@@ -12,6 +12,13 @@ export default function ScreenPage() {
   const [countdown, setCountdown] = useState(17 * 3600 + 48 * 60 + 11);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // New states for added features
+  const [isSold, setIsSold] = useState(false);
+  const [isUnsold, setIsUnsold] = useState(false);
+  const [shotClock, setShotClock] = useState(100); // percentage 100 to 0
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const shotClockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Toggle state between 'live' and 'flow' views
   const [activeView, setActiveView] = useState<'live' | 'flow'>('live');
   
@@ -21,27 +28,101 @@ export default function ScreenPage() {
   const [players, setPlayers] = useState(AUCTION_CONFIG.players);
   const [activePlayer, setActivePlayer] = useState<string | null>(null);
   const [activeTeam, setActiveTeam] = useState<string | null>(null);
+  const [flowActivePlayer, setFlowActivePlayer] = useState<string | null>(null);
+  const [flowActiveTeam, setFlowActiveTeam] = useState<string | null>(null);
+
+  const [isShuffling, setIsShuffling] = useState(false);
+  const [shuffleTarget, setShuffleTarget] = useState<typeof players[0] | null>(null);
+  const [shuffleIndex, setShuffleIndex] = useState(0);
 
   const togglePlayer = (p: typeof players[0]) => {
-    if (activePlayer === p.id) {
-      setActivePlayer(null);
-      setActiveTeam(null);
+    if (flowActivePlayer === p.id) {
+      setFlowActivePlayer(null);
+      setFlowActiveTeam(null);
     } else {
-      setActivePlayer(p.id);
-      setActiveTeam(p.teamShortCode);
+      setFlowActivePlayer(p.id);
+      setFlowActiveTeam(p.teamShortCode || null);
     }
   };
 
   const toggleTeam = (t: typeof AUCTION_CONFIG.teams[0]) => {
-    if (activeTeam === t.shortCode && !activePlayer) {
-      setActiveTeam(null);
+    if (flowActiveTeam === t.shortCode && !flowActivePlayer) {
+      setFlowActiveTeam(null);
     } else {
-      setActiveTeam(t.shortCode);
-      setActivePlayer(null);
+      setFlowActiveTeam(t.shortCode);
+      setFlowActivePlayer(null);
     }
   };
 
-  const hasSelection = activePlayer !== null || activeTeam !== null;
+  const hasSelection = flowActivePlayer !== null || flowActiveTeam !== null;
+
+  const activePlayerObj = players.find(p => p.id === activePlayer) || players.find(p => p.status === 'pending') || players[0];
+
+  const handleShuffle = () => {
+    const lockedPlayers = players.filter(p => p.status === 'locked');
+    if (lockedPlayers.length === 0) return;
+
+    setIsShuffling(true);
+    setIsSold(false);
+    setIsUnsold(false);
+    setShuffleTarget(null);
+    setActivePlayer(null);
+    setActiveTeam(null);
+    
+    const randomIndex = Math.floor(Math.random() * lockedPlayers.length);
+    const winner = lockedPlayers[randomIndex];
+    
+    let currentDelay = 30; // Start very fast
+    const maxDelay = 400; // Slow down to this delay
+    const slowdownFactor = 1.1; // Multiplier per tick
+    let currentIndex = Math.floor(Math.random() * lockedPlayers.length);
+    
+    const spin = () => {
+      currentIndex = (currentIndex + 1) % lockedPlayers.length;
+      setShuffleIndex(currentIndex);
+      
+      if (activeView === 'live' && currentDelay < maxDelay) {
+        currentDelay *= slowdownFactor;
+        setTimeout(spin, currentDelay);
+      } else {
+        // Final selection
+        setShuffleTarget(winner);
+        
+        setTimeout(() => {
+          setPlayers(current => current.map(p => p.id === winner.id ? { ...p, status: 'pending' } : p));
+          setIsShuffling(false);
+          setShuffleTarget(null);
+          setActivePlayer(winner.id);
+          setActiveTeam(null);
+          
+          const parsed = parseFloat(winner.price.replace(/[^0-9.]/g, ''));
+          let initialBid = isNaN(parsed) ? 200 : (winner.price.includes('M') ? parsed * 1000 : parsed);
+          setCurrentBid(initialBid);
+          setShotClock(100);
+          setIsSold(false);
+          setIsUnsold(false);
+        }, activeView === 'live' ? 2500 : 100); 
+      }
+    };
+    
+    spin();
+  };
+
+  const markSold = () => {
+    setIsSold(true);
+    setIsUnsold(false);
+    setShotClock(0);
+    // In a real app we'd also assign the player to a team here
+    if (activePlayerObj) {
+      setPlayers(current => current.map(p => p.id === activePlayerObj.id ? { ...p, status: 'sold', teamShortCode: 'MI' } : p));
+    }
+  };
+
+  const markUnsold = () => {
+    setIsUnsold(true);
+    setIsSold(false);
+    setShotClock(0);
+  };
 
   useEffect(() => {
     if (activePlayer) {
@@ -65,18 +146,52 @@ export default function ScreenPage() {
   useEffect(() => {
     function scheduleBid() {
       timeoutRef.current = setTimeout(() => {
-        if (Math.random() > 0.85) {
+        // Only simulate bids if not sold, unsold, and not shuffling
+        if (!isSold && !isUnsold && !isShuffling && activePlayerObj && Math.random() > 0.85) {
+          // New bid comes in, reset shot clock
           setCurrentBid((p) => p + 250);
           setBidPulse(false);
           requestAnimationFrame(() => requestAnimationFrame(() => setBidPulse(true)));
           setFlashOverlay(true);
           setTimeout(() => setFlashOverlay(false), 200);
+          setShotClock(100);
+          setIsSold(false);
+          setIsUnsold(false);
         }
         scheduleBid();
       }, 5000 + Math.random() * 8000);
     }
     scheduleBid();
-    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
+    
+    // Simulate shot clock draining
+    shotClockIntervalRef.current = setInterval(() => {
+      setShotClock((prev) => {
+        if (isSold || isUnsold || isShuffling || !activePlayerObj) return 100;
+
+        if (prev <= 0) {
+           // Simulate sold when clock hits 0
+           if (!isSold && !isUnsold) setIsSold(true);
+           return 0;
+        }
+        return prev - 2; // drain speed
+      });
+    }, 100);
+
+    return () => { 
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (shotClockIntervalRef.current) clearInterval(shotClockIntervalRef.current);
+    };
+  }, [isSold, isUnsold, isShuffling, activePlayerObj]);
+
+  // Randomly show leaderboard occasionally
+  useEffect(() => {
+    const leaderboardInterval = setInterval(() => {
+      if (Math.random() > 0.7) {
+        setShowLeaderboard(true);
+        setTimeout(() => setShowLeaderboard(false), 8000); // hide after 8s
+      }
+    }, 25000);
+    return () => clearInterval(leaderboardInterval);
   }, []);
 
   const fmt = (s: number) => {
@@ -111,6 +226,40 @@ export default function ScreenPage() {
           100% { transform: translateX(-50%); }
         }
         .ticker-track { animation: ticker-scroll 30s linear infinite; }
+
+        @keyframes stamp-sold {
+          0% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+          50% { transform: translate(-50%, -50%) scale(0.8); opacity: 1; }
+          70% { transform: translate(-50%, -50%) scale(1.1); }
+          100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+        .animate-stamp { animation: stamp-sold 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        @keyframes screen-shake {
+          0%, 100% { transform: translate(0, 0); }
+          10% { transform: translate(-2px, -2px); }
+          20% { transform: translate(-3px, 0px); }
+          30% { transform: translate(3px, 2px); }
+          40% { transform: translate(1px, -1px); }
+          50% { transform: translate(-1px, 2px); }
+          60% { transform: translate(-3px, 1px); }
+          70% { transform: translate(3px, 1px); }
+          80% { transform: translate(-1px, -1px); }
+          90% { transform: translate(1px, 2px); }
+        }
+        .animate-shake { animation: screen-shake 0.5s cubic-bezier(.36,.07,.19,.97); }
+
+        @keyframes slide-in-right {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        .animate-slide-in { animation: slide-in-right 0.5s ease-out forwards; }
+        
+        @keyframes slide-out-right {
+          from { transform: translateX(0); opacity: 1; }
+          to { transform: translateX(100%); opacity: 0; }
+        }
+        .animate-slide-out { animation: slide-out-right 0.5s ease-in forwards; }
 
         @keyframes dot-pulse {
           0%,100% { opacity: 1; } 50% { opacity: 0.4; }
@@ -151,27 +300,31 @@ export default function ScreenPage() {
         /* ── Mobile only layout (< 640px) ── */
         @media (max-width: 639px) {
           .main-layout {
-            flex-direction: column !important;
             overflow-y: auto !important;
             overflow-x: hidden !important;
-            padding: 0 16px !important;
-            gap: 12px !important;
+            padding: 0 !important;
+          }
+          .live-view-inner {
+            padding: 0 16px 20px 16px !important;
+            gap: 16px !important;
           }
           .aside-panel {
             width: 100% !important;
-            flex-direction: row !important;
-            padding: 0 0 12px 0 !important;
-            gap: 10px !important;
+            flex-direction: column !important;
+            padding: 0 !important;
+            gap: 16px !important;
             min-height: unset !important;
           }
           .bid-card {
-            flex: 1 !important;
+            flex: none !important;
             min-height: 160px !important;
             padding: 16px !important;
+            width: 100% !important;
           }
           .team-card {
-            flex: 1 !important;
+            flex: none !important;
             padding: 12px !important;
+            width: 100% !important;
           }
           .hero-section {
             padding: 8px 0 0 !important;
@@ -186,6 +339,8 @@ export default function ScreenPage() {
             gap: 24px !important;
             padding: 10px 20px !important;
             margin-top: 16px !important;
+            width: 100% !important;
+            justify-content: space-between !important;
           }
           .stats-row .stat-value { font-size: 18px !important; }
           .header-logo-text { font-size: 14px !important; }
@@ -200,15 +355,32 @@ export default function ScreenPage() {
           .bid-leading-name { font-size: 16px !important; }
           .bid-divider { margin-bottom: 14px !important; }
           .footer-countdown-label { display: none; }
+          
+          /* Flow View Mobile */
+          .flow-view-grid {
+            display: flex !important;
+            flex-direction: column !important;
+            overflow-y: auto !important;
+          }
+          .flow-pool, .flow-franchises {
+            width: 100% !important;
+            border: none !important;
+            height: auto !important;
+            max-height: 400px !important;
+          }
+          .flow-canvas-container {
+            display: none !important;
+          }
         }
 
         /* ── Tablet layout (iPad): 640px–1023px uses desktop-style side-by-side ── */
         @media (min-width: 640px) and (max-width: 1023px) {
           .main-layout {
-            flex-direction: row !important;
-            overflow: hidden !important;
-            gap: 10px !important;
+            padding: 0 !important;
+          }
+          .live-view-inner {
             padding: 0 16px !important;
+            gap: 12px !important;
           }
           .aside-panel {
             width: 36% !important;
@@ -249,8 +421,18 @@ export default function ScreenPage() {
       {flashOverlay && (
         <div className="fixed inset-0 pointer-events-none z-[200]" style={{ background: "rgba(228,93,53,0.05)" }} />
       )}
+      
+      {/* Shuffle Overlay */}
+      {activeView === 'live' && (
+        <ShuffleOverlay 
+          isShuffling={isShuffling}
+          shuffleTarget={shuffleTarget}
+          players={players}
+          shuffleIndex={shuffleIndex}
+        />
+      )}
 
-      <div className="font-inter bg-[#0b0f10] text-[#e0e3e4] h-screen w-screen flex flex-col overflow-hidden relative select-none">
+      <div className="font-inter bg-[#0b0f10] text-[#e0e3e4] fixed inset-0 flex flex-col overflow-hidden select-none">
 
         {/* Atmospheric flares */}
         <div className="flare w-[430px] h-[430px]" style={{ top: -140, left: -140 }} />
@@ -292,21 +474,67 @@ export default function ScreenPage() {
         </header>
 
         {/* ══════════ MAIN ══════════ */}
-        <main className="main-layout flex-1 mt-14 mb-[40px] flex overflow-hidden min-h-0 relative">
+        <main className={`main-layout flex-1 mt-14 mb-[40px] flex overflow-hidden min-h-0 relative ${isSold && activeView === 'live' ? 'animate-shake' : ''}`}>
           
+          {/* Leaderboard Interrupt (Live View Only) */}
+          {activeView === 'live' && showLeaderboard && (
+            <div className="absolute left-8 top-8 z-40 animate-slide-in">
+              <div className="glass-panel p-5 rounded-2xl border border-[#e45d35]/30 w-72" style={{ background: "rgba(11,15,16,0.85)" }}>
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
+                  <span className="ms ms-fill text-[#e45d35]">leaderboard</span>
+                  <span className="font-mono-geist text-[10px] text-white uppercase tracking-[0.2em] font-bold">Top Buys</span>
+                </div>
+                <div className="space-y-3">
+                  {[
+                    { name: 'Rohit Sharma', team: 'TITANS XI', price: '16,250' },
+                    { name: 'Ben Stokes', team: 'ROYALS', price: '18,750' },
+                    { name: 'MS Dhoni', team: 'STRIKERS', price: '14,000' },
+                  ].map((p, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <div>
+                        <div className="font-archivo font-bold text-white text-sm">{p.name}</div>
+                        <div className="font-mono-geist text-[8px] text-white/50 uppercase">{p.team}</div>
+                      </div>
+                      <div className="font-archivo text-[#e45d35] font-bold">{p.price}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeView === 'live' && (
+            <div className="absolute bottom-6 right-6 z-[100] flex gap-2">
+              <button onClick={markSold} className="px-3 py-1 bg-green-500/20 text-green-400 border border-green-500/50 rounded text-xs font-mono font-bold hover:bg-green-500/40 transition-colors uppercase tracking-widest">Mark Sold</button>
+              <button onClick={markUnsold} className="px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/50 rounded text-xs font-mono font-bold hover:bg-red-500/40 transition-colors uppercase tracking-widest">Mark Unsold</button>
+              <button onClick={handleShuffle} disabled={isShuffling || players.filter(p => p.status === 'locked').length === 0} className="px-3 py-1 bg-[#e45d35]/20 text-[#e45d35] border border-[#e45d35]/50 rounded text-xs font-mono font-bold hover:bg-[#e45d35]/40 transition-colors uppercase tracking-widest disabled:opacity-50">Next Player</button>
+            </div>
+          )}
+
           {activeView === 'live' ? (
-            <div className="w-full h-full flex gap-[14px] px-[30px] pt-4">
+            <div className="live-view-inner w-full h-full flex flex-col sm:flex-row gap-[14px] px-0 sm:px-[30px] pt-4 pb-12">
               {/* ── CENTER: Hero ── */}
               <section className="hero-section flex-1 flex flex-col items-center justify-center px-[34px] sm:px-[20px] py-[10px] relative min-w-0">
 
                 {/* Player image */}
                 <div className="relative">
+                  {/* SOLD / UNSOLD STAMP */}
+                  {(isSold || isUnsold) && (
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 animate-stamp pointer-events-none">
+                      <div className={`border-[6px] ${isSold ? 'border-[#e45d35] text-[#e45d35]' : 'border-gray-400 text-gray-400'} rounded-xl px-6 py-2 transform -rotate-12 backdrop-blur-sm bg-black/20`} style={{ boxShadow: `0 0 40px ${isSold ? 'rgba(228,93,53,0.5)' : 'rgba(156,163,175,0.5)'}, inset 0 0 20px ${isSold ? 'rgba(228,93,53,0.5)' : 'rgba(156,163,175,0.5)'}` }}>
+                        <span className="font-archivo text-6xl font-black italic tracking-tighter uppercase" style={{ textShadow: `0 0 20px ${isSold ? 'rgba(228,93,53,0.8)' : 'rgba(156,163,175,0.8)'}` }}>
+                          {isSold ? 'SOLD' : 'UNSOLD'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div
-                    className="player-image-wrap relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08]"
+                    className={`player-image-wrap relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08] transition-all duration-300 ${(isSold || isUnsold) ? 'grayscale brightness-50' : ''}`}
                     style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
                   >
                     <img
-                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuAH3YsJAfo8TbaRj-mQVD1aaJeJS4NZbMLmGZoXwZq6b-8qdYJiG4yhUAO5qA2h84DtDViP0uoklStDd1ecScF5TiVz0xwZ_hKdC3wHcfavCBkIGxDzrRyP5IUfRLwDg0mI5dI6_wGOxwo4G4ScIau4tjN9we3cxjv7SzguyDEPXwYEDcWbAdyjXaFqXdJlXcxVxK3AFhv4lkTrRReAXYvDfMnQbR4KYwgtG6tFwmtD7oaNtVFJKUIUoltCFP95TT4pdzawlOpWm7Q"
+                      src={activePlayerObj?.img || "https://lh3.googleusercontent.com/aida-public/AB6AXuAH3YsJAfo8TbaRj-mQVD1aaJeJS4NZbMLmGZoXwZq6b-8qdYJiG4yhUAO5qA2h84DtDViP0uoklStDd1ecScF5TiVz0xwZ_hKdC3wHcfavCBkIGxDzrRyP5IUfRLwDg0mI5dI6_wGOxwo4G4ScIau4tjN9we3cxjv7SzguyDEPXwYEDcWbAdyjXaFqXdJlXcxVxK3AFhv4lkTrRReAXYvDfMnQbR4KYwgtG6tFwmtD7oaNtVFJKUIUoltCFP95TT4pdzawlOpWm7Q"}
                       alt="Player Portrait"
                       className="w-full h-full object-cover object-top"
                       style={{ filter: "grayscale(0.15) contrast(1.2)" }}
@@ -326,13 +554,13 @@ export default function ScreenPage() {
                 {/* Player name */}
                 <div className="text-center z-20 -mt-[30px]">
                   <h2 className="font-archivo text-fluid-hero leading-none font-bold uppercase tracking-[-0.025em] text-white italic mb-[9px]" style={{ textShadow: "0 4px 24px rgba(0,0,0,0.8)" }}>
-                    Virat Kohli
+                    {activePlayerObj?.name}
                   </h2>
                   <div className="flex items-center justify-center gap-3 sm:gap-5 flex-wrap">
                     <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-[#e45d35] tracking-[0.18em]">ALL-ROUNDER</span>
                     <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
                     <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
-                      BASE: 2,000 <span className="text-[10px] opacity-60">CR</span>
+                      BASE: {activePlayerObj?.price} <span className="text-[10px] opacity-60">CR</span>
                     </span>
                   </div>
                 </div>
@@ -383,9 +611,17 @@ export default function ScreenPage() {
                     </span>
 
                     <div
-                      className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[30px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}
+                      className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[15px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}
                     >
                       {currentBid.toLocaleString()}
+                    </div>
+                    
+                    {/* SHOT CLOCK / TENSION BAR */}
+                    <div className="w-full h-1 bg-white/[0.05] rounded-full overflow-hidden mb-[15px] max-w-[200px] mx-auto relative">
+                      <div 
+                        className={`absolute top-0 bottom-0 left-0 transition-all duration-100 ease-linear rounded-full ${shotClock < 25 ? 'bg-red-500 animate-pulse' : 'bg-[#e45d35]'}`}
+                        style={{ width: `${shotClock}%` }}
+                      />
                     </div>
 
                     <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right, transparent, rgba(228,93,53,0.30), transparent)" }} />
@@ -463,24 +699,35 @@ export default function ScreenPage() {
               </aside>
             </div>
           ) : (
-            <div className="w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
+            <div className="flow-view-grid w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
               <FlowCanvas 
                 players={players} 
                 playerListRef={playerListRef}
                 teamListRef={teamListRef}
-                activePlayer={activePlayer}
-                activeTeam={activeTeam}
+                activePlayer={flowActivePlayer}
+                activeTeam={flowActiveTeam}
               />
               {/* Left Column: Player Pool */}
               <aside 
                 ref={playerListRef}
-                className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5"
+                className="flow-pool col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5"
               >
                 <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
-                  <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white mb-4">Player Pool</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Player Pool</h3>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handleShuffle}
+                        disabled={isShuffling || players.filter(p => p.status === 'locked').length === 0}
+                        className="text-xs font-mono px-3 py-1 bg-[#e45d35]/20 text-[#e45d35] hover:bg-[#e45d35]/40 disabled:opacity-50 disabled:cursor-not-allowed rounded border border-[#e45d35]/50 transition-colors uppercase tracking-widest"
+                      >
+                        SHUFFLE
+                      </button>
+                    </div>
+                  </div>
                   {players.map(p => {
                     const isLocked = p.status === 'locked';
-                    const isHighlighted = hasSelection && !isLocked ? (activePlayer ? activePlayer === p.id : activeTeam === p.teamShortCode) : false;
+                    const isHighlighted = hasSelection && !isLocked ? (flowActivePlayer ? flowActivePlayer === p.id : flowActiveTeam === p.teamShortCode) : false;
                     const isDimmed = hasSelection && !isHighlighted && !isLocked;
                     
                     return (
@@ -511,17 +758,17 @@ export default function ScreenPage() {
               </aside>
 
               {/* Middle Column */}
-              <section className="col-span-6 flex flex-col relative z-0 pointer-events-none" />
+              <section className="flow-canvas-container col-span-6 flex flex-col relative z-0 pointer-events-none" />
 
               {/* Right Column: Franchises */}
               <aside 
                 ref={teamListRef}
-                className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5"
+                className="flow-franchises col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5"
               >
                 <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
                   <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white mb-4">Franchises</h3>
                   {AUCTION_CONFIG.teams.map(t => {
-                    const isHighlighted = hasSelection ? activeTeam === t.shortCode : false;
+                    const isHighlighted = hasSelection ? flowActiveTeam === t.shortCode : false;
                     const isDimmed = hasSelection && !isHighlighted;
                     
                     return (
@@ -549,6 +796,40 @@ export default function ScreenPage() {
             </div>
           )}
         </main>
+        {/* ══════════ TICKER ══════════ */}
+        <div className="absolute bottom-0 left-0 right-0 h-10 bg-[#e45d35] z-50 flex items-center overflow-hidden border-t border-[#e45d35]/50">
+          <div className="bg-[#0b0f10] text-[#e45d35] h-full px-4 flex items-center shrink-0 z-10 border-r border-[#e45d35]/30">
+            <span className="font-mono-geist text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-[#e45d35] animate-pulse" />
+              LIVE NEWS
+            </span>
+          </div>
+          <div className="flex-1 overflow-hidden h-full flex items-center">
+            <div className="ticker-track flex whitespace-nowrap text-[#0b0f10] font-archivo font-bold text-sm uppercase tracking-wide">
+              {/* Duplicate for infinite scroll */}
+              {[...Array(2)].map((_, i) => (
+                <div key={i} className="flex items-center">
+                  <span className="px-6 flex items-center gap-2">
+                    <span className="w-1 h-1 bg-[#0b0f10]/50 rounded-full" />
+                    Rohit Sharma sold to TITANS XI for 16,250 CR!
+                  </span>
+                  <span className="px-6 flex items-center gap-2">
+                    <span className="w-1 h-1 bg-[#0b0f10]/50 rounded-full" />
+                    Ben Stokes base price set at 2,000 CR
+                  </span>
+                  <span className="px-6 flex items-center gap-2">
+                    <span className="w-1 h-1 bg-[#0b0f10]/50 rounded-full" />
+                    MS Dhoni retains STRIKERS captaincy
+                  </span>
+                  <span className="px-6 flex items-center gap-2">
+                    <span className="w-1 h-1 bg-[#0b0f10]/50 rounded-full" />
+                    Jasprit Bumrah heading to FALCONS for 11,200 CR
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </>
   );
