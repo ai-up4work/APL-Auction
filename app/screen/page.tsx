@@ -1,445 +1,370 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState, useRef } from "react";
 
 export default function ScreenPage() {
+  const [currentBid, setCurrentBid] = useState(12500);
+  const [bidPulse, setBidPulse] = useState(true);
+  const [flashOverlay, setFlashOverlay] = useState(false);
+  const [countdown, setCountdown] = useState(17 * 3600 + 48 * 60 + 11);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => setCountdown((p) => (p > 0 ? p - 1 : 0)), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    function scheduleBid() {
+      timeoutRef.current = setTimeout(() => {
+        if (Math.random() > 0.85) {
+          setCurrentBid((p) => p + 250);
+          setBidPulse(false);
+          requestAnimationFrame(() => requestAnimationFrame(() => setBidPulse(true)));
+          setFlashOverlay(true);
+          setTimeout(() => setFlashOverlay(false), 200);
+        }
+        scheduleBid();
+      }, 5000 + Math.random() * 8000);
+    }
+    scheduleBid();
+    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
+  }, []);
+
+  const fmt = (s: number) => {
+    const h = Math.floor(s / 3600).toString().padStart(2, "0");
+    const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
+    const sec = (s % 60).toString().padStart(2, "0");
+    return `${h}:${m}:${sec}`;
+  };
+
+  const ticker = [
+    { name: "Rohit Sharma",    price: "16,250", team: "TITANS XI" },
+    { name: "Kane Williamson", price: "9,500",  team: "MAVERICKS" },
+    { name: "Ben Stokes",      price: "18,750", team: "ROYALS"    },
+    { name: "MS Dhoni",        price: "14,000", team: "STRIKERS"  },
+    { name: "Jasprit Bumrah",  price: "11,200", team: "FALCONS"   },
+  ];
+
   return (
-    <div className="bg-surface-container-lowest text-on-surface h-screen w-screen overflow-hidden flex flex-col font-body-md select-none">
-      {/* Ambient Background Effects */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30 mix-blend-screen z-0">
-        <div className="absolute top-[-20%] left-[-10%] w-[800px] h-[800px] bg-primary/20 rounded-full blur-[150px]"></div>
-        <div className="absolute bottom-[-20%] right-[-10%] w-[800px] h-[800px] bg-error/10 rounded-full blur-[150px]"></div>
-      </div>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
-      {/* Header: Broadcast Info */}
-      <header className="h-24 shrink-0 bg-surface/80 backdrop-blur-2xl border-b border-border-overlay px-12 flex items-center justify-between relative z-20">
-        <div className="flex items-center gap-6">
-          <div className="w-16 h-16 bg-surface-container-highest rounded-2xl flex items-center justify-center border border-border-overlay shadow-lg">
-            <span className="material-symbols-outlined text-bid-glow text-4xl">
-              gavel
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <h1 className="font-headline-lg text-4xl uppercase tracking-tighter leading-none text-white drop-shadow-md">
-              APL Auction 2024
-            </h1>
-            <div className="flex items-center gap-4 mt-1">
-              <span className="font-label-mono text-xs text-on-surface-variant uppercase tracking-[0.3em]">
-                Live Broadcast Session
-              </span>
-              <span className="w-1 h-1 rounded-full bg-border-overlay"></span>
-              <span className="font-label-mono text-xs text-primary-fixed uppercase tracking-widest">
-                Akkaraipattu
-              </span>
+        /* ── Material Symbols ── */
+        .ms {
+          font-family: 'Material Symbols Outlined';
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+          font-style: normal; line-height: 1; display: inline-block;
+          text-transform: none; letter-spacing: normal; user-select: none;
+        }
+        .ms-fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+        /* ── Bid glow pulse (no Tailwind equivalent) ── */
+        @keyframes pulse-bid {
+          0%,100% { filter: drop-shadow(0 0 7px rgba(228,93,53,0.45)); }
+          50%      { filter: drop-shadow(0 0 19px rgba(228,93,53,0.85)); }
+        }
+        .bid-animate { animation: pulse-bid 2s infinite ease-in-out; }
+
+        /* ── Ticker scroll (no Tailwind equivalent) ── */
+        @keyframes ticker-scroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .ticker-track { animation: ticker-scroll 30s linear infinite; }
+
+        /* ── Dot pulse (no Tailwind equivalent) ── */
+        @keyframes dot-pulse {
+          0%,100% { opacity: 1; } 50% { opacity: 0.4; }
+        }
+        .dot-pulse { animation: dot-pulse 1.5s ease-in-out infinite; }
+
+        /* ── Glass panel (backdrop-filter needs -webkit- prefix) ── */
+        .glass-panel {
+          background: rgba(16,20,21,0.50);
+          backdrop-filter: blur(28px);
+          -webkit-backdrop-filter: blur(28px);
+        }
+
+        /* ── Atmospheric flare (radial-gradient not in Tailwind) ── */
+        .flare {
+          position: absolute;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(228,93,53,0.13) 0%, transparent 70%);
+          filter: blur(70px);
+          pointer-events: none;
+        }
+
+        /* ── Custom font families ── */
+        .font-archivo { font-family: 'Archivo Narrow', sans-serif; }
+        .font-mono-geist { font-family: 'Geist Mono', monospace; }
+        .font-inter { font-family: 'Inter', sans-serif; }
+
+        /* ── clamp() fluid font sizes (no Tailwind equivalent) ── */
+        .text-fluid-hero { font-size: clamp(44px, 6vw, 80px); }
+        .text-fluid-bid  { font-size: clamp(52px, 6.5vw, 84px); }
+
+        /* ── Header backdrop (needs -webkit- prefix) ── */
+        .header-blur {
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+        }
+
+        /* ── Footer backdrop ── */
+        .footer-blur {
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+        }
+      `}</style>
+
+      {/* Flash overlay */}
+      {flashOverlay && (
+        <div className="fixed inset-0 pointer-events-none z-[200]" style={{ background: "rgba(228,93,53,0.05)" }} />
+      )}
+
+      <div className="font-inter bg-[#0b0f10] text-[#e0e3e4] h-screen w-screen flex flex-col overflow-hidden relative select-none">
+
+        {/* ── Atmospheric flares ── */}
+        <div className="flare w-[430px] h-[430px]" style={{ top: -140, left: -140 }} />
+        <div className="flare w-[430px] h-[430px]" style={{ bottom: -140, right: -140 }} />
+        {/* Center radial glow — radial-gradient not in Tailwind */}
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at center, rgba(228,93,53,0.10) 0%, transparent 70%)" }} />
+
+        {/* ══════════ HEADER ══════════ */}
+        <header className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(11,15,16,0.85)] header-blur border-b border-white/5">
+          {/* Logo */}
+          <div className="flex items-center gap-[13px]">
+            <div className="w-9 h-9 rounded-[7px] bg-[#e45d35] flex items-center justify-center shrink-0">
+              <span className="ms ms-fill text-[20px] text-[#0b0f10]">sports_cricket</span>
             </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-12">
-          {/* Global Purse */}
-          <div className="flex flex-col items-end">
-            <span className="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-widest">
-              Base Purse Cap
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="font-headline-lg text-3xl text-white">
-                50,000
-              </span>
-              <span className="font-label-mono text-xs text-on-surface-variant">
-                CR
-              </span>
-            </div>
-          </div>
-
-          <div className="w-px h-12 bg-border-overlay"></div>
-
-          {/* Live Status */}
-          <div className="bg-error-container/20 border border-error/30 px-6 py-3 rounded-full flex items-center gap-3 shadow-[0_0_20px_rgba(255,180,171,0.15)]">
-            <span className="w-3 h-3 rounded-full bg-error animate-pulse shadow-[0_0_10px_rgba(255,180,171,0.8)]"></span>
-            <span className="font-label-mono text-error font-bold tracking-[0.2em] text-sm uppercase">
-              Live
-            </span>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Grid Layout */}
-      <main className="flex-1 flex overflow-hidden relative z-10 p-8 gap-8">
-        {/* Left Panel: Standing / Roster Status */}
-        <aside className="w-[380px] shrink-0 flex flex-col gap-4">
-          <div className="bg-surface/60 backdrop-blur-xl border border-border-overlay rounded-3xl flex flex-col h-full overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-border-overlay bg-surface-container-low/50">
-              <h2 className="font-label-mono text-sm uppercase tracking-[0.2em] text-on-surface-variant flex items-center gap-2">
-                <span className="material-symbols-outlined text-lg">
-                  format_list_numbered
-                </span>
-                Franchise Standings
-              </h2>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
-              {/* Team Card (Active/Leading) */}
-              <div className="p-5 rounded-2xl border border-bid-glow bg-bid-glow/5 relative overflow-hidden">
-                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-bid-glow shadow-[0_0_10px_rgba(228,93,53,0.8)]"></div>
-
-                <div className="flex justify-between items-start mb-3 pl-2">
-                  <h3 className="font-headline-md text-xl uppercase tracking-wider text-white">
-                    Galle Gladiators
-                  </h3>
-                  <span className="font-label-mono text-[10px] text-bid-glow tracking-widest px-2 py-1 bg-bid-glow/10 rounded border border-bid-glow/20">
-                    Active Bid
-                  </span>
-                </div>
-                <div className="flex justify-between items-end pl-2">
-                  <div className="flex flex-col">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Remaining
-                    </span>
-                    <span className="font-headline-md text-2xl text-primary-fixed">
-                      15,000{" "}
-                      <span className="text-xs text-on-surface-variant">
-                        CR
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Squad
-                    </span>
-                    <span className="font-headline-md text-xl">12/15</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Team Card (Normal) */}
-              <div className="p-5 rounded-2xl border border-border-overlay bg-surface-container/50">
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-headline-md text-xl uppercase tracking-wider text-on-surface">
-                    Colombo Kings
-                  </h3>
-                  <span className="font-label-mono text-[10px] text-on-surface-variant tracking-widest px-2 py-1 bg-surface-container-high rounded border border-border-overlay">
-                    Waiting
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <div className="flex flex-col">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Remaining
-                    </span>
-                    <span className="font-headline-md text-2xl">
-                      28,500{" "}
-                      <span className="text-xs text-on-surface-variant">
-                        CR
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Squad
-                    </span>
-                    <span className="font-headline-md text-xl">8/15</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Team Card (Normal) */}
-              <div className="p-5 rounded-2xl border border-border-overlay bg-surface-container/50">
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-headline-md text-xl uppercase tracking-wider text-on-surface">
-                    Jaffna Stallions
-                  </h3>
-                  <span className="font-label-mono text-[10px] text-on-surface-variant tracking-widest px-2 py-1 bg-surface-container-high rounded border border-border-overlay">
-                    Waiting
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <div className="flex flex-col">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Remaining
-                    </span>
-                    <span className="font-headline-md text-2xl">
-                      41,200{" "}
-                      <span className="text-xs text-on-surface-variant">
-                        CR
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="font-label-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
-                      Squad
-                    </span>
-                    <span className="font-headline-md text-xl">3/15</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        {/* Center Stage: The Player */}
-        <section className="flex-1 flex flex-col items-center justify-center relative">
-          {/* Spotlight effect */}
-          <div className="absolute top-[-10%] w-[600px] h-[800px] bg-white/5 blur-[100px] rounded-full pointer-events-none transform -rotate-12"></div>
-
-          <div className="w-full max-w-[560px] flex flex-col items-center z-10 relative">
-            {/* Status Tag */}
-            <div className="bg-error text-on-error px-6 py-2 rounded-full font-label-mono text-xs uppercase tracking-[0.3em] font-bold shadow-[0_0_20px_rgba(255,180,171,0.4)] mb-8 transform -translate-y-4">
-              On The Block
-            </div>
-
-            {/* Player Card/Portrait (Highly Stylized) */}
-            <div className="w-full aspect-[3/4] rounded-[2.5rem] bg-surface-container-high border-2 border-border-overlay overflow-hidden relative shadow-2xl group">
-              <div className="absolute inset-0 bg-gradient-to-br from-surface-container-lowest to-surface-container"></div>
-
-              <div className="absolute inset-0 flex items-center justify-center opacity-60 mix-blend-luminosity grayscale contrast-125">
-                <span className="material-symbols-outlined text-[300px] text-on-surface-variant/20">
-                  person
-                </span>
-              </div>
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent"></div>
-              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent"></div>
-
-              {/* Player Details Overlay */}
-              <div className="absolute bottom-0 inset-x-0 p-10 flex flex-col items-center text-center">
-                <span className="font-label-mono text-sm text-primary-fixed uppercase tracking-[0.4em] mb-2 shadow-black drop-shadow-md">
-                  Lot #042
-                </span>
-                <h2 className="font-headline-lg text-[72px] uppercase tracking-tighter leading-[0.85] text-white drop-shadow-xl mb-6 text-shadow-glow">
-                  Rashid Khan
-                </h2>
-
-                <div className="flex items-center justify-center gap-4 bg-black/40 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10">
-                  <span className="font-headline-md text-xl text-surface-tint tracking-widest uppercase">
-                    All-Rounder
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-border-overlay"></span>
-                  <span className="font-headline-md text-xl text-surface-tint tracking-widest uppercase">
-                    Afghanistan
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Core Stats Board */}
-            <div className="w-full grid grid-cols-3 gap-4 mt-8">
-              <div className="bg-surface/80 backdrop-blur-md border border-border-overlay rounded-2xl p-6 text-center shadow-lg">
-                <p className="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-[0.2em] mb-2">
-                  Base Price
-                </p>
-                <p className="font-headline-lg text-3xl text-white">2,000</p>
-              </div>
-              <div className="bg-surface/80 backdrop-blur-md border border-border-overlay rounded-2xl p-6 text-center shadow-lg">
-                <p className="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-[0.2em] mb-2">
-                  T20I SR
-                </p>
-                <p className="font-headline-lg text-3xl text-white">137.4</p>
-              </div>
-              <div className="bg-surface/80 backdrop-blur-md border border-border-overlay rounded-2xl p-6 text-center shadow-lg">
-                <p className="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-[0.2em] mb-2">
-                  Econ
-                </p>
-                <p className="font-headline-lg text-3xl text-white">6.18</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Right Panel: Bidding Action */}
-        <aside className="w-[420px] shrink-0 flex flex-col gap-6">
-          {/* Current High Bid */}
-          <div className="bg-surface/80 backdrop-blur-xl border border-border-overlay rounded-3xl p-10 flex flex-col items-center justify-center text-center relative overflow-hidden shadow-2xl shrink-0 h-[360px]">
-            <span className="material-symbols-outlined absolute -top-12 -right-12 text-[250px] text-on-surface-variant/5 rotate-[-15deg] pointer-events-none">
-              gavel
-            </span>
-
-            <div className="relative z-10 flex flex-col items-center">
-              <span className="font-label-mono text-sm text-bid-glow uppercase tracking-[0.3em] font-bold mb-6">
-                Current High Bid
-              </span>
-
-              <div className="font-headline-lg text-[100px] leading-none text-white tracking-tighter tabular-nums drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] mb-8">
-                4,500
-              </div>
-
-              <div className="bg-surface-container-highest/80 border border-border-overlay rounded-2xl px-6 py-4 flex flex-col items-center gap-2 w-full max-w-[280px]">
-                <span className="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-[0.2em]">
-                  Leading Franchise
-                </span>
-                <span className="font-headline-md text-2xl uppercase tracking-wider text-white text-center leading-tight">
-                  Galle Gladiators
-                </span>
-              </div>
+            <div>
+              <div className="font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">APL AUCTION</div>
+              <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">Broadcast Feed Live • 2024 Season</div>
             </div>
           </div>
 
-          {/* Bid History Log */}
-          <div className="bg-surface/60 backdrop-blur-xl border border-border-overlay rounded-3xl flex-1 flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-border-overlay bg-surface-container-low/50 flex justify-between items-center">
-              <h2 className="font-label-mono text-sm uppercase tracking-[0.2em] text-on-surface-variant flex items-center gap-2">
-                <span className="material-symbols-outlined text-lg">
-                  history
-                </span>
-                Bid History
-              </h2>
-              <span className="w-2 h-2 rounded-full bg-bid-glow animate-pulse"></span>
+          {/* Right */}
+          <div className="flex items-center gap-[30px]">
+            <div className="text-right">
+              <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.1em]">Total Purse Cap</div>
+              <div className="font-archivo text-[18px] font-bold text-white">50,000 <span className="text-[9px] opacity-50">CR</span></div>
             </div>
-
-            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 custom-scrollbar">
-              <div className="p-4 rounded-xl bg-bid-glow/10 border border-bid-glow/30 flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <span className="font-headline-md text-xl font-bold text-bid-glow uppercase">
-                    GG
-                  </span>
-                  <span className="font-headline-lg text-2xl text-white">
-                    4,500
-                  </span>
-                </div>
-                <span className="font-label-mono text-[10px] text-on-surface-variant">
-                  Just now
-                </span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <span className="font-headline-md text-xl text-on-surface-variant uppercase">
-                    CK
-                  </span>
-                  <span className="font-headline-lg text-2xl text-on-surface">
-                    4,000
-                  </span>
-                </div>
-                <span className="font-label-mono text-[10px] text-on-surface-variant/50">
-                  12s ago
-                </span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <span className="font-headline-md text-xl text-on-surface-variant uppercase">
-                    JS
-                  </span>
-                  <span className="font-headline-lg text-2xl text-on-surface">
-                    3,500
-                  </span>
-                </div>
-                <span className="font-label-mono text-[10px] text-on-surface-variant/50">
-                  28s ago
-                </span>
-              </div>
-              <div className="p-4 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <span className="font-headline-md text-xl text-on-surface-variant uppercase">
-                    GG
-                  </span>
-                  <span className="font-headline-lg text-2xl text-on-surface">
-                    3,000
-                  </span>
-                </div>
-                <span className="font-label-mono text-[10px] text-on-surface-variant/50">
-                  45s ago
-                </span>
-              </div>
-              <div className="p-4 rounded-xl bg-surface-container-low flex justify-between items-center border border-dashed border-border-overlay">
-                <div className="flex items-center gap-4">
-                  <span className="font-headline-md text-sm text-on-surface-variant uppercase">
-                    Base Price
-                  </span>
-                  <span className="font-headline-lg text-xl text-on-surface-variant">
-                    2,000
-                  </span>
-                </div>
-                <span className="font-label-mono text-[10px] text-on-surface-variant/50">
-                  Start
-                </span>
-              </div>
+            <div className="w-px h-7 bg-white/10" />
+            <div className="flex items-center gap-[9px] bg-[rgba(127,29,29,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(239,68,68,0.30)]">
+              <div className="dot-pulse w-[6px] h-[6px] rounded-full bg-red-500" style={{ boxShadow: "0 0 7px #ef4444" }} />
+              <span className="font-mono-geist text-red-400 font-bold tracking-[0.18em] text-[9px]">LIVE BROADCAST</span>
             </div>
           </div>
-        </aside>
-      </main>
+        </header>
 
-      {/* Bottom Ticker */}
-      <footer className="h-16 shrink-0 bg-primary-fixed text-on-primary-fixed flex items-center relative z-20 overflow-hidden shadow-[0_-10px_30px_rgba(218,226,253,0.1)]">
-        <div className="absolute left-0 top-0 bottom-0 bg-on-primary-fixed text-primary-fixed flex items-center px-8 z-10 border-r border-border-overlay shadow-[10px_0_20px_rgba(0,0,0,0.5)]">
-          <span className="material-symbols-outlined mr-3">history_edu</span>
-          <span className="font-headline-md text-lg uppercase tracking-widest font-bold whitespace-nowrap">
-            Recently Sold
-          </span>
-          <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-r from-on-primary-fixed to-transparent translate-x-full"></div>
-        </div>
+        {/* ══════════ MAIN ══════════ */}
+        <main className="flex-1 mt-14 mb-[40px] px-[30px] flex gap-[14px] overflow-hidden min-h-0">
 
-        <div className="flex-1 flex overflow-hidden h-full">
-          <div className="flex items-center gap-16 whitespace-nowrap px-16 ml-[300px]">
-            <div className="flex items-center gap-4">
-              <span className="font-headline-md text-xl font-bold uppercase">
+          {/* ── CENTER: Hero ── */}
+          <section className="flex-1 flex flex-col items-center justify-center px-[34px] py-[10px] relative min-w-0">
+
+            {/* Player image */}
+            <div className="relative">
+              <div className="relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08]" style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}>
+                <img
+                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuAH3YsJAfo8TbaRj-mQVD1aaJeJS4NZbMLmGZoXwZq6b-8qdYJiG4yhUAO5qA2h84DtDViP0uoklStDd1ecScF5TiVz0xwZ_hKdC3wHcfavCBkIGxDzrRyP5IUfRLwDg0mI5dI6_wGOxwo4G4ScIau4tjN9we3cxjv7SzguyDEPXwYEDcWbAdyjXaFqXdJlXcxVxK3AFhv4lkTrRReAXYvDfMnQbR4KYwgtG6tFwmtD7oaNtVFJKUIUoltCFP95TT4pdzawlOpWm7Q"
+                  alt="Player Portrait"
+                  className="w-full h-full object-cover object-top"
+                  style={{ filter: "grayscale(0.15) contrast(1.2)" }}
+                />
+                {/* Gradient overlay — complex gradient, keep vanilla */}
+                <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #0b0f10 0%, transparent 55%)" }} />
+              </div>
+
+              {/* LOT pill */}
+              <div
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-[#e45d35] text-[#0b0f10] font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
+                style={{ boxShadow: "0 4px 16px rgba(228,93,53,0.45)" }}
+              >
+                LOT #42 • ON THE BLOCK
+              </div>
+            </div>
+
+            {/* Player name */}
+            <div className="text-center z-20 -mt-[30px]">
+              <h2 className="font-archivo text-fluid-hero leading-none font-bold uppercase tracking-[-0.025em] text-white italic mb-[9px]" style={{ textShadow: "0 4px 24px rgba(0,0,0,0.8)" }}>
                 Virat Kohli
-              </span>
-              <span className="font-headline-lg text-2xl font-black">
-                20,500
-              </span>
-              <span className="font-label-mono text-[10px] uppercase font-bold tracking-widest opacity-60">
-                To
-              </span>
-              <span className="font-headline-md text-xl font-bold uppercase">
-                Maruthamunai Marvels
-              </span>
+              </h2>
+              <div className="flex items-center justify-center gap-5">
+                <span className="font-archivo text-[17px] font-bold text-[#e45d35] tracking-[0.18em]">ALL-ROUNDER</span>
+                <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
+                <span className="font-archivo text-[17px] font-semibold text-white/80 tracking-[0.08em]">
+                  BASE: 2,000 <span className="text-[10px] opacity-60">CR</span>
+                </span>
+              </div>
             </div>
 
-            <span className="w-2 h-2 rounded-full bg-on-primary-fixed/30"></span>
+            {/* Stats row */}
+            <div
+              className="flex items-center gap-16 mt-[32px] px-11 py-3 rounded-[17px] border border-white/[0.08]"
+              style={{
+                background: "rgba(11,15,16,0.42)",
+                backdropFilter: "blur(20px)",
+                WebkitBackdropFilter: "blur(20px)",
+                boxShadow: "0 8px 42px rgba(0,0,0,0.55)",
+              }}
+            >
+              {[
+                { label: "Matches",     value: "245"   },
+                { label: "Strike Rate", value: "138.4" },
+                { label: "Average",     value: "42.1"  },
+              ].map((s, i, arr) => (
+                <React.Fragment key={s.label}>
+                  <div className="text-center">
+                    <p className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-[5px]">{s.label}</p>
+                    <p className="font-archivo text-[24px] font-bold text-white">{s.value}</p>
+                  </div>
+                  {i < arr.length - 1 && <div className="w-px h-8 bg-white/10" />}
+                </React.Fragment>
+              ))}
+            </div>
+          </section>
 
-            <div className="flex items-center gap-4 opacity-70">
-              <span className="font-headline-md text-xl font-bold uppercase">
-                Mitchell Starc
-              </span>
-              <span className="font-headline-lg text-2xl font-black">
-                24,750
-              </span>
-              <span className="font-label-mono text-[10px] uppercase font-bold tracking-widest opacity-60">
-                To
-              </span>
-              <span className="font-headline-md text-xl font-bold uppercase">
-                Colombo Kings
-              </span>
+          {/* ── RIGHT: Bid + Team ── */}
+          <aside className="w-[26%] shrink-0 flex flex-col py-12 gap-3 min-h-0">
+
+            {/* Bid card */}
+            <div
+              className="glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(228,93,53,0.18)]"
+              style={{ background: "linear-gradient(135deg, rgba(39,43,44,0.45) 0%, rgba(11,15,16,0.82) 100%)" }}
+            >
+              {/* Gavel emboss */}
+              <div className="absolute -top-8 -right-8 opacity-[0.05] pointer-events-none">
+                <span className="ms ms-fill text-white" style={{ fontSize: 220 }}>gavel</span>
+              </div>
+              {/* Shimmer corner */}
+              <div className="absolute -top-6 -right-6 w-[100px] h-[100px] bg-white/[0.03] rotate-45 rounded-xl pointer-events-none" />
+
+              <div className="text-center w-full relative z-10">
+                <span className="font-mono-geist text-[#e45d35] text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
+                  Current High Bid
+                </span>
+
+                <div
+                  className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[30px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}
+                >
+                  {currentBid.toLocaleString()}
+                </div>
+
+                {/* Divider — complex gradient, keep vanilla */}
+                <div className="w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right, transparent, rgba(228,93,53,0.30), transparent)" }} />
+
+                <div className="flex items-center justify-center gap-4">
+                  <div className="w-[58px] h-[58px] rounded-xl bg-[rgba(228,93,53,0.10)] border border-[rgba(228,93,53,0.20)] flex items-center justify-center">
+                    <span className="ms ms-fill text-[28px] text-[#e45d35]">groups</span>
+                  </div>
+                  <div>
+                    <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-1 font-bold">
+                      Leading Team
+                    </div>
+                    <div className="font-archivo text-[24px] font-light text-white tracking-[-0.01em]">STRIKERS</div>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <span className="w-2 h-2 rounded-full bg-on-primary-fixed/30"></span>
+            {/* Team stats card */}
+            <div
+              className="glass-panel shrink-0 rounded-2xl px-[18px] pt-4 pb-[14px] border border-white/[0.06] relative overflow-hidden"
+              style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 100%)" }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Team Statistics</span>
+                <div className="flex gap-[5px]">
+                  <div className="w-4 h-[3px] bg-[#e45d35] rounded-full" />
+                  <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                  <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                </div>
+              </div>
 
-            <div className="flex items-center gap-4 opacity-50">
-              <span className="font-headline-md text-xl font-bold uppercase">
-                Babar Azam
-              </span>
-              <span className="font-headline-lg text-2xl font-black">
-                18,000
-              </span>
-              <span className="font-label-mono text-[10px] uppercase font-bold tracking-widest opacity-60">
-                To
-              </span>
-              <span className="font-headline-md text-xl font-bold uppercase">
-                Jaffna Stallions
-              </span>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-archivo text-[20px] font-bold text-white uppercase tracking-[0.02em]">Titans XI</h3>
+                <div className="px-[10px] py-[3px] bg-[rgba(228,93,53,0.10)] rounded-[6px] border border-[rgba(228,93,53,0.22)]">
+                  <span className="font-mono-geist text-[#e45d35] text-[8px] font-bold tracking-[0.12em]">ACTIVE</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] block mb-[6px]">Squad Filled</span>
+                  <div className="flex items-center gap-[10px]">
+                    <span className="font-archivo text-[18px] font-semibold text-white">
+                      14 <span className="text-[10px] opacity-40">/ 18</span>
+                    </span>
+                    <div className="flex-1 h-[5px] bg-white/[0.06] rounded-full overflow-hidden">
+                      <div className="h-full w-[77%] bg-[#e45d35] rounded-full" />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
+                  <span className="font-archivo text-[18px] font-semibold text-[#e45d35]">
+                    12,450 <span className="text-[9px] opacity-50">CR</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Top buy */}
+              <div className="flex items-center justify-between px-3 py-2 bg-white/[0.04] rounded-[10px] border border-white/[0.05]">
+                <div className="flex items-center gap-[10px]">
+                  <span className="ms ms-fill text-[13px] text-[#e45d35]">star</span>
+                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
+                </div>
+                <span className="font-mono-geist text-[10px] text-white">Rohit Sharma — 16,250 CR</span>
+              </div>
+
+              {/* Bottom progress shimmer */}
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.04]">
+                <div className="h-full w-1/3 bg-[rgba(228,93,53,0.35)]" />
+              </div>
+              <div className="absolute -bottom-8 -right-8 w-[100px] h-[100px] rounded-full pointer-events-none" style={{ background: "rgba(228,93,53,0.05)", filter: "blur(24px)" }} />
+            </div>
+          </aside>
+        </main>
+
+        {/* ══════════ FOOTER ══════════ */}
+        <footer className="fixed bottom-0 left-0 right-0 z-50 h-[52px] flex items-stretch bg-[rgba(11,15,16,0.92)] footer-blur border-t border-white/[0.05] overflow-hidden">
+
+          {/* Label */}
+          <div className="shrink-0 flex items-center gap-[10px] px-[27px] bg-[#e45d35] relative">
+            {/* Gradient fade — keep vanilla */}
+            <div className="absolute right-0 top-0 bottom-0 w-[35px] translate-x-full" style={{ background: "linear-gradient(to right,#e45d35,transparent)" }} />
+            <span className="ms text-[15px] text-[#0b0f10]">history_edu</span>
+            <span className="font-mono-geist text-[#0b0f10] font-black tracking-[0.2em] text-[9px] whitespace-nowrap">RECENTLY SOLD</span>
+          </div>
+
+          {/* Ticker */}
+          <div className="flex-1 overflow-hidden relative flex items-center">
+            <div className="ticker-track flex items-center gap-14 whitespace-nowrap">
+              {[...ticker, ...ticker].map((p, i) => (
+                <React.Fragment key={i}>
+                  <div className="flex items-center gap-[17px] shrink-0">
+                    <span className="font-archivo text-[15px] font-semibold text-white">{p.name}</span>
+                    <span className="font-mono-geist text-[15px] font-bold text-[#e45d35]">{p.price}</span>
+                    <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.45)] uppercase tracking-[0.1em]">TO</span>
+                    <span className="font-archivo text-[15px] font-semibold text-white/75 tracking-[0.02em]">{p.team}</span>
+                  </div>
+                  <div className="w-[5px] h-[5px] rounded-full bg-white/10 shrink-0" />
+                </React.Fragment>
+              ))}
             </div>
           </div>
-        </div>
-      </footer>
 
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-        /* Custom scrollbar for webkit */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background-color: var(--color-border-overlay);
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background-color: rgba(255,255,255,0.2);
-        }
-      `,
-        }}
-      />
-    </div>
+          {/* Countdown */}
+          <div className="shrink-0 flex flex-col items-end justify-center px-[21px] border-l border-white/[0.05] bg-[rgba(39,43,44,0.95)]">
+            <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Time Remaining</span>
+            <span className="font-mono-geist text-[18px] text-white tracking-[-0.01em] tabular-nums">{fmt(countdown)}</span>
+          </div>
+        </footer>
+      </div>
+    </>
   );
 }
