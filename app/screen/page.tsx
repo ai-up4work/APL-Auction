@@ -715,15 +715,7 @@ export default function ScreenPage() {
                 <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Player Pool</h3>
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={handleShuffle}
-                        disabled={isShuffling || players.filter(p => p.status === 'locked').length === 0}
-                        className="text-xs font-mono px-3 py-1 bg-[#e45d35]/20 text-[#e45d35] hover:bg-[#e45d35]/40 disabled:opacity-50 disabled:cursor-not-allowed rounded border border-[#e45d35]/50 transition-colors uppercase tracking-widest"
-                      >
-                        SHUFFLE
-                      </button>
-                    </div>
+                   
                   </div>
                   {players.map(p => {
                     const isLocked = p.status === 'locked';
