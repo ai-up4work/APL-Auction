@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
+import { FlowCanvas } from "@/components/FlowCanvas";
+import { AUCTION_CONFIG } from "@/app/sankey/data";
+import { ShuffleOverlay } from "@/components/ShuffleOverlay";
 
 export default function ScreenPage() {
   const [currentBid, setCurrentBid] = useState(12500);
@@ -8,6 +11,51 @@ export default function ScreenPage() {
   const [flashOverlay, setFlashOverlay] = useState(false);
   const [countdown, setCountdown] = useState(17 * 3600 + 48 * 60 + 11);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Toggle state between 'live' and 'flow' views
+  const [activeView, setActiveView] = useState<'live' | 'flow'>('live');
+  
+  // For FlowCanvas
+  const playerListRef = useRef<HTMLDivElement>(null);
+  const teamListRef = useRef<HTMLDivElement>(null);
+  const [players, setPlayers] = useState(AUCTION_CONFIG.players);
+  const [activePlayer, setActivePlayer] = useState<string | null>(null);
+  const [activeTeam, setActiveTeam] = useState<string | null>(null);
+
+  const togglePlayer = (p: typeof players[0]) => {
+    if (activePlayer === p.id) {
+      setActivePlayer(null);
+      setActiveTeam(null);
+    } else {
+      setActivePlayer(p.id);
+      setActiveTeam(p.teamShortCode);
+    }
+  };
+
+  const toggleTeam = (t: typeof AUCTION_CONFIG.teams[0]) => {
+    if (activeTeam === t.shortCode && !activePlayer) {
+      setActiveTeam(null);
+    } else {
+      setActiveTeam(t.shortCode);
+      setActivePlayer(null);
+    }
+  };
+
+  const hasSelection = activePlayer !== null || activeTeam !== null;
+
+  useEffect(() => {
+    if (activePlayer) {
+      const el = document.getElementById(`player-${activePlayer}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activePlayer]);
+
+  useEffect(() => {
+    if (activeTeam) {
+      const el = document.getElementById(`team-${activeTeam}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeTeam]);
 
   useEffect(() => {
     const interval = setInterval(() => setCountdown((p) => (p > 0 ? p - 1 : 0)), 1000);
@@ -37,14 +85,6 @@ export default function ScreenPage() {
     const sec = (s % 60).toString().padStart(2, "0");
     return `${h}:${m}:${sec}`;
   };
-
-  const ticker = [
-    { name: "Rohit Sharma",    price: "16,250", team: "TITANS XI" },
-    { name: "Kane Williamson", price: "9,500",  team: "MAVERICKS" },
-    { name: "Ben Stokes",      price: "18,750", team: "ROYALS"    },
-    { name: "MS Dhoni",        price: "14,000", team: "STRIKERS"  },
-    { name: "Jasprit Bumrah",  price: "11,200", team: "FALCONS"   },
-  ];
 
   return (
     <>
@@ -232,6 +272,13 @@ export default function ScreenPage() {
 
           {/* Right */}
           <div className="flex items-center gap-[16px] sm:gap-[30px]">
+            {/* Toggle Button */}
+            <button 
+              onClick={() => setActiveView(v => v === 'live' ? 'flow' : 'live')}
+              className="text-[10px] font-mono-geist px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md border border-white/10 transition-colors uppercase tracking-widest text-[#e45d35]"
+            >
+              {activeView === 'live' ? 'View Full Board' : 'View Live Bid'}
+            </button>
             <div className="header-purse text-right hidden sm:block">
               <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.1em]">Total Purse Cap</div>
               <div className="font-archivo text-[18px] font-bold text-white">50,000 <span className="text-[9px] opacity-50">CR</span></div>
@@ -245,173 +292,262 @@ export default function ScreenPage() {
         </header>
 
         {/* ══════════ MAIN ══════════ */}
-        <main className="main-layout flex-1 mt-14 mb-[40px] px-[30px] flex gap-[14px] overflow-hidden min-h-0">
+        <main className="main-layout flex-1 mt-14 mb-[40px] flex overflow-hidden min-h-0 relative">
+          
+          {activeView === 'live' ? (
+            <div className="w-full h-full flex gap-[14px] px-[30px] pt-4">
+              {/* ── CENTER: Hero ── */}
+              <section className="hero-section flex-1 flex flex-col items-center justify-center px-[34px] sm:px-[20px] py-[10px] relative min-w-0">
 
-          {/* ── CENTER: Hero ── */}
-          <section className="hero-section flex-1 flex flex-col items-center justify-center px-[34px] sm:px-[20px] py-[10px] relative min-w-0">
-
-            {/* Player image */}
-            <div className="relative">
-              <div
-                className="player-image-wrap relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08]"
-                style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
-              >
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuAH3YsJAfo8TbaRj-mQVD1aaJeJS4NZbMLmGZoXwZq6b-8qdYJiG4yhUAO5qA2h84DtDViP0uoklStDd1ecScF5TiVz0xwZ_hKdC3wHcfavCBkIGxDzrRyP5IUfRLwDg0mI5dI6_wGOxwo4G4ScIau4tjN9we3cxjv7SzguyDEPXwYEDcWbAdyjXaFqXdJlXcxVxK3AFhv4lkTrRReAXYvDfMnQbR4KYwgtG6tFwmtD7oaNtVFJKUIUoltCFP95TT4pdzawlOpWm7Q"
-                  alt="Player Portrait"
-                  className="w-full h-full object-cover object-top"
-                  style={{ filter: "grayscale(0.15) contrast(1.2)" }}
-                />
-                <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #0b0f10 0%, transparent 55%)" }} />
-              </div>
-
-              {/* LOT pill */}
-              <div
-                className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-[#e45d35] text-[#0b0f10] font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
-                style={{ boxShadow: "0 4px 16px rgba(228,93,53,0.45)" }}
-              >
-                LOT #42 • ON THE BLOCK
-              </div>
-            </div>
-
-            {/* Player name */}
-            <div className="text-center z-20 -mt-[30px]">
-              <h2 className="font-archivo text-fluid-hero leading-none font-bold uppercase tracking-[-0.025em] text-white italic mb-[9px]" style={{ textShadow: "0 4px 24px rgba(0,0,0,0.8)" }}>
-                Virat Kohli
-              </h2>
-              <div className="flex items-center justify-center gap-3 sm:gap-5 flex-wrap">
-                <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-[#e45d35] tracking-[0.18em]">ALL-ROUNDER</span>
-                <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
-                <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
-                  BASE: 2,000 <span className="text-[10px] opacity-60">CR</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Stats row */}
-            <div
-              className="stats-row flex items-center gap-16 mt-[32px] px-11 py-3 rounded-[17px] border border-white/[0.08]"
-              style={{
-                background: "rgba(11,15,16,0.42)",
-                backdropFilter: "blur(20px)",
-                WebkitBackdropFilter: "blur(20px)",
-                boxShadow: "0 8px 42px rgba(0,0,0,0.55)",
-              }}
-            >
-              {[
-                { label: "Matches",     value: "245"   },
-                { label: "Strike Rate", value: "138.4" },
-                { label: "Average",     value: "42.1"  },
-              ].map((s, i, arr) => (
-                <React.Fragment key={s.label}>
-                  <div className="text-center">
-                    <p className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-[5px]">{s.label}</p>
-                    <p className="stat-value font-archivo text-[24px] font-bold text-white">{s.value}</p>
+                {/* Player image */}
+                <div className="relative">
+                  <div
+                    className="player-image-wrap relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08]"
+                    style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
+                  >
+                    <img
+                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuAH3YsJAfo8TbaRj-mQVD1aaJeJS4NZbMLmGZoXwZq6b-8qdYJiG4yhUAO5qA2h84DtDViP0uoklStDd1ecScF5TiVz0xwZ_hKdC3wHcfavCBkIGxDzrRyP5IUfRLwDg0mI5dI6_wGOxwo4G4ScIau4tjN9we3cxjv7SzguyDEPXwYEDcWbAdyjXaFqXdJlXcxVxK3AFhv4lkTrRReAXYvDfMnQbR4KYwgtG6tFwmtD7oaNtVFJKUIUoltCFP95TT4pdzawlOpWm7Q"
+                      alt="Player Portrait"
+                      className="w-full h-full object-cover object-top"
+                      style={{ filter: "grayscale(0.15) contrast(1.2)" }}
+                    />
+                    <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #0b0f10 0%, transparent 55%)" }} />
                   </div>
-                  {i < arr.length - 1 && <div className="w-px h-8 bg-white/10" />}
-                </React.Fragment>
-              ))}
-            </div>
-          </section>
 
-          {/* ── RIGHT: Bid + Team ── */}
-          <aside className="aside-panel w-[26%] shrink-0 flex flex-col py-12 gap-3 min-h-0">
-
-            {/* Bid card */}
-            <div
-              className="bid-card glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(228,93,53,0.18)]"
-              style={{ background: "linear-gradient(135deg, rgba(39,43,44,0.45) 0%, rgba(11,15,16,0.82) 100%)" }}
-            >
-              {/* Gavel emboss */}
-              <div className="absolute -top-8 -right-8 opacity-[0.05] pointer-events-none">
-                <span className="ms ms-fill text-white" style={{ fontSize: 220 }}>gavel</span>
-              </div>
-              <div className="absolute -top-6 -right-6 w-[100px] h-[100px] bg-white/[0.03] rotate-45 rounded-xl pointer-events-none" />
-
-              <div className="text-center w-full relative z-10">
-                <span className="bid-label font-mono-geist text-[#e45d35] text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
-                  Current High Bid
-                </span>
-
-                <div
-                  className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[30px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}
-                >
-                  {currentBid.toLocaleString()}
-                </div>
-
-                <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right, transparent, rgba(228,93,53,0.30), transparent)" }} />
-
-                <div className="flex items-center justify-center gap-3 sm:gap-4">
-                  <div className="bid-leading-icon w-[58px] h-[58px] rounded-xl bg-[rgba(228,93,53,0.10)] border border-[rgba(228,93,53,0.20)] flex items-center justify-center">
-                    <span className="ms ms-fill text-[28px] text-[#e45d35]">groups</span>
-                  </div>
-                  <div>
-                    <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-1 font-bold">
-                      Leading Team
-                    </div>
-                    <div className="bid-leading-name font-archivo text-[24px] font-light text-white tracking-[-0.01em]">STRIKERS</div>
+                  {/* LOT pill */}
+                  <div
+                    className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-[#e45d35] text-[#0b0f10] font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
+                    style={{ boxShadow: "0 4px 16px rgba(228,93,53,0.45)" }}
+                  >
+                    LOT #42 • ON THE BLOCK
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Team stats card */}
-            <div
-              className="glass-panel shrink-0 rounded-2xl px-[18px] pt-4 pb-[14px] border border-white/[0.06] relative overflow-hidden"
-              style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 100%)" }}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Team Statistics</span>
-                <div className="flex gap-[5px]">
-                  <div className="w-4 h-[3px] bg-[#e45d35] rounded-full" />
-                  <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
-                  <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-archivo text-[16px] sm:text-[20px] font-bold text-white uppercase tracking-[0.02em]">Titans XI</h3>
-                <div className="px-[10px] py-[3px] bg-[rgba(228,93,53,0.10)] rounded-[6px] border border-[rgba(228,93,53,0.22)]">
-                  <span className="font-mono-geist text-[#e45d35] text-[8px] font-bold tracking-[0.12em]">ACTIVE</span>
-                </div>
-              </div>
-
-              <div className="team-stats-grid grid grid-cols-2 gap-3 mb-3">
-                <div>
-                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] block mb-[6px]">Squad Filled</span>
-                  <div className="flex items-center gap-[10px]">
-                    <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-white">
-                      14 <span className="text-[10px] opacity-40">/ 18</span>
+                {/* Player name */}
+                <div className="text-center z-20 -mt-[30px]">
+                  <h2 className="font-archivo text-fluid-hero leading-none font-bold uppercase tracking-[-0.025em] text-white italic mb-[9px]" style={{ textShadow: "0 4px 24px rgba(0,0,0,0.8)" }}>
+                    Virat Kohli
+                  </h2>
+                  <div className="flex items-center justify-center gap-3 sm:gap-5 flex-wrap">
+                    <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-[#e45d35] tracking-[0.18em]">ALL-ROUNDER</span>
+                    <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
+                    <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
+                      BASE: 2,000 <span className="text-[10px] opacity-60">CR</span>
                     </span>
-                    <div className="flex-1 h-[5px] bg-white/[0.06] rounded-full overflow-hidden">
-                      <div className="h-full w-[77%] bg-[#e45d35] rounded-full" />
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div
+                  className="stats-row flex items-center gap-16 mt-[32px] px-11 py-3 rounded-[17px] border border-white/[0.08]"
+                  style={{
+                    background: "rgba(11,15,16,0.42)",
+                    backdropFilter: "blur(20px)",
+                    WebkitBackdropFilter: "blur(20px)",
+                    boxShadow: "0 8px 42px rgba(0,0,0,0.55)",
+                  }}
+                >
+                  {[
+                    { label: "Matches",     value: "245"   },
+                    { label: "Strike Rate", value: "138.4" },
+                    { label: "Average",     value: "42.1"  },
+                  ].map((s, i, arr) => (
+                    <React.Fragment key={s.label}>
+                      <div className="text-center">
+                        <p className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-[5px]">{s.label}</p>
+                        <p className="stat-value font-archivo text-[24px] font-bold text-white">{s.value}</p>
+                      </div>
+                      {i < arr.length - 1 && <div className="w-px h-8 bg-white/10" /> }
+                    </React.Fragment>
+                  ))}
+                </div>
+              </section>
+
+              {/* ── RIGHT: Bid + Team ── */}
+              <aside className="aside-panel w-[26%] shrink-0 flex flex-col py-12 gap-3 min-h-0">
+
+                {/* Bid card */}
+                <div
+                  className="bid-card glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(228,93,53,0.18)]"
+                  style={{ background: "linear-gradient(135deg, rgba(39,43,44,0.45) 0%, rgba(11,15,16,0.82) 100%)" }}
+                >
+                  {/* Gavel emboss */}
+                  <div className="absolute -top-8 -right-8 opacity-[0.05] pointer-events-none">
+                    <span className="ms ms-fill text-white" style={{ fontSize: 220 }}>gavel</span>
+                  </div>
+                  <div className="absolute -top-6 -right-6 w-[100px] h-[100px] bg-white/[0.03] rotate-45 rounded-xl pointer-events-none" />
+
+                  <div className="text-center w-full relative z-10">
+                    <span className="bid-label font-mono-geist text-[#e45d35] text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
+                      Current High Bid
+                    </span>
+
+                    <div
+                      className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[30px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}
+                    >
+                      {currentBid.toLocaleString()}
+                    </div>
+
+                    <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right, transparent, rgba(228,93,53,0.30), transparent)" }} />
+
+                    <div className="flex items-center justify-center gap-3 sm:gap-4">
+                      <div className="bid-leading-icon w-[58px] h-[58px] rounded-xl bg-[rgba(228,93,53,0.10)] border border-[rgba(228,93,53,0.20)] flex items-center justify-center">
+                        <span className="ms ms-fill text-[28px] text-[#e45d35]">groups</span>
+                      </div>
+                      <div>
+                        <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-1 font-bold">
+                          Leading Team
+                        </div>
+                        <div className="bid-leading-name font-archivo text-[24px] font-light text-white tracking-[-0.01em]">STRIKERS</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-col items-end">
-                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
-                  <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-[#e45d35]">
-                    12,450 <span className="text-[9px] opacity-50">CR</span>
-                  </span>
-                </div>
-              </div>
 
-              {/* Top buy */}
-              <div className="team-top-buy flex items-center justify-between px-3 py-2 bg-white/[0.04] rounded-[10px] border border-white/[0.05]">
-                <div className="flex items-center gap-[10px]">
-                  <span className="ms ms-fill text-[13px] text-[#e45d35]">star</span>
-                  <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
-                </div>
-                <span className="font-mono-geist text-[10px] text-white">Rohit Sharma — 16,250 CR</span>
-              </div>
+                {/* Team stats card */}
+                <div
+                  className="glass-panel shrink-0 rounded-2xl px-[18px] pt-4 pb-[14px] border border-white/[0.06] relative overflow-hidden"
+                  style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 100%)" }}
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Team Statistics</span>
+                    <div className="flex gap-[5px]">
+                      <div className="w-4 h-[3px] bg-[#e45d35] rounded-full" />
+                      <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                      <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                    </div>
+                  </div>
 
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.04]">
-                <div className="h-full w-1/3 bg-[rgba(228,93,53,0.35)]" />
-              </div>
-              <div className="absolute -bottom-8 -right-8 w-[100px] h-[100px] rounded-full pointer-events-none" style={{ background: "rgba(228,93,53,0.05)", filter: "blur(24px)" }} />
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-archivo text-[16px] sm:text-[20px] font-bold text-white uppercase tracking-[0.02em]">Titans XI</h3>
+                    <div className="px-[10px] py-[3px] bg-[rgba(228,93,53,0.10)] rounded-[6px] border border-[rgba(228,93,53,0.22)]">
+                      <span className="font-mono-geist text-[#e45d35] text-[8px] font-bold tracking-[0.12em]">ACTIVE</span>
+                    </div>
+                  </div>
+
+                  <div className="team-stats-grid grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] block mb-[6px]">Squad Filled</span>
+                      <div className="flex items-center gap-[10px]">
+                        <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-white">
+                          14 <span className="text-[10px] opacity-40">/ 18</span>
+                        </span>
+                        <div className="flex-1 h-[5px] bg-white/[0.06] rounded-full overflow-hidden">
+                          <div className="h-full w-[77%] bg-[#e45d35] rounded-full" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
+                      <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-[#e45d35]">
+                        12,450 <span className="text-[9px] opacity-50">CR</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Top buy */}
+                  <div className="team-top-buy flex items-center justify-between px-3 py-2 bg-white/[0.04] rounded-[10px] border border-white/[0.05]">
+                    <div className="flex items-center gap-[10px]">
+                      <span className="ms ms-fill text-[13px] text-[#e45d35]">star</span>
+                      <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
+                    </div>
+                    <span className="font-mono-geist text-[10px] text-white">Rohit Sharma — 16,250 CR</span>
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.04]">
+                    <div className="h-full w-1/3 bg-[rgba(228,93,53,0.35)]" />
+                  </div>
+                  <div className="absolute -bottom-8 -right-8 w-[100px] h-[100px] rounded-full pointer-events-none" style={{ background: "rgba(228,93,53,0.05)", filter: "blur(24px)" }} />
+                </div>
+              </aside>
             </div>
-          </aside>
+          ) : (
+            <div className="w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
+              <FlowCanvas 
+                players={players} 
+                playerListRef={playerListRef}
+                teamListRef={teamListRef}
+                activePlayer={activePlayer}
+                activeTeam={activeTeam}
+              />
+              {/* Left Column: Player Pool */}
+              <aside 
+                ref={playerListRef}
+                className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5"
+              >
+                <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                  <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white mb-4">Player Pool</h3>
+                  {players.map(p => {
+                    const isLocked = p.status === 'locked';
+                    const isHighlighted = hasSelection && !isLocked ? (activePlayer ? activePlayer === p.id : activeTeam === p.teamShortCode) : false;
+                    const isDimmed = hasSelection && !isHighlighted && !isLocked;
+                    
+                    return (
+                      <div 
+                        key={p.id} 
+                        id={`player-${p.id}`} 
+                        onClick={() => !isLocked && togglePlayer(p)}
+                        className={`glass-panel p-3 rounded-xl flex items-center gap-4 transition-all duration-300
+                          ${!isLocked ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed grayscale'}
+                          ${isHighlighted ? 'ring-1 ring-[#e45d35] shadow-[0_0_15px_rgba(228,93,53,0.3)] bg-white/10' : 'border border-white/5'}
+                          ${isDimmed ? 'opacity-30' : ''}
+                          ${p.status === 'sold' && !isHighlighted ? 'border-r-2 border-r-green-500/50' : ''}
+                        `}
+                      >
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#313536] flex-shrink-0">
+                          {p.img && <img src={p.img} className="w-full h-full object-cover" alt="" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm truncate font-archivo text-white">{p.name}</p>
+                          <p className={`text-[10px] font-mono font-medium mt-0.5 ${p.status === 'sold' ? 'text-green-400' : 'text-[#c6c6cd]'} uppercase`}>
+                            {p.status === 'sold' ? `SOLD • ${p.teamShortCode}` : `BASE: ${p.price}`}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              {/* Middle Column */}
+              <section className="col-span-6 flex flex-col relative z-0 pointer-events-none" />
+
+              {/* Right Column: Franchises */}
+              <aside 
+                ref={teamListRef}
+                className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5"
+              >
+                <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                  <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white mb-4">Franchises</h3>
+                  {AUCTION_CONFIG.teams.map(t => {
+                    const isHighlighted = hasSelection ? activeTeam === t.shortCode : false;
+                    const isDimmed = hasSelection && !isHighlighted;
+                    
+                    return (
+                      <div 
+                        key={t.id} 
+                        id={`team-${t.shortCode}`} 
+                        onClick={() => toggleTeam(t)}
+                        className={`glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300
+                          ${isHighlighted ? 'ring-1 ring-[#e45d35] shadow-[0_0_15px_rgba(228,93,53,0.3)] bg-white/10' : 'border border-white/5 hover:border-[#e45d35]'}
+                          ${isDimmed ? 'opacity-30' : 'opacity-100'}
+                        `}
+                      >
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#1c2021] flex-shrink-0">
+                          {t.logoUrl && <img src={t.logoUrl} className="w-full h-full object-cover" alt="" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">{t.name}</p>
+                          <p className="text-[10px] font-mono text-[#e45d35] mt-0.5 tracking-wider">{t.purse}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+            </div>
+          )}
         </main>
       </div>
     </>
