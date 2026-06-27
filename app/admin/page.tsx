@@ -6,11 +6,7 @@ import PlayersTab from "@/components/Admin/PlayersTab";
 import RulesTab from "@/components/Admin/RulesTab";
 import SessionTab from "@/components/Admin/SessionTab";
 import LaunchTab from "@/components/Admin/LaunchTab";
-
-// Single source of truth for which steps are config-only (locked during live/paused)
-export const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
-
-export type AuctionStatus = "setup" | "live" | "paused" | "completed";
+import { CONFIG_STEPS, AuctionStatus } from "./config";
 
 export default function AdminPage() {
   const [activeStep, setActiveStep] = useState("teams");
@@ -25,7 +21,6 @@ export default function AdminPage() {
 
   function handleLaunch() {
     setAuctionStatus("live");
-    // Stay on launch tab so admin can see live controls
   }
 
   function handleStop() {
@@ -49,7 +44,6 @@ export default function AdminPage() {
         maxWidth: "100%",
       }}
     >
-      {/* Radial background glows */}
       <div
         className="fixed inset-0 pointer-events-none"
         style={{
@@ -72,10 +66,6 @@ export default function AdminPage() {
         onReauction={handleReauction}
       />
 
-      {/*
-        pt-36 covers the two-row header (utility bar ~48px + stepper ~80px = ~128px).
-        If header height changes, update this single value.
-      */}
       <main
         className="flex-1 w-full min-w-0 max-w-screen-2xl mx-auto pt-36 pb-20 px-10"
         style={{ position: "relative", zIndex: 1 }}
