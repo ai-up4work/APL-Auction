@@ -1,25 +1,9 @@
 "use client";
 
-/**
- * Auction Admin Console — Next.js page
- *
- * Wrapped with DesktopOnlyWrapper so phones and tablets (< 1024px)
- * see a styled blocker screen instead of the admin UI.
- *
- * Color system:
- *   --sold:   Amber-gold  (#C9920A / #F5B400)
- *   --unsold: Slate-cool  (#4A5568 / #A0AEC0)
- *   --accent: Crimson     (#9B1C1C / #E53E3E)
- *
- * Typography:
- *   Archivo Narrow  → display / headlines / team names / bid amounts
- *   Geist Mono      → labels, mono data, tracking caps, badge text
- *   Inter           → base body font
- */
-
 import React, { useEffect, useRef, useState } from "react";
 import DesktopOnlyWrapper from "@/components/DesktopOnlyWrapper";
-import AuctionStatus   from "@/components/Admin/LaunchTab";
+import AuctionStatus from "@/components/Admin/LaunchTab";
+import { AuctionStamp } from "@/components/AuctionStamp";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -31,7 +15,6 @@ type BidRow = {
   color: string;
   amount: string;
 };
-
 
 type Particle = {
   id: number;
@@ -124,58 +107,6 @@ function seedBids(): BidRow[] {
 }
 
 // ─────────────────────────────────────────────
-//  AuctionStamp
-// ─────────────────────────────────────────────
-export function AuctionStamp({ state }: { state: "sold" | "unsold" }) {
-  if (state === "sold") {
-    return (
-      <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
-        <div className="auction-sold-stamp">
-          <div className="sold-stamp-face">
-            <div className="sold-inner-ring" />
-            <div className="sold-hatch-layer" />
-            <span className="sold-word">SOLD</span>
-            <div className="sold-dots">
-              <span className="sold-dot" />
-              <span className="sold-dot" />
-              <span className="sold-dot" />
-            </div>
-            <span className="sold-sub">Auction finalized</span>
-            <div className="sold-bar" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
-      <div className="auction-unsold-stamp">
-        <div className="unsold-stamp-face">
-          <div className="unsold-inner-ring" />
-          <div className="unsold-hatch-layer" />
-          <CrossMark className="corner-tl" />
-          <CrossMark className="corner-tr" />
-          <CrossMark className="corner-bl" />
-          <CrossMark className="corner-br" />
-          <span className="unsold-word">UNSOLD</span>
-          <span className="unsold-sub">No bids accepted</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CrossMark({ className }: { className: string }) {
-  return (
-    <div className={`cross-mark ${className}`}>
-      <div className="cross-h" />
-      <div className="cross-v" />
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
 //  Inner admin page (desktop-only content)
 // ─────────────────────────────────────────────
 function AuctionAdminContent() {
@@ -187,7 +118,6 @@ function AuctionAdminContent() {
   const [particles,   setParticles]   = useState<Particle[]>([]);
   const flashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-generate bids while pending
   useEffect(() => {
     const interval = setInterval(() => {
       if (soldState !== "pending") return;
@@ -270,7 +200,6 @@ function AuctionAdminContent() {
       className="bg-background text-on-background selection:bg-secondary-container selection:text-on-secondary-container overflow-hidden h-screen flex flex-col relative"
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
-      {/* ── Font + global styles ── */}
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
@@ -296,7 +225,6 @@ function AuctionAdminContent() {
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
 
-        /* ── Particle ── */
         .auction-particle {
           position: fixed; pointer-events: none; z-index: 100;
           border-radius: 50%; width: 8px; height: 8px;
@@ -309,7 +237,6 @@ function AuctionAdminContent() {
           100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
         }
 
-        /* ── SOLD stamp ── */
         .auction-sold-stamp {
           transform: rotate(-13deg);
           animation: sold-land 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -369,7 +296,6 @@ function AuctionAdminContent() {
           height: 6px; background: #C9920A;
         }
 
-        /* ── UNSOLD stamp ── */
         .auction-unsold-stamp {
           transform: rotate(13deg);
           animation: unsold-land 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.05s both;
@@ -423,7 +349,6 @@ function AuctionAdminContent() {
         }
       `}</style>
 
-      {/* Particle burst layer */}
       {particles.map((p) => (
         <span
           key={p.id}
@@ -439,7 +364,6 @@ function AuctionAdminContent() {
         />
       ))}
 
-      {/* Flash overlay */}
       <div
         className={`fixed inset-0 pointer-events-none z-[60] transition-opacity duration-75 ${
           soldState === "sold"
@@ -450,7 +374,6 @@ function AuctionAdminContent() {
         } ${flashActive ? "opacity-100" : "opacity-0"}`}
       />
 
-      {/* Radial glow */}
       <div
         className={`fixed inset-0 pointer-events-none z-[55] flex items-center justify-center transition-opacity duration-500 ${
           glowActive ? "opacity-100" : "opacity-0"
@@ -496,7 +419,7 @@ function AuctionAdminContent() {
 
       <main className="mt-16 h-[calc(100vh-4rem)] overflow-hidden grid grid-cols-[20%_55%_25%]">
 
-        {/* ══════════ LEFT SIDEBAR: Player Queue ══════════ */}
+        {/* ══════════ LEFT SIDEBAR ══════════ */}
         <aside className="hidden xl:flex flex-col h-full bg-surface-container-lowest border-r border-outline-variant shrink-0 overflow-hidden">
           <div className="px-8 pt-8 pb-6 border-b border-outline-variant">
             <div className="flex items-center gap-4 mb-6">
@@ -525,7 +448,6 @@ function AuctionAdminContent() {
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
-            {/* Active row */}
             <div className="p-4 bg-amber-400/10 border-l-4 border-amber-400 rounded-r flex items-center justify-between cursor-default">
               <div className="flex items-center gap-4">
                 <span className="material-symbols-outlined text-amber-400">play_circle</span>
@@ -565,8 +487,6 @@ function AuctionAdminContent() {
 
         {/* ══════════ CENTER ══════════ */}
         <section className="flex flex-col h-full p-4 gap-4 overflow-hidden">
-
-          {/* Hero: Current Player On Block */}
           <div
             className={`glass-panel rounded-2xl flex flex-col md:flex-row relative overflow-hidden group items-start transition-all duration-700 p-4 gap-4 ${
               soldState === "sold"
@@ -660,7 +580,7 @@ function AuctionAdminContent() {
             </div>
           </div>
 
-          {/* Real-time Bid Log */}
+          {/* Bid Log */}
           <div className="flex-1 min-h-0 glass-panel rounded-2xl flex flex-col overflow-hidden bg-surface-container-lowest">
             <div className="px-8 py-5 border-b border-white/10 flex justify-between items-center bg-white/5">
               <h3 className="font-mono-geist text-xs text-on-surface uppercase flex items-center gap-3 font-bold tracking-[0.2em]">
@@ -710,7 +630,7 @@ function AuctionAdminContent() {
           </div>
         </section>
 
-        {/* ══════════ RIGHT SIDEBAR: Team Financials ══════════ */}
+        {/* ══════════ RIGHT SIDEBAR ══════════ */}
         <aside className="hidden lg:flex flex-col h-full bg-surface-container-low border-l border-outline-variant shrink-0 overflow-hidden">
           <div className="px-8 py-4 border-b border-outline-variant">
             <h3 className="font-mono-geist text-xs text-on-surface-variant uppercase font-bold tracking-[0.2em] mb-6">
@@ -803,7 +723,7 @@ function AuctionAdminContent() {
 }
 
 // ─────────────────────────────────────────────
-//  Default export — wrapped with DesktopOnlyWrapper
+//  Default export
 // ─────────────────────────────────────────────
 export default function AuctionAdminPage() {
   return (
