@@ -1,3 +1,4 @@
 {
-  "/auctioneer/page": "app/auctioneer/page.js"
+  "/auctioneer/page": "app/auctioneer/page.js",
+  "/screen/page": "app/screen/page.js"
 }
