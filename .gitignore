@@ -11,3 +11,5 @@ coverage/
 // compilation artifacts
 .next
 /.next
+.next/
+.next
