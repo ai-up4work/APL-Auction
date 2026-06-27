@@ -413,40 +413,6 @@ export default function ScreenPage() {
             </div>
           </aside>
         </main>
-
-        {/* ══════════ FOOTER ══════════ */}
-        <footer className="fixed bottom-0 left-0 right-0 z-50 h-[46px] sm:h-[52px] sm:mt-2 flex items-stretch bg-[rgba(11,15,16,0.92)] footer-blur border-t border-white/[0.05] overflow-hidden">
-
-          {/* Label */}
-          <div className="shrink-0 flex items-center gap-[8px] sm:gap-[10px] px-[14px] sm:px-[27px] bg-[#e45d35] relative">
-            <div className="absolute right-0 top-0 bottom-0 w-[35px] translate-x-full" style={{ background: "linear-gradient(to right,#e45d35,transparent)" }} />
-            <span className="ms text-[15px] text-[#0b0f10]">history_edu</span>
-            <span className="font-mono-geist text-[#0b0f10] font-black tracking-[0.2em] text-[8px] sm:text-[9px] whitespace-nowrap hidden sm:inline">RECENTLY SOLD</span>
-          </div>
-
-          {/* Ticker */}
-          <div className="flex-1 overflow-hidden relative flex items-center">
-            <div className="ticker-track flex items-center gap-10 sm:gap-14 whitespace-nowrap">
-              {[...ticker, ...ticker].map((p, i) => (
-                <React.Fragment key={i}>
-                  <div className="flex items-center gap-[10px] sm:gap-[17px] shrink-0">
-                    <span className="font-archivo text-[13px] sm:text-[15px] font-semibold text-white">{p.name}</span>
-                    <span className="font-mono-geist text-[13px] sm:text-[15px] font-bold text-[#e45d35]">{p.price}</span>
-                    <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.45)] uppercase tracking-[0.1em]">TO</span>
-                    <span className="font-archivo text-[13px] sm:text-[15px] font-semibold text-white/75 tracking-[0.02em]">{p.team}</span>
-                  </div>
-                  <div className="w-[5px] h-[5px] rounded-full bg-white/10 shrink-0" />
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Countdown */}
-          <div className="shrink-0 flex flex-col items-end justify-center px-[14px] sm:px-[21px] border-l border-white/[0.05] bg-[rgba(39,43,44,0.95)]">
-            <span className="footer-countdown-label font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em] hidden sm:block">Time Remaining</span>
-            <span className="font-mono-geist text-[14px] sm:text-[18px] text-white tracking-[-0.01em] tabular-nums">{fmt(countdown)}</span>
-          </div>
-        </footer>
       </div>
     </>
   );

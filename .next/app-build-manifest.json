@@ -6,15 +6,15 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/auctioneer/page": [
+    "/admin/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/auctioneer/page.js"
+      "static/chunks/app/admin/page.js"
     ],
-    "/screen/page": [
+    "/sankey/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/screen/page.js"
+      "static/chunks/app/sankey/page.js"
     ]
   }
 }

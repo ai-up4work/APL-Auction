@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme {
+  --color-theme-orange: #e45d35;
   --color-bid-glow: #e45d35;
   --color-secondary-fixed: #ffdbd1;
   --color-on-error-container: #ffdad6;
@@ -97,12 +98,6 @@
     animation: pulse-red 2s infinite;
   }
 
-  @keyframes pulse-red {
-    0% { opacity: 1; }
-    50% { opacity: 0.4; }
-    100% { opacity: 1; }
-  }
-
   .bento-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -112,20 +107,9 @@
   .pulse-glow {
     animation: pulse-glow-animation 2s infinite ease-in-out;
   }
-
-  @keyframes pulse-glow-animation {
-    0%, 100% { opacity: 0.8; filter: drop-shadow(0 0 5px #e45d35); }
-    50% { opacity: 1; filter: drop-shadow(0 0 15px #e45d35); }
-  }
   
   .active-glow {
     animation: pulse-active-glow 2s infinite ease-in-out;
-  }
-
-  @keyframes pulse-active-glow {
-    0% { box-shadow: 0 0 5px rgba(228, 93, 53, 0.3); }
-    50% { box-shadow: 0 0 20px rgba(228, 93, 53, 0.6); }
-    100% { box-shadow: 0 0 5px rgba(228, 93, 53, 0.3); }
   }
 
   .circular-progress {
@@ -140,4 +124,22 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .flow-dots {
+    stroke-dasharray: 6 18;
+    animation: flow-move 1s linear infinite;
+  }
+  @keyframes flow-move {
+    from { stroke-dashoffset: 24; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  .animate-scan {
+    animation: scan-vertical 1.2s linear infinite;
+  }
+}
+
+@keyframes scan-vertical {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
 }

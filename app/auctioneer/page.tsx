@@ -19,6 +19,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import DesktopOnlyWrapper from "@/components/DesktopOnlyWrapper";
+import AuctionStatus   from "@/components/Admin/LaunchTab";
 
 // ─────────────────────────────────────────────
 //  Types
@@ -31,7 +32,6 @@ type BidRow = {
   amount: string;
 };
 
-export type SoldState = "pending" | "sold" | "unsold";
 
 type Particle = {
   id: number;
@@ -47,6 +47,8 @@ type QueuedPlayer = {
   role: string;
   country: string;
 };
+
+type SoldState = "pending" | "sold" | "unsold";
 
 type TeamCard = {
   id: string;

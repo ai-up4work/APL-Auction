@@ -1,4 +1,4 @@
 {
-  "/auctioneer/page": "app/auctioneer/page.js",
-  "/screen/page": "app/screen/page.js"
+  "/admin/page": "app/admin/page.js",
+  "/sankey/page": "app/sankey/page.js"
 }
