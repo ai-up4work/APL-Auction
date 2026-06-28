@@ -833,8 +833,8 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                     const isPending = status === "pending";
 
                     const isHighlighted = hasSelection && !isLocked && !isUnsoldP
-                      ? (flowActivePlayer ? flowActivePlayer === p.id : flowActiveTeam === pAny.teamShortCode)
-                      : false;
+                    ? (flowActivePlayer ? flowActivePlayer === String(p.id) : flowActiveTeam === pAny.teamShortCode)
+                    : false;
                     const isDimmed = hasSelection && !isHighlighted && !isLocked;
 
                     return (
