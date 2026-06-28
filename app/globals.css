@@ -69,6 +69,7 @@
   --font-headline-md: 'Archivo Narrow', sans-serif;
   --font-body-lg: 'Inter', sans-serif;
   --font-headline-lg: 'Archivo Narrow', sans-serif;
+  
 }
 
 @layer base {
@@ -143,3 +144,4 @@
   0% { transform: translateY(-100%); }
   100% { transform: translateY(100%); }
 }
+

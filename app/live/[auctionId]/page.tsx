@@ -378,7 +378,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
         .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
-        .font-mono-geist { font-family: 'Geist Mono', monospace; }
+        .font-mono-geist { font-family: 'Geist', monospace; }
         .font-inter      { font-family: 'Inter', sans-serif; }
 
         .material-symbols-outlined {
@@ -458,7 +458,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         }
         .sold-sub {
           display: block; text-align: center;
-          font-family: 'Geist Mono', monospace;
+          font-family: 'Geist', monospace;
           font-size: 9px; font-weight: 500;
           letter-spacing: 0.42em; text-transform: uppercase;
           color: rgba(245,180,0,0.6);
@@ -514,7 +514,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         }
         .unsold-sub {
           display: block; text-align: center;
-          font-family: 'Geist Mono', monospace;
+          font-family: 'Geist', monospace;
           font-size: 9px; font-weight: 500;
           letter-spacing: 0.35em; text-transform: uppercase;
           color: rgba(160,174,192,0.55);
@@ -868,7 +868,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                   <div className="p-4 glass-panel rounded-xl">
                     <div className="flex items-end justify-between mb-2">
                       <div>
-                        <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] mb-1">
+                        <p className="font-['Geist'] text-[9px] text-on-surface-variant uppercase tracking-[0.18em] mb-1">
                           Current High Bid
                         </p>
                         <p className="font-archivo text-4xl font-bold text-amber-400">
@@ -878,7 +878,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                       </div>
                       {winningTeam && (
                         <div className="text-right">
-                          <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.1em] mb-1">
+                          <p className="font-['Geist'] text-[9px] text-on-surface-variant uppercase tracking-[0.1em] mb-1">
                             Leading
                           </p>
                           <p className="font-archivo text-xl font-bold text-white">{winningTeam.code}</p>
@@ -886,7 +886,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                       )}
                     </div>
                     {soldState === "pending" && (
-                      <p className="font-mono-geist text-[10px] text-on-surface-variant">
+                      <p className="font-['Geist'] text-[10px] text-on-surface-variant">
                         Next bid: <span className="text-amber-400 font-bold">{nextBidAmount.toLocaleString()} pts</span>
                       </p>
                     )}

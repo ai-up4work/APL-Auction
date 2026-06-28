@@ -38,10 +38,15 @@ const GLOBAL_STYLES = `
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .animate-pulse-bid { animation: pulse-glow 2s infinite ease-in-out; }
-  .animate-ping-ring { animation: ping-ring 1.2s infinite ease-out; }
-  .animate-bid-flash { animation: bid-flash 0.5s ease-out forwards; }
-  .animate-slide-up  { animation: slide-up 0.25s ease-out forwards; }
+  @keyframes timer-pulse {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+  .animate-pulse-bid  { animation: pulse-glow 2s infinite ease-in-out; }
+  .animate-ping-ring  { animation: ping-ring 1.2s infinite ease-out; }
+  .animate-bid-flash  { animation: bid-flash 0.5s ease-out forwards; }
+  .animate-slide-up   { animation: slide-up 0.25s ease-out forwards; }
+  .animate-timer-pulse{ animation: timer-pulse 0.8s ease-in-out infinite; }
 
   .glass {
     background: rgba(16,20,21,0.65);
@@ -62,7 +67,7 @@ const GLOBAL_STYLES = `
   .ticker-scroll::-webkit-scrollbar-thumb { background: rgba(228,93,53,0.4); border-radius: 99px; }
 
   .font-archivo { font-family: 'Archivo Narrow', sans-serif; }
-  .font-mono    { font-family: 'Geist Mono', monospace; }
+  .font-mono    { font-family: 'Geist', monospace; }
   .font-inter   { font-family: 'Inter', sans-serif; }
 `;
 
@@ -92,6 +97,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   const [roster,       setRoster]       = useState(0);
   const [totalPoints,  setTotalPoints]  = useState(50000);
   const [teamSize,     setTeamSize]     = useState(16);
+  const [timerSeconds, setTimerSeconds] = useState(15);
 
   const [isSold,       setIsSold]       = useState(false);
   const [isUnsold,     setIsUnsold]     = useState(false);
@@ -100,12 +106,42 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   const [bidSuccess,   setBidSuccess]   = useState(false);
   const [loading,      setLoading]      = useState(true);
 
-  const currentLotRef = useRef(currentLot);
-  const rulesRef      = useRef(rules);
-  const teamRef       = useRef(team);
-  useEffect(() => { currentLotRef.current = currentLot; }, [currentLot]);
-  useEffect(() => { rulesRef.current      = rules;       }, [rules]);
-  useEffect(() => { teamRef.current       = team;        }, [team]);
+  // ── Shot clock (mirrors watch page logic) ─────────────────────────────────
+  // 0–100 percentage. Drains to 0 over timerSeconds.
+  // Resets to 100 on every new bid or new lot.
+  // When it hits 0, bidding is locked until the next lot.
+  const [shotClock,    setShotClock]    = useState(100);
+  const timerExpired   = shotClock <= 0 && !!currentLot && !isSold && !isUnsold;
+
+  const currentLotRef  = useRef(currentLot);
+  const rulesRef       = useRef(rules);
+  const teamRef        = useRef(team);
+  const isSoldRef      = useRef(isSold);
+  const isUnsoldRef    = useRef(isUnsold);
+  const timerSecondsRef= useRef(timerSeconds);
+
+  useEffect(() => { currentLotRef.current  = currentLot;   }, [currentLot]);
+  useEffect(() => { rulesRef.current       = rules;         }, [rules]);
+  useEffect(() => { teamRef.current        = team;          }, [team]);
+  useEffect(() => { isSoldRef.current      = isSold;        }, [isSold]);
+  useEffect(() => { isUnsoldRef.current    = isUnsold;      }, [isUnsold]);
+  useEffect(() => { timerSecondsRef.current= timerSeconds;  }, [timerSeconds]);
+
+  // ── Shot clock ticker ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => {
+      setShotClock((prev) => {
+        // Freeze when lot is closed or nothing on block
+        if (isSoldRef.current || isUnsoldRef.current || !currentLotRef.current) return prev;
+        if (prev <= 0) return 0;
+        // ── FIX: use ?? not || so timerSeconds=0 doesn't fall back to 15 ──
+        const secs = timerSecondsRef.current ?? 15;
+        const drainPerTick = 100 / (secs * 10); // ticks every 100ms
+        return Math.max(0, prev - drainPerTick);
+      });
+    }, 100);
+    return () => clearInterval(id);
+  }, []); // stable — reads everything via refs
 
   // ── Load initial state ────────────────────────────────────────────────────
   useEffect(() => {
@@ -120,8 +156,9 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
         setRules(auctionState.rules);
         setTotalPoints(auctionState.rules.totalPoints);
         setTeamSize(auctionState.rules.teamSize);
+        // ── FIX: use ?? so 0 is a valid timer value ──
+        setTimerSeconds(auctionState.session.timerSeconds ?? 15);
 
-        // Find this team by code
         const found = auctionState.teams.find(
           (t) => t.code.toLowerCase() === teamCode.toLowerCase()
         );
@@ -159,19 +196,21 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       if (cur && lot.id !== cur.id && (lot.status === "sold" || lot.status === "unsold")) return;
 
       if (lot.status === "pending" && cur?.id !== lot.id) {
+        // New lot — reset everything including the shot clock
         setCurrentLot(lot);
         setBidHistory([]);
         setIsSold(false);
         setIsUnsold(false);
         setBidError("");
         setBidSuccess(false);
+        setShotClock(100); // ← reset timer for new lot
         scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
 
       setCurrentLot(lot);
-      if (lot.status === "sold")   { setIsSold(true);  setIsUnsold(false); }
-      if (lot.status === "unsold") { setIsUnsold(true); setIsSold(false);  }
+      if (lot.status === "sold")   { setIsSold(true);  setIsUnsold(false); setShotClock(0); }
+      if (lot.status === "unsold") { setIsUnsold(true); setIsSold(false);  setShotClock(0); }
     });
 
     const bidSub = subscribeToBids(auctionId, (bid) => {
@@ -179,6 +218,8 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       setCurrentLot((prev) =>
         prev ? { ...prev, currentBid: bid.amount, winningTeamCode: bid.teamCode, winningTeamId: bid.teamId } : prev
       );
+      // Reset shot clock on every new bid
+      setShotClock(100);
       if (flashRef.current) {
         flashRef.current.classList.remove("animate-bid-flash");
         void flashRef.current.offsetWidth;
@@ -204,6 +245,12 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   const handleBid = useCallback(async () => {
     const t = teamRef.current;
     if (!currentLotRef.current || isSold || isUnsold || isPlacing || !t) return;
+    // Extra guard: refuse if timer has expired
+    if (shotClock <= 0) {
+      setBidError("Time's up — awaiting auctioneer decision.");
+      setTimeout(() => setBidError(""), 3000);
+      return;
+    }
     const amount = getNextBidAmount(currentLotRef.current.currentBid, rulesRef.current?.tiers ?? []);
     if (amount > purse) {
       setBidError("Insufficient purse for this bid.");
@@ -222,14 +269,31 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     } finally {
       setIsPlacing(false);
     }
-  }, [auctionId, isSold, isUnsold, isPlacing, purse]);
+  }, [auctionId, isSold, isUnsold, isPlacing, purse, shotClock]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const nextBid   = currentLot ? getNextBidAmount(currentLot.currentBid, rules?.tiers ?? []) : 0;
-  const purgePct  = Math.min((purse / Math.max(totalPoints, 1)) * 100, 100);
-  const isLeading = !!team && currentLot?.winningTeamId === team.id;
-  const canBid    = !!currentLot && !isSold && !isUnsold && !isPlacing && nextBid <= purse;
-  const fmtCR     = (n: number) => n.toLocaleString();
+  const nextBid      = currentLot ? getNextBidAmount(currentLot.currentBid, rules?.tiers ?? []) : 0;
+  const purgePct     = Math.min((purse / Math.max(totalPoints, 1)) * 100, 100);
+  const isLeading    = !!team && currentLot?.winningTeamId === team.id;
+  const shotClockPct = Math.round(Math.min(100, Math.max(0, shotClock) * 10) / 10);
+  const canBid       = !!currentLot && !isSold && !isUnsold && !isPlacing
+                       && nextBid <= purse && shotClock > 0;
+  const fmtPTS       = (n: number) => n.toLocaleString();
+
+  // Button label
+  const bidLabel = bidSuccess       ? "Bid Placed!"
+    : isPlacing                     ? "Placing…"
+    : !currentLot                   ? "Awaiting Lot"
+    : isSold                        ? "Lot Closed"
+    : isUnsold                      ? "Lot Unsold"
+    : timerExpired                  ? "Time's Up"
+    : nextBid > purse               ? "Insufficient Purse"
+    : `Place Bid · ${fmtPTS(nextBid)} Points`;
+
+  const bidIcon = bidSuccess  ? "check_circle"
+    : isPlacing               ? "progress_activity"
+    : timerExpired            ? "timer_off"
+    : "gavel";
 
   if (loading) {
     return (
@@ -260,7 +324,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
           <div>
             <p className="font-archivo font-bold text-[13px] text-white leading-none">{team?.name ?? teamCode.toUpperCase()}</p>
             <p className="font-mono text-[8px] text-[#5a6a74] uppercase tracking-widest leading-none mt-0.5">
-              {fmtCR(purse)} CR remaining
+              {fmtPTS(purse)} CR remaining
             </p>
           </div>
         </div>
@@ -307,20 +371,46 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
              style={{ height: "calc(100dvh - 56px - 72px)" }}>
 
           {/* Current bid */}
-          <div ref={bidCardRef} className="glass rounded-xl p-5 shrink-0 relative overflow-hidden">
+          <div ref={bidCardRef} className="glass rounded-xl p-5 shrink-0 relative overflow-hidden justify-center items-center text-center">
             <div className="absolute -top-6 -right-6 opacity-[0.04] pointer-events-none">
               <span className="ms ms-fill text-white" style={{ fontSize: 180 }}>gavel</span>
             </div>
             <p className="font-mono text-[9px] text-[#5a6a74] uppercase tracking-[0.2em] mb-1">Current High Bid</p>
-            <div className="flex items-end gap-3 mb-3">
+            <div className="flex items-end gap-3 mb-3 justify-center items-center text-center">
               <span
-                className={`font-archivo font-bold leading-none ${currentLot ? "animate-pulse-bid" : ""}`}
-                style={{ fontSize: "clamp(42px,11vw,64px)", color: BID_COLOR }}
+                className={`font-archivo font-bold leading-none ${currentLot && !timerExpired ? "animate-pulse-bid" : ""}`}
+                style={{ fontSize: "clamp(60px,11vw,100px)", color: timerExpired ? "#4b5563" : BID_COLOR }}
               >
-                {currentLot ? fmtCR(currentLot.currentBid) : "—"}
+                {currentLot ? fmtPTS(currentLot.currentBid) : "—"}
               </span>
-              <span className="font-mono text-[10px] text-[#5a6a74] mb-2">CR</span>
+              <span className="font-mono text-[10px] text-[#5a6a74] mb-2">Points</span>
             </div>
+
+            {/* ── Shot clock bar ── */}
+            {currentLot && !isSold && !isUnsold && (
+              <div className="mb-3">
+                <div className="w-full h-1.5 bg-[#1e2527] rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-100 ease-linear"
+                    style={{
+                      width: `${shotClockPct}%`,
+                      background: shotClock < 25
+                        ? "#ef4444"
+                        : shotClock < 50
+                        ? "#f59e0b"
+                        : BID_COLOR,
+                      boxShadow: shotClock < 25 ? "0 0 8px #ef444480" : undefined,
+                    }}
+                  />
+                </div>
+                {timerExpired && (
+                  <p className={`font-mono text-[9px] text-red-400 uppercase tracking-widest mt-1 text-center animate-timer-pulse`}>
+                    Time's up — awaiting auctioneer decision
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center"
@@ -332,14 +422,20 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                   <p className="font-archivo font-bold text-sm text-white">{currentLot?.winningTeamCode ?? "—"}</p>
                 </div>
               </div>
-              {currentLot && !isSold && !isUnsold && (
+              {currentLot && !isSold && !isUnsold && !timerExpired && (
                 <div className="text-right">
                   <p className="font-mono text-[8px] text-[#5a6a74] uppercase tracking-widest">Next bid</p>
-                  <p className="font-archivo font-bold text-sm" style={{ color: BID_COLOR }}>{fmtCR(nextBid)} CR</p>
+                  <p className="font-archivo font-bold text-sm" style={{ color: BID_COLOR }}>{fmtPTS(nextBid)} Points</p>
                 </div>
               )}
-              {isSold   && <span className="font-archivo font-black text-sm uppercase tracking-widest" style={{ color: BID_COLOR }}>SOLD</span>}
-              {isUnsold && <span className="font-archivo font-black text-sm uppercase tracking-widest text-gray-400">UNSOLD</span>}
+              {isSold      && <span className="font-archivo font-black text-sm uppercase tracking-widest" style={{ color: BID_COLOR }}>SOLD</span>}
+              {isUnsold    && <span className="font-archivo font-black text-sm uppercase tracking-widest text-gray-400">UNSOLD</span>}
+              {timerExpired && !isSold && !isUnsold && (
+                <div className="flex items-center gap-1 text-red-400">
+                  <span className="ms text-[14px]">timer_off</span>
+                  <span className="font-mono text-[9px] uppercase tracking-widest">Locked</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -349,7 +445,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
             <div>
               <div className="flex justify-between font-mono text-[10px] mb-1.5">
                 <span className="text-[#c6c6cd]">Purse remaining</span>
-                <span className="text-white">{fmtCR(purse)} <span className="text-[#5a6a74]">/ {fmtCR(totalPoints)}</span></span>
+                <span className="text-white">{fmtPTS(purse)} <span className="text-[#5a6a74]">/ {fmtPTS(totalPoints)}</span></span>
               </div>
               <div className="w-full h-1.5 bg-[#1e2527] rounded-full overflow-hidden">
                 <div
@@ -377,7 +473,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
             </div>
           )}
 
-          {/* Bid button */}
+          {/* ── Bid button ── */}
           <button
             onClick={handleBid}
             disabled={!canBid}
@@ -385,20 +481,21 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                        tracking-wide text-white flex items-center justify-center gap-3
                        active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
-              background: bidSuccess ? "#22c55e" : canBid ? BID_COLOR : "#1e2527",
-              boxShadow: canBid ? `0 4px 24px ${BID_COLOR}40` : "none",
+              background: bidSuccess
+                ? "#22c55e"
+                : timerExpired
+                ? "#1a0a08"
+                : canBid
+                ? BID_COLOR
+                : "#1e2527",
+              boxShadow: canBid && !timerExpired ? `0 4px 24px ${BID_COLOR}40` : "none",
+              border: timerExpired ? "1px solid rgba(239,68,68,0.25)" : "none",
             }}
           >
-            <span className="ms ms-fill text-[20px]">
-              {bidSuccess ? "check_circle" : isPlacing ? "progress_activity" : "gavel"}
+            <span className={`ms ms-fill text-[20px] ${isPlacing ? "animate-spin" : timerExpired ? "animate-timer-pulse" : ""}`}>
+              {bidIcon}
             </span>
-            {bidSuccess  ? "Bid Placed!"
-            : isPlacing  ? "Placing…"
-            : !currentLot ? "Awaiting Lot"
-            : isSold     ? "Lot Closed"
-            : isUnsold   ? "Lot Unsold"
-            : nextBid > purse ? "Insufficient Purse"
-            : `Bid ${fmtCR(nextBid)} CR`}
+            {bidLabel}
           </button>
 
           {/* Bid history */}
@@ -456,7 +553,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                         className="font-archivo font-bold text-sm tabular-nums shrink-0"
                         style={{ color: isTop ? BID_COLOR : isMe ? `${BID_COLOR}cc` : "#e0e3e5" }}
                       >
-                        {fmtCR(bid.amount)}
+                        {fmtPTS(bid.amount)}
                       </span>
                     </div>
                   );

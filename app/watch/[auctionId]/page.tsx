@@ -277,7 +277,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setShotClock((prev) => {
         if (isSold || isUnsold || isShuffling || !currentLotRef.current) return prev;
         if (prev <= 0) return 0;
-        const seconds = auctionRef.current?.session.timerSeconds || 15;
+        const seconds = auctionRef.current?.session.timerSeconds ?? 15;
         const drainPerTick = 100 / (seconds * 10);
         return Math.max(0, prev - drainPerTick);
       });
