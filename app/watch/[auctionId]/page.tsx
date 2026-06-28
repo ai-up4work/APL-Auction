@@ -3,7 +3,7 @@
 
 import React, { use, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { FlowCanvas } from "@/components/FlowCanvas";
-import { AUCTION_CONFIG } from "@/app/sankey/data";
+import { AUCTION_CONFIG } from "./data";
 import { ShuffleOverlay } from "@/components/ShuffleOverlay";
 import { AuctionProvider, useAuction } from "@/context/AuctionContext";
 import {
@@ -898,9 +898,9 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                             "text-[#c6c6cd]",
                           ].join(" ")}>
                             {isSoldP   ? `SOLD • ${pAny.teamShortCode}` :
-                             isUnsoldP ? `BASE: ${p.price}`             :
+                             isUnsoldP ? `BASE: ${pAny.price}`             :
                              isPending ? "ON THE BLOCK"                 :
-                             `BASE: ${p.price}`}
+                             `BASE: ${pAny.price}`}
                           </p>
                         </div>
 
