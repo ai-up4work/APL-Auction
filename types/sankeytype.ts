@@ -1,8 +1,7 @@
 export type Player = {
   id: string;
   name: string;
-  status: 'sold' | 'pending' | 'locked';
-  price: string;
+  status: "locked" | "pending" | "sold" | "unsold"; // ← add "unsold"You said: full code  price: string;
   teamShortCode: string | null;
   img: string | null;
 };

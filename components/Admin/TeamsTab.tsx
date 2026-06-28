@@ -1,47 +1,11 @@
+// components/Admin/TeamsTab.tsx
 "use client";
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import type { Team } from "@/types/auction";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface Team {
-  id: number;
-  code: string;
-  tier: "Pro" | "Elite" | "Legend";
-  owner: string;
-  name: string;
-  color: string;
-  roster: number;
-  logo: string;
-}
-
-let _nextId = 10;
-function nextId() { return _nextId++; }
-
-// ── Initial data ──────────────────────────────────────────────────────────────
-const INITIAL_TEAMS: Team[] = [
-  {
-    id: 1, code: "CK", tier: "Pro", owner: "Fraser & Co.", name: "Colombo Kings",
-    color: "#002B5B", roster: 8,
-    logo: "https://lh3.googleusercontent.com/aida-public/AB6AXuBGZEFsZEExJW7DMUwPPUd4jIpS4MzHL_jwHhAkoAEqPNOithkjhP04KjuIEA7vHanvaN5GtYFUpDylT38P37jFZXkNOZm92EUr4ZIS21KHyH0bxG-yvoQngEyzHl1PzheB_Y3BJCJPlBYHXyPBfR4GYXF5AU2n_3QawAopHm1wW37bckkp89U8g33-QCYEbocryfbsqcoD8ntVA8Ge_saxsHTDpm5XkefiADizh21maaetQ1DzKOsvj-mUpEjCc70gSM2afCntCew",
-  },
-  {
-    id: 2, code: "KW", tier: "Elite", owner: "MJ Holdings", name: "Kandy Warriors",
-    color: "#e45d35", roster: 12,
-    logo: "https://lh3.googleusercontent.com/aida-public/AB6AXuDx5NPblel9xPIO1UdtkFaoRu8qICCnXarW1Rbo6Ycn1nlaM_5P9ZQticpEGXo30GWtW9WvbtReNvahha_G8Lf9ySKb-4wC_rR8KWiz6g1NgKqKtS_EDFOJs1HSAymukyanN6p64VTUPCZBxMPvaq4z1-IfjFkFG5peSZUW8FfxmyqiVMqWf-fe7QA0cOKu4o7w9Z_WpiwjzcwmTllEayYHoquZivEevRUbGW29FTmDgS-tQZ927gERBrRA5wzcDL5KHZqKtHM09Qc",
-  },
-  {
-    id: 3, code: "GG", tier: "Pro", owner: "Nadeem Abid", name: "Galle Gladiators",
-    color: "#4B0082", roster: 6,
-    logo: "https://lh3.googleusercontent.com/aida-public/AB6AXuDst4Chqv9boiM9deT3ixVz6Umvtwmp3kGvvxAtpsDqWmS6KI15lyZFQnX0K28JbZMefeTDIEwwb1cs31ebVMf7YuGVDBsEljdEF4u6r7suESQxr1xjsRps88wztuu5ma6pNngJjpKXCnAzPLnWg3yvL9hwrBI1KVFEX5uQO7zkAEq8nHUovolnsJgVk6J3Pj4j4Th4BSlPEzzHREv4B4NSue4w2YuujGO7NYQAxKrSDpmmbEw5KmZ0r2XRdgm_J7b3IO_FibnuEOE",
-  },
-  {
-    id: 4, code: "JS", tier: "Pro", owner: "Arnold George", name: "Jaffna Stallions",
-    color: "#006400", roster: 10,
-    logo: "https://lh3.googleusercontent.com/aida-public/AB6AXuA1Yqq_gu7dFEFFJ9Vjpm-1qVEIq1vCLPTd5BluCdxaUJ4B9DYmTKP7KnPZfjmyETGUAHjkIaHvZ50Hn8jQhncL1c0wiVEpd23jiUeXNCejQ0BFbf8kU70UPXhEsbz7jYBSQu7C1HIM__3nZRg1sab-BPHew95Y2Y-qOnLDBckRlfW-EoC6_FV5Mof2ElobuTr3ifLSOyuA1E1gY25XAIiJD5oU13KZyf-3fkcMkQevfyI6LUqE2zHrK5V7aKcOmJByMho8rXbIeCw",
-  },
-];
-
+// ── Constants ─────────────────────────────────────────────────────────────────
 const TOOLS = [
   { icon: "upload_file", label: "Import CSV" },
   { icon: "palette",     label: "Batch Style" },
@@ -52,9 +16,18 @@ const TOOLS = [
 const TIERS: Team["tier"][] = ["Pro", "Elite", "Legend"];
 const MAX_TEAMS = 8;
 
-const EMPTY_FORM: Omit<Team, "id" | "roster"> = {
-  name: "", code: "", tier: "Pro", owner: "", color: "#e45d35", logo: "",
+const EMPTY_FORM: Omit<Team, "id" | "roster" | "supabaseId"> = {
+  name: "", code: "", tier: "Pro", owner: "", color: "#e45d35", logo: "", pin: "",
 };
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+interface TeamsTabProps {
+  locked: boolean;
+  teams: Team[];
+  onAddTeam: (data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
+  onEditTeam: (id: number, data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
+  onDeleteTeam: (id: number) => Promise<void>;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -100,16 +73,14 @@ interface ToastProps { message: string; type: "success" | "error" }
 
 function Toast({ message, type }: ToastProps) {
   return (
-    <div
-      className="fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl"
+    <div className="fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl"
       style={{
         background: type === "success" ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
         border: `1px solid ${type === "success" ? "rgba(52,211,153,0.35)" : "rgba(248,113,113,0.35)"}`,
-        backdropFilter: "blur(12px)",
-        minWidth: "220px",
-      }}
-    >
-      <span className="material-symbols-outlined" style={{ fontSize: "18px", color: type === "success" ? "#34d399" : "#f87171", flexShrink: 0 }}>
+        backdropFilter: "blur(12px)", minWidth: "220px",
+      }}>
+      <span className="material-symbols-outlined"
+        style={{ fontSize: "18px", color: type === "success" ? "#34d399" : "#f87171", flexShrink: 0 }}>
         {type === "success" ? "check_circle" : "error"}
       </span>
       <span style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#e0e3e4" }}>{message}</span>
@@ -119,29 +90,67 @@ function Toast({ message, type }: ToastProps) {
 
 function useToast() {
   const [toast, setToast] = useState<(ToastProps & { key: number }) | null>(null);
-
   function show(message: string, type: ToastProps["type"] = "success") {
     const key = Date.now();
     setToast({ message, type, key });
     setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 3000);
   }
-
   return { toast, show };
 }
 
-// ── Franchise Modal (Add + Edit) ──────────────────────────────────────────────
+// ── PIN Visibility Toggle ─────────────────────────────────────────────────────
+function PinInput({
+  value, onChange, disabled,
+}: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="flex items-center rounded-lg overflow-hidden"
+      style={{ border: "1px solid rgba(255,255,255,0.1)", background: disabled ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.04)" }}>
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        maxLength={6}
+        disabled={disabled}
+        placeholder="4–6 digits"
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        className="flex-1 bg-transparent px-3 py-2 text-sm outline-none"
+        style={{
+          color: disabled ? "#45464d" : "#e0e3e4",
+          fontFamily: "'Geist', monospace",
+          letterSpacing: show ? "0.2em" : "0.3em",
+          cursor: disabled ? "not-allowed" : "auto",
+        }}
+        onFocus={(e) => { if (!disabled) e.currentTarget.parentElement!.style.borderColor = "rgba(228,93,53,0.5)"; }}
+        onBlur={(e)  => { e.currentTarget.parentElement!.style.borderColor = "rgba(255,255,255,0.1)"; }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="px-2.5 border-l flex items-center"
+        style={{ borderColor: "rgba(255,255,255,0.08)", color: "#9a9aa5" }}
+        tabIndex={-1}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
+          {show ? "visibility_off" : "visibility"}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+// ── Franchise Modal ───────────────────────────────────────────────────────────
 interface FranchiseModalProps {
   initial?: Team;
   existingCodes: string[];
   onClose: () => void;
-  onSave: (data: Omit<Team, "id" | "roster">) => void;
+  onSave: (data: Omit<Team, "id" | "roster" | "supabaseId">) => void;
 }
 
 function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseModalProps) {
   const isEdit = !!initial;
-  const [form, setForm] = useState<Omit<Team, "id" | "roster">>(
+  const [form, setForm] = useState<Omit<Team, "id" | "roster" | "supabaseId">>(
     initial
-      ? { name: initial.name, code: initial.code, tier: initial.tier, owner: initial.owner, color: initial.color, logo: initial.logo }
+      ? { name: initial.name, code: initial.code, tier: initial.tier, owner: initial.owner, color: initial.color, logo: initial.logo, pin: initial.pin ?? "" }
       : { ...EMPTY_FORM }
   );
   const [error, setError] = useState("");
@@ -155,13 +164,13 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
     if (!form.code.trim())  { setError("Team code is required."); return; }
     if (form.code.trim().length > 3) { setError("Team code must be 3 characters or fewer."); return; }
     if (!form.owner.trim()) { setError("Owner name is required."); return; }
+    if (form.pin && form.pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
 
     const upperCode = form.code.trim().toUpperCase();
     if (existingCodes.includes(upperCode)) {
       setError(`Code "${upperCode}" is already in use by another franchise.`);
       return;
     }
-
     onSave({ ...form, code: upperCode, name: form.name.trim(), owner: form.owner.trim() });
     onClose();
   }
@@ -174,7 +183,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
         style={{ background: "#181c1d", border: "1px solid rgba(228,93,53,0.2)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
         onClick={(e) => e.stopPropagation()}>
 
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h3 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "22px", fontWeight: 700, color: "#e0e3e4" }}>
@@ -193,7 +201,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
           </button>
         </div>
 
-        {/* Error */}
         {error && (
           <p className="text-xs px-3 py-2 rounded-lg"
             style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>
@@ -209,7 +216,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
           </div>
-
           <div>
             <FieldLabel>Team Code * (max 3)</FieldLabel>
             <input type="text" value={form.code}
@@ -219,7 +225,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               style={{ ...inputBase(), fontFamily: "'Geist', monospace", letterSpacing: "0.1em" }}
               onFocus={focusOn} onBlur={focusOff} />
           </div>
-
           <div>
             <FieldLabel>Tier</FieldLabel>
             <select value={form.tier} onChange={(e) => set("tier", e.target.value as Team["tier"])}
@@ -228,7 +233,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               {TIERS.map((t) => <option key={t} value={t} style={{ background: "#181c1d" }}>{t}</option>)}
             </select>
           </div>
-
           <div className="col-span-2">
             <FieldLabel>Owner / Organisation *</FieldLabel>
             <input type="text" value={form.owner} onChange={(e) => set("owner", e.target.value)}
@@ -236,7 +240,6 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
           </div>
-
           <div>
             <FieldLabel>Identity Color</FieldLabel>
             <div className="flex items-center gap-2">
@@ -246,13 +249,21 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               <span className="text-xs font-mono" style={{ color: "#c6c6cd" }}>{form.color.toUpperCase()}</span>
             </div>
           </div>
-
           <div>
             <FieldLabel>Logo URL</FieldLabel>
             <input type="text" value={form.logo} onChange={(e) => set("logo", e.target.value)}
               placeholder="https://..."
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
+          </div>
+
+          {/* ── PIN FIELD — NEW ── */}
+          <div className="col-span-2">
+            <FieldLabel>Owner Access PIN (4–6 digits)</FieldLabel>
+            <PinInput value={form.pin ?? ""} onChange={(v) => set("pin", v)} />
+            <p className="mt-1.5 text-[10px]" style={{ color: "#9a9aa5" }}>
+              Team owners use this PIN to access the bidding room. Leave blank to set later.
+            </p>
           </div>
         </div>
 
@@ -272,6 +283,7 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               </p>
               <p className="text-[10px]" style={{ color: "#9a9aa5", fontFamily: "'Geist', monospace" }}>
                 {form.code || "CODE"} • {form.tier} {form.owner ? `• ${form.owner}` : ""}
+                {form.pin ? ` • PIN: ${"•".repeat(form.pin.length)}` : " • No PIN set"}
               </p>
             </div>
             <div className="ml-auto w-3 h-3 rounded-full shrink-0" style={{ background: form.color }} />
@@ -279,7 +291,8 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
         )}
 
         <div className="flex gap-3 pt-1">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold"
             style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#c6c6cd", fontFamily: "'Geist', monospace" }}>
             Cancel
           </button>
@@ -295,7 +308,7 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
   );
 }
 
-// ── Delete confirmation ───────────────────────────────────────────────────────
+// ── Delete Confirm ─────────────────────────────────────────────────────────────
 function DeleteConfirm({ team, onConfirm, onCancel }: { team: Team; onConfirm: () => void; onCancel: () => void }) {
   return createPortal(
     <div className="fixed inset-0 flex items-center justify-center"
@@ -305,8 +318,7 @@ function DeleteConfirm({ team, onConfirm, onCancel }: { team: Team; onConfirm: (
         style={{ background: "#181c1d", border: "1px solid rgba(248,113,113,0.3)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: "rgba(248,113,113,0.12)" }}>
+          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(248,113,113,0.12)" }}>
             <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#f87171" }}>warning</span>
           </div>
           <h3 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "17px", fontWeight: 700, color: "#e0e3e4" }}>
@@ -317,7 +329,8 @@ function DeleteConfirm({ team, onConfirm, onCancel }: { team: Team; onConfirm: (
           This franchise and all its configuration will be permanently removed. This cannot be undone.
         </p>
         <div className="flex gap-3 pt-1">
-          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+          <button onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold"
             style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#c6c6cd", fontFamily: "'Geist', monospace" }}>
             Cancel
           </button>
@@ -335,17 +348,13 @@ function DeleteConfirm({ team, onConfirm, onCancel }: { team: Team; onConfirm: (
 
 // ── Team Card ─────────────────────────────────────────────────────────────────
 function TeamCard({
-  team, isActive, onClick, locked,
-  onEdit, onDelete,
+  team, isActive, onClick, locked, onEdit, onDelete,
 }: {
-  team: Team;
-  isActive: boolean;
-  onClick: () => void;
-  locked: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
+  team: Team; isActive: boolean; onClick: () => void;
+  locked: boolean; onEdit: () => void; onDelete: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const hasPIN = !!team.pin;
 
   return (
     <div
@@ -365,22 +374,12 @@ function TeamCard({
         transition: "all 0.2s ease",
         cursor: locked ? "default" : "pointer",
         opacity: locked ? 0.7 : 1,
-      }}
-    >
+      }}>
       <div className="absolute top-0 right-0 w-36 h-36 rounded-full pointer-events-none"
         style={{
           background: isActive || (hovered && !locked) ? "rgba(228,93,53,0.1)" : "rgba(228,93,53,0.04)",
           transform: "translate(50%,-50%)", filter: "blur(36px)",
         }} />
-
-      {isActive && (
-        <div className="absolute top-3 right-3 z-20">
-          <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full"
-            style={{ background: "rgba(228,93,53,0.18)", color: "#e45d35", border: "1px solid rgba(228,93,53,0.35)", fontFamily: "'Geist', monospace" }}>
-            Active Selection
-          </span>
-        </div>
-      )}
 
       <div className="flex items-start justify-between relative z-10">
         <div className="flex items-center gap-4">
@@ -399,17 +398,15 @@ function TeamCard({
               </span>
               <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>{team.owner}</span>
             </div>
-            <h3 className="text-xl tracking-tight"
-              style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
+            <h3 className="text-xl tracking-tight" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
               {team.name}
             </h3>
           </div>
         </div>
 
-        {!locked && (
+        {!locked ? (
           <div className={`flex items-center gap-1.5 transition-opacity duration-150 ${hovered ? "opacity-100" : "opacity-0"}`}>
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
               className="p-1.5 rounded-lg transition-colors"
               style={{ background: "rgba(24,28,29,0.8)", color: "#c6c6cd", border: "1px solid rgba(255,255,255,0.1)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#e45d35"; }}
@@ -417,8 +414,7 @@ function TeamCard({
               title="Edit franchise">
               <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>edit</span>
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
               className="p-1.5 rounded-lg transition-colors"
               style={{ background: "rgba(24,28,29,0.8)", color: "#c6c6cd", border: "1px solid rgba(255,255,255,0.1)" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f87171"; }}
@@ -427,16 +423,16 @@ function TeamCard({
               <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>delete</span>
             </button>
           </div>
-        )}
-        {locked && (
+        ) : (
           <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#45464d" }}>lock</span>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/5 relative z-10">
+      <div className="grid grid-cols-3 gap-3 pt-4 border-t border-white/5 relative z-10">
         <div className="flex flex-col gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-widest"
-            style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>Identity Color</span>
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+            Identity Color
+          </span>
           <div className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full ring-2 ring-white/10" style={{ background: team.color }} />
             <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#e0e3e4" }}>
@@ -445,13 +441,36 @@ function TeamCard({
           </div>
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-widest"
-            style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>Roster Size</span>
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+            Roster Size
+          </span>
           <div className="flex items-center gap-1">
             <span className="text-sm font-bold" style={{ color: "#e45d35" }}>
               {String(team.roster).padStart(2, "0")}
             </span>
-            <span className="text-[10px]" style={{ color: "#c6c6cd" }}>Players Locked</span>
+            <span className="text-[10px]" style={{ color: "#c6c6cd" }}>Players</span>
+          </div>
+        </div>
+
+        {/* ── PIN STATUS — NEW ── */}
+        <div className="flex flex-col gap-1">
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+            Owner PIN
+          </span>
+          <div className="flex items-center gap-1.5">
+            {hasPIN ? (
+              <>
+                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#34d399" }}>lock</span>
+                <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#34d399" }}>
+                  {"•".repeat(team.pin!.length)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#f87171" }}>lock_open</span>
+                <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#f87171" }}>Not set</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -460,79 +479,89 @@ function TeamCard({
 }
 
 // ── Main Tab ──────────────────────────────────────────────────────────────────
-export default function TeamsTab({ locked = false }: { locked?: boolean }) {
-  const [teams, setTeams] = useState<Team[]>(INITIAL_TEAMS);
-  const [activeTeamId, setActiveTeamId] = useState<number>(2);
-
+export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDeleteTeam }: TeamsTabProps) {
+  const [activeTeamId, setActiveTeamId] = useState<number | null>(teams[0]?.id ?? null);
   const [modal, setModal] = useState<null | { mode: "add" } | { mode: "edit"; team: Team }>(null);
   const [deleteTarget, setDeleteTarget] = useState<Team | null>(null);
-
   const { toast, show: showToast } = useToast();
 
   const atCapacity = teams.length >= MAX_TEAMS;
 
-  function handleAdd(data: Omit<Team, "id" | "roster">) {
-    const newTeam: Team = { ...data, id: nextId(), roster: 0 };
-    setTeams((prev) => [...prev, newTeam]);
-    setActiveTeamId(newTeam.id);
-    showToast(`${newTeam.name} has been created.`);
+  if (activeTeamId !== null && !teams.find((t) => t.id === activeTeamId) && teams.length > 0) {
+    setActiveTeamId(teams[0].id);
   }
 
-  function handleEdit(data: Omit<Team, "id" | "roster">) {
-    setTeams((prev) => prev.map((t) =>
-      t.id === (modal as { mode: "edit"; team: Team }).team.id
-        ? { ...t, ...data }
-        : t
-    ));
-    showToast("Franchise updated successfully.");
-  }
+  // PIN warning banner
+  const teamsWithoutPin = teams.filter((t) => !t.pin);
+  const showPinWarning = teamsWithoutPin.length > 0 && !locked;
 
-  function handleDelete(team: Team) {
-    setTeams((prev) => prev.filter((t) => t.id !== team.id));
-    if (activeTeamId === team.id && teams.length > 1) {
-      const remaining = teams.filter((t) => t.id !== team.id);
-      setActiveTeamId(remaining[0].id);
+  async function handleAdd(data: Omit<Team, "id" | "roster" | "supabaseId">) {
+    try {
+      await onAddTeam(data);
+      showToast(`${data.name} has been created.`);
+    } catch {
+      showToast("Failed to create franchise.", "error");
     }
-    setDeleteTarget(null);
-    showToast(`${team.name} has been removed.`, "error");
+  }
+
+  async function handleEdit(data: Omit<Team, "id" | "roster" | "supabaseId">) {
+    if (modal?.mode !== "edit") return;
+    try {
+      await onEditTeam(modal.team.id, data);
+      showToast("Franchise updated successfully.");
+    } catch {
+      showToast("Failed to update franchise.", "error");
+    }
+  }
+
+  async function handleDelete(team: Team) {
+    try {
+      await onDeleteTeam(team.id);
+      setDeleteTarget(null);
+      showToast(`${team.name} has been removed.`, "error");
+    } catch {
+      showToast("Failed to remove franchise.", "error");
+    }
   }
 
   function existingCodes(excludeId?: number) {
-    return teams
-      .filter((t) => t.id !== excludeId)
-      .map((t) => t.code.toUpperCase());
+    return teams.filter((t) => t.id !== excludeId).map((t) => t.code.toUpperCase());
   }
 
   return (
     <>
       {modal?.mode === "add" && (
-        <FranchiseModal
-          existingCodes={existingCodes()}
-          onClose={() => setModal(null)}
-          onSave={handleAdd}
-        />
+        <FranchiseModal existingCodes={existingCodes()} onClose={() => setModal(null)} onSave={handleAdd} />
       )}
       {modal?.mode === "edit" && (
-        <FranchiseModal
-          initial={modal.team}
-          existingCodes={existingCodes(modal.team.id)}
-          onClose={() => setModal(null)}
-          onSave={handleEdit}
-        />
+        <FranchiseModal initial={modal.team} existingCodes={existingCodes(modal.team.id)} onClose={() => setModal(null)} onSave={handleEdit} />
       )}
       {deleteTarget && (
-        <DeleteConfirm
-          team={deleteTarget}
-          onConfirm={() => handleDelete(deleteTarget)}
-          onCancel={() => setDeleteTarget(null)}
-        />
+        <DeleteConfirm team={deleteTarget} onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />
       )}
-
       {toast && <Toast key={toast.key} message={toast.message} type={toast.type} />}
 
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="flex-1 min-w-0">
           {locked && <LockBanner />}
+
+          {/* ── PIN warning banner ── */}
+          {showPinWarning && (
+            <div className="flex items-start gap-3 px-5 py-3 rounded-xl mb-6"
+              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#fbbf24", flexShrink: 0, marginTop: "1px" }}>
+                lock_open
+              </span>
+              <div>
+                <p className="text-sm font-bold mb-0.5" style={{ color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
+                  {teamsWithoutPin.length} franchise{teamsWithoutPin.length > 1 ? "s" : ""} missing owner PIN
+                </p>
+                <p className="text-[11px]" style={{ color: "rgba(251,191,36,0.7)", fontFamily: "'Inter', sans-serif" }}>
+                  {teamsWithoutPin.map((t) => t.name).join(", ")} — click the edit button on each card to set their PIN before launch.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-between items-end mb-8">
             <div>
@@ -548,10 +577,7 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
             {!locked && (
               <button
                 onClick={() => {
-                  if (atCapacity) {
-                    showToast(`Maximum of ${MAX_TEAMS} franchises reached.`, "error");
-                    return;
-                  }
+                  if (atCapacity) { showToast(`Maximum of ${MAX_TEAMS} franchises reached.`, "error"); return; }
                   setModal({ mode: "add" });
                 }}
                 className="px-5 py-2.5 font-bold flex items-center gap-1.5 rounded-xl transition-all hover:-translate-y-0.5 whitespace-nowrap ml-6"
@@ -559,12 +585,9 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
                   background: atCapacity ? "rgba(255,255,255,0.06)" : "#e45d35",
                   color: atCapacity ? "#45464d" : "#fff",
                   boxShadow: atCapacity ? "none" : "0 0 20px rgba(228,93,53,0.25)",
-                  fontFamily: "'Geist', monospace",
-                  fontSize: "12px",
+                  fontFamily: "'Geist', monospace", fontSize: "12px",
                   cursor: atCapacity ? "not-allowed" : "pointer",
-                }}
-                title={atCapacity ? `Maximum of ${MAX_TEAMS} franchises reached` : undefined}
-              >
+                }}>
                 <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span>
                 Create New Franchise
               </button>
@@ -598,8 +621,7 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {teams.map((team) => (
                 <TeamCard
-                  key={team.id}
-                  team={team}
+                  key={team.id} team={team}
                   isActive={activeTeamId === team.id}
                   onClick={() => setActiveTeamId(team.id)}
                   locked={locked}
@@ -611,7 +633,7 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
           )}
         </div>
 
-        {/* Right sidebar */}
+        {/* Sidebar */}
         <aside className="w-full lg:w-72 flex flex-col gap-5 shrink-0">
           <div className="p-4 rounded-xl"
             style={{
@@ -623,9 +645,7 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
               Management Tools
             </h4>
             <div className="grid grid-cols-2 gap-3">
-              {TOOLS.map((tool) => (
-                <SidebarTool key={tool.label} icon={tool.icon} label={tool.label} />
-              ))}
+              {TOOLS.map((tool) => <SidebarTool key={tool.label} icon={tool.icon} label={tool.label} />)}
             </div>
             <button
               className="w-full mt-4 py-3 font-black text-[10px] uppercase rounded-xl transition-all hover:opacity-90 hover:-translate-y-0.5"
@@ -635,15 +655,60 @@ export default function TeamsTab({ locked = false }: { locked?: boolean }) {
             </button>
           </div>
 
+          {/* PIN status summary */}
+          <div className="p-4 rounded-xl"
+            style={{ background: "rgba(16,20,21,0.4)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.07)", boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+            <h4 className="text-base mb-4" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
+              PIN Status
+            </h4>
+            <div className="flex flex-col gap-2">
+              {teams.length === 0 ? (
+                <p className="text-[11px]" style={{ color: "#9a9aa5" }}>No franchises yet.</p>
+              ) : (
+                teams.map((team) => (
+                  <div key={team.id} className="flex items-center justify-between px-3 py-2 rounded-lg"
+                    style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${team.pin ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}` }}>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ background: team.color }} />
+                      <span className="text-[11px] font-bold" style={{ fontFamily: "'Geist', monospace", color: "#e0e3e4" }}>
+                        {team.code}
+                      </span>
+                      <span className="text-[10px]" style={{ color: "#9a9aa5" }}>{team.name}</span>
+                    </div>
+                    {team.pin ? (
+                      <div className="flex items-center gap-1">
+                        <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#34d399" }}>check_circle</span>
+                        <span className="text-[9px] font-black uppercase" style={{ fontFamily: "'Geist', monospace", color: "#34d399" }}>Set</span>
+                      </div>
+                    ) : (
+                      <button onClick={() => setModal({ mode: "edit", team })}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all"
+                        style={{ fontFamily: "'Geist', monospace", color: "#f87171", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(248,113,113,0.2)"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(248,113,113,0.1)"; }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: "10px" }}>add</span>
+                        Set PIN
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
           <div className="p-3 rounded-lg border" style={{ background: "rgba(24,28,29,0.3)", borderColor: "rgba(69,70,77,0.3)" }}>
-            <p className="text-[9px] font-black uppercase tracking-widest mb-3"
-              style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+            <p className="text-[9px] font-black uppercase tracking-widest mb-3" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
               Franchise Data Sync
             </p>
             <div className="space-y-3">
               {[
-                { label: "Purse Utilization",  value: "42%",   pct: 42, color: "#e45d35" },
-                { label: "Squad Composition",  value: `${teams.reduce((s, t) => s + t.roster, 0)} / ${teams.length * 25}`, pct: Math.round((teams.reduce((s, t) => s + t.roster, 0) / Math.max(teams.length * 25, 1)) * 100), color: "#c6c6cd" },
+                { label: "Purse Utilization", value: "42%", pct: 42, color: "#e45d35" },
+                {
+                  label: "Squad Composition",
+                  value: `${teams.reduce((s, t) => s + t.roster, 0)} / ${teams.length * 25}`,
+                  pct: Math.round((teams.reduce((s, t) => s + t.roster, 0) / Math.max(teams.length * 25, 1)) * 100),
+                  color: "#c6c6cd",
+                },
               ].map((item) => (
                 <div key={item.label}>
                   <div className="flex justify-between text-[10px] mb-1">
@@ -675,8 +740,7 @@ function SidebarTool({ icon, label }: { icon: string; label: string }) {
         borderColor: hovered ? "rgba(228,93,53,0.5)" : "rgba(69,70,77,0.3)",
       }}>
       <span className="material-symbols-outlined text-xl" style={{ color: "#e45d35" }}>{icon}</span>
-      <span className="text-[9px] font-black uppercase tracking-widest"
-        style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+      <span className="text-[9px] font-black uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
         {label}
       </span>
     </button>

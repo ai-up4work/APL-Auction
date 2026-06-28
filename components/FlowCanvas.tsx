@@ -30,7 +30,11 @@ export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, 
       const hasSelection = activePlayer !== null || activeTeam !== null;
 
       players.forEach(p => {
-        if (p.status !== 'sold' || !p.teamShortCode) return;
+        if (p.status !== 'sold' && p.status !== 'unsold') return; // ← include unsold
+
+        // unsold players have no teamShortCode so skip the line drawing
+        // but we still want them visually distinct in the list — no line needed
+        if (p.status === 'unsold') return; // no flow line for unsold, just list styling
 
         const playerEl = document.getElementById(`player-${p.id}`);
         const teamEl = document.getElementById(`team-${p.teamShortCode}`);

@@ -2,10 +2,8 @@
 import React, { useRef, useCallback } from "react";
 import Image from "next/image";
 
-/* ─── Types ─── */
 export type Franchise = { id: string; name: string; city: string; image: string };
 
-/* ─── Franchise Coverflow Carousel ─── */
 export default function FranchiseCarousel({
   franchises,
   selected,
@@ -27,7 +25,6 @@ export default function FranchiseCarousel({
     [franchises, onChange]
   );
 
-  /* pointer drag (covers mouse + touch + pen) */
   const onPointerDown = (e: React.PointerEvent) => {
     dragStartX.current = e.clientX;
     draggingPointerId.current = e.pointerId;
@@ -42,21 +39,15 @@ export default function FranchiseCarousel({
     if (Math.abs(dx) > 30) goTo(currentIdx + (dx < 0 ? 1 : -1));
   };
 
-  const onPointerUp = (e: React.PointerEvent) => finishDrag(e);
-
-  // Reset cleanly if the gesture gets interrupted (e.g. a notification,
-  // the browser taking over, or the pointer leaving the window) so the
-  // carousel never gets stuck mid-swipe on mobile.
   const onPointerCancel = () => {
     dragStartX.current = null;
     draggingPointerId.current = null;
   };
 
-  /* card geometry */
   const getStyle = (rel: number): React.CSSProperties => {
     const n = franchises.length;
     const norm = ((rel % n) + n) % n;
-    const r = norm > n / 2 ? norm - n : norm; // -1, 0, 1
+    const r = norm > n / 2 ? norm - n : norm;
 
     if (r === 0)
       return {
@@ -68,7 +59,7 @@ export default function FranchiseCarousel({
     const side = r < 0 ? -1 : 1;
     const far = Math.abs(r) > 1;
     return {
-      transform: `translateX(${side * (far ? 200 : 112)}px) translateZ(${far ? -160 : -80}px) rotateY(${-side * (far ? 45 : 28)}deg) scale(${far ? 0.65 : 0.82})`,
+      transform: `translateX(${side * (far ? 230 : 128)}px) translateZ(${far ? -160 : -80}px) rotateY(${-side * (far ? 45 : 28)}deg) scale(${far ? 0.65 : 0.82})`,
       opacity: far ? 0 : 0.6,
       filter: far ? "blur(3px) grayscale(0.7)" : "blur(1px) grayscale(0.6)",
       zIndex: far ? 1 : 5,
@@ -80,13 +71,12 @@ export default function FranchiseCarousel({
       {/* 3-D scene */}
       <div
         className="relative w-full overflow-hidden touch-none"
-        style={{ height: 230, perspective: "900px", perspectiveOrigin: "50% 50%", touchAction: "none" }}
+        style={{ height: 270, perspective: "900px", perspectiveOrigin: "50% 50%", touchAction: "none" }}
         onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
+        onPointerUp={finishDrag}
         onPointerCancel={onPointerCancel}
         onPointerLeave={onPointerCancel}
       >
-        {/* track */}
         <div
           className="absolute inset-0 flex items-center justify-center"
           style={{ transformStyle: "preserve-3d" }}
@@ -100,7 +90,7 @@ export default function FranchiseCarousel({
                 onClick={() => goTo(i)}
                 className="absolute cursor-pointer"
                 style={{
-                  width: 148,
+                  width: 172,
                   transition:
                     "transform 0.45s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.45s ease, filter 0.45s ease",
                   transformStyle: "preserve-3d",
@@ -122,63 +112,57 @@ export default function FranchiseCarousel({
                     transition: "border-color 0.4s ease, box-shadow 0.4s ease",
                   }}
                 >
-                  {/* shimmer top */}
+                  {/* shimmer */}
                   <div
-                    className="absolute inset-0 pointer-events-none rounded-[18px]"
+                    className="absolute inset-0 pointer-events-none rounded-[18px] z-10"
                     style={{
                       background:
                         "linear-gradient(135deg,rgba(255,255,255,0.04) 0%,transparent 60%)",
                     }}
                   />
 
-                  {/* ember glow at card base */}
+                  {/* full-bleed image */}
+                  <div className="relative w-full" style={{ height: 148 }}>
+                    <Image
+                      src={f.image}
+                      alt={f.name}
+                      fill
+                      className="object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    {/* bottom fade into card body */}
+                    <div
+                      className="absolute bottom-0 left-0 right-0 h-10 pointer-events-none"
+                      style={{
+                        background:
+                          "linear-gradient(to bottom, transparent, #111415)",
+                      }}
+                    />
+                  </div>
+
+                  {/* ember glow */}
                   <div
                     className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full pointer-events-none"
                     style={{
                       width: 80,
                       height: 40,
-                      background: isActive
-                        ? "rgba(228,93,53,0.28)"
-                        : "transparent",
+                      background: isActive ? "rgba(228,93,53,0.28)" : "transparent",
                       filter: "blur(18px)",
                       transition: "background 0.45s ease",
                     }}
                   />
 
-                  <div className="flex flex-col items-center gap-3 px-3.5 pt-5 pb-4 relative">
-                    {/* logo */}
-                    <div
-                      className="relative rounded-xl overflow-hidden border flex-shrink-0"
-                      style={{
-                        width: 80,
-                        height: 80,
-                        background: "#000",
-                        borderColor: "rgba(255,255,255,0.06)",
-                      }}
+                  {/* name + city */}
+                  <div className="flex flex-col items-center gap-0.5 px-3 pt-2 pb-4 relative">
+                    <p className="font-['Archivo_Narrow',sans-serif] text-[13px] font-bold uppercase tracking-[0.04em] text-[#e0e3e4] leading-tight text-center">
+                      {f.name}
+                    </p>
+                    <p
+                      className="font-['Geist',monospace,sans-serif] text-[9px] tracking-[0.14em] uppercase"
+                      style={{ color: "#454750" }}
                     >
-                      <Image
-                        src={f.image}
-                        alt={f.name}
-                        fill
-                        className="object-contain"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-
-                    {/* name + city */}
-                    <div className="text-center">
-                      <p
-                        className="font-['Archivo_Narrow',sans-serif] text-[13px] font-bold uppercase tracking-[0.04em] text-[#e0e3e4] leading-tight"
-                      >
-                        {f.name}
-                      </p>
-                      <p
-                        className="font-['Geist',monospace,sans-serif] text-[9px] tracking-[0.14em] uppercase mt-0.5"
-                        style={{ color: "#454750" }}
-                      >
-                        {f.city}
-                      </p>
-                    </div>
+                      {f.city}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -204,10 +188,7 @@ export default function FranchiseCarousel({
             style={{
               height: 5,
               width: i === currentIdx ? 18 : 5,
-              background:
-                i === currentIdx
-                  ? "#e45d35"
-                  : "rgba(255,255,255,0.15)",
+              background: i === currentIdx ? "#e45d35" : "rgba(255,255,255,0.15)",
               borderRadius: i === currentIdx ? 3 : "50%",
             }}
             aria-label={`Select ${f.name}`}

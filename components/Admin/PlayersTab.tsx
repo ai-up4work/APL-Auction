@@ -1,36 +1,22 @@
+// components/Admin/PlayersTab.tsx
 "use client";
 
 import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-
-// ── Stable unique ID counter (module-level, never resets) ─────────────────────
-let _nextId = 1;
-function nextId() { return _nextId++; }
+import type { Player } from "@/types/auction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface Player {
-  id: number;
-  name: string;
-  role: Role;
-  origin: "Local" | "Overseas";
-  price: number;
-  capped: boolean;
-  img: string;
-  country: string;
-}
-
 type Role = "Batsman" | "Bowler" | "All-rounder" | "Wicket Keeper";
 
-// ── Initial data ──────────────────────────────────────────────────────────────
-const INITIAL_PLAYERS: Player[] = [
-  { id: nextId(), name: "Virat Kohli",      role: "Batsman",       origin: "Overseas", price: 2000, capped: true,  country: "India",     img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-  { id: nextId(), name: "Rohit Sharma",     role: "Batsman",       origin: "Overseas", price: 1800, capped: true,  country: "India",     img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-  { id: nextId(), name: "Jasprit Bumrah",   role: "Bowler",        origin: "Overseas", price: 1700, capped: true,  country: "India",     img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-  { id: nextId(), name: "Kusal Mendis",     role: "Wicket Keeper", origin: "Local",    price: 900,  capped: true,  country: "Sri Lanka", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-  { id: nextId(), name: "Wanindu Hasaranga",role: "All-rounder",   origin: "Local",    price: 1200, capped: true,  country: "Sri Lanka", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-  { id: nextId(), name: "Pathum Nissanka",  role: "Batsman",       origin: "Local",    price: 500,  capped: false, country: "Sri Lanka", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0" },
-];
+// ── Props ─────────────────────────────────────────────────────────────────────
+interface PlayersTabProps {
+  locked: boolean;
+  players: Player[];
+  onAddPlayer: (data: Omit<Player, "id" | "supabaseId">) => Promise<void>;
+  onDeletePlayer: (id: number) => Promise<void>;
+}
 
+// ── Constants ─────────────────────────────────────────────────────────────────
 const ROLE_COLORS: Record<Role, { bg: string; text: string }> = {
   Batsman:         { bg: "rgba(56,132,255,0.12)",  text: "#4d9fff" },
   Bowler:          { bg: "rgba(52,211,153,0.12)",  text: "#34d399" },
@@ -44,7 +30,7 @@ type Filter = (typeof FILTERS)[number];
 
 const DEFAULT_BASE_PRICE = 500;
 
-const EMPTY_FORM: Omit<Player, "id"> = {
+const EMPTY_FORM: Omit<Player, "id" | "supabaseId"> = {
   name: "", role: "Batsman", origin: "Local",
   price: DEFAULT_BASE_PRICE, capped: false, img: "", country: "",
 };
@@ -52,10 +38,8 @@ const EMPTY_FORM: Omit<Player, "id"> = {
 // ── Lock Banner ───────────────────────────────────────────────────────────────
 function LockBanner() {
   return (
-    <div
-      className="flex items-center gap-3 px-5 py-3 rounded-xl mb-6"
-      style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}
-    >
+    <div className="flex items-center gap-3 px-5 py-3 rounded-xl mb-6"
+      style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
       <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#fbbf24", flexShrink: 0 }}>lock</span>
       <p style={{ fontSize: "12px", color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
         Player pool is <strong>locked</strong> while the auction is live. Stop or re-auction to make changes.
@@ -65,19 +49,32 @@ function LockBanner() {
 }
 
 // ── Add Player Modal ──────────────────────────────────────────────────────────
-function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Player) => void }) {
-  const [form, setForm] = useState<Omit<Player, "id">>(EMPTY_FORM);
+function AddPlayerModal({
+  onClose, onAdd,
+}: {
+  onClose: () => void;
+  onAdd: (p: Omit<Player, "id" | "supabaseId">) => Promise<void>;
+}) {
+  const [form, setForm] = useState<Omit<Player, "id" | "supabaseId">>(EMPTY_FORM);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.name.trim()) { setError("Player name is required."); return; }
     if (form.price < 1)    { setError("Base price must be at least 1 pt."); return; }
-    onAdd({ ...form, id: nextId(), name: form.name.trim() });
-    onClose();
+    setSaving(true);
+    try {
+      await onAdd({ ...form, name: form.name.trim() });
+      onClose();
+    } catch {
+      setError("Failed to add player. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const inputStyle: React.CSSProperties = {
@@ -90,16 +87,12 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
   const focusOff = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; };
 
   return createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center"
+    <div className="fixed inset-0 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999 }}
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg rounded-2xl p-6 flex flex-col gap-5"
+      onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl p-6 flex flex-col gap-5"
         style={{ background: "#181c1d", border: "1px solid rgba(228,93,53,0.2)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+        onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <div>
             <h3 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "22px", fontWeight: 700, color: "#e0e3e4" }}>
@@ -111,7 +104,8 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
         </div>
 
         {error && (
-          <p className="text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>
+          <p className="text-xs px-3 py-2 rounded-lg"
+            style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>
             {error}
           </p>
         )}
@@ -120,7 +114,8 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
           <div className="col-span-2">
             <FieldLabel>Full Name *</FieldLabel>
             <input type="text" value={form.name} onChange={(e) => set("name", e.target.value)}
-              placeholder="e.g. Virat Kohli" className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+              placeholder="e.g. Virat Kohli"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
           </div>
           <div>
@@ -132,7 +127,8 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
           <div>
             <FieldLabel>Country</FieldLabel>
             <input type="text" value={form.country} onChange={(e) => set("country", e.target.value)}
-              placeholder="e.g. India" className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+              placeholder="e.g. India"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
           </div>
           <div>
@@ -161,21 +157,36 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
           <Toggle checked={form.capped} onChange={(v) => set("capped", v)} />
         </div>
 
+        {/* Photo URL — optional with note */}
         <div>
-          <FieldLabel>Photo URL</FieldLabel>
+          <FieldLabel>Photo URL <span style={{ color: "#9a9aa5", textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span></FieldLabel>
           <input type="text" value={form.img} onChange={(e) => set("img", e.target.value)}
-            placeholder="https://..." className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            placeholder="https://..."
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
             style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
+          {!form.img && (
+            <p className="mt-1.5 text-[10px] flex items-center gap-1" style={{ color: "#fbbf24" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "11px" }}>warning</span>
+              No photo — a placeholder will be shown on the auction board.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-3 pt-1">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold"
             style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#c6c6cd", fontFamily: "'Geist', monospace" }}>
             Cancel
           </button>
-          <button onClick={handleSubmit} className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all hover:-translate-y-0.5"
-            style={{ background: "#e45d35", color: "#fff", fontFamily: "'Geist', monospace", boxShadow: "0 0 18px rgba(228,93,53,0.25)" }}>
-            Register Player
+          <button onClick={handleSubmit} disabled={saving}
+            className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all hover:-translate-y-0.5"
+            style={{
+              background: saving ? "rgba(228,93,53,0.5)" : "#e45d35",
+              color: "#fff", fontFamily: "'Geist', monospace",
+              boxShadow: "0 0 18px rgba(228,93,53,0.25)",
+              cursor: saving ? "wait" : "pointer",
+            }}>
+            {saving ? "Registering…" : "Register Player"}
           </button>
         </div>
       </div>
@@ -185,9 +196,14 @@ function AddPlayerModal({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Pl
 }
 
 // ── Player Card ───────────────────────────────────────────────────────────────
-function PlayerCard({ player, onDelete, locked }: { player: Player; onDelete: () => void; locked: boolean }) {
+function PlayerCard({
+  player, onDelete, locked,
+}: {
+  player: Player; onDelete: () => void; locked: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
-  const roleStyle = ROLE_COLORS[player.role] ?? { bg: "rgba(255,255,255,0.08)", text: "#c6c6cd" };
+  const roleStyle = ROLE_COLORS[player.role as Role] ?? { bg: "rgba(255,255,255,0.08)", text: "#c6c6cd" };
+  const missingPhoto = !player.img;
 
   return (
     <div
@@ -197,12 +213,17 @@ function PlayerCard({ player, onDelete, locked }: { player: Player; onDelete: ()
       style={{
         background: "rgba(16,20,21,0.4)",
         backdropFilter: "blur(24px)",
-        border: `1px solid ${hovered && !locked ? "rgba(228,93,53,0.4)" : "rgba(255,255,255,0.08)"}`,
+        border: `1px solid ${
+          missingPhoto
+            ? "rgba(251,191,36,0.25)"          // ← amber border if no photo
+            : hovered && !locked
+            ? "rgba(228,93,53,0.4)"
+            : "rgba(255,255,255,0.08)"
+        }`,
         boxShadow: hovered && !locked ? "0 4px 24px rgba(228,93,53,0.1)" : "0 4px 20px rgba(0,0,0,0.3)",
         transform: hovered && !locked ? "translateY(-3px)" : "translateY(0)",
         transition: "all 0.2s ease",
-      }}
-    >
+      }}>
       <div className="absolute top-0 right-0 w-32 h-32 rounded-full pointer-events-none"
         style={{
           background: hovered && !locked ? "rgba(228,93,53,0.09)" : "rgba(228,93,53,0.04)",
@@ -214,10 +235,19 @@ function PlayerCard({ player, onDelete, locked }: { player: Player; onDelete: ()
         {player.img ? (
           <img src={player.img} alt={player.name} className="h-full w-full object-cover" style={{ objectPosition: "center 10%" }} />
         ) : (
-          <div className="h-full w-full flex items-center justify-center">
-            <span className="material-symbols-outlined" style={{ fontSize: "64px", color: "#313536" }}>person</span>
+          // ── No photo: amber placeholder ──
+          <div className="h-full w-full flex flex-col items-center justify-center gap-2"
+            style={{ background: "rgba(251,191,36,0.04)" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "48px", color: "rgba(251,191,36,0.3)" }}>
+              person
+            </span>
+            <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full"
+              style={{ fontFamily: "'Geist', monospace", color: "#fbbf24", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.25)" }}>
+              No Photo
+            </span>
           </div>
         )}
+
         <div className="absolute inset-x-0 bottom-0 h-16 pointer-events-none"
           style={{ background: "linear-gradient(to top, rgba(16,20,21,0.95), transparent)" }} />
 
@@ -232,7 +262,6 @@ function PlayerCard({ player, onDelete, locked }: { player: Player; onDelete: ()
 
         {hovered && !locked && (
           <div className="absolute top-2.5 right-2.5 flex gap-1.5 z-10">
-            <IconButton icon="edit" />
             <IconButton icon="delete" danger onClick={(e) => { e.stopPropagation(); onDelete(); }} />
           </div>
         )}
@@ -278,12 +307,12 @@ function PlayerCard({ player, onDelete, locked }: { player: Player; onDelete: ()
 }
 
 // ── Main Tab ──────────────────────────────────────────────────────────────────
-export default function PlayersTab({ locked = false }: { locked?: boolean }) {
-  const [players, setPlayers] = useState<Player[]>(INITIAL_PLAYERS);
-  const [filter, setFilter] = useState<Filter>("All");
+export default function PlayersTab({ locked, players, onAddPlayer, onDeletePlayer }: PlayersTabProps) {
+  const [filter, setFilter]       = useState<Filter>("All");
   const [showModal, setShowModal] = useState(false);
   const [poolLocked, setPoolLocked] = useState(false);
 
+  const isEditingBlocked = locked || poolLocked;
   const filtered = filter === "All" ? players : players.filter((p) => p.role === filter);
 
   const roleCounts = ROLES.reduce<Record<Role, number>>((acc, r) => {
@@ -291,22 +320,21 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
     return acc;
   }, {} as Record<Role, number>);
 
-  const totalPoolValue = players.reduce((sum, p) => sum + p.price, 0);
+  const totalPoolValue    = players.reduce((sum, p) => sum + p.price, 0);
+  const missingPhotoCount = players.filter((p) => !p.img).length;
 
-  const deletePlayer = useCallback((id: number) => {
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+  const handleDelete = useCallback(async (id: number) => {
+    try { await onDeletePlayer(id); } catch { /* handled by context */ }
+  }, [onDeletePlayer]);
 
-  const addPlayer = useCallback((player: Player) => {
-    setPlayers((prev) => [...prev, player]);
-  }, []);
-
-  const isEditingBlocked = locked || poolLocked;
+  const handleAdd = useCallback(async (data: Omit<Player, "id" | "supabaseId">) => {
+    await onAddPlayer(data);
+  }, [onAddPlayer]);
 
   return (
     <>
       {showModal && !isEditingBlocked && (
-        <AddPlayerModal onClose={() => setShowModal(false)} onAdd={addPlayer} />
+        <AddPlayerModal onClose={() => setShowModal(false)} onAdd={handleAdd} />
       )}
 
       <div className="flex flex-col lg:flex-row gap-8">
@@ -320,6 +348,24 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
                 Pool is <strong>manually locked</strong>.{" "}
                 <button className="underline" onClick={() => setPoolLocked(false)}>Unlock</button> to make changes.
               </p>
+            </div>
+          )}
+
+          {/* ── Missing photos warning — amber, non-blocking ── */}
+          {missingPhotoCount > 0 && !locked && (
+            <div className="flex items-start gap-3 px-5 py-3 rounded-xl mb-6"
+              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#fbbf24", flexShrink: 0, marginTop: "1px" }}>
+                image_not_supported
+              </span>
+              <div>
+                <p className="text-sm font-bold mb-0.5" style={{ color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
+                  {missingPhotoCount} player{missingPhotoCount > 1 ? "s" : ""} without a photo
+                </p>
+                <p className="text-[11px]" style={{ color: "rgba(251,191,36,0.7)", fontFamily: "'Inter', sans-serif" }}>
+                  Photos are optional — players without one will show a placeholder on the auction board. You can still launch.
+                </p>
+              </div>
             </div>
           )}
 
@@ -377,12 +423,7 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {filtered.map((player) => (
-                <PlayerCard
-                  key={player.id}
-                  player={player}
-                  locked={isEditingBlocked}
-                  onDelete={() => deletePlayer(player.id)}
-                />
+                <PlayerCard key={player.id} player={player} locked={isEditingBlocked} onDelete={() => handleDelete(player.id)} />
               ))}
             </div>
           )}
@@ -422,6 +463,21 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
                 {totalPoolValue.toLocaleString()} pts
               </span>
             </div>
+
+            {/* Photo coverage stat */}
+            {players.length > 0 && (
+              <div className="mt-3 pt-3 border-t flex items-center justify-between" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+                  Photo Coverage
+                </span>
+                <span className="text-sm font-black" style={{
+                  fontFamily: "'Geist', monospace",
+                  color: missingPhotoCount === 0 ? "#34d399" : "#fbbf24",
+                }}>
+                  {players.length - missingPhotoCount}/{players.length}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Bulk actions */}
@@ -437,15 +493,13 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
             </h4>
             <div className="flex flex-col gap-2">
               {[
-                { icon: "upload_file", label: "Import via CSV",   onClick: () => alert("CSV import — wire up your handler") },
-                { icon: "download",    label: "Export Registry",  onClick: () => alert("Export — wire up your handler") },
-                { icon: "shuffle",     label: "Randomise Order",  onClick: () => setPlayers((p) => [...p].sort(() => Math.random() - 0.5)) },
+                { icon: "upload_file", label: "Import via CSV",  onClick: () => alert("CSV import — wire up your handler") },
+                { icon: "download",    label: "Export Registry", onClick: () => alert("Export — wire up your handler") },
               ].map((action) => (
                 <SidebarActionButton key={action.label} icon={action.icon} label={action.label} onClick={action.onClick} />
               ))}
             </div>
-            <button
-              onClick={() => setPoolLocked(true)}
+            <button onClick={() => setPoolLocked(true)}
               className="w-full mt-4 py-3 font-black text-[10px] uppercase rounded-xl transition-all hover:opacity-90 hover:-translate-y-0.5"
               style={{ background: "#e45d35", color: "#fff", letterSpacing: "0.18em", fontFamily: "'Geist', monospace", boxShadow: "0 0 18px rgba(228,93,53,0.25)" }}>
               Lock Player Pool
@@ -483,12 +537,10 @@ export default function PlayersTab({ locked = false }: { locked?: boolean }) {
   );
 }
 
-// ── Tiny reusable UI atoms ────────────────────────────────────────────────────
-
+// ── Atoms ─────────────────────────────────────────────────────────────────────
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <label className="block text-[9px] font-bold uppercase tracking-widest mb-1.5"
-      style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+    <label className="block text-[9px] font-bold uppercase tracking-widest mb-1.5" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
       {children}
     </label>
   );
@@ -518,15 +570,7 @@ function CloseButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function IconButton({
-  icon,
-  danger = false,
-  onClick,
-}: {
-  icon: string;
-  danger?: boolean;
-  onClick?: (e: React.MouseEvent) => void;
-}) {
+function IconButton({ icon, danger = false, onClick }: { icon: string; danger?: boolean; onClick?: (e: React.MouseEvent) => void }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button onClick={onClick}
@@ -534,8 +578,7 @@ function IconButton({
       onMouseLeave={() => setHovered(false)}
       className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
       style={{
-        background: "rgba(16,20,21,0.8)",
-        border: "1px solid rgba(255,255,255,0.1)",
+        background: "rgba(16,20,21,0.8)", border: "1px solid rgba(255,255,255,0.1)",
         color: hovered ? (danger ? "#f87171" : "#e45d35") : "#c6c6cd",
       }}>
       <span className="material-symbols-outlined" style={{ fontSize: "13px" }}>{icon}</span>
@@ -554,8 +597,7 @@ function SidebarActionButton({ icon, label, onClick }: { icon: string; label: st
         background: hovered ? "rgba(228,93,53,0.08)" : "rgba(39,43,44,0.4)",
         borderColor: hovered ? "rgba(228,93,53,0.5)" : "rgba(69,70,77,0.3)",
         color: hovered ? "#e45d35" : "#c6c6cd",
-        fontFamily: "'Geist', monospace",
-        fontSize: "11px",
+        fontFamily: "'Geist', monospace", fontSize: "11px",
       }}>
       <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#e45d35" }}>{icon}</span>
       {label}

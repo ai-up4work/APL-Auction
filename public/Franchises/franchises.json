@@ -1,0 +1,32 @@
+[
+  {
+    "id": "CSK",
+    "name": "Chennai Super Kings",
+    "city": "Chennai",
+    "image": "/Franchises/CSK.png"
+  },
+  {
+    "id": "MI",
+    "name": "Mumbai Indians",
+    "city": "Mumbai",
+    "image": "/Franchises/MI.png"
+  },
+  {
+    "id": "RCB",
+    "name": "Royal Challengers Bengaluru",
+    "city": "Bengaluru",
+    "image": "/Franchises/RCB.png"
+  },
+  {
+    "id": "GT",
+    "name": "Gujarat Titans",
+    "city": "Gujarat",
+    "image": "/Franchises/GT.png"
+  },
+  {
+    "id": "RR",
+    "name": "Rajasthan Royals",
+    "city": "Rajasthan",
+    "image": "/Franchises/RR.png"
+  }
+]

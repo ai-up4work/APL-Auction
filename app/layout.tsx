@@ -1,4 +1,5 @@
 import "./globals.css";
+import { AuctionProvider } from "@/context/AuctionContext";
 
 export const metadata = {
   title: "APL Auction",
@@ -28,7 +29,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <AuctionProvider>{children}</AuctionProvider>
+      </body>
     </html>
   );
 }

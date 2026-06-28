@@ -10,7 +10,15 @@ const nextConfig = {
             {
                 protocol: 'https',
                 hostname: 'lh3.googleusercontent.com',
-            }
+            },
+            { 
+                protocol: 'https', 
+                hostname: 'img1.hscicdn.com' 
+            },
+            {
+                protocol: 'https',
+                hostname: 'images.seeklogo.com',
+            },
         ],
     },
 };

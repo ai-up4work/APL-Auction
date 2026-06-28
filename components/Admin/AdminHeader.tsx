@@ -1,7 +1,10 @@
+// components/Admin/AdminHeader.tsx
 "use client";
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import AuctionSwitcher from "@/components/Admin/AuctionSwitcher";
+
 
 // ── Status → visual meta ───────────────────────────────────────────────────────
 const STATUS_META = {
@@ -268,7 +271,7 @@ export default function AdminHeader({
 
       {/* ── Utility Bar ── */}
       <div className="h-12 px-4 md:px-6 lg:px-10 flex items-center justify-between border-b border-white/5">
-        {/* Left: brand + status badge */}
+        {/* Left: brand + status badge + auction switcher */}
         <div className="flex items-center gap-2 md:gap-4 min-w-0 shrink-0">
           <span
             className="font-black tracking-tighter uppercase text-sm md:text-base whitespace-nowrap"
@@ -292,6 +295,10 @@ export default function AdminHeader({
               {status.label}
             </span>
           </div>
+
+          {/* ── Auction switcher ── */}
+          <div className="hidden sm:block h-4 w-px bg-white/10" />
+          <AuctionSwitcher />
         </div>
 
         {/* Right: auction controls + notifications + profile */}
