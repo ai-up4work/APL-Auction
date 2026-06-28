@@ -1,3 +1,5 @@
+// Ignore TS error for side-effect CSS import when no type declarations are present
+// @ts-ignore
 import "./globals.css";
 import { AuctionProvider } from "@/context/AuctionContext";
 
