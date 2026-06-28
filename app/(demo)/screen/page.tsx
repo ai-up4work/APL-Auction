@@ -12,7 +12,7 @@
 
 import React, { use, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { FlowCanvas } from "@/components/FlowCanvas";
-import { AUCTION_CONFIG } from "@/app/sankey/data";
+import { AUCTION_CONFIG } from "@/app/watch/[auctionId]/data";
 import { ShuffleOverlay } from "@/components/ShuffleOverlay";
 import { loadAuction } from "@/lib/auctionDb";
 import {
