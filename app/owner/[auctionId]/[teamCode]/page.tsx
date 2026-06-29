@@ -302,7 +302,7 @@ export default function OwnerIndexPage() {
 
   const NAV_ITEMS = [
     { segment: "squad",   icon: "groups",   label: "Squad",       sub: `${roster} of ${totalSlots} players` },
-    { segment: "budget",  icon: "payments", label: "Budget",      sub: `${purse.toLocaleString()} CR remaining` },
+    { segment: "budget",  icon: "payments", label: "Budget",      sub: `${purse.toLocaleString()} PTS remaining` },
     { segment: "history", icon: "reorder",  label: "Bid History", sub: "Every transaction" },
   ];
 
@@ -447,7 +447,7 @@ export default function OwnerIndexPage() {
 
             {/* Stat cards */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <StatCard label="Purse Left" value={`${fmt(purse)} CR`} pct={pursePct} accentColor={accent} delay="0.08s" />
+              <StatCard label="Purse Left" value={`${fmt(purse)} PTS`} pct={pursePct} accentColor={accent} delay="0.08s" />
               <StatCard label="Squad" value={`${roster}/${totalSlots}`} sub={`${totalSlots - roster} slots open`} pct={rosterPct} accentColor={accent} delay="0.12s" />
             </div>
 
@@ -463,7 +463,7 @@ export default function OwnerIndexPage() {
                   textTransform: "uppercase", color: "#3a4a54",
                 }}>Total Invested</p>
                 <p style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: 16, fontWeight: 700, color: accent }}>
-                  {fmt(spent)} CR
+                  {fmt(spent)} PTS
                 </p>
               </div>
             )}

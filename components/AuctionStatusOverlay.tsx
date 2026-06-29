@@ -200,19 +200,11 @@ export function CompletedContent({ stats }: { stats?: AuctionStats }) {
                 </div>
               </>
             )}
-
-            {/* Nudge toward the board toggle */}
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-[#e45d35]/20 bg-[rgba(228,93,53,0.06)]">
-              <span className="ms text-[#e45d35] text-[14px]">grid_view</span>
-              <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em]">
-                View Full Board → Sankey chart
-              </span>
-            </div>
           </div>
         </div>
 
         {/* RIGHT — top buys + team spend summary */}
-        <div className="w-full sm:w-[300px] shrink-0 flex flex-col gap-3 py-6 px-4 sm:pr-6 sm:pl-2 overflow-y-auto">
+        <div className="w-full sm:w-[300px] shrink-0 flex flex-col gap-3 py-6 px-4 sm:pr-6 sm:pl-2 overflow-y-auto"> 
 
           {stats && stats.topBuys.length > 0 && (
             <div className="aso-glass rounded-2xl border border-white/[0.07] p-5 shrink-0">

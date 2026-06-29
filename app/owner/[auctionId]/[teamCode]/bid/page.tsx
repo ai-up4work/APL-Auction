@@ -359,7 +359,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     : isLocked        ? "TIME'S UP"
     : isLeading       ? "YOU'RE LEADING"
     : nextBid > purse ? "INSUFFICIENT PURSE"
-    : `PLACE BID — ${fmt(nextBid)} CR`;
+    : `PLACE BID — ${fmt(nextBid)}`;
 
   const bidIcon =
     isPaused || isEnded ? "pause_circle"
@@ -408,7 +408,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
               {team?.name ?? teamCode.toUpperCase()}
             </p>
             <p className="f-label-sm text-[#5a6a74] text-[9px] leading-none mt-[3px]">
-              {fmt(purse)} CR REMAINING
+              {fmt(purse)} Points REMAINING
             </p>
           </div>
         </div>
@@ -526,7 +526,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                     >
                       {currentLot && !isRevealing ? fmt(currentLot.currentBid) : "—"}
                     </span>
-                    <span className="f-label text-[11px] text-[#5a6a74] mb-3">CR</span>
+                    <span className="f-label text-[11px] text-[#5a6a74] mb-3">Points</span>
                   </div>
 
                   {isRevealing && (
@@ -561,7 +561,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                     {currentLot && !isSold && !isUnsold && !isRevealing && !isLocked && !isLeading && (
                       <div className="text-right">
                         <p className="f-label-sm text-[8px] text-[#5a6a74]">NEXT BID</p>
-                        <p className="f-num text-[18px]" style={{ color: BID_COLOR }}>{fmt(nextBid)} CR</p>
+                        <p className="f-num text-[18px]" style={{ color: BID_COLOR }}>{fmt(nextBid)} Points</p>
                       </div>
                     )}
                     {isLeading && !isSold && !isUnsold && !isRevealing && !isLocked && (
@@ -759,11 +759,11 @@ function PlayerCard({
     const hasStarted = completedCount > 0;
     return (
       <section className="glass rounded-xl flex-1 min-h-0 flex flex-col items-center justify-center gap-4">
-        <span className="ms text-[#2a3a44]" style={{ fontSize: 56 }}>
+        <span className="ms text-[#2a3a44]" style={{ fontSize: 90 }}>
           {hasStarted ? "pending" : "hourglass_empty"}
         </span>
         <div className="text-center">
-          <p className="f-display text-[22px] text-white mb-1">
+          <p className="f-display text-[45px] text-white mb-1">
             {hasStarted ? "NEXT LOT SOON" : "AWAITING LOT"}
           </p>
           <p className="f-label text-[9px] text-[#3a4a54]">
@@ -851,7 +851,7 @@ function PlayerCard({
 
       <div className="shrink-0 grid grid-cols-3 gap-2 p-2.5">
         {[
-          { label: "BASE",    value: isRevealing ? "—" : `${lot.basePrice.toLocaleString()} CR`, accent: true  },
+          { label: "BASE",    value: isRevealing ? "—" : `${lot.basePrice.toLocaleString()} Points`, accent: true  },
           { label: "COUNTRY", value: isRevealing ? "—" : (lot.playerCountry || "—"),              accent: false },
           { label: "ROLE",    value: isRevealing ? "—" : (lot.playerRole    || "—"),              accent: false },
         ].map((s) => (

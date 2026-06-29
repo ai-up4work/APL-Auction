@@ -417,7 +417,7 @@ export const DEFAULT_RULES: AuctionRules = {
 };
 
 export const DEFAULT_SESSION: SessionConfig = {
-  auctionName:        "APL Season 1 Auction",
+  auctionName:        "APL Season 1",
   auctioneer:         "",
   auctionDate:        "",
   auctionTime:        "",

@@ -12,7 +12,7 @@ export default function BudgetRing({
   startAmount = 30_000,
   endAmount   = 32_400,
   utilization = 64.8,
-  currency    = "CR",
+  currency    = "PTS",
   duration    = 1500,
 }: BudgetRingProps) {
   const [amount, setAmount] = useState(startAmount);

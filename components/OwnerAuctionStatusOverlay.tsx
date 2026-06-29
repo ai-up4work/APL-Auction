@@ -288,7 +288,7 @@ function PausedBlock({ accentColor = "#e45d35", purse = 0, roster = 0, teamSize 
               color:      "#e0e3e4",
               lineHeight: 1,
             }}>
-              {fmt(purse)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>CR</span>
+              {fmt(purse)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>PTS</span>
             </p>
             <div style={{ marginTop: 6, height: 2, borderRadius: 99, background: "rgba(255,255,255,0.05)" }}>
               <div style={{
@@ -475,7 +475,7 @@ function CompletedBlock({ accentColor = "#e45d35", purse = 0, roster = 0, teamSi
                 color:      accentColor,
                 lineHeight: 1,
               }}>
-                {fmt(spent)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>CR</span>
+                {fmt(spent)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>PTS</span>
               </p>
             </div>
             <div>
@@ -494,7 +494,7 @@ function CompletedBlock({ accentColor = "#e45d35", purse = 0, roster = 0, teamSi
                 color:      "#e0e3e4",
                 lineHeight: 1,
               }}>
-                {fmt(purse)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>CR</span>
+                {fmt(purse)}<span style={{ fontSize: 10, color: "#3a4a54", marginLeft: 3 }}>PTS</span>
               </p>
             </div>
           </div>
@@ -699,7 +699,7 @@ export function CompletedContent({ stats }: { stats?: AuctionStats }) {
                         <p style={{ fontFamily: "'Geist Mono',monospace", fontSize: 8, color: "rgba(198,198,205,0.50)", textTransform: "uppercase", letterSpacing: "0.12em" }}>{buy.teamCode}</p>
                       </div>
                     </div>
-                    <p style={{ fontFamily: "'Archivo Narrow',sans-serif", color: "#e45d35", fontWeight: 700, fontSize: 13 }}>{buy.amount.toLocaleString()} <span style={{ fontSize: 9, opacity: 0.5 }}>CR</span></p>
+                    <p style={{ fontFamily: "'Archivo Narrow',sans-serif", color: "#e45d35", fontWeight: 700, fontSize: 13 }}>{buy.amount.toLocaleString()} <span style={{ fontSize: 9, opacity: 0.5 }}>PTS</span></p>
                   </div>
                 ))}
               </div>

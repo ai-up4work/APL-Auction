@@ -187,7 +187,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         id:     p.supabaseId ?? String(p.id),
         name:   p.name,
         img:    p.img,
-        price:  `${p.price.toLocaleString()} CR`,
+        price:  `${p.price.toLocaleString()} PTS`,
         status: "locked",
       })
     );
@@ -196,7 +196,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       id:     lot.playerId,
       name:   lot.playerName,
       img:    lot.playerImg,
-      price:  `${lot.basePrice.toLocaleString()} CR`,
+      price:  `${lot.basePrice.toLocaleString()} PTS`,
       status: "pending",
     });
 
@@ -393,7 +393,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     }
     return completedLots.slice(0, 8).map((l) =>
       l.status === "sold"
-        ? `${l.playerName} sold to ${l.winningTeamCode ?? "—"} for ${l.currentBid.toLocaleString()} CR!`
+        ? `${l.playerName} sold to ${l.winningTeamCode ?? "—"} for ${l.currentBid.toLocaleString()} PTS!`
         : `${l.playerName} went unsold`
     );
   }, [completedLots, auction?.session.auctionName]);
@@ -405,7 +405,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       if (currentLot && currentLot.playerId === supId) {
         return buildFlowPlayer({
           id: supId, name: p.name, img: p.img,
-          price: `${p.price.toLocaleString()} CR`,
+          price: `${p.price.toLocaleString()} PTS`,
           status: "pending",
           teamShortCode: currentLot.winningTeamCode,
         });
@@ -414,14 +414,14 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       if (closedLot) {
         return buildFlowPlayer({
           id: supId, name: p.name, img: p.img,
-          price: `${p.price.toLocaleString()} CR`,
+          price: `${p.price.toLocaleString()} PTS`,
           status: closedLot.status === "sold" ? "sold" : "unsold" as any,
           teamShortCode: closedLot.status === "sold" ? closedLot.winningTeamCode : null,
         });
       }
       return buildFlowPlayer({
         id: supId, name: p.name, img: p.img,
-        price: `${p.price.toLocaleString()} CR`,
+        price: `${p.price.toLocaleString()} PTS`,
         status: "locked",
       });
     });
@@ -435,7 +435,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         name:      t.name,
         shortCode: t.code,
         logoUrl:   t.logo || "",
-        purse:     `${fmtPts(t.supabaseId ? teamPurses[t.supabaseId]?.remaining : undefined) ?? fmtPts(auction.rules.totalPoints)} CR`,
+        purse:     `${fmtPts(t.supabaseId ? teamPurses[t.supabaseId]?.remaining : undefined) ?? fmtPts(auction.rules.totalPoints)} PTS`,
       })
     );
   }, [auction, teamPurses]);
@@ -653,7 +653,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
             <div className="header-purse text-right hidden sm:block">
               <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.1em]">Total Purse Cap</div>
               <div className="font-archivo text-[18px] font-bold text-white">
-                {fmtPts(auction.rules.totalPoints)} <span className="text-[9px] opacity-50">CR</span>
+                {fmtPts(auction.rules.totalPoints)} <span className="text-[9px] opacity-50">PTS</span>
               </div>
             </div>
             <div className="w-px h-7 bg-white/10 hidden sm:block" />
@@ -780,7 +780,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           </span>
                           <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
                           <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
-                            BASE: {fmtPts(currentLot?.basePrice)} <span className="text-[10px] opacity-60">CR</span>
+                            BASE: {fmtPts(currentLot?.basePrice)} <span className="text-[10px] opacity-60">PTS</span>
                           </span>
                         </div>
                       </div>
@@ -836,7 +836,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
                       {currentLot && !isSold && !isUnsold && !isLocked && (
                         <p className="font-mono-geist text-[9px] text-[#5a6a74] uppercase tracking-widest mb-[15px]">
-                          Next bid: {fmtPts(nextBid)} CR
+                          Next bid: {fmtPts(nextBid)} PTS
                         </p>
                       )}
                       {isLocked && !isSold && !isUnsold && (
@@ -898,7 +898,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                       <div className="flex flex-col items-end">
                         <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
                         <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-[#e45d35]">
-                          {fmtPts(winningPurse?.remaining ?? auction.rules.totalPoints)} <span className="text-[9px] opacity-50">CR</span>
+                          {fmtPts(winningPurse?.remaining ?? auction.rules.totalPoints)} <span className="text-[9px] opacity-50">PTS</span>
                         </span>
                       </div>
                     </div>
@@ -908,7 +908,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
                       </div>
                       <span className="font-mono-geist text-[10px] text-white">
-                        {leaderTopBuy ? `${leaderTopBuy.playerName} — ${leaderTopBuy.currentBid.toLocaleString()} CR` : "—"}
+                        {leaderTopBuy ? `${leaderTopBuy.playerName} — ${leaderTopBuy.currentBid.toLocaleString()} PTS` : "—"}
                       </span>
                     </div>
                   </div>
@@ -930,13 +930,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                 <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Player Pool</h3>
-                    {hasSelection && (
-                      <button onClick={clearFlowSelection}
-                        className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-mono-geist uppercase tracking-widest text-[#e45d35] border border-[#e45d35]/30 hover:bg-[#e45d35]/10 transition-colors">
-                        <span className="ms text-[11px]">close</span>
-                        Clear
-                      </button>
-                    )}
+                   
                   </div>
 
                   {flowPlayers.map((p) => {
@@ -999,13 +993,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                 <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Franchises</h3>
-                    {hasSelection && (
-                      <button onClick={clearFlowSelection}
-                        className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-mono-geist uppercase tracking-widest text-[#e45d35] border border-[#e45d35]/30 hover:bg-[#e45d35]/10 transition-colors">
-                        <span className="ms text-[11px]">close</span>
-                        Clear
-                      </button>
-                    )}
+                   
                   </div>
                   {flowTeams.map((t) => {
                     const isHighlighted = hasSelection ? flowActiveTeam === t.shortCode : false;

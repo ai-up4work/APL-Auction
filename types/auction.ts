@@ -48,7 +48,7 @@ export interface Player {
 
   lotOrder?: number;        // ← ADDED: for shuffling, null until shuffled
 
-
+  ownerTeamCode?: string;  // ← ADDED: for live auction, null until sold
 }
 
 // ── Auction Rules ─────────────────────────────────────────────────────────────
