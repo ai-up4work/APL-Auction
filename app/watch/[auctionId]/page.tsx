@@ -13,6 +13,7 @@ import {
   subscribeToBids,
   subscribeToTeamPurses,
   getNextBidAmount,
+  completeLotReveal,
   type AuctionLot,
   type BidEntry,
 } from "@/lib/auctionLiveDb";
@@ -68,6 +69,8 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
   const playerListRef = useRef<HTMLDivElement>(null);
   const teamListRef   = useRef<HTMLDivElement>(null);
+  const revealedLotIdRef = useRef<string | null>(null);  // ← NEW
+
 
   const leaderboardTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const flashTimeout     = useRef<ReturnType<typeof setTimeout>  | null>(null);
@@ -80,6 +83,13 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
   useEffect(() => { remainingRef.current     = remainingPlayers; }, [remainingPlayers]);
   useEffect(() => { currentLotRef.current    = currentLot;       }, [currentLot]);
   useEffect(() => { completedLotsRef.current = completedLots;    }, [completedLots]);
+
+  // FIX (two-phase lot status): mirrors `isShuffling` so the realtime lot
+  // subscription can tell "I'm already mid-animation for this lot" apart
+  // from "this lot reached pending some other way (missed the shuffling
+  // event, page just loaded, etc.) and I should just sync directly."
+  const isShufflingRef = useRef(isShuffling);
+  useEffect(() => { isShufflingRef.current = isShuffling; }, [isShuffling]);
 
   // Hydrate context
   useEffect(() => {
@@ -101,7 +111,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setTeamPurses(purses);
 
       const liveData = await loadLiveState(auctionId);
-      setCurrentLot(liveData.currentLot);
       setBidHistory(liveData.bidHistory);
       setCompletedLots(liveData.completedLots);
       setLotNumber(liveData.lotNumber);
@@ -111,17 +120,28 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setRemainingPlayers(auction.players.filter((p) => !usedIds.has(p.supabaseId ?? "")));
 
       if (liveData.currentLot?.status === "sold") {
+        setCurrentLot(liveData.currentLot);
         setIsSold(true);
         freezeClock();
       } else if (liveData.currentLot?.status === "unsold") {
+        setCurrentLot(liveData.currentLot);
         setIsUnsold(true);
         freezeClock();
+      } else if (liveData.currentLot?.status === "shuffling") {
+        // FIX (two-phase lot status): caught mid-reveal on load (refresh,
+        // late subscribe, etc). Don't show the player ahead of the
+        // animation — treat as "no lot yet". The realtime subscription's
+        // "pending" transition (real reveal, or the auctioneer's fallback)
+        // will bring it on screen a moment later.
+        setCurrentLot(null);
+        pauseClock();
       } else if (liveData.currentLot) {
+        setCurrentLot(liveData.currentLot);
         // FIX: anchor to the real event time — latest bid if one exists,
         // otherwise the lot's own startedAt — so the watch page's countdown
         // stays in sync with the auctioneer and owner pages regardless of
         // when this browser loaded or received the realtime event.
-        const anchor = liveData.bidHistory[0]?.placedAt ?? liveData.currentLot.startedAt;
+        const anchor = liveData.bidHistory[0]?.placedAt ?? liveData.currentLot.startedAt!;
         resetClock(anchor);
       } else {
         pauseClock();
@@ -195,18 +215,24 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       } else {
         setShuffleIndex(targetIndex);
         setShuffleTarget(targetFlow);
-        setTimeout(() => {
-          setIsShuffling(false);
-          setShuffleTarget(null);
+      setTimeout(async () => {
+        setIsShuffling(false);
+        setShuffleTarget(null);
+        setLotNumber(lot.lotNumber);
+        setRemainingPlayers((prev) =>
+          prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
+        );
+        try {
+          const revealed = await completeLotReveal(lot.id);
+          revealedLotIdRef.current = revealed.id;   // ← NEW: mark that WE did the transition
+          setCurrentLot(revealed);
+          resetClock(revealed.startedAt!);
+        } catch (err) {
+          console.error("[watch] completeLotReveal failed:", err);
           setCurrentLot(lot);
-          setLotNumber(lot.lotNumber);
-          setRemainingPlayers((prev) =>
-            prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
-          );
-          // FIX: anchor to the lot's real startedAt so the watch page clock
-          // agrees with the auctioneer/owner pages from the moment of reveal.
-          resetClock(lot.startedAt);
-        }, 900);
+          resetClock();
+        }
+      }, 900);
       }
     }
     spin();
@@ -221,8 +247,36 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     const lotSub = subscribeToLot(auctionId, (lot) => {
       const isNewLot = currentLotRef.current?.id !== lot.id;
 
-      if (lot.status === "pending" && isNewLot) {
+      // FIX (two-phase lot status): the reveal animation is driven by
+      // "shuffling" now — "pending" only ever means the reveal already
+      // finished and a real anchor exists.
+      if (lot.status === "shuffling" && isNewLot) {
         triggerShuffleAndReveal(lot);
+        return;
+      }
+
+      if (lot.status === "pending") {
+        if (isShufflingRef.current && currentLotRef.current?.id === lot.id) {
+          return;
+        }
+        const wasShuffling = currentLotRef.current?.status === "shuffling";
+        if (isNewLot) {
+          setRemainingPlayers((prev) =>
+            prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
+          );
+        }
+        setCurrentLot(lot);
+        setIsSold(false);
+        setIsUnsold(false);
+        // Only reset clock when lot is genuinely new or just came out of
+        // shuffling. Bid placements also update the lot row (current_bid,
+        // winning_team_id) which fires this handler again with the same
+        // "pending" status — those must NOT overwrite the fresher
+        // bid-anchored resetClock that already ran.
+        if ((isNewLot || wasShuffling) && revealedLotIdRef.current !== lot.id) {
+          resetClock(lot.startedAt!);
+        }
+        revealedLotIdRef.current = null;
         return;
       }
 
@@ -246,24 +300,23 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       }
     }, getCurrentLotId);
 
-    const bidSub = subscribeToBids(auctionId, (bid) => {
-      if (bid.lotId !== currentLotRef.current?.id) return; // stale bid guard
-      setBidHistory((prev) => [bid, ...prev].slice(0, 30));
-      setCurrentLot((prev) =>
-        prev
-          ? { ...prev, currentBid: bid.amount, winningTeamCode: bid.teamCode, winningTeamId: bid.teamId }
-          : prev
-      );
-      setBidPulse(false);
-      requestAnimationFrame(() => requestAnimationFrame(() => setBidPulse(true)));
-      setFlashOverlay(true);
-      if (flashTimeout.current) clearTimeout(flashTimeout.current);
-      flashTimeout.current = setTimeout(() => setFlashOverlay(false), 200);
-      // FIX: anchor to the bid's real placedAt timestamp so the watch page
-      // countdown agrees with auctioneer/owner, instead of resetting to
-      // Date.now() whenever this browser's websocket happened to deliver it.
-      resetClock(bid.placedAt);
-    });
+      const bidSub = subscribeToBids(auctionId, (bid) => {
+        console.log('[watch] bid event received, lotId=', bid.lotId, 'currentLot=', currentLotRef.current?.id);
+        if (bid.lotId !== currentLotRef.current?.id) return;
+        console.log('[watch] calling resetClock');
+        setBidHistory((prev) => [bid, ...prev].slice(0, 30));
+        setCurrentLot((prev) =>
+          prev
+            ? { ...prev, currentBid: bid.amount, winningTeamCode: bid.teamCode, winningTeamId: bid.teamId }
+            : prev
+        );
+        setBidPulse(false);
+        requestAnimationFrame(() => requestAnimationFrame(() => setBidPulse(true)));
+        setFlashOverlay(true);
+        if (flashTimeout.current) clearTimeout(flashTimeout.current);
+        flashTimeout.current = setTimeout(() => setFlashOverlay(false), 200);
+        resetClock(bid.placedAt, true);   // ← force=true
+      });
 
     return () => {
       lotSub.unsubscribe();
@@ -997,10 +1050,24 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
 function WatchWithClock({ auctionId }: { auctionId: string }) {
   const { auction } = useAuction();
-  const timerSeconds = auction?.session?.timerSeconds ?? 15;
+
+  if (!auction?.session?.timerSeconds) {
+    return (
+      <div className="h-screen bg-[#0b0f10] flex items-center justify-center">
+        <div className="text-center">
+          <span className="ms text-[#e45d35] text-5xl animate-spin block mb-4">
+            progress_activity
+          </span>
+          <p className="font-mono-geist text-[#5a6a74] text-sm uppercase tracking-widest">
+            Loading broadcast…
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <ShotClockProvider timerSeconds={timerSeconds}>
+    <ShotClockProvider timerSeconds={auction.session.timerSeconds}>
       <ScreenContent auctionId={auctionId} />
     </ShotClockProvider>
   );

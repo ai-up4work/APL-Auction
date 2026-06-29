@@ -482,7 +482,7 @@ export async function cloneAuction(sourceId: string, newName: string): Promise<s
     saveSession(newId, { ...source.session, auctionName: newName }),
     ...source.teams.map((t)   => upsertTeam(newId,   { ...t,   supabaseId: undefined, roster: 0 })),
     // lotOrder cleared so the new auction requires a fresh shuffle
-    ...source.players.map((p) => upsertPlayer(newId, { ...p,   supabaseId: undefined, lotOrder: null })),
+    ...source.players.map((p) => upsertPlayer(newId, { ...p,   supabaseId: undefined, lotOrder: undefined })),
   ]);
 
   return newId;

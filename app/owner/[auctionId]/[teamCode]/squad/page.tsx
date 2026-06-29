@@ -154,6 +154,7 @@ export default function SquadPage() {
           .eq("status", "sold")
           .order("updated_at", { ascending: false });
 
+
         const mapped: SoldPlayer[] = (playerRows ?? []).map((p: any) => ({
           id:       p.id,
           name:     p.name,

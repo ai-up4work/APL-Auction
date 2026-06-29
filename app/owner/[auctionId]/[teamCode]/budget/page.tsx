@@ -217,7 +217,7 @@ export default function FinancialsPage() {
                 startAmount={budget.totalPoints}
                 endAmount={budget.remainingPurse}
                 utilization={utilization}
-                currency="CR"
+                currency="Points"
                 duration={1500}
               />
             </section>
@@ -318,7 +318,7 @@ export default function FinancialsPage() {
                       <span
                         className="font-['Geist'] text-[#c6c6cd]"
                         style={{ fontSize: "clamp(8px, 1.1svh, 10px)" }}
-                      >CR</span>
+                      >Points</span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -329,7 +329,7 @@ export default function FinancialsPage() {
                     <div
                       className="font-['Inter'] text-[#ffb5a0]"
                       style={{ fontSize: "clamp(12px, 2svh, 16px)" }}
-                    >{fmt(targetAvg)} CR</div>
+                    >{fmt(targetAvg)} Points</div>
                   </div>
                 </div>
               )}
@@ -361,13 +361,13 @@ export default function FinancialsPage() {
                   <span
                     className="font-['Archivo_Narrow'] text-[#c6c6cd]"
                     style={{ fontSize: "clamp(16px, 2.8svh, 22px)" }}
-                  >CR</span>
+                  >Points</span>
                 </div>
                 <p
                   className="font-['Geist'] text-[#c6c6cd] opacity-80 leading-relaxed"
                   style={{ fontSize: "clamp(8px, 1.1svh, 10px)" }}
                 >
-                  Calculated based on maintaining a minimum {fmt(budget.basePrice)} CR reserve
+                  Calculated based on maintaining a minimum {fmt(budget.basePrice)} Points reserve
                   for all remaining {slotsLeft} required slot{slotsLeft !== 1 ? "s" : ""}.
                 </p>
               </div>
