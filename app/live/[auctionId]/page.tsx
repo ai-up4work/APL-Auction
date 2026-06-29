@@ -71,6 +71,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
   const [isShufflingPool, setIsShufflingPool] = useState(false);
   const [showFeedback,    setShowFeedback]    = useState(false);
   const [feedbackTrigger, setFeedbackTrigger] = useState<"paused" | "completed">("completed");
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
 
   const flashTimeout  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentLotRef = useRef(currentLot);
@@ -331,10 +332,10 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
   }
 
   async function handleEndSession() {
-    if (!confirm("End the auction session? This cannot be undone.")) return;
     await handleStop();
     setFeedbackTrigger("completed");
     setShowFeedback(true);
+    setShowEndConfirm(false);
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -765,10 +766,10 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
               Pause
             </button>
             <button
-              onClick={handleEndSession}
+              onClick={() => setShowEndConfirm(true)}
               className="bg-error-container text-on-error-container px-6 py-2 rounded font-mono-geist font-bold hover:brightness-110 transition-all active:scale-95 border border-white/10 uppercase tracking-[0.2em] text-xs"
             >
-              End Session
+              Complete Auction
             </button>
           </div>
         </header>
@@ -1234,6 +1235,102 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             trigger={feedbackTrigger}
             onClose={() => setShowFeedback(false)}
           />
+        )}
+
+        {/* End Session Confirm Modal */}
+        {showEndConfirm && (
+          <div className="fixed inset-0 z-[400] flex items-center justify-center">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowEndConfirm(false)}
+            />
+
+            {/* Dialog */}
+            <div
+              className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
+              style={{
+                background: "rgba(16, 20, 21, 0.95)",
+                border: "1px solid rgba(248,113,113,0.2)",
+                boxShadow: "0 0 80px rgba(239,68,68,0.12), 0 24px 64px rgba(0,0,0,0.6)",
+              }}
+            >
+              {/* Icon */}
+              <div className="flex items-center justify-center">
+                <div
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.25)" }}
+                >
+                  <span className="material-symbols-outlined text-red-400" style={{ fontSize: 32 }}>
+                    gavel
+                  </span>
+                </div>
+              </div>
+
+              {/* Text */}
+              <div className="text-center space-y-2">
+                <h2
+                  className="font-archivo text-2xl font-bold italic uppercase tracking-tight text-white"
+                >
+                  End the Auction?
+                </h2>
+                <p className="font-mono-geist text-[11px] text-on-surface-variant uppercase tracking-[0.12em] leading-relaxed">
+                  This will close the session for all participants.<br />
+                  This action cannot be undone.
+                </p>
+              </div>
+
+              {/* Stats summary */}
+              <div
+                className="grid grid-cols-2 gap-3 p-4 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                <div className="text-center">
+                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.15em] mb-1">
+                    Lots Completed
+                  </p>
+                  <p className="font-archivo text-2xl font-bold text-white">
+                    {completedLots.length}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.15em] mb-1">
+                    Players Remaining
+                  </p>
+                  <p className="font-archivo text-2xl font-bold text-white">
+                    {playerQueue.length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowEndConfirm(false)}
+                  className="flex-1 py-3 rounded-xl font-mono-geist text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "#a0aec0",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEndSession}
+                  disabled={isBusy}
+                  className="flex-1 py-3 rounded-xl font-mono-geist text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+                  style={{
+                    background: "linear-gradient(135deg, #991b1b, #ef4444)",
+                    color: "#fff",
+                    boxShadow: "0 4px 24px rgba(239,68,68,0.3)",
+                  }}
+                >
+                  End Auction
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </AuctionStatusGate>
