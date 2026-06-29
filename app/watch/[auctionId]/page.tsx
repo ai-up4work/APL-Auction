@@ -40,9 +40,8 @@ function buildFlowTeam(overrides: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ScreenContent({ auctionId }: { auctionId: string }) {
-  const { auction, loadFromDb }                                   = useAuction();
-  // FIX (Redundancy 5): consume shot clock from context — no local timer
-  const { shotClock, isLocked, resetClock, freezeClock, pauseClock } = useShotClock();
+  const { auction, loadFromDb }                                        = useAuction();
+  const { shotClock, isLocked, resetClock, freezeClock, pauseClock }  = useShotClock();
 
   const [loadingLive, setLoadingLive]           = useState(true);
   const [teamPurses, setTeamPurses]             = useState<Record<string, TeamPurse>>({});
@@ -94,7 +93,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     if (!auction?.auctionId) return;
 
     async function init() {
-      // FIX (Redundancy 1): shared helper replaces duplicate 20-line block
       const purses = await ensureTeamPurses(
         auctionId,
         auction.teams,
@@ -106,7 +104,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setCurrentLot(liveData.currentLot);
       setBidHistory(liveData.bidHistory);
       setCompletedLots(liveData.completedLots);
-      setLotNumber(liveData.lotNumber); // FIX (Bug 7)
+      setLotNumber(liveData.lotNumber);
 
       const usedIds = new Set(liveData.completedLots.map((l) => l.playerId));
       if (liveData.currentLot) usedIds.add(liveData.currentLot.playerId);
@@ -119,7 +117,12 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         setIsUnsold(true);
         freezeClock();
       } else if (liveData.currentLot) {
-        resetClock();
+        // FIX: anchor to the real event time — latest bid if one exists,
+        // otherwise the lot's own startedAt — so the watch page's countdown
+        // stays in sync with the auctioneer and owner pages regardless of
+        // when this browser loaded or received the realtime event.
+        const anchor = liveData.bidHistory[0]?.placedAt ?? liveData.currentLot.startedAt;
+        resetClock(anchor);
       } else {
         pauseClock();
       }
@@ -141,7 +144,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
   }, [auctionId, auction?.auctionId]);
 
   // Shuffle animation
-  // FIX (Redundancy 4): uses shared shuffleArray from auctionLiveUtils
   const triggerShuffleAndReveal = useCallback((lot: AuctionLot) => {
     setIsShuffling(true);
     setIsSold(false);
@@ -170,7 +172,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     });
 
     const poolWithoutTarget = rawPool.filter((p) => p.id !== targetFlow.id);
-    // FIX (Redundancy 4): shared shuffleArray instead of local duplicate
     const shuffledPool      = shuffleArray(poolWithoutTarget);
     const targetIndex       = Math.floor(Math.random() * (shuffledPool.length + 1));
     shuffledPool.splice(targetIndex, 0, targetFlow);
@@ -202,7 +203,9 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
           setRemainingPlayers((prev) =>
             prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
           );
-          resetClock(); // new lot revealed — start the clock
+          // FIX: anchor to the lot's real startedAt so the watch page clock
+          // agrees with the auctioneer/owner pages from the moment of reveal.
+          resetClock(lot.startedAt);
         }, 900);
       }
     }
@@ -213,7 +216,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
   useEffect(() => {
     if (!auction?.auctionId) return;
 
-    // FIX (Redundancy 3): orphan-close guard is now inside subscribeToLot
     const getCurrentLotId = () => currentLotRef.current?.id ?? null;
 
     const lotSub = subscribeToLot(auctionId, (lot) => {
@@ -244,7 +246,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       }
     }, getCurrentLotId);
 
-    // FIX (Bug 3): guard bids to current lot; also drive shot clock reset
     const bidSub = subscribeToBids(auctionId, (bid) => {
       if (bid.lotId !== currentLotRef.current?.id) return; // stale bid guard
       setBidHistory((prev) => [bid, ...prev].slice(0, 30));
@@ -258,7 +259,10 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setFlashOverlay(true);
       if (flashTimeout.current) clearTimeout(flashTimeout.current);
       flashTimeout.current = setTimeout(() => setFlashOverlay(false), 200);
-      resetClock(); // new bid — reset shot clock
+      // FIX: anchor to the bid's real placedAt timestamp so the watch page
+      // countdown agrees with auctioneer/owner, instead of resetting to
+      // Date.now() whenever this browser's websocket happened to deliver it.
+      resetClock(bid.placedAt);
     });
 
     return () => {
@@ -539,6 +543,23 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
           </div>
 
           <div className="flex items-center gap-[16px] sm:gap-[30px]">
+            {/* Shot clock bar in header — mirrors live page */}
+            {currentLot && !isSold && !isUnsold && (
+              <div className="flex items-center gap-3">
+                <span
+                  className="font-mono-geist text-[10px] uppercase tracking-[0.1em]"
+                  style={{ color: shotClockColor }}
+                >
+                  {isLocked ? "Locked" : "Clock"}
+                </span>
+                <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-100"
+                    style={{ width: `${shotClock}%`, background: shotClockColor }}
+                  />
+                </div>
+              </div>
+            )}
             <button
               onClick={() => {
                 setActiveView((v) => (v === "live" ? "flow" : "live"));
@@ -704,7 +725,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                     <div className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[15px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}>
                       {fmtPts(currentLot?.currentBid)}
                     </div>
-
 
                     {currentLot && !isSold && !isUnsold && !isLocked && (
                       <p className="font-mono-geist text-[9px] text-[#5a6a74] uppercase tracking-widest mb-[15px]">

@@ -249,41 +249,23 @@ export async function deletePlayerFromDb(supabaseId: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHUFFLE — Fisher-Yates on player IDs, persisted to lot_order column
+// SHUFFLE
 //
-// FIX: Previously fired N parallel individual updates with no transaction,
-// meaning a single failure left a partial shuffle (some players with new
-// lot_order, some with old).  We now build the full id→order mapping in JS
-// and send it to a single Supabase RPC (`shuffle_player_order`) that runs
-// all updates atomically inside a DB transaction.
-//
-// If you do not have that RPC yet, the fallback path below runs the parallel
-// updates as before — but you should add the RPC to get atomicity:
-//
-//   create or replace function shuffle_player_order(
-//     p_auction_id uuid,
-//     p_order      jsonb   -- [{"id": "...", "lot_order": 0}, ...]
-//   ) returns void language plpgsql as $$
-//   declare r jsonb;
-//   begin
-//     for r in select * from jsonb_array_elements(p_order) loop
-//       update players
-//         set lot_order = (r->>'lot_order')::int
-//         where id = (r->>'id')::uuid
-//           and auction_id = p_auction_id;
-//     end loop;
-//   end;
-//   $$;
+// Fisher-Yates on player IDs, persisted to lot_order column via RPC.
+// Returns the exact order payload written to the DB so the caller can
+// update React state directly — no read-back or retry loop needed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function shufflePlayerOrder(auctionId: string): Promise<void> {
+export async function shufflePlayerOrder(
+  auctionId: string
+): Promise<{ id: string; lot_order: number }[]> {
   const { data, error } = await supabase
     .from("players")
     .select("id")
     .eq("auction_id", auctionId);
 
   if (error) throw sbErr(error, "shufflePlayerOrder(fetch)");
-  if (!data || data.length === 0) return;
+  if (!data || data.length === 0) return [];
 
   // Fisher-Yates in-place shuffle
   const ids = data.map((p: any) => p.id as string);
@@ -292,27 +274,24 @@ export async function shufflePlayerOrder(auctionId: string): Promise<void> {
     [ids[i], ids[j]] = [ids[j], ids[i]];
   }
 
-  // Build the order payload
   const orderPayload = ids.map((id, index) => ({ id, lot_order: index }));
 
-  // Try the atomic RPC first; fall back to parallel updates if RPC not found.
+  // Try atomic RPC first
   const { error: rpcError } = await supabase.rpc("shuffle_player_order", {
     p_auction_id: auctionId,
     p_order:      orderPayload,
   });
 
-  if (!rpcError) return; // atomic path succeeded
+  if (!rpcError) return orderPayload;
 
-  // Fallback: log the RPC miss but don't hard-fail — use parallel updates.
-  // This preserves the existing behaviour while the RPC is being added.
+  // PGRST202 = function not found; any other error is real — rethrow
   if (rpcError.code !== "PGRST202") {
-    // PGRST202 = function not found; any other error is real — rethrow.
     throw sbErr(rpcError, "shufflePlayerOrder(rpc)");
   }
 
   console.warn(
     "[shufflePlayerOrder] shuffle_player_order RPC not found — " +
-    "falling back to parallel updates.  Add the RPC for atomic shuffles."
+    "falling back to parallel updates. Add the RPC for atomic shuffles."
   );
 
   const results = await Promise.all(
@@ -323,6 +302,8 @@ export async function shufflePlayerOrder(auctionId: string): Promise<void> {
   for (const r of results) {
     if (r.error) throw sbErr(r.error, "shufflePlayerOrder(update)");
   }
+
+  return orderPayload;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -378,10 +359,6 @@ export async function saveSession(auctionId: string, session: SessionConfig): Pr
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FULL LAUNCH SAVE
-//
-// FIX: Teams and players were previously upserted sequentially in for-loops
-// (34 round trips for 8 teams + 26 players).  They are now parallelized with
-// Promise.all, consistent with how rules/session are already saved above.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function saveFullAuctionAndLaunch(state: AuctionState): Promise<string> {
@@ -390,17 +367,24 @@ export async function saveFullAuctionAndLaunch(state: AuctionState): Promise<str
     auctionId = await createAuction(state.session.auctionName);
   }
 
-  // Rules and session in parallel
   await Promise.all([
     saveRules(auctionId, state.rules),
     saveSession(auctionId, state.session),
   ]);
 
-  // FIX: all team and player upserts in parallel (was sequential for-loops)
   await Promise.all([
     ...state.teams.map((t) => upsertTeam(auctionId!, t)),
     ...state.players.map((p) => upsertPlayer(auctionId!, p)),
   ]);
+
+  // ← set remaining_purse = totalPoints for all teams at launch
+  const { error: purseError } = await supabase
+    .from("teams")
+    .update({ remaining_purse: state.rules.totalPoints })
+    .eq("auction_id", auctionId)
+    .is("remaining_purse", null);
+
+  if (purseError) throw sbErr(purseError, "saveFullAuctionAndLaunch(set purse)");
 
   await updateAuctionStatus(auctionId, "live", {
     launched_at: new Date().toISOString(),
@@ -408,7 +392,6 @@ export async function saveFullAuctionAndLaunch(state: AuctionState): Promise<str
 
   return auctionId;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // DEFAULTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,31 +447,25 @@ export interface AuctionSummary {
 export async function listAuctions(): Promise<AuctionSummary[]> {
   const { data, error } = await supabase
     .from("auctions")
-    .select("id, name, status, created_at, launched_at, completed_at")
+    .select(`
+      id, name, status, created_at, launched_at, completed_at,
+      teams:teams(count),
+      players:players(count)
+    `)
     .order("created_at", { ascending: false });
 
   if (error) throw sbErr(error, "listAuctions");
 
-  const summaries = await Promise.all(
-    (data ?? []).map(async (a: any) => {
-      const [{ count: teamCount }, { count: playerCount }] = await Promise.all([
-        supabase.from("teams").select("id", { count: "exact", head: true }).eq("auction_id", a.id),
-        supabase.from("players").select("id", { count: "exact", head: true }).eq("auction_id", a.id),
-      ]);
-      return {
-        id:          a.id,
-        name:        a.name,
-        status:      a.status as AuctionStatus,
-        createdAt:   a.created_at,
-        launchedAt:  a.launched_at ?? null,
-        completedAt: a.completed_at ?? null,
-        teamCount:   teamCount ?? 0,
-        playerCount: playerCount ?? 0,
-      };
-    })
-  );
-
-  return summaries;
+  return (data ?? []).map((a: any) => ({
+    id:          a.id,
+    name:        a.name,
+    status:      a.status as AuctionStatus,
+    createdAt:   a.created_at,
+    launchedAt:  a.launched_at  ?? null,
+    completedAt: a.completed_at ?? null,
+    teamCount:   a.teams[0]?.count   ?? 0,
+    playerCount: a.players[0]?.count ?? 0,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -496,15 +473,16 @@ export async function listAuctions(): Promise<AuctionSummary[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function cloneAuction(sourceId: string, newName: string): Promise<string> {
-  const newId = await createAuction(newName);
+  const newId  = await createAuction(newName);
   const source = await loadAuction(sourceId);
   if (!source) throw new Error("Source auction not found");
 
   await Promise.all([
     saveRules(newId, source.rules),
     saveSession(newId, { ...source.session, auctionName: newName }),
-    ...source.teams.map((t) => upsertTeam(newId, { ...t, supabaseId: undefined, roster: 0 })),
-    ...source.players.map((p) => upsertPlayer(newId, { ...p, supabaseId: undefined })),
+    ...source.teams.map((t)   => upsertTeam(newId,   { ...t,   supabaseId: undefined, roster: 0 })),
+    // lotOrder cleared so the new auction requires a fresh shuffle
+    ...source.players.map((p) => upsertPlayer(newId, { ...p,   supabaseId: undefined, lotOrder: null })),
   ]);
 
   return newId;
@@ -533,7 +511,7 @@ export function generateLinks(
     ownerLinks: teams.map((t) => ({
       teamCode: t.code,
       teamName: t.name,
-      url:      `${baseUrl}/owner/${auctionId}/${t.code.toLowerCase()}`,
+      url:      `${baseUrl}/owner/${auctionId}/join`,
       pin:      t.pin ?? "—",
     })),
   };

@@ -135,8 +135,8 @@ export function useAuction(): AuctionContextValue {
 async function fetchPlayersWithRetry(
   auctionId: string,
   expectedCount: number,
-  maxAttempts = 5,
-  delayMs = 400
+  maxAttempts = 8,   // was 5
+  delayMs = 600      // was 400
 ): Promise<Player[] | null> {
   const { supabase } = await import("@/lib/supabse");
 
@@ -195,15 +195,42 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { auctionRef.current = auction; }, [auction]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
   async function ensureAuctionId(): Promise<string> {
     const current = auctionRef.current;
     if (current.auctionId) return current.auctionId;
+
+    // Create the auction row
     const id = await createAuction(current.session.auctionName || "APL Auction");
-    setAuction((prev) => ({ ...prev, auctionId: id }));
+
+    // Persist all teams that have no supabaseId yet
+    const savedTeams = await Promise.all(
+      current.teams.map(async (t) => {
+        if (t.supabaseId) return t;
+        const supabaseId = await upsertTeam(id, t);
+        return { ...t, supabaseId };
+      })
+    );
+
+    // Persist all players that have no supabaseId yet
+    const savedPlayers = await Promise.all(
+      current.players.map(async (p) => {
+        if (p.supabaseId) return p;
+        const supabaseId = await upsertPlayer(id, p);
+        return { ...p, supabaseId };
+      })
+    );
+
+    // Commit everything to state atomically
+    setAuction((prev) => ({
+      ...prev,
+      auctionId: id,
+      teams:   savedTeams,
+      players: savedPlayers,
+    }));
+
     localStorage.setItem("apl_auction_id", id);
     return id;
-  }
+}
 
   function withSave<T>(fn: () => Promise<T>): Promise<T> {
     setIsSaving(true);
@@ -431,33 +458,41 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ── SHUFFLE ───────────────────────────────────────────────────────────────
-
   const handleShuffle = useCallback(async () => {
     await withSave(async () => {
-      const id             = await ensureAuctionId();
-      const expectedCount  = auctionRef.current.players.length;
+      const id = await ensureAuctionId(); // this already persists unpersisted teams/players
+      
+      // Re-read from ref after ensureAuctionId, which may have updated state
+      // Wait a tick for state to settle
+      await new Promise(r => setTimeout(r, 50));
+      const currentPlayers = auctionRef.current.players;
 
-      // 1. Write shuffled lot_order to DB (atomically via RPC when available)
-      await shufflePlayerOrder(id);
+      // Persist any still-unpersisted players (edge case: added after ensureAuctionId ran)
+      const updatedPlayers = await Promise.all(
+        currentPlayers.map(async (p) => {
+          if (p.supabaseId) return p;
+          const supabaseId = await upsertPlayer(id, p);
+          return { ...p, supabaseId };
+        })
+      );
 
-      // 2. Fetch back with retry — waits until all writes are visible
-      const freshPlayers = await fetchPlayersWithRetry(id, expectedCount);
-
-      if (freshPlayers && freshPlayers.length > 0) {
-        // 3. Merge back into state — keep everything else (teams, rules, session)
-        setAuction((prev) => ({ ...prev, players: freshPlayers }));
-        const ready = computeShuffleReady(freshPlayers);
-        setShuffleReady(ready);
-        return;
+      // Commit any newly-persisted players to state
+      const hadNewlySaved = updatedPlayers.some((p, i) => p.supabaseId !== currentPlayers[i].supabaseId);
+      if (hadNewlySaved) {
+        setAuction(prev => ({ ...prev, players: updatedPlayers }));
       }
 
-      // Fetch failed to confirm — be conservative, don't claim ready
-      setShuffleReady(false);
-      throw new Error(
-        "Shuffle was saved, but couldn't confirm all players were updated. Please retry."
-      );
+      const orderPayload = await shufflePlayerOrder(id);
+      const orderMap = new Map(orderPayload.map(({ id, lot_order }) => [id, lot_order]));
+
+      const shuffledPlayers = [...updatedPlayers]
+        .map(p => ({ ...p, lotOrder: orderMap.get(p.supabaseId ?? "") ?? p.lotOrder }))
+        .sort((a, b) => (a.lotOrder ?? 0) - (b.lotOrder ?? 0));
+
+      setAuction(prev => ({ ...prev, players: shuffledPlayers }));
+      setShuffleReady(computeShuffleReady(shuffledPlayers));
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── LIFECYCLE ─────────────────────────────────────────────────────────────
