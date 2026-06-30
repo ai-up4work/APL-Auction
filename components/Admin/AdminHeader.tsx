@@ -8,10 +8,10 @@ import AuctionSwitcher from "@/components/Admin/AuctionSwitcher";
 
 // ── Status → visual meta ───────────────────────────────────────────────────────
 const STATUS_META = {
-  setup:     { label: "SETUP MODE", color: "#9a9aa5", pulse: false },
-  live:      { label: "LIVE",       color: "#e45d35", pulse: true  },
-  paused:    { label: "PAUSED",     color: "#fbbf24", pulse: false },
-  completed: { label: "COMPLETED",  color: "#f87171", pulse: false },
+  setup:     { label: "SETUP MODE", color: "var(--color-outline)",       pulse: false },
+  live:      { label: "LIVE",       color: "var(--color-theme-orange)",  pulse: true  },
+  paused:    { label: "PAUSED",     color: "var(--color-warning)",       pulse: false },
+  completed: { label: "COMPLETED",  color: "var(--color-error)",         pulse: false },
 } as const;
 
 // ── Confirmation copy for each control action ──────────────────────────────────
@@ -68,7 +68,7 @@ function ConfirmDialog({
   if (!cfg || !mounted) return null;
 
   const danger = cfg.tone === "danger";
-  const accent = danger ? "#f87171" : "#e45d35";
+  const accent = danger ? "var(--color-error)" : "var(--color-theme-orange)";
   const requireText = "requireText" in cfg ? cfg.requireText : undefined;
   const locked = requireText != null && typed.trim().toUpperCase() !== requireText;
 
@@ -81,8 +81,8 @@ function ConfirmDialog({
       <div
         className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
         style={{
-          background: "#181c1d",
-          border: `1px solid ${danger ? "rgba(248,113,113,0.3)" : "rgba(228,93,53,0.25)"}`,
+          background: "var(--color-surface-container)",
+          border: `1px solid ${danger ? "rgba(255,180,171,0.3)" : "rgba(201,151,31,0.25)"}`,
           boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -90,7 +90,7 @@ function ConfirmDialog({
         <div className="flex items-center gap-3">
           <div
             className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: danger ? "rgba(248,113,113,0.12)" : "rgba(228,93,53,0.12)" }}
+            style={{ background: danger ? "var(--color-error-container)" : "rgba(201,151,31,0.12)" }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: "18px", color: accent }}>
               {danger ? "warning" : "info"}
@@ -98,17 +98,17 @@ function ConfirmDialog({
           </div>
           <h3
             style={{
-              fontFamily: "'Archivo Narrow', sans-serif",
+              fontFamily: "var(--font-headline-md)",
               fontSize: "17px",
               fontWeight: 700,
-              color: "#e0e3e4",
+              color: "var(--color-on-surface)",
             }}
           >
             {cfg.title}
           </h3>
         </div>
 
-        <p className="text-[13px] leading-[20px]" style={{ color: "#9a9aa5", fontFamily: "'Inter', sans-serif" }}>
+        <p className="text-[13px] leading-[20px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
           {cfg.message}
         </p>
 
@@ -116,7 +116,7 @@ function ConfirmDialog({
           <div>
             <label
               className="block text-[9px] font-bold uppercase tracking-widest mb-1.5"
-              style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}
+              style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}
             >
               Type {requireText} to confirm
             </label>
@@ -128,10 +128,10 @@ function ConfirmDialog({
               placeholder={requireText}
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={{
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(248,113,113,0.25)",
-                color: "#e0e3e4",
-                fontFamily: "'Geist', monospace",
+                background: "var(--color-surface-container-low)",
+                border: "1px solid rgba(255,180,171,0.25)",
+                color: "var(--color-on-surface)",
+                fontFamily: "var(--font-label-mono)",
                 letterSpacing: "0.05em",
               }}
             />
@@ -143,10 +143,10 @@ function ConfirmDialog({
             onClick={onCancel}
             className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-colors"
             style={{
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              color: "#c6c6cd",
-              fontFamily: "'Geist', monospace",
+              background: "var(--color-surface-container-low)",
+              border: "1px solid var(--color-border-overlay)",
+              color: "var(--color-on-surface-variant)",
+              fontFamily: "var(--font-label-mono)",
             }}
           >
             Cancel
@@ -156,11 +156,11 @@ function ConfirmDialog({
             disabled={!!locked}
             className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all"
             style={{
-              background: locked ? "rgba(255,255,255,0.06)" : danger ? "#f87171" : "#e45d35",
-              color: locked ? "#45464d" : "#fff",
-              fontFamily: "'Geist', monospace",
+              background: locked ? "var(--color-surface-container-high)" : danger ? "var(--color-error)" : "var(--color-theme-orange)",
+              color: locked ? "var(--color-surface-variant)" : danger ? "var(--color-on-error)" : "var(--color-on-primary)",
+              fontFamily: "var(--font-label-mono)",
               cursor: locked ? "not-allowed" : "pointer",
-              boxShadow: locked ? "none" : `0 0 18px ${danger ? "rgba(248,113,113,0.3)" : "rgba(228,93,53,0.25)"}`,
+              boxShadow: locked ? "none" : `0 0 18px ${danger ? "rgba(255,180,171,0.3)" : "rgba(201,151,31,0.25)"}`,
             }}
           >
             {cfg.confirmLabel}
@@ -193,12 +193,12 @@ function HeaderActionButton({
       onMouseLeave={() => setHovered(false)}
       className="flex items-center gap-1.5 h-[34px] px-3 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-colors"
       style={{
-        fontFamily: "'Geist', monospace",
-        borderColor: danger ? "rgba(248,113,113,0.3)" : "rgba(228,93,53,0.3)",
+        fontFamily: "var(--font-label-mono)",
+        borderColor: danger ? "rgba(255,180,171,0.3)" : "rgba(201,151,31,0.3)",
         background: hovered
-          ? danger ? "rgba(248,113,113,0.14)" : "rgba(228,93,53,0.14)"
-          : danger ? "rgba(248,113,113,0.06)" : "rgba(228,93,53,0.06)",
-        color: danger ? "#f87171" : "#e45d35",
+          ? danger ? "var(--color-error-container)" : "rgba(201,151,31,0.14)"
+          : danger ? "rgba(147,0,10,0.2)" : "rgba(201,151,31,0.06)",
+        color: danger ? "var(--color-error)" : "var(--color-theme-orange)",
       }}
     >
       <span className="material-symbols-outlined" style={{ fontSize: "15px" }}>{icon}</span>
@@ -262,9 +262,9 @@ export default function AdminHeader({
     <header
       className="fixed top-0 left-0 right-0 z-50"
       style={{
-        background: "rgba(11,15,16,0.85)",
+        background: "rgba(13,17,23,0.85)",
         backdropFilter: "blur(20px)",
-        borderBottom: "1px solid rgba(255,255,255,0.05)",
+        borderBottom: "1px solid var(--color-outline-variant)",
       }}
     >
       {pendingAction && (
@@ -276,16 +276,16 @@ export default function AdminHeader({
       )}
 
       {/* ── Utility Bar ── */}
-      <div className="h-12 px-4 md:px-6 lg:px-10 flex items-center justify-between border-b border-white/5">
+      <div className="h-12 px-4 md:px-6 lg:px-10 flex items-center justify-between border-b" style={{ borderColor: "var(--color-outline-variant)" }}>
         {/* Left: brand + status badge + auction switcher */}
         <div className="flex items-center gap-2 md:gap-4 min-w-0 shrink-0">
           <span
             className="font-black tracking-tighter uppercase text-sm md:text-base whitespace-nowrap"
-            style={{ fontFamily: "'Archivo Narrow', sans-serif", color: "#e45d35" }}
+            style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-theme-orange)" }}
           >
             War Room Admin
           </span>
-          <div className="hidden sm:block h-4 w-px bg-white/10" />
+          <div className="hidden sm:block h-4 w-px" style={{ background: "var(--color-outline-variant)" }} />
           <div
             className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border"
             style={{ background: `${status.color}1a`, borderColor: `${status.color}4d` }}
@@ -296,14 +296,14 @@ export default function AdminHeader({
             />
             <span
               className="text-[10px] font-bold uppercase tracking-wider"
-              style={{ fontFamily: "'Geist', monospace", color: status.color }}
+              style={{ fontFamily: "var(--font-label-mono)", color: status.color }}
             >
               {status.label}
             </span>
           </div>
 
           {/* ── Auction switcher ── */}
-          <div className="hidden sm:block h-4 w-px bg-white/10" />
+          <div className="hidden sm:block h-4 w-px" style={{ background: "var(--color-outline-variant)" }} />
           <AuctionSwitcher />
         </div>
 
@@ -325,12 +325,12 @@ export default function AdminHeader({
                   <HeaderActionButton icon="restart_alt" label="Re-auction" danger onClick={() => setPendingAction("reauction")} />
                 )}
               </div>
-              <div className="w-px h-5 bg-white/[0.08]" />
+              <div className="w-px h-5" style={{ background: "var(--color-outline-variant)" }} />
             </>
           )}
 
           <NotificationButton />
-          <div className="w-px h-5 bg-white/[0.08]" />
+          <div className="w-px h-5" style={{ background: "var(--color-outline-variant)" }} />
           <ProfileChip />
         </div>
       </div>
@@ -358,7 +358,7 @@ export default function AdminHeader({
                 {i < STEPS.length - 1 && (
                   <div
                     className="flex-1 h-px mx-2 sm:mx-4"
-                    style={{ background: "rgba(255,255,255,0.07)", marginTop: "-14px" }}
+                    style={{ background: "var(--color-outline-variant)", marginTop: "-14px" }}
                   />
                 )}
               </div>
@@ -400,10 +400,10 @@ function StepButton({
         className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center mb-1 sm:mb-2 transition-all"
         style={
           isActive
-            ? { background: "#e45d35", color: "#fff" }
+            ? { background: "var(--color-theme-orange)", color: "var(--color-on-primary)" }
             : hovered && !isDisabled
-            ? { background: "rgba(228,93,53,0.15)", border: "1px solid rgba(228,93,53,0.3)", color: "#e45d35" }
-            : { background: "#272b2c", border: "1px solid #3a3d42", color: "#9a9aa5" }
+            ? { background: "rgba(201,151,31,0.15)", border: "1px solid rgba(201,151,31,0.3)", color: "var(--color-theme-orange)" }
+            : { background: "var(--color-surface-container)", border: "1px solid var(--color-outline-variant)", color: "var(--color-outline)" }
         }
       >
         <span className="material-symbols-outlined" style={{ fontSize: "24px" }}>
@@ -412,14 +412,14 @@ function StepButton({
       </div>
       <span
         className="hidden sm:block text-[9px] font-bold uppercase tracking-widest whitespace-nowrap"
-        style={{ fontFamily: "'Geist', monospace", color: isActive ? "#e45d35" : "#9a9aa5" }}
+        style={{ fontFamily: "var(--font-label-mono)", color: isActive ? "var(--color-theme-orange)" : "var(--color-outline)" }}
       >
         {step.label}
       </span>
       {isActive && (
         <div
           className="absolute -bottom-3 sm:-bottom-4 w-1 h-1 rounded-full"
-          style={{ background: "#e45d35" }}
+          style={{ background: "var(--color-theme-orange)" }}
         />
       )}
     </button>
@@ -432,8 +432,8 @@ function NotificationButton() {
     <button
       className="relative w-[34px] h-[34px] rounded-lg flex items-center justify-center transition-colors"
       style={{
-        color: hovered ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)",
-        background: hovered ? "rgba(255,255,255,0.07)" : "transparent",
+        color: hovered ? "var(--color-on-surface-variant)" : "var(--color-outline)",
+        background: hovered ? "var(--color-surface-container-high)" : "transparent",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -442,7 +442,7 @@ function NotificationButton() {
       <span className="material-symbols-outlined text-xl">notifications</span>
       <span
         className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full"
-        style={{ background: "#e45d35", border: "1.5px solid #0b0f10" }}
+        style={{ background: "var(--color-theme-orange)", border: "1.5px solid var(--color-background)" }}
       />
     </button>
   );
@@ -454,28 +454,28 @@ function ProfileChip() {
     <button
       className="flex items-center gap-2 h-[34px] pl-1.5 pr-2.5 rounded-lg border transition-colors"
       style={{
-        borderColor: hovered ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.1)",
-        background: hovered ? "rgba(255,255,255,0.06)" : "transparent",
+        borderColor: hovered ? "var(--color-outline)" : "var(--color-border-overlay)",
+        background: hovered ? "var(--color-surface-container-high)" : "transparent",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       aria-label="Admin account"
     >
       <div
-        className="w-6 h-6 rounded-[6px] flex items-center justify-center text-[9px] font-bold text-white shrink-0"
-        style={{ background: "#e45d35" }}
+        className="w-6 h-6 rounded-[6px] flex items-center justify-center text-[9px] font-bold shrink-0"
+        style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)" }}
       >
         AC
       </div>
       <div className="hidden sm:flex flex-col items-start leading-none">
-        <span className="text-[12px] font-medium" style={{ color: "rgba(255,255,255,0.7)", fontFamily: "'Inter', sans-serif" }}>
+        <span className="text-[12px] font-medium" style={{ color: "var(--color-on-surface-variant)", fontFamily: "var(--font-body-md)" }}>
           Admin
         </span>
-        <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)", fontFamily: "'Inter', sans-serif" }}>
+        <span className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
           Console
         </span>
       </div>
-      <span className="material-symbols-outlined hidden sm:block" style={{ fontSize: "14px", color: "rgba(255,255,255,0.25)" }}>
+      <span className="material-symbols-outlined hidden sm:block" style={{ fontSize: "14px", color: "var(--color-outline)" }}>
         expand_more
       </span>
     </button>

@@ -58,6 +58,7 @@ interface AuctionContextValue {
   deleteTeam: (id: number) => Promise<void>;
 
   addPlayer:    (data: Omit<Player, "id" | "supabaseId">) => Promise<void>;
+  editPlayer: (id: number, data: Omit<Player, "id" | "supabaseId">) => Promise<void>;
   deletePlayer: (id: number) => Promise<void>;
 
   updateRules:   (rules: AuctionRules) => void;
@@ -413,6 +414,23 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const editPlayer = useCallback(
+    async (id: number, data: Omit<Player, "id" | "supabaseId">) => {
+      setAuction((prev) => ({
+        ...prev,
+        players: prev.players.map((p) => (p.id === id ? { ...p, ...data } : p)),
+      }));
+      await withSave(async () => {
+        const player = auctionRef.current.players.find((p) => p.id === id);
+        if (!player) return;
+        const auctionId = await ensureAuctionId();
+        await upsertPlayer(auctionId, { ...player, ...data });
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const deletePlayer = useCallback(
     async (id: number) => {
       const player = auctionRef.current.players.find((p) => p.id === id);
@@ -581,6 +599,7 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     editTeam,
     deleteTeam,
     addPlayer,
+    editPlayer,
     deletePlayer,
     updateRules,
     updateSession,

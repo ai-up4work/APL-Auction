@@ -19,12 +19,13 @@ export default function AdminPage() {
     auction,
     isSaving,
     saveError,
-    shuffleReady,   // ← added
+    shuffleReady,
     links,
     addTeam,
     editTeam,
     deleteTeam,
     addPlayer,
+    editPlayer,
     deletePlayer,
     updateRules,
     updateSession,
@@ -33,7 +34,7 @@ export default function AdminPage() {
     handleResume,
     handleStop,
     handleReauction,
-    handleShuffle,  // ← added
+    handleShuffle,
   } = useAuction();
 
   const { status: auctionStatus, teams, players, rules, session } = auction;
@@ -62,9 +63,9 @@ export default function AdminPage() {
     <div
       className="min-h-screen w-full flex flex-col overflow-x-hidden selection:bg-orange-500/30"
       style={{
-        background: "#101415",
-        color: "#e0e3e4",
-        fontFamily: "'Inter', sans-serif",
+        background: "var(--color-background)",
+        color: "var(--color-on-background)",
+        fontFamily: "var(--font-body-md)",
         position: "relative",
         maxWidth: "100%",
       }}
@@ -74,9 +75,9 @@ export default function AdminPage() {
         className="fixed inset-0 pointer-events-none"
         style={{
           background: `
-            radial-gradient(circle at 50% -20%, rgba(190,198,224,0.15) 0%, transparent 70%),
-            radial-gradient(circle at 0% 100%, rgba(228,93,53,0.05) 0%, transparent 50%),
-            radial-gradient(circle at 100% 100%, rgba(190,198,224,0.05) 0%, transparent 50%)
+            radial-gradient(circle at 50% -20%, rgba(200,205,216,0.15) 0%, transparent 70%),
+            radial-gradient(circle at 0% 100%, rgba(201,151,31,0.05) 0%, transparent 50%),
+            radial-gradient(circle at 100% 100%, rgba(200,205,216,0.05) 0%, transparent 50%)
           `,
           zIndex: 0,
         }}
@@ -87,14 +88,14 @@ export default function AdminPage() {
         <div
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
           style={{
-            background: "rgba(16,20,21,0.9)",
-            border: "1px solid rgba(228,93,53,0.3)",
-            color: "#e45d35",
-            fontFamily: "'Geist', monospace",
+            background: "var(--color-surface-container)",
+            border: "1px solid rgba(201,151,31,0.3)",
+            color: "var(--color-theme-orange)",
+            fontFamily: "var(--font-label-mono)",
             backdropFilter: "blur(12px)",
           }}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--color-theme-orange)" }} />
           Saving…
         </div>
       )}
@@ -104,10 +105,10 @@ export default function AdminPage() {
         <div
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
           style={{
-            background: "rgba(248,113,113,0.12)",
-            border: "1px solid rgba(248,113,113,0.4)",
-            color: "#f87171",
-            fontFamily: "'Geist', monospace",
+            background: "var(--color-error-container)",
+            border: "1px solid rgba(255,180,171,0.4)",
+            color: "var(--color-error)",
+            fontFamily: "var(--font-label-mono)",
             backdropFilter: "blur(12px)",
           }}
         >
@@ -143,7 +144,9 @@ export default function AdminPage() {
           <PlayersTab
             locked={auctionLocked}
             players={players}
+            teams={teams}
             onAddPlayer={addPlayer}
+            onEditPlayer={editPlayer}   // ← new
             onDeletePlayer={deletePlayer}
           />
         )}

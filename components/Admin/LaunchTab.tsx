@@ -9,12 +9,12 @@ type AuctionStatus = "setup" | "live" | "paused" | "completed";
 interface LaunchTabProps {
   auctionStatus:      AuctionStatus;
   onLaunch:           () => void;
-  onShuffle:          () => Promise<void>;   // ← real shuffle handler
+  onShuffle:          () => Promise<void>;
   teamCount?:         number;
   allPinsSet?:        boolean;
   playerCount?:       number;
   auctionName?:       string;
-  shuffleReady?:      boolean;               // ← controlled from parent (persisted)
+  shuffleReady?:      boolean;
   targetPlayerCount?: number;
   links?:             AuctionLinks | null;
 }
@@ -90,20 +90,20 @@ function LinkRow({
   return (
     <div
       className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl"
-      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+      style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#e45d35", flexShrink: 0 }}>
+        <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-theme-orange)", flexShrink: 0 }}>
           {icon}
         </span>
         <div className="min-w-0">
-          <p className="text-xs font-bold mb-0.5" style={{ color: "#e0e3e4", fontFamily: "'Inter', sans-serif" }}>
+          <p className="text-xs font-bold mb-0.5" style={{ color: "var(--color-on-surface)", fontFamily: "var(--font-body-md)" }}>
             {label}
           </p>
-          <p className="text-[10px] truncate" style={{ color: "#45464d", fontFamily: "'Geist', monospace" }}>
+          <p className="text-[10px] truncate" style={{ color: "var(--color-surface-variant)", fontFamily: "var(--font-label-mono)" }}>
             {url}
           </p>
-          <p className="text-[10px]" style={{ color: "#5a6a74" }}>{note}</p>
+          <p className="text-[10px]" style={{ color: "var(--color-outline)" }}>{note}</p>
         </div>
       </div>
       <button
@@ -112,13 +112,13 @@ function LinkRow({
           flexShrink: 0,
           padding: "5px 12px",
           borderRadius: 6,
-          border: "1px solid rgba(190,198,224,0.15)",
+          border: "1px solid var(--color-border-overlay)",
           background: "transparent",
-          color: copied ? "#4ade80" : "#8a9ba8",
+          color: copied ? "var(--color-success)" : "var(--color-on-surface-variant)",
           fontSize: 11,
           fontWeight: 700,
           cursor: "pointer",
-          fontFamily: "'Geist', monospace",
+          fontFamily: "var(--font-label-mono)",
           transition: "color 0.2s",
         }}
       >
@@ -150,25 +150,25 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
       className="w-full mt-6 rounded-2xl overflow-hidden"
       style={{
         maxWidth: "860px",
-        background: "rgba(16,20,21,0.6)",
-        border: "1px solid rgba(228,93,53,0.25)",
+        background: "var(--color-surface-glass)",
+        border: "1px solid rgba(201,151,31,0.25)",
         backdropFilter: "blur(24px)",
       }}
     >
       <div
         className="flex items-center gap-3 px-6 py-4"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(228,93,53,0.05)" }}
+        style={{ borderBottom: "1px solid var(--color-outline-variant)", background: "rgba(201,151,31,0.05)" }}
       >
         <span
           className="w-2 h-2 rounded-full animate-pulse"
-          style={{ background: "#4ade80", boxShadow: "0 0 8px rgba(74,222,128,0.8)", flexShrink: 0 }}
+          style={{ background: "var(--color-success)", boxShadow: "0 0 8px rgba(52,211,153,0.8)", flexShrink: 0 }}
         />
-        <p className="font-bold" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "18px", color: "#e0e3e4" }}>
+        <p className="font-bold" style={{ fontFamily: "var(--font-headline-md)", fontSize: "18px", color: "var(--color-on-surface)" }}>
           Auction is Live — Share Access Links
         </p>
         <span
           className="ml-auto text-[9px] font-black uppercase tracking-[0.15em] px-3 py-1 rounded-full"
-          style={{ fontFamily: "'Geist', monospace", color: "#4ade80", background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.25)" }}
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-success)", background: "var(--color-success-container)", border: "1px solid rgba(52,211,153,0.25)" }}
         >
           Live
         </span>
@@ -176,7 +176,7 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
 
       <div className="p-6 flex flex-col gap-6">
         <div>
-          <p className="text-[9px] font-black uppercase tracking-[0.15em] mb-3" style={{ fontFamily: "'Geist', monospace", color: "#5a6a74" }}>
+          <p className="text-[9px] font-black uppercase tracking-[0.15em] mb-3" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
             Global Access
           </p>
           <div className="flex flex-col gap-2">
@@ -195,22 +195,22 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
           </div>
         </div>
 
-        <div style={{ height: 1, background: "rgba(255,255,255,0.06)" }} />
+        <div style={{ height: 1, background: "var(--color-outline-variant)" }} />
 
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[9px] font-black uppercase tracking-[0.15em]" style={{ fontFamily: "'Geist', monospace", color: "#5a6a74" }}>
+            <p className="text-[9px] font-black uppercase tracking-[0.15em]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
               Team Owner Links
             </p>
             <button
               onClick={copyAllOwnerLinks}
               style={{
                 padding: "4px 12px", borderRadius: 6,
-                border: "1px solid rgba(228,93,53,0.25)",
-                background: "rgba(228,93,53,0.06)",
-                color: copied === "all-owners" ? "#4ade80" : "#e45d35",
+                border: "1px solid rgba(201,151,31,0.25)",
+                background: "rgba(201,151,31,0.06)",
+                color: copied === "all-owners" ? "var(--color-success)" : "var(--color-theme-orange)",
                 fontSize: 11, fontWeight: 700, cursor: "pointer",
-                fontFamily: "'Geist', monospace",
+                fontFamily: "var(--font-label-mono)",
               }}
             >
               {copied === "all-owners" ? "✓ Copied All" : "Copy All"}
@@ -222,29 +222,29 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
               <div
                 key={teamCode}
                 className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
-                style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}
+                style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-border-overlay)" }}
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded" style={{ fontFamily: "'Geist', monospace", color: "#e45d35", background: "rgba(228,93,53,0.1)" }}>
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", background: "rgba(201,151,31,0.1)" }}>
                       {teamCode}
                     </span>
-                    <span className="text-xs font-semibold truncate" style={{ color: "#e0e3e4" }}>{teamName}</span>
+                    <span className="text-xs font-semibold truncate" style={{ color: "var(--color-on-surface)" }}>{teamName}</span>
                   </div>
-                  <p className="text-[10px] truncate mb-0.5" style={{ color: "#45464d", fontFamily: "'Geist', monospace" }}>{url}</p>
-                  <p className="text-[11px]" style={{ color: "#5a6a74" }}>
-                    PIN: <span style={{ fontFamily: "'Geist', monospace", color: "#e45d35", fontWeight: 700 }}>{pin}</span>
+                  <p className="text-[10px] truncate mb-0.5" style={{ color: "var(--color-surface-variant)", fontFamily: "var(--font-label-mono)" }}>{url}</p>
+                  <p className="text-[11px]" style={{ color: "var(--color-outline)" }}>
+                    PIN: <span style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", fontWeight: 700 }}>{pin}</span>
                   </p>
                 </div>
                 <button
                   onClick={() => copy(`${url}\nPIN: ${pin}`, `owner-${teamCode}`)}
                   style={{
                     flexShrink: 0, padding: "5px 10px", borderRadius: 6,
-                    border: "1px solid rgba(190,198,224,0.12)",
+                    border: "1px solid var(--color-border-overlay)",
                     background: "transparent",
-                    color: copied === `owner-${teamCode}` ? "#4ade80" : "#8a9ba8",
+                    color: copied === `owner-${teamCode}` ? "var(--color-success)" : "var(--color-on-surface-variant)",
                     fontSize: 11, fontWeight: 700, cursor: "pointer",
-                    fontFamily: "'Geist', monospace",
+                    fontFamily: "var(--font-label-mono)",
                   }}
                 >
                   {copied === `owner-${teamCode}` ? "✓" : "Copy"}
@@ -273,7 +273,6 @@ export default function LaunchTab(props: LaunchTabProps) {
     links,
   } = props;
 
-  // Local shuffling UI state — shuffled truth comes from parent via shuffleReady
   const [shuffling,  setShuffling]  = useState(false);
   const [shuffleErr, setShuffleErr] = useState<string | null>(null);
 
@@ -299,7 +298,7 @@ export default function LaunchTab(props: LaunchTabProps) {
     setShuffling(true);
     setShuffleErr(null);
     try {
-      await onShuffle(); // ← real DB write via parent
+      await onShuffle();
     } catch (err: any) {
       setShuffleErr(err?.message ?? "Shuffle failed");
     } finally {
@@ -324,34 +323,34 @@ export default function LaunchTab(props: LaunchTabProps) {
 
   const statusStyles = {
     complete: {
-      bg:          "rgba(255,255,255,0.02)",
-      borderLeft:  "rgba(228,93,53,0.2)",
+      bg:          "var(--color-surface-container-lowest)",
+      borderLeft:  "rgba(201,151,31,0.2)",
       iconName:    "check_circle",
       iconFill:    "'FILL' 1",
-      iconColor:   "#e45d35",
+      iconColor:   "var(--color-theme-orange)",
       labelWeight: 500,
-      labelColor:  "#c6c6cd",
-      metaColor:   "rgba(228,93,53,0.6)",
+      labelColor:  "var(--color-on-surface-variant)",
+      metaColor:   "rgba(201,151,31,0.6)",
     },
     warning: {
-      bg:          "rgba(234,179,8,0.04)",
-      borderLeft:  "rgba(234,179,8,0.45)",
+      bg:          "var(--color-warning-container)",
+      borderLeft:  "rgba(251,191,36,0.45)",
       iconName:    "warning",
       iconFill:    "'FILL' 1",
-      iconColor:   "#ca8a04",
+      iconColor:   "var(--color-warning)",
       labelWeight: 600,
-      labelColor:  "#d4a800",
-      metaColor:   "#ca8a04",
+      labelColor:  "var(--color-warning)",
+      metaColor:   "var(--color-warning)",
     },
     action: {
-      bg:          "rgba(228,93,53,0.04)",
-      borderLeft:  "rgba(248,113,113,0.4)",
+      bg:          "rgba(201,151,31,0.04)",
+      borderLeft:  "rgba(255,180,171,0.4)",
       iconName:    "radio_button_unchecked",
       iconFill:    "'FILL' 0",
-      iconColor:   "#45464d",
+      iconColor:   "var(--color-surface-variant)",
       labelWeight: 700,
-      labelColor:  "#e45d35",
-      metaColor:   "#f87171",
+      labelColor:  "var(--color-theme-orange)",
+      metaColor:   "var(--color-error)",
     },
   } as const;
 
@@ -360,25 +359,25 @@ export default function LaunchTab(props: LaunchTabProps) {
 
       {/* Eyebrow */}
       <div className="flex items-center gap-2 px-4 py-1.5 rounded-full mb-6 border"
-        style={{ background: "rgba(228,93,53,0.08)", borderColor: "rgba(228,93,53,0.2)" }}>
-        <span className="material-symbols-outlined text-sm" style={{ color: "#e45d35" }}>security</span>
+        style={{ background: "rgba(201,151,31,0.08)", borderColor: "rgba(201,151,31,0.2)" }}>
+        <span className="material-symbols-outlined text-sm" style={{ color: "var(--color-theme-orange)" }}>security</span>
         <span className="text-[10px] font-black uppercase tracking-[0.2em]"
-          style={{ fontFamily: "'Geist', monospace", color: "#e45d35" }}>
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}>
           Mission Critical Protocol
         </span>
       </div>
 
       {/* Hero heading */}
       <h2 className="text-center font-bold mb-4"
-        style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "clamp(40px,6vw,64px)", lineHeight: 1.05, letterSpacing: "-0.01em", color: "#e0e3e4" }}>
+        style={{ fontFamily: "var(--font-headline-lg)", fontSize: "clamp(40px,6vw,64px)", lineHeight: 1.05, letterSpacing: "-0.01em", color: "var(--color-on-surface)" }}>
         Launch Preparation
       </h2>
       <p className="text-center max-w-lg mb-14 text-sm leading-6"
-        style={{ fontFamily: "'Inter', sans-serif", color: "#9a9aa5" }}>
+        style={{ fontFamily: "var(--font-body-md)", color: "var(--color-outline)" }}>
         Validate all core datasets before{" "}
-        <span className="italic" style={{ color: "#e45d35" }}>initializing</span>{" "}
+        <span className="italic" style={{ color: "var(--color-theme-orange)" }}>initializing</span>{" "}
         the live auction environment.{" "}
-        <span style={{ color: "rgba(228,93,53,0.8)" }}>Commencement locks all configurations.</span>
+        <span style={{ color: "rgba(201,151,31,0.8)" }}>Commencement locks all configurations.</span>
       </p>
 
       {/* Main grid */}
@@ -386,26 +385,26 @@ export default function LaunchTab(props: LaunchTabProps) {
 
         {/* Left: Checklist */}
         <div className="rounded-2xl overflow-hidden relative"
-          style={{ background: "rgba(16,20,21,0.6)", border: "1px solid rgba(255,255,255,0.07)", backdropFilter: "blur(24px)" }}>
+          style={{ background: "var(--color-surface-glass)", border: "1px solid var(--color-border-overlay)", backdropFilter: "blur(24px)" }}>
           <div className="absolute pointer-events-none select-none -right-5 -bottom-5 opacity-[0.03]">
-            <span className="material-symbols-outlined" style={{ fontSize: "260px", color: "#e45d35" }}>fact_check</span>
+            <span className="material-symbols-outlined" style={{ fontSize: "260px", color: "var(--color-theme-orange)" }}>fact_check</span>
           </div>
 
-          <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: "1px solid var(--color-outline-variant)" }}>
             <div>
-              <p className="text-lg font-bold mb-0.5" style={{ fontFamily: "'Archivo Narrow', sans-serif", color: "#e45d35" }}>
+              <p className="text-lg font-bold mb-0.5" style={{ fontFamily: "var(--font-headline-md)", color: "var(--color-theme-orange)" }}>
                 Pre-flight Checklist
               </p>
-              <p className="text-[9px] font-black uppercase tracking-[0.15em]" style={{ fontFamily: "'Geist', monospace", color: "#45464d" }}>
+              <p className="text-[9px] font-black uppercase tracking-[0.15em]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-surface-variant)" }}>
                 Verification Status
               </p>
             </div>
             <div className="text-right">
               <p className="font-bold leading-none mb-0.5"
-                style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "36px", color: "#e0e3e4" }}>
+                style={{ fontFamily: "var(--font-headline-md)", fontSize: "36px", color: "var(--color-on-surface)" }}>
                 {passCount}/{total}
               </p>
-              <p className="text-[9px] uppercase tracking-[0.12em]" style={{ fontFamily: "'Geist', monospace", color: "#45464d" }}>
+              <p className="text-[9px] uppercase tracking-[0.12em]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-surface-variant)" }}>
                 Checks Complete
               </p>
             </div>
@@ -419,7 +418,7 @@ export default function LaunchTab(props: LaunchTabProps) {
                   className="flex items-center justify-between px-6 py-4"
                   style={{
                     background:   s.bg,
-                    borderBottom: i < checklist.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                    borderBottom: i < checklist.length - 1 ? "1px solid var(--color-outline-variant)" : "none",
                     borderLeft:   `2px solid ${s.borderLeft}`,
                   }}>
                   <div className="flex items-center gap-3">
@@ -429,18 +428,18 @@ export default function LaunchTab(props: LaunchTabProps) {
                     </span>
                     <div>
                       <span className="text-sm"
-                        style={{ fontFamily: "'Inter', sans-serif", fontWeight: s.labelWeight, color: s.labelColor }}>
+                        style={{ fontFamily: "var(--font-body-md)", fontWeight: s.labelWeight, color: s.labelColor }}>
                         {item.label}
                       </span>
                       {item.status === "warning" && (
-                        <p className="text-[9px] mt-0.5" style={{ fontFamily: "'Geist', monospace", color: "#78716c" }}>
+                        <p className="text-[9px] mt-0.5" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
                           Auction can proceed without photos
                         </p>
                       )}
                     </div>
                   </div>
                   <span className="text-[9px] font-black uppercase tracking-[0.15em]"
-                    style={{ fontFamily: "'Geist', monospace", color: s.metaColor }}>
+                    style={{ fontFamily: "var(--font-label-mono)", color: s.metaColor }}>
                     {item.meta}
                   </span>
                 </div>
@@ -454,26 +453,26 @@ export default function LaunchTab(props: LaunchTabProps) {
 
           {/* Randomisation card */}
           <div className="rounded-2xl p-5 relative overflow-hidden"
-            style={{ background: "rgba(16,20,21,0.6)", border: "1px solid rgba(255,255,255,0.07)", backdropFilter: "blur(24px)" }}>
+            style={{ background: "var(--color-surface-glass)", border: "1px solid var(--color-border-overlay)", backdropFilter: "blur(24px)" }}>
             <div className="absolute pointer-events-none -right-2 -top-2 transition-opacity duration-500"
               style={{ opacity: shuffleReady ? 0.18 : 0.08 }}>
-              <span className="material-symbols-outlined rotate-12 mt-5 mr-4" style={{ fontSize: "90px", color: "#e45d35" }}>
+              <span className="material-symbols-outlined rotate-12 mt-5 mr-4" style={{ fontSize: "90px", color: "var(--color-theme-orange)" }}>
                 casino
               </span>
             </div>
 
             <p className="text-base font-bold mb-1.5 relative z-10"
-              style={{ fontFamily: "'Archivo Narrow', sans-serif", color: "#e0e3e4" }}>
+              style={{ fontFamily: "var(--font-headline-md)", color: "var(--color-on-surface)" }}>
               Randomisation
             </p>
             <p className="text-[11px] leading-[18px] mb-4 relative z-10"
-              style={{ fontFamily: "'Inter', sans-serif", color: "#9a9aa5" }}>
+              style={{ fontFamily: "var(--font-body-md)", color: "var(--color-outline)" }}>
               Fisher-Yates shuffle — cryptographically determines the definitive player sequence and saves it to the database.
             </p>
 
             {shuffleErr && (
               <p className="text-[10px] mb-3 px-3 py-1.5 rounded-lg relative z-10"
-                style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)", fontFamily: "'Geist', monospace" }}>
+                style={{ background: "var(--color-error-container)", color: "var(--color-error)", border: "1px solid var(--color-error)", fontFamily: "var(--font-label-mono)" }}>
                 {shuffleErr}
               </p>
             )}
@@ -483,20 +482,20 @@ export default function LaunchTab(props: LaunchTabProps) {
               disabled={shuffleReady || shuffling}
               className="relative z-10 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-[0.18em] transition-all duration-300"
               style={{
-                fontFamily: "'Geist', monospace",
+                fontFamily: "var(--font-label-mono)",
                 background: shuffleReady
-                  ? "rgba(228,93,53,0.1)"
+                  ? "rgba(201,151,31,0.1)"
                   : shuffling
-                  ? "rgba(255,255,255,0.04)"
-                  : "#e0e3e4",
+                  ? "var(--color-surface-container-low)"
+                  : "var(--color-on-surface)",
                 border: shuffleReady
-                  ? "1px solid rgba(228,93,53,0.35)"
-                  : "1px solid rgba(255,255,255,0.1)",
+                  ? "1px solid rgba(201,151,31,0.35)"
+                  : "1px solid var(--color-border-overlay)",
                 color: shuffleReady
-                  ? "#e45d35"
+                  ? "var(--color-theme-orange)"
                   : shuffling
-                  ? "#9a9aa5"
-                  : "#101415",
+                  ? "var(--color-outline)"
+                  : "var(--color-surface)",
                 cursor: shuffleReady || shuffling ? "default" : "pointer",
               }}
             >
@@ -512,7 +511,7 @@ export default function LaunchTab(props: LaunchTabProps) {
 
             {shuffleReady && (
               <p className="text-[9px] mt-2 text-center relative z-10"
-                style={{ fontFamily: "'Geist', monospace", color: "rgba(228,93,53,0.5)" }}>
+                style={{ fontFamily: "var(--font-label-mono)", color: "rgba(201,151,31,0.5)" }}>
                 Order saved to database
               </p>
             )}
@@ -521,26 +520,26 @@ export default function LaunchTab(props: LaunchTabProps) {
           {/* Final initialisation card */}
           <div className="rounded-2xl p-5 flex flex-col gap-4 relative overflow-hidden transition-all duration-500"
             style={{
-              background:     allReady ? "rgba(228,93,53,0.06)" : "rgba(39,43,44,0.5)",
-              border:         allReady ? "2px solid rgba(228,93,53,0.3)" : "1px solid rgba(255,255,255,0.06)",
+              background:     allReady ? "rgba(201,151,31,0.06)" : "var(--color-surface-container)",
+              border:         allReady ? "2px solid rgba(201,151,31,0.3)" : "1px solid var(--color-outline-variant)",
               backdropFilter: "blur(24px)",
             }}>
             {allReady && (
               <div className="absolute top-0 left-0 w-full h-px pointer-events-none"
-                style={{ background: "linear-gradient(90deg, transparent, rgba(228,93,53,0.6), transparent)" }} />
+                style={{ background: "linear-gradient(90deg, transparent, rgba(201,151,31,0.6), transparent)" }} />
             )}
 
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-2 h-2 rounded-full"
-                  style={{ background: "#e45d35", boxShadow: allReady ? "0 0 8px rgba(228,93,53,0.8)" : "none" }} />
+                  style={{ background: "var(--color-theme-orange)", boxShadow: allReady ? "0 0 8px rgba(201,151,31,0.8)" : "none" }} />
                 <p className="text-[10px] font-black uppercase tracking-[0.15em]"
-                  style={{ fontFamily: "'Geist', monospace", color: "#e45d35" }}>
+                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}>
                   Final Initialization
                 </p>
               </div>
               <p className="text-[11px] leading-[18px]"
-                style={{ fontFamily: "'Inter', sans-serif", color: "#9a9aa5" }}>
+                style={{ fontFamily: "var(--font-body-md)", color: "var(--color-outline)" }}>
                 {isLive
                   ? "The auction is live. Share the links below with teams and spectators."
                   : isPaused
@@ -549,7 +548,7 @@ export default function LaunchTab(props: LaunchTabProps) {
                   ? "This auction has ended. Use Re-auction to start fresh."
                   : <>
                       Executing the launch command transitions the environment to{" "}
-                      <span className="italic font-semibold" style={{ color: "#e45d35" }}>Live Mode</span>.
+                      <span className="italic font-semibold" style={{ color: "var(--color-theme-orange)" }}>Live Mode</span>.
                       Database schemas will be locked.
                     </>
                 }
@@ -561,25 +560,25 @@ export default function LaunchTab(props: LaunchTabProps) {
               disabled={launchDisabled}
               className="w-full py-6 rounded-xl font-bold italic uppercase transition-all duration-500"
               style={{
-                fontFamily:    "'Archivo Narrow', sans-serif",
+                fontFamily:    "var(--font-headline-lg)",
                 fontSize:      allReady ? "22px" : "20px",
                 letterSpacing: "0.04em",
                 background: isLive || isPaused || isCompleted
-                  ? "rgba(255,255,255,0.04)"
+                  ? "var(--color-surface-container-low)"
                   : allReady
-                  ? "#e45d35"
-                  : "repeating-linear-gradient(45deg, rgba(228,93,53,0.05), rgba(228,93,53,0.05) 10px, rgba(228,93,53,0.1) 10px, rgba(228,93,53,0.1) 20px)",
+                  ? "var(--color-theme-orange)"
+                  : "repeating-linear-gradient(45deg, rgba(201,151,31,0.05), rgba(201,151,31,0.05) 10px, rgba(201,151,31,0.1) 10px, rgba(201,151,31,0.1) 20px)",
                 border: allReady && !launchDisabled
-                  ? "1px solid rgba(228,93,53,0.6)"
-                  : "1px solid rgba(255,255,255,0.06)",
-                color:     allReady && !launchDisabled ? "#fff" : "rgba(228,93,53,0.35)",
+                  ? "1px solid rgba(201,151,31,0.6)"
+                  : "1px solid var(--color-outline-variant)",
+                color:     allReady && !launchDisabled ? "var(--color-on-primary)" : "rgba(201,151,31,0.35)",
                 cursor:    launchDisabled ? "not-allowed" : "pointer",
-                boxShadow: allReady && !launchDisabled ? "0 0 40px rgba(228,93,53,0.3)" : "none",
+                boxShadow: allReady && !launchDisabled ? "0 0 40px rgba(201,151,31,0.3)" : "none",
               }}>
               {launchLabel}
               {!allReady && !isLive && !isPaused && !isCompleted && (
                 <div className="text-[9px] font-black not-italic uppercase tracking-[0.3em] mt-1.5"
-                  style={{ fontFamily: "'Geist', monospace", color: "rgba(228,93,53,0.35)" }}>
+                  style={{ fontFamily: "var(--font-label-mono)", color: "rgba(201,151,31,0.35)" }}>
                   Lock Sequence Pending
                 </div>
               )}
@@ -593,28 +592,28 @@ export default function LaunchTab(props: LaunchTabProps) {
 
       {/* Session Summary */}
       <div className="w-full mt-6 rounded-2xl p-5 flex items-center gap-6"
-        style={{ maxWidth: "860px", background: "rgba(16,20,21,0.6)", border: "1px solid rgba(255,255,255,0.07)", backdropFilter: "blur(24px)" }}>
+        style={{ maxWidth: "860px", background: "var(--color-surface-glass)", border: "1px solid var(--color-border-overlay)", backdropFilter: "blur(24px)" }}>
         <div className="shrink-0">
           <p className="text-sm font-bold whitespace-nowrap"
-            style={{ fontFamily: "'Archivo Narrow', sans-serif", color: "#e0e3e4" }}>
+            style={{ fontFamily: "var(--font-headline-md)", color: "var(--color-on-surface)" }}>
             Session Summary
           </p>
           <span className="text-[9px] font-black uppercase tracking-[0.15em] mt-1 inline-block px-2 py-0.5 rounded-full border"
-            style={{ fontFamily: "'Geist', monospace", color: "#e45d35", background: "rgba(228,93,53,0.08)", borderColor: "rgba(228,93,53,0.25)" }}>
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", background: "rgba(201,151,31,0.08)", borderColor: "rgba(201,151,31,0.25)" }}>
             Configured
           </span>
         </div>
-        <div className="w-px self-stretch shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
+        <div className="w-px self-stretch shrink-0" style={{ background: "var(--color-outline-variant)" }} />
         <div className="flex items-center gap-0 flex-1 min-w-0">
           {sessionSummary.map((row, i) => (
             <div key={row.label} className="flex flex-col gap-1 flex-1 px-4"
-              style={{ borderRight: i < sessionSummary.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none" }}>
+              style={{ borderRight: i < sessionSummary.length - 1 ? "1px solid var(--color-outline-variant)" : "none" }}>
               <div className="flex items-center gap-1.5">
-                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#45464d" }}>{row.icon}</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "var(--color-surface-variant)" }}>{row.icon}</span>
                 <span className="text-[8px] uppercase tracking-[0.1em]"
-                  style={{ fontFamily: "'Geist', monospace", color: "#9a9aa5" }}>{row.label}</span>
+                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>{row.label}</span>
               </div>
-              <span className="text-[11px] font-black" style={{ fontFamily: "'Geist', monospace", color: "#e0e3e4" }}>
+              <span className="text-[11px] font-black" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}>
                 {row.value}
               </span>
             </div>
@@ -624,17 +623,17 @@ export default function LaunchTab(props: LaunchTabProps) {
 
       {/* ALP-01 Footer */}
       <div className="w-full mt-8 rounded-2xl p-6 flex items-start gap-5"
-        style={{ maxWidth: "860px", background: "rgba(228,93,53,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderLeft: "6px solid #e45d35", backdropFilter: "blur(24px)" }}>
+        style={{ maxWidth: "860px", background: "rgba(201,151,31,0.04)", border: "1px solid var(--color-outline-variant)", borderLeft: "6px solid var(--color-theme-orange)", backdropFilter: "blur(24px)" }}>
         <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: "rgba(228,93,53,0.12)" }}>
-          <span className="material-symbols-outlined text-[22px]" style={{ color: "#e45d35" }}>verified_user</span>
+          style={{ background: "rgba(201,151,31,0.12)" }}>
+          <span className="material-symbols-outlined text-[22px]" style={{ color: "var(--color-theme-orange)" }}>verified_user</span>
         </div>
         <div>
           <p className="text-base font-bold mb-1.5"
-            style={{ fontFamily: "'Archivo Narrow', sans-serif", color: "#e0e3e4" }}>
+            style={{ fontFamily: "var(--font-headline-md)", color: "var(--color-on-surface)" }}>
             Administrative Lock Protocol (ALP-01)
           </p>
-          <p className="text-xs leading-5" style={{ fontFamily: "'Inter', sans-serif", color: "#9a9aa5" }}>
+          <p className="text-xs leading-5" style={{ fontFamily: "var(--font-body-md)", color: "var(--color-outline)" }}>
             Upon initiation, the system enforces a strict immutable state on team rosters, base valuations,
             and tournament structures. Any data discrepancies post-launch will require a catastrophic session
             reset and hardware re-authentication. Verification is absolute.

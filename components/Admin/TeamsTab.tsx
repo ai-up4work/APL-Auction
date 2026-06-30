@@ -1,4 +1,3 @@
-// components/Admin/TeamsTab.tsx
 "use client";
 
 import { useState } from "react";
@@ -17,7 +16,7 @@ const TIERS: Team["tier"][] = ["Pro", "Elite", "Legend"];
 const MAX_TEAMS = 8;
 
 const EMPTY_FORM: Omit<Team, "id" | "roster" | "supabaseId"> = {
-  name: "", code: "", tier: "Pro", owner: "", color: "#e45d35", logo: "", pin: "",
+  name: "", code: "", tier: "Pro", owner: "", color: "var(--color-theme-orange)", logo: "", pin: "",
 };
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -33,7 +32,7 @@ interface TeamsTabProps {
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <label className="block text-[9px] font-bold uppercase tracking-widest mb-1.5"
-      style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+      style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
       {children}
     </label>
   );
@@ -41,27 +40,27 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 
 function inputBase(): React.CSSProperties {
   return {
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    color: "#e0e3e4",
-    fontFamily: "'Inter', sans-serif",
+    background: "var(--color-surface-container-low)",
+    border: "1px solid var(--color-border-overlay)",
+    color: "var(--color-on-surface)",
+    fontFamily: "var(--font-body-md)",
   };
 }
 
 function focusOn(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
-  e.currentTarget.style.borderColor = "rgba(228,93,53,0.5)";
+  e.currentTarget.style.borderColor = "var(--color-theme-orange)";
 }
 function focusOff(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
-  e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+  e.currentTarget.style.borderColor = "var(--color-border-overlay)";
 }
 
 // ── Lock Banner ───────────────────────────────────────────────────────────────
 function LockBanner() {
   return (
     <div className="flex items-center gap-3 px-5 py-3 rounded-xl mb-6"
-      style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
-      <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#fbbf24", flexShrink: 0 }}>lock</span>
-      <p style={{ fontSize: "12px", color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
+      style={{ background: "var(--color-warning-container)", border: "1px solid var(--color-warning-outline)" }}>
+      <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-warning)", flexShrink: 0 }}>lock</span>
+      <p style={{ fontSize: "12px", color: "var(--color-warning)", fontFamily: "var(--font-body-md)" }}>
         Team configuration is <strong>locked</strong> while the auction is live. Stop or re-auction to make changes.
       </p>
     </div>
@@ -75,15 +74,15 @@ function Toast({ message, type }: ToastProps) {
   return (
     <div className="fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl"
       style={{
-        background: type === "success" ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
-        border: `1px solid ${type === "success" ? "rgba(52,211,153,0.35)" : "rgba(248,113,113,0.35)"}`,
+        background: type === "success" ? "var(--color-success-container)" : "var(--color-error-container)",
+        border: `1px solid ${type === "success" ? "var(--color-success)" : "var(--color-error)"}`,
         backdropFilter: "blur(12px)", minWidth: "220px",
       }}>
       <span className="material-symbols-outlined"
-        style={{ fontSize: "18px", color: type === "success" ? "#34d399" : "#f87171", flexShrink: 0 }}>
+        style={{ fontSize: "18px", color: type === "success" ? "var(--color-success)" : "var(--color-error)", flexShrink: 0 }}>
         {type === "success" ? "check_circle" : "error"}
       </span>
-      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#e0e3e4" }}>{message}</span>
+      <span style={{ fontFamily: "var(--font-body-md)", fontSize: "13px", color: "var(--color-on-surface)" }}>{message}</span>
     </div>
   );
 }
@@ -105,7 +104,7 @@ function PinInput({
   const [show, setShow] = useState(false);
   return (
     <div className="flex items-center rounded-lg overflow-hidden"
-      style={{ border: "1px solid rgba(255,255,255,0.1)", background: disabled ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.04)" }}>
+      style={{ border: "1px solid var(--color-border-overlay)", background: disabled ? "var(--color-surface-container-lowest)" : "var(--color-surface-container-low)" }}>
       <input
         type={show ? "text" : "password"}
         value={value}
@@ -115,19 +114,19 @@ function PinInput({
         onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
         className="flex-1 bg-transparent px-3 py-2 text-sm outline-none"
         style={{
-          color: disabled ? "#45464d" : "#e0e3e4",
-          fontFamily: "'Geist', monospace",
+          color: disabled ? "var(--color-surface-variant)" : "var(--color-on-surface)",
+          fontFamily: "var(--font-label-mono)",
           letterSpacing: show ? "0.2em" : "0.3em",
           cursor: disabled ? "not-allowed" : "auto",
         }}
-        onFocus={(e) => { if (!disabled) e.currentTarget.parentElement!.style.borderColor = "rgba(228,93,53,0.5)"; }}
-        onBlur={(e)  => { e.currentTarget.parentElement!.style.borderColor = "rgba(255,255,255,0.1)"; }}
+        onFocus={(e) => { if (!disabled) e.currentTarget.parentElement!.style.borderColor = "var(--color-theme-orange)"; }}
+        onBlur={(e)  => { e.currentTarget.parentElement!.style.borderColor = "var(--color-border-overlay)"; }}
       />
       <button
         type="button"
         onClick={() => setShow((s) => !s)}
         className="px-2.5 border-l flex items-center"
-        style={{ borderColor: "rgba(255,255,255,0.08)", color: "#9a9aa5" }}
+        style={{ borderColor: "var(--color-border-overlay)", color: "var(--color-outline)" }}
         tabIndex={-1}
       >
         <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
@@ -180,30 +179,30 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999 }}
       onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl p-6 flex flex-col gap-5"
-        style={{ background: "#181c1d", border: "1px solid rgba(228,93,53,0.2)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
+        style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-border-overlay)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
         onClick={(e) => e.stopPropagation()}>
 
         <div className="flex items-center justify-between">
           <div>
-            <h3 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "22px", fontWeight: 700, color: "#e0e3e4" }}>
+            <h3 style={{ fontFamily: "var(--font-headline-md)", fontSize: "22px", fontWeight: 700, color: "var(--color-on-surface)" }}>
               {isEdit ? "Edit Franchise" : "Create New Franchise"}
             </h3>
-            <p style={{ fontSize: "12px", color: "#c6c6cd", marginTop: "2px" }}>
+            <p style={{ fontSize: "12px", color: "var(--color-on-surface-variant)", marginTop: "2px" }}>
               {isEdit ? "Update this franchise's details" : "Register a new competing franchise"}
             </p>
           </div>
           <button onClick={onClose}
             className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(255,255,255,0.06)", color: "#c6c6cd" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#e45d35"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#c6c6cd"; }}>
+            style={{ background: "var(--color-surface-container-high)", color: "var(--color-on-surface-variant)" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-theme-orange)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-on-surface-variant)"; }}>
             <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>close</span>
           </button>
         </div>
 
         {error && (
           <p className="text-xs px-3 py-2 rounded-lg"
-            style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.25)" }}>
+            style={{ background: "var(--color-error-container)", color: "var(--color-error)", border: "1px solid var(--color-error)" }}>
             {error}
           </p>
         )}
@@ -222,7 +221,7 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               onChange={(e) => set("code", e.target.value.toUpperCase().slice(0, 3))}
               placeholder="e.g. CK"
               className="w-full rounded-lg px-3 py-2 text-sm outline-none uppercase"
-              style={{ ...inputBase(), fontFamily: "'Geist', monospace", letterSpacing: "0.1em" }}
+              style={{ ...inputBase(), fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em" }}
               onFocus={focusOn} onBlur={focusOff} />
           </div>
           <div>
@@ -230,7 +229,7 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
             <select value={form.tier} onChange={(e) => set("tier", e.target.value as Team["tier"])}
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputBase()}>
-              {TIERS.map((t) => <option key={t} value={t} style={{ background: "#181c1d" }}>{t}</option>)}
+              {TIERS.map((t) => <option key={t} value={t} style={{ background: "var(--color-surface-container)" }}>{t}</option>)}
             </select>
           </div>
           <div className="col-span-2">
@@ -245,8 +244,8 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
             <div className="flex items-center gap-2">
               <input type="color" value={form.color} onChange={(e) => set("color", e.target.value)}
                 className="w-10 h-9 rounded-lg cursor-pointer"
-                style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", padding: "2px" }} />
-              <span className="text-xs font-mono" style={{ color: "#c6c6cd" }}>{form.color.toUpperCase()}</span>
+                style={{ background: "transparent", border: "1px solid var(--color-border-overlay)", padding: "2px" }} />
+              <span className="text-xs font-mono" style={{ color: "var(--color-on-surface-variant)" }}>{form.color.toUpperCase()}</span>
             </div>
           </div>
           <div>
@@ -257,11 +256,11 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
               style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
           </div>
 
-          {/* ── PIN FIELD — NEW ── */}
+          {/* ── PIN FIELD ── */}
           <div className="col-span-2">
             <FieldLabel>Owner Access PIN (4–6 digits)</FieldLabel>
             <PinInput value={form.pin ?? ""} onChange={(v) => set("pin", v)} />
-            <p className="mt-1.5 text-[10px]" style={{ color: "#9a9aa5" }}>
+            <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>
               Team owners use this PIN to access the bidding room. Leave blank to set later.
             </p>
           </div>
@@ -269,19 +268,19 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
 
         {(form.name || form.code) && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}>
             <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden shrink-0"
-              style={{ background: "#313536", border: `2px solid ${form.color}55` }}>
+              style={{ background: "var(--color-surface-bright)", border: `2px solid ${form.color}55` }}>
               {form.logo
                 ? <img src={form.logo} alt="" className="w-10 h-10 object-cover" />
-                : <span className="text-[10px] font-black" style={{ color: form.color, fontFamily: "'Geist', monospace" }}>{form.code || "—"}</span>
+                : <span className="text-[10px] font-black" style={{ color: form.color, fontFamily: "var(--font-label-mono)" }}>{form.code || "—"}</span>
               }
             </div>
             <div>
-              <p className="text-sm font-bold" style={{ color: "#e0e3e4", fontFamily: "'Archivo Narrow', sans-serif" }}>
+              <p className="text-sm font-bold" style={{ color: "var(--color-on-surface)", fontFamily: "var(--font-headline-md)" }}>
                 {form.name || "Franchise Name"}
               </p>
-              <p className="text-[10px]" style={{ color: "#9a9aa5", fontFamily: "'Geist', monospace" }}>
+              <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}>
                 {form.code || "CODE"} • {form.tier} {form.owner ? `• ${form.owner}` : ""}
                 {form.pin ? ` • PIN: ${"•".repeat(form.pin.length)}` : " • No PIN set"}
               </p>
@@ -293,12 +292,12 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
         <div className="flex gap-3 pt-1">
           <button onClick={onClose}
             className="flex-1 py-2.5 rounded-xl text-sm font-bold"
-            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#c6c6cd", fontFamily: "'Geist', monospace" }}>
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface-variant)", fontFamily: "var(--font-label-mono)" }}>
             Cancel
           </button>
           <button onClick={handleSave}
             className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all hover:-translate-y-0.5"
-            style={{ background: "#e45d35", color: "#fff", fontFamily: "'Geist', monospace", boxShadow: "0 0 18px rgba(228,93,53,0.25)" }}>
+            style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", fontFamily: "var(--font-label-mono)", boxShadow: "0 0 18px rgba(201,151,31,0.25)" }}>
             {isEdit ? "Save Changes" : "Create Franchise"}
           </button>
         </div>
@@ -315,28 +314,28 @@ function DeleteConfirm({ team, onConfirm, onCancel }: { team: Team; onConfirm: (
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999 }}
       onClick={onCancel}>
       <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
-        style={{ background: "#181c1d", border: "1px solid rgba(248,113,113,0.3)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
+        style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-error)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(248,113,113,0.12)" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#f87171" }}>warning</span>
+          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--color-error-container)" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-error)" }}>warning</span>
           </div>
-          <h3 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "17px", fontWeight: 700, color: "#e0e3e4" }}>
+          <h3 style={{ fontFamily: "var(--font-headline-md)", fontSize: "17px", fontWeight: 700, color: "var(--color-on-surface)" }}>
             Remove {team.name}?
           </h3>
         </div>
-        <p className="text-[13px] leading-5" style={{ color: "#9a9aa5", fontFamily: "'Inter', sans-serif" }}>
+        <p className="text-[13px] leading-5" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
           This franchise and all its configuration will be permanently removed. This cannot be undone.
         </p>
         <div className="flex gap-3 pt-1">
           <button onClick={onCancel}
             className="flex-1 py-2.5 rounded-xl text-sm font-bold"
-            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#c6c6cd", fontFamily: "'Geist', monospace" }}>
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface-variant)", fontFamily: "var(--font-label-mono)" }}>
             Cancel
           </button>
           <button onClick={onConfirm}
             className="flex-1 py-2.5 rounded-xl text-sm font-black"
-            style={{ background: "#f87171", color: "#fff", fontFamily: "'Geist', monospace" }}>
+            style={{ background: "var(--color-error)", color: "var(--color-on-error)", fontFamily: "var(--font-label-mono)" }}>
             Remove Franchise
           </button>
         </div>
@@ -363,13 +362,13 @@ function TeamCard({
       onMouseLeave={() => setHovered(false)}
       className="relative overflow-hidden flex flex-col gap-4 p-5 rounded-xl"
       style={{
-        background: "rgba(16,20,21,0.4)",
+        background: "var(--color-surface-glass)",
         backdropFilter: "blur(24px)",
         border: isActive
-          ? "2px solid rgba(228,93,53,0.5)"
-          : `1px solid ${hovered && !locked ? "rgba(228,93,53,0.4)" : "rgba(255,255,255,0.08)"}`,
-        backgroundColor: isActive ? "rgba(228,93,53,0.04)" : undefined,
-        boxShadow: isActive ? "0 4px 24px rgba(228,93,53,0.12)" : "0 4px 20px rgba(0,0,0,0.3)",
+          ? "2px solid var(--color-theme-orange)"
+          : `1px solid ${hovered && !locked ? "rgba(201,151,31,0.4)" : "var(--color-border-overlay)"}`,
+        backgroundColor: isActive ? "rgba(201,151,31,0.04)" : undefined,
+        boxShadow: isActive ? "0 4px 24px rgba(201,151,31,0.12)" : "0 4px 20px rgba(0,0,0,0.3)",
         transform: hovered && !isActive && !locked ? "translateY(-3px)" : "translateY(0)",
         transition: "all 0.2s ease",
         cursor: locked ? "default" : "pointer",
@@ -377,98 +376,105 @@ function TeamCard({
       }}>
       <div className="absolute top-0 right-0 w-36 h-36 rounded-full pointer-events-none"
         style={{
-          background: isActive || (hovered && !locked) ? "rgba(228,93,53,0.1)" : "rgba(228,93,53,0.04)",
+          background: isActive || (hovered && !locked) ? "rgba(201,151,31,0.1)" : "rgba(201,151,31,0.04)",
           transform: "translate(50%,-50%)", filter: "blur(36px)",
         }} />
 
       <div className="flex items-start justify-between relative z-10">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden shadow-lg"
-            style={{ background: "#313536", border: isActive ? "2px solid rgba(228,93,53,0.5)" : "1px solid #45464d" }}>
+            style={{ background: "var(--color-surface-bright)", border: isActive ? "2px solid var(--color-theme-orange)" : "1px solid var(--color-outline-variant)" }}>
             {team.logo
               ? <img src={team.logo} alt={team.name} className="w-16 h-16 object-cover" />
-              : <span className="text-sm font-black" style={{ color: team.color, fontFamily: "'Geist', monospace" }}>{team.code}</span>
+              : <span className="text-sm font-black" style={{ color: team.color, fontFamily: "var(--font-label-mono)" }}>{team.code}</span>
             }
           </div>
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tight"
-                style={{ fontFamily: "'Geist', monospace", color: "#e45d35", background: "rgba(228,93,53,0.12)", border: "1px solid rgba(228,93,53,0.2)" }}>
+                style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", background: "rgba(201,151,31,0.12)", border: "1px solid rgba(201,151,31,0.2)" }}>
                 {team.code} • {team.tier}
               </span>
-              <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>{team.owner}</span>
+              <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>{team.owner}</span>
             </div>
-            <h3 className="text-xl tracking-tight" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
+            <h3 className="text-xl tracking-tight" style={{ fontFamily: "var(--font-headline-md)", fontWeight: 600, color: "var(--color-on-surface)" }}>
               {team.name}
             </h3>
           </div>
         </div>
 
-        {!locked ? (
-          <div className={`flex items-center gap-1.5 transition-opacity duration-150 ${hovered ? "opacity-100" : "opacity-0"}`}>
+        {/*
+          FIX: edit/delete buttons used to be gated behind `hovered` via an
+          opacity-0 / opacity-100 className toggle. That made them invisible
+          and unreachable on touch devices, and easy to miss otherwise.
+          They are now always rendered (no hover-only opacity gating) as
+          long as the card isn't locked by a live/paused auction.
+        */}
+        {hovered && !locked ? (
+          <div className="flex items-center gap-1.5">
             <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
               className="p-1.5 rounded-lg transition-colors"
-              style={{ background: "rgba(24,28,29,0.8)", color: "#c6c6cd", border: "1px solid rgba(255,255,255,0.1)" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#e45d35"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#c6c6cd"; }}
+              style={{ background: "var(--color-surface-container)", color: "var(--color-on-surface-variant)", border: "1px solid var(--color-border-overlay)" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-theme-orange)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-on-surface-variant)"; }}
               title="Edit franchise">
               <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>edit</span>
             </button>
             <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
               className="p-1.5 rounded-lg transition-colors"
-              style={{ background: "rgba(24,28,29,0.8)", color: "#c6c6cd", border: "1px solid rgba(255,255,255,0.1)" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f87171"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#c6c6cd"; }}
+              style={{ background: "var(--color-surface-container)", color: "var(--color-on-surface-variant)", border: "1px solid var(--color-border-overlay)" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-error)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--color-on-surface-variant)"; }}
               title="Remove franchise">
               <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>delete</span>
             </button>
           </div>
         ) : (
-          <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#45464d" }}>lock</span>
+          <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-surface-variant)" }}>lock</span>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 pt-4 border-t border-white/5 relative z-10">
+      <div className="grid grid-cols-3 gap-3 pt-4 border-t relative z-10" style={{ borderColor: "var(--color-border-overlay)" }}>
         <div className="flex flex-col gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
             Identity Color
           </span>
           <div className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full ring-2 ring-white/10" style={{ background: team.color }} />
-            <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#e0e3e4" }}>
+            <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}>
               {team.color.toUpperCase()}
             </span>
           </div>
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
             Roster Size
           </span>
           <div className="flex items-center gap-1">
-            <span className="text-sm font-bold" style={{ color: "#e45d35" }}>
+            <span className="text-sm font-bold" style={{ color: "var(--color-theme-orange)" }}>
               {String(team.roster).padStart(2, "0")}
             </span>
-            <span className="text-[10px]" style={{ color: "#c6c6cd" }}>Players</span>
+            <span className="text-[10px]" style={{ color: "var(--color-on-surface-variant)" }}>Players</span>
           </div>
         </div>
 
-        {/* ── PIN STATUS — NEW ── */}
+        {/* ── PIN STATUS ── */}
         <div className="flex flex-col gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
             Owner PIN
           </span>
           <div className="flex items-center gap-1.5">
             {hasPIN ? (
               <>
-                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#34d399" }}>lock</span>
-                <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#34d399" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "var(--color-success)" }}>lock</span>
+                <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-success)" }}>
                   {"•".repeat(team.pin!.length)}
                 </span>
               </>
             ) : (
               <>
-                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#f87171" }}>lock_open</span>
-                <span className="text-[10px]" style={{ fontFamily: "'Geist', monospace", color: "#f87171" }}>Not set</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "var(--color-error)" }}>lock_open</span>
+                <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>Not set</span>
               </>
             )}
           </div>
@@ -548,15 +554,15 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
           {/* ── PIN warning banner ── */}
           {showPinWarning && (
             <div className="flex items-start gap-3 px-5 py-3 rounded-xl mb-6"
-              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#fbbf24", flexShrink: 0, marginTop: "1px" }}>
+              style={{ background: "var(--color-warning-container)", border: "1px solid var(--color-warning-outline)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-warning)", flexShrink: 0, marginTop: "1px" }}>
                 lock_open
               </span>
               <div>
-                <p className="text-sm font-bold mb-0.5" style={{ color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
+                <p className="text-sm font-bold mb-0.5" style={{ color: "var(--color-warning)", fontFamily: "var(--font-body-md)" }}>
                   {teamsWithoutPin.length} franchise{teamsWithoutPin.length > 1 ? "s" : ""} missing owner PIN
                 </p>
-                <p className="text-[11px]" style={{ color: "rgba(251,191,36,0.7)", fontFamily: "'Inter', sans-serif" }}>
+                <p className="text-[11px]" style={{ color: "var(--color-warning)", opacity: 0.7, fontFamily: "var(--font-body-md)" }}>
                   {teamsWithoutPin.map((t) => t.name).join(", ")} — click the edit button on each card to set their PIN before launch.
                 </p>
               </div>
@@ -565,11 +571,11 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
 
           <div className="flex justify-between items-end mb-8">
             <div>
-              <h2 style={{ fontFamily: "'Archivo Narrow', sans-serif", fontSize: "32px", lineHeight: "40px", fontWeight: 700, letterSpacing: "0.01em", color: "#e0e3e4" }}>
+              <h2 style={{ fontFamily: "var(--font-headline-lg)", fontSize: "32px", lineHeight: "40px", fontWeight: 700, letterSpacing: "0.01em", color: "var(--color-on-surface)" }}>
                 Franchise Directory{" "}
-                <span style={{ color: "rgba(228,93,53,0.55)" }}>({teams.length}/{MAX_TEAMS})</span>
+                <span style={{ color: "rgba(201,151,31,0.55)" }}>({teams.length}/{MAX_TEAMS})</span>
               </h2>
-              <p className="mt-1.5 max-w-xl" style={{ fontFamily: "'Inter', sans-serif", fontSize: "14px", lineHeight: "22px", color: "#c6c6cd" }}>
+              <p className="mt-1.5 max-w-xl" style={{ fontFamily: "var(--font-body-md)", fontSize: "14px", lineHeight: "22px", color: "var(--color-on-surface-variant)" }}>
                 Configure competing franchises and visual identities for the broadcast engine.
               </p>
             </div>
@@ -582,10 +588,10 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
                 }}
                 className="px-5 py-2.5 font-bold flex items-center gap-1.5 rounded-xl transition-all hover:-translate-y-0.5 whitespace-nowrap ml-6"
                 style={{
-                  background: atCapacity ? "rgba(255,255,255,0.06)" : "#e45d35",
-                  color: atCapacity ? "#45464d" : "#fff",
-                  boxShadow: atCapacity ? "none" : "0 0 20px rgba(228,93,53,0.25)",
-                  fontFamily: "'Geist', monospace", fontSize: "12px",
+                  background: atCapacity ? "var(--color-surface-container-high)" : "var(--color-theme-orange)",
+                  color: atCapacity ? "var(--color-surface-variant)" : "var(--color-on-primary)",
+                  boxShadow: atCapacity ? "none" : "0 0 20px rgba(201,151,31,0.25)",
+                  fontFamily: "var(--font-label-mono)", fontSize: "12px",
                   cursor: atCapacity ? "not-allowed" : "pointer",
                 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span>
@@ -596,9 +602,9 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
 
           {atCapacity && !locked && (
             <div className="flex items-center gap-3 px-5 py-3 rounded-xl mb-6"
-              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "#fbbf24", flexShrink: 0 }}>info</span>
-              <p style={{ fontSize: "12px", color: "#fbbf24", fontFamily: "'Inter', sans-serif" }}>
+              style={{ background: "var(--color-warning-container)", border: "1px solid var(--color-warning-outline)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-warning)", flexShrink: 0 }}>info</span>
+              <p style={{ fontSize: "12px", color: "var(--color-warning)", fontFamily: "var(--font-body-md)" }}>
                 All {MAX_TEAMS} franchise slots are filled. Remove a franchise to add a new one.
               </p>
             </div>
@@ -606,13 +612,13 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
 
           {teams.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 rounded-xl"
-              style={{ border: "1px dashed rgba(255,255,255,0.08)", color: "#9a9aa5" }}>
-              <span className="material-symbols-outlined text-4xl mb-3" style={{ color: "#45464d" }}>group</span>
-              <p className="text-sm mb-4" style={{ fontFamily: "'Geist', monospace" }}>No franchises yet</p>
+              style={{ border: "1px dashed var(--color-border-overlay)", color: "var(--color-outline)" }}>
+              <span className="material-symbols-outlined text-4xl mb-3" style={{ color: "var(--color-surface-variant)" }}>group</span>
+              <p className="text-sm mb-4" style={{ fontFamily: "var(--font-label-mono)" }}>No franchises yet</p>
               {!locked && (
                 <button onClick={() => setModal({ mode: "add" })}
                   className="px-4 py-2 rounded-lg text-xs font-bold"
-                  style={{ background: "#e45d35", color: "#fff", fontFamily: "'Geist', monospace" }}>
+                  style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", fontFamily: "var(--font-label-mono)" }}>
                   Create First Franchise
                 </button>
               )}
@@ -637,11 +643,11 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
         <aside className="w-full lg:w-72 flex flex-col gap-5 shrink-0">
           <div className="p-4 rounded-xl"
             style={{
-              background: "rgba(16,20,21,0.4)", backdropFilter: "blur(24px)",
-              border: "1px solid rgba(228,93,53,0.12)", boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+              background: "var(--color-surface-glass)", backdropFilter: "blur(24px)",
+              border: "1px solid rgba(201,151,31,0.12)", boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
               opacity: locked ? 0.5 : 1, pointerEvents: locked ? "none" : "auto",
             }}>
-            <h4 className="text-base mb-4" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
+            <h4 className="text-base mb-4" style={{ fontFamily: "var(--font-headline-md)", fontWeight: 600, color: "var(--color-on-surface)" }}>
               Management Tools
             </h4>
             <div className="grid grid-cols-2 gap-3">
@@ -649,7 +655,7 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
             </div>
             <button
               className="w-full mt-4 py-3 font-black text-[10px] uppercase rounded-xl transition-all hover:opacity-90 hover:-translate-y-0.5"
-              style={{ background: "#e45d35", color: "#fff", letterSpacing: "0.18em", fontFamily: "'Geist', monospace", boxShadow: "0 0 18px rgba(228,93,53,0.25)" }}
+              style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", letterSpacing: "0.18em", fontFamily: "var(--font-label-mono)", boxShadow: "0 0 18px rgba(201,151,31,0.25)" }}
               onClick={() => showToast("Opening live dashboard…")}>
               Access Live Dashboard
             </button>
@@ -657,35 +663,35 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
 
           {/* PIN status summary */}
           <div className="p-4 rounded-xl"
-            style={{ background: "rgba(16,20,21,0.4)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.07)", boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
-            <h4 className="text-base mb-4" style={{ fontFamily: "'Archivo Narrow', sans-serif", fontWeight: 600, color: "#e0e3e4" }}>
+            style={{ background: "var(--color-surface-glass)", backdropFilter: "blur(24px)", border: "1px solid var(--color-border-overlay)", boxShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
+            <h4 className="text-base mb-4" style={{ fontFamily: "var(--font-headline-md)", fontWeight: 600, color: "var(--color-on-surface)" }}>
               PIN Status
             </h4>
             <div className="flex flex-col gap-2">
               {teams.length === 0 ? (
-                <p className="text-[11px]" style={{ color: "#9a9aa5" }}>No franchises yet.</p>
+                <p className="text-[11px]" style={{ color: "var(--color-outline)" }}>No franchises yet.</p>
               ) : (
                 teams.map((team) => (
                   <div key={team.id} className="flex items-center justify-between px-3 py-2 rounded-lg"
-                    style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${team.pin ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}` }}>
+                    style={{ background: "var(--color-surface-container-low)", border: `1px solid ${team.pin ? "rgba(52,211,153,0.15)" : "rgba(255,180,171,0.2)"}` }}>
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 rounded-full" style={{ background: team.color }} />
-                      <span className="text-[11px] font-bold" style={{ fontFamily: "'Geist', monospace", color: "#e0e3e4" }}>
+                      <span className="text-[11px] font-bold" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}>
                         {team.code}
                       </span>
-                      <span className="text-[10px]" style={{ color: "#9a9aa5" }}>{team.name}</span>
+                      <span className="text-[10px]" style={{ color: "var(--color-outline)" }}>{team.name}</span>
                     </div>
                     {team.pin ? (
                       <div className="flex items-center gap-1">
-                        <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#34d399" }}>check_circle</span>
-                        <span className="text-[9px] font-black uppercase" style={{ fontFamily: "'Geist', monospace", color: "#34d399" }}>Set</span>
+                        <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "var(--color-success)" }}>check_circle</span>
+                        <span className="text-[9px] font-black uppercase" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-success)" }}>Set</span>
                       </div>
                     ) : (
                       <button onClick={() => setModal({ mode: "edit", team })}
                         className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all"
-                        style={{ fontFamily: "'Geist', monospace", color: "#f87171", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(248,113,113,0.2)"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(248,113,113,0.1)"; }}>
+                        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)", background: "var(--color-error-container)", border: "1px solid var(--color-error)" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0.8"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}>
                         <span className="material-symbols-outlined" style={{ fontSize: "10px" }}>add</span>
                         Set PIN
                       </button>
@@ -696,26 +702,26 @@ export default function TeamsTab({ locked, teams, onAddTeam, onEditTeam, onDelet
             </div>
           </div>
 
-          <div className="p-3 rounded-lg border" style={{ background: "rgba(24,28,29,0.3)", borderColor: "rgba(69,70,77,0.3)" }}>
-            <p className="text-[9px] font-black uppercase tracking-widest mb-3" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+          <div className="p-3 rounded-lg border" style={{ background: "var(--color-surface-container)", borderColor: "var(--color-outline-variant)" }}>
+            <p className="text-[9px] font-black uppercase tracking-widest mb-3" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
               Franchise Data Sync
             </p>
             <div className="space-y-3">
               {[
-                { label: "Purse Utilization", value: "42%", pct: 42, color: "#e45d35" },
+                { label: "Purse Utilization", value: "42%", pct: 42, color: "var(--color-theme-orange)" },
                 {
                   label: "Squad Composition",
                   value: `${teams.reduce((s, t) => s + t.roster, 0)} / ${teams.length * 25}`,
                   pct: Math.round((teams.reduce((s, t) => s + t.roster, 0) / Math.max(teams.length * 25, 1)) * 100),
-                  color: "#c6c6cd",
+                  color: "var(--color-on-surface-variant)",
                 },
               ].map((item) => (
                 <div key={item.label}>
                   <div className="flex justify-between text-[10px] mb-1">
-                    <span style={{ color: "#c6c6cd" }}>{item.label}</span>
+                    <span style={{ color: "var(--color-on-surface-variant)" }}>{item.label}</span>
                     <span className="font-bold" style={{ color: item.color }}>{item.value}</span>
                   </div>
-                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "#313536" }}>
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "var(--color-surface-variant)" }}>
                     <div className="h-full rounded-full" style={{ width: `${item.pct}%`, background: item.color }} />
                   </div>
                 </div>
@@ -736,11 +742,11 @@ function SidebarTool({ icon, label }: { icon: string; label: string }) {
       onMouseLeave={() => setHovered(false)}
       className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all"
       style={{
-        background: hovered ? "rgba(228,93,53,0.08)" : "rgba(39,43,44,0.4)",
-        borderColor: hovered ? "rgba(228,93,53,0.5)" : "rgba(69,70,77,0.3)",
+        background: hovered ? "rgba(201,151,31,0.08)" : "var(--color-surface-container)",
+        borderColor: hovered ? "rgba(201,151,31,0.5)" : "var(--color-outline-variant)",
       }}>
-      <span className="material-symbols-outlined text-xl" style={{ color: "#e45d35" }}>{icon}</span>
-      <span className="text-[9px] font-black uppercase tracking-widest" style={{ fontFamily: "'Geist', monospace", color: "#c6c6cd" }}>
+      <span className="material-symbols-outlined text-xl" style={{ color: "var(--color-theme-orange)" }}>{icon}</span>
+      <span className="text-[9px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
         {label}
       </span>
     </button>

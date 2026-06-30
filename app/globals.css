@@ -8,7 +8,7 @@
   --color-on-error-container: #ffdad6;
 
   /* Surfaces — deep midnight navy from the logo's night sky */
-  --color-surface-variant: #2a2f3d;
+  --color-surface-variant: #ffffff;
   --color-surface: #0d1117;
   --color-surface-container-lowest: #07090d;
   --color-primary-fixed: #d9e0f5;
@@ -65,6 +65,11 @@
   --color-on-tertiary-fixed: #001a42;
   --color-on-tertiary-container: #385283;
   --color-on-secondary-fixed: #2e2200;
+
+  /* Warning — amber, used for lock banners, PIN warnings, budget alerts */
+  --color-warning: #fbbf24;
+  --color-warning-container: rgba(251, 191, 36, 0.07);
+  --color-warning-outline: rgba(251, 191, 36, 0.25);
 
   --spacing-container-max: 1440px;
   --spacing-margin-desktop: 40px;
