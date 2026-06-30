@@ -1,21 +1,13 @@
 // app/owner/[auctionId]/[teamCode]/squad/page.tsx
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import BottomNavBar from "@/components/BottomNavBar";
 import { supabase } from "@/lib/supabse";
-import {
-  subscribeToLot,
-  subscribeToBids,
-  subscribeToTeamPurses,
-  loadLiveState,
-  loadTeamPurses,
-  type AuctionLot,
-  type BidEntry,
-} from "@/lib/auctionLiveDb";
+import { useOwner } from "@/context/OwnerContext";
 
 // Matches --color-theme-orange in globals.css — fallback accent when a team
 // has no color of its own.
@@ -97,6 +89,15 @@ export default function SquadPage() {
   const auctionId = params?.auctionId as string;
   const teamCode  = (params?.teamCode as string)?.toUpperCase();
 
+  // Single source of truth for auction/team/rules + their realtime
+  // subscriptions, provided by the route layout. Do NOT subscribe to
+  // `subscribeToTeamPurses` again here — Supabase dedupes channels by
+  // topic string (`purses:${auctionId}`), and OwnerProvider already holds
+  // that subscription open, so a second call throws "cannot add
+  // postgres_changes callbacks ... after subscribe()". Instead we just
+  // mirror the matching team's purse/roster from context.
+  const { team: ownerTeam } = useOwner();
+
   const [team,        setTeam]        = useState<TeamRow | null>(null);
   const [purse,       setPurse]       = useState<TeamPurse>({ remaining: 0, roster: 0 });
   const [soldPlayers, setSoldPlayers] = useState<SoldPlayer[]>([]);
@@ -140,13 +141,16 @@ export default function SquadPage() {
           .maybeSingle();
         if (rulesRow?.team_size) setTotalSlots(rulesRow.team_size);
 
-        // 3. Fetch all players sold to this team
+        // 3. Fetch all players sold to this team.
+        // NOTE: closeLotSold() (lib/auctionLiveDb.ts) writes sold_to_team_id
+        // and sold_price on a sale but never sets players.status — so we
+        // must NOT filter on status here. sold_to_team_id is the reliable
+        // signal that a player belongs to this team.
         const { data: playerRows } = await supabase
           .from("players")
           .select("id, name, role, origin, price, img, country, updated_at, sold_price")
           .eq("auction_id", auctionId)
           .eq("sold_to_team_id", teamRow.id)
-          .eq("status", "sold")
           .order("updated_at", { ascending: false });
 
 
@@ -171,18 +175,15 @@ export default function SquadPage() {
     boot();
   }, [auctionId, teamCode]);
 
-  // ── realtime: purse changes ───────────────────────────────────────────────
+  // ── purse/roster sync from OwnerContext ───────────────────────────────────
+  // OwnerProvider owns the realtime subscription for this; we just mirror its
+  // value here once it resolves to the matching team (matched by code, since
+  // the local `team` row may resolve on a slightly different tick).
   useEffect(() => {
-    if (!auctionId || !team) return;
-
-    const sub = subscribeToTeamPurses(auctionId, (tId, remaining, roster) => {
-      if (tId === team.id) {
-        setPurse({ remaining, roster });
-      }
-    });
-
-    return () => { supabase.removeChannel(sub); };
-  }, [auctionId, team]);
+    if (ownerTeam && ownerTeam.code?.toUpperCase() === teamCode) {
+      setPurse({ remaining: ownerTeam.remainingPurse, roster: ownerTeam.roster });
+    }
+  }, [ownerTeam, teamCode]);
 
   // ── realtime: new sold players ────────────────────────────────────────────
   // We listen to lot closures; when a lot is sold to our team, fetch the
@@ -381,21 +382,31 @@ export default function SquadPage() {
 
           {/* ── Player Cards ── */}
           <div className="flex flex-col gap-2">
-            {soldPlayers.map(({ id, name, role, origin, price, img }) => (
+            {soldPlayers.map(({ id, name, role, origin, price, img, country }) => (
               <div key={id} className="bg-[rgba(16,20,21,0.6)] border border-white/[0.07] rounded-xl overflow-hidden flex h-[108px]">
-                {/* Photo */}
-                <div className="w-full h-full relative shrink-0 overflow-hidden p-0">
+                {/* Photo — fixed-width thumbnail, NOT w-full (that bug was
+                   collapsing the info column to zero width). */}
+                <div className="w-[108px] h-full relative shrink-0 overflow-hidden bg-[#1e2324]">
                   {img ? (
                     <Image src={img} alt={name} fill
-                      className="object-cover w-full h-full"
+                      className="object-cover"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <div className="w-full h-full bg-[#1e2324] flex items-center justify-center">
-                      <span className="material-symbols-outlined text-[#7a7d88] text-[32px]">person</span>
+                    <div className="w-full h-full flex items-center justify-center">
+                      <span className="material-symbols-outlined text-[#7a7d88] text-[60px]">person</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent to-[#161b1c]" style={{ backgroundImage: "linear-gradient(to right, transparent 40%, #161b1c 100%)" }} />
+                  {/* subtle fade into the card so the photo blends with the info column */}
+                  <div
+                    className="absolute inset-0"
+                    style={{ backgroundImage: "linear-gradient(to right, transparent 55%, rgba(16,20,21,0.85) 100%)" }}
+                  />
+                  {country && (
+                    <span className="absolute bottom-1.5 left-1.5 text-[8px] font-bold tracking-[0.08em] uppercase text-[#dae2fd] bg-black/55 backdrop-blur-sm rounded px-1.5 py-0.5">
+                      {country}
+                    </span>
+                  )}
                 </div>
 
                 {/* Info */}
@@ -409,7 +420,7 @@ export default function SquadPage() {
                         {role}{origin ? ` · ${origin}` : ""}
                       </div>
                     </div>
-                    <span className="material-symbols-outlined text-[18px] text-[#3d4047] shrink-0">verified</span>
+                    <span className="material-symbols-outlined text-[18px] text-theme-orange shrink-0">verified</span>
                   </div>
 
                   <div className="flex items-center justify-between">

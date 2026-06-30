@@ -203,6 +203,7 @@ function AuctionAdminContent() {
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
         .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
         .font-mono-geist { font-family: 'Geist Mono', monospace; }

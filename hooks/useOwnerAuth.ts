@@ -17,7 +17,7 @@ interface AuthPayload {
 }
 
 /** Session is valid for 12 hours */
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 function sessionKey(auctionId: string, teamCode: string) {
   return `owner_auth_${auctionId}_${teamCode.toLowerCase()}`;

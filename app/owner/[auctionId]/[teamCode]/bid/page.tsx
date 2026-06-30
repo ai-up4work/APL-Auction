@@ -1,26 +1,24 @@
+// app/owner/[auctionId]/[teamCode]/(protected)/bid/page.tsx
 "use client";
 
 import React, { use, useEffect, useRef, useState, useCallback } from "react";
-import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import BottomNavBar from "@/components/BottomNavBar";
 import { ShotClockProvider, useShotClock } from "@/context/ShotClockContext";
+import { useOwner } from "@/context/OwnerContext";
 import {
   AuctionStatusOverlay,
   type AuctionStatus,
 } from "@/components/OwnerAuctionStatusOverlay";
 import {
   loadLiveState,
-  loadTeamPurses,
   subscribeToLot,
   subscribeToBids,
-  subscribeToTeamPurses,
   placeBid,
   getNextBidAmount,
   type AuctionLot,
   type BidEntry,
 } from "@/lib/auctionLiveDb";
 import { loadAuction } from "@/lib/auctionDb";
-import type { AuctionRules } from "@/types/auction";
 import Image from "next/image";
 
 // Matches --color-theme-orange in globals.css. Used as the fallback accent
@@ -113,14 +111,6 @@ const GLOBAL_STYLES = `
   .f-num      { font-family: 'Archivo Narrow', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
 `;
 
-interface TeamInfo {
-  id:    string;
-  name:  string;
-  code:  string;
-  color: string;
-  logo:  string;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BID ROOM
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,16 +121,16 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
   const { shotClock, isLocked, resetClock, freezeClock, pauseClock } = useShotClock();
 
-  const [team,          setTeam]          = useState<TeamInfo | null>(null);
+  // Team / rules / purse / roster / auction status all come from the shared
+  // OwnerProvider (set up in the (protected) layout) — no duplicate fetch or
+  // duplicate realtime subscription here. teamLogos is derived locally from
+  // a one-off Supabase read since OwnerContext only tracks the current team.
+  const { auction, team, rules, loading: ownerLoading } = useOwner();
+
   const [teamLogos,     setTeamLogos]     = useState<Record<string, string>>({});
-  const [rules,         setRules]         = useState<AuctionRules | null>(null);
   const [currentLot,    setCurrentLot]    = useState<AuctionLot | null>(null);
   const [bidHistory,    setBidHistory]    = useState<BidEntry[]>([]);
   const [completedLots, setCompletedLots] = useState<AuctionLot[]>([]);
-  const [purse,         setPurse]         = useState(0);
-  const [roster,        setRoster]        = useState(0);
-  const [totalPoints,   setTotalPoints]   = useState(50000);
-  const [teamSize,      setTeamSize]      = useState(16);
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>("live");
 
   const [isSold,     setIsSold]     = useState(false);
@@ -150,9 +140,15 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   const [bidSuccess, setBidSuccess] = useState(false);
   const [loading,    setLoading]    = useState(true);
 
+  const purse       = team?.remainingPurse ?? 0;
+  const roster      = team?.roster ?? 0;
+  const totalPoints = rules?.totalPoints ?? 50000;
+  const teamSize    = rules?.teamSize ?? 16;
+
   const currentLotRef    = useRef(currentLot);
   const rulesRef         = useRef(rules);
   const teamRef          = useRef(team);
+  const purseRef         = useRef(purse);
   const isLockedRef      = useRef(isLocked);
   const isPlacingRef     = useRef(isPlacing);
   const auctionStatusRef = useRef(auctionStatus);
@@ -160,41 +156,25 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   useEffect(() => { currentLotRef.current    = currentLot;    }, [currentLot]);
   useEffect(() => { rulesRef.current         = rules;         }, [rules]);
   useEffect(() => { teamRef.current          = team;          }, [team]);
+  useEffect(() => { purseRef.current         = purse;         }, [purse]);
   useEffect(() => { isLockedRef.current      = isLocked;      }, [isLocked]);
   useEffect(() => { isPlacingRef.current     = isPlacing;     }, [isPlacing]);
   useEffect(() => { auctionStatusRef.current = auctionStatus; }, [auctionStatus]);
 
-  // ── Load initial state ────────────────────────────────────────────────────
+  // Keep local auctionStatus in sync with the context once it's loaded.
+  useEffect(() => {
+    if (auction?.status) setAuctionStatus(auction.status as AuctionStatus);
+  }, [auction?.status]);
+
+  // ── Load lot/bid state + team logos (lot/bid data is NOT in OwnerContext) ──
   useEffect(() => {
     async function init() {
-      const [liveData, auctionState, purses] = await Promise.all([
+      const [liveData, auctionState] = await Promise.all([
         loadLiveState(auctionId),
         loadAuction(auctionId),
-        loadTeamPurses(auctionId),
       ]);
 
       if (auctionState) {
-        setRules(auctionState.rules);
-        setTotalPoints(auctionState.rules.totalPoints);
-        setTeamSize(auctionState.rules.teamSize);
-        setAuctionStatus(auctionState.status as AuctionStatus);
-
-        const found = auctionState.teams.find(
-          (t) => t.code.toLowerCase() === teamCode.toLowerCase()
-        );
-        if (found) {
-          setTeam({
-            id:    found.supabaseId ?? "",
-            name:  found.name,
-            code:  found.code,
-            color: found.color,
-            logo:  (found as any).logo ?? "",
-          });
-          const myPurse = found.supabaseId ? purses[found.supabaseId] : null;
-          setPurse(myPurse?.remaining ?? auctionState.rules.totalPoints);
-          setRoster(myPurse?.roster ?? found.roster ?? 0);
-        }
-
         const logoMap: Record<string, string> = {};
         auctionState.teams.forEach((t) => {
           const logo = (t as any).logo;
@@ -226,7 +206,10 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     init().catch(console.error);
   }, [auctionId, teamCode, resetClock, freezeClock, pauseClock]);
 
-  // ── Realtime subscriptions ────────────────────────────────────────────────
+  // ── Realtime subscriptions: lot + bids only. Purse/roster/status realtime
+  // is already handled inside OwnerProvider — subscribing again here would
+  // hit the same "cannot add postgres_changes callbacks after subscribe()"
+  // channel-topic collision. ─────────────────────────────────────────────────
   useEffect(() => {
     const lotSub = subscribeToLot(auctionId, (lot) => {
       const cur = currentLotRef.current;
@@ -245,13 +228,6 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       }
 
       if (lot.status === "pending") {
-        // FIX: this branch must not assume the client already saw a
-        // "shuffling" event for this lot (mobile tabs can be backgrounded
-        // and miss that brief intermediate status). Always clear the
-        // sold/unsold stamp here — a "pending" lot should never show one,
-        // regardless of what the client previously rendered. bidHistory is
-        // only cleared when the lot actually changed, so a redundant
-        // re-fire of "pending" for the same lot won't wipe valid bids.
         const isNewLot = cur?.id !== lot.id;
         setCurrentLot(lot);
         if (isNewLot) {
@@ -296,17 +272,9 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       }
     });
 
-    const purseSub = subscribeToTeamPurses(auctionId, (teamId, remaining, newRoster) => {
-      if (teamId === teamRef.current?.id) {
-        setPurse(remaining);
-        setRoster(newRoster);
-      }
-    });
-
     return () => {
       lotSub.unsubscribe();
       bidSub.unsubscribe();
-      purseSub.unsubscribe();
     };
   }, [auctionId, resetClock, freezeClock, pauseClock]);
 
@@ -336,7 +304,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       return;
     }
     const amount = getNextBidAmount(currentLotRef.current.currentBid, rulesRef.current?.tiers ?? []);
-    if (amount > purse) {
+    if (amount > purseRef.current) {
       setBidError("Insufficient purse for this bid.");
       setTimeout(() => setBidError(""), 3000);
       return;
@@ -354,7 +322,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     } finally {
       setIsPlacing(false);
     }
-  }, [auctionId, purse, resetClock]);
+  }, [auctionId, resetClock]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const nextBid     = currentLot ? getNextBidAmount(currentLot.currentBid, rules?.tiers ?? []) : 0;
@@ -396,11 +364,11 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     : isLocked          ? "timer_off"
     : "gavel";
 
-  if (loading) {
+  if (loading || ownerLoading) {
     return (
       <div className="h-dvh bg-background flex items-center justify-center">
         <div className="text-center">
-          <span className="ms ms-fill text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
+          <div className="w-10 h-10 border-[3px] border-theme-orange/15 border-t-theme-orange rounded-full animate-spin mx-auto mb-4" />
           <p className="f-label text-[#5a6a74] text-[10px]">Loading Auction Room</p>
         </div>
       </div>
@@ -915,9 +883,9 @@ export default function OwnerPage({
 }) {
   const { auctionId, teamCode } = use(params);
   return (
-    <MobileOnlyWrapper>
+    <>
       <style>{GLOBAL_STYLES}</style>
       <BidRoomWithClock auctionId={auctionId} teamCode={teamCode} />
-    </MobileOnlyWrapper>
+    </>
   );
 }

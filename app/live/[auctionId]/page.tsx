@@ -1092,7 +1092,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         <button
                           onClick={handleMarkUnsold}
                           disabled={isBusy}
-                          className="flex items-center justify-center gap-1 bg-surface-variant text-on-surface-variant py-3 rounded-lg font-mono-geist text-[10px] uppercase tracking-[0.2em] hover:bg-white/10 transition-all active:scale-95 border border-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="flex items-center justify-center gap-1 bg-surface-bright text-on-surface-variant py-3 rounded-lg font-mono-geist text-[10px] uppercase tracking-[0.2em] hover:bg-white/10 transition-all active:scale-95 border border-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <span className="material-symbols-outlined text-sm">close</span>
                           Mark Unsold
@@ -1135,7 +1135,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           style={{ background: "linear-gradient(135deg,#A87815,#E8C468)", color: "#1a1304" }}
                         >
                           <span className="material-symbols-outlined text-sm">play_arrow</span>
-                          Start First Player
+                          {playerQueue.length === 0 ? "No more players" : "Start Next Player"}
                         </button>
                       ) : (
                         <button

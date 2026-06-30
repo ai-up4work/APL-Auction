@@ -29,6 +29,7 @@ export interface OwnerAuction {
   id:     string;
   name:   string;
   status: "setup" | "live" | "paused" | "completed";
+  logo:   string | null;
 }
 
 export interface OwnerRules {
@@ -61,6 +62,13 @@ export function useOwner(): OwnerContextValue {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER
+//
+// This is the SINGLE source of truth for auction/team/rules data and its
+// realtime subscriptions for everything under the owner (protected) route
+// tree. Pages should consume useOwner() rather than re-fetching/re-subscribing
+// on their own — duplicate subscriptions on the same channel topic
+// (`owner-auction-${auctionId}`) throw "cannot add postgres_changes callbacks
+// ... after subscribe()" since Supabase dedupes channels by topic string.
 // ─────────────────────────────────────────────────────────────────────────────
 export function OwnerProvider({
   children,
@@ -101,7 +109,7 @@ export function OwnerProvider({
             .maybeSingle(),
           supabase
             .from("session_config")
-            .select("timer_seconds")
+            .select("timer_seconds, auction_logo")
             .eq("auction_id", auctionId)
             .maybeSingle(),
         ]);
@@ -111,6 +119,7 @@ export function OwnerProvider({
           id:     auc.id,
           name:   auc.name,
           status: auc.status,
+          logo:   sc?.auction_logo ?? null,
         });
       }
 
@@ -143,9 +152,13 @@ export function OwnerProvider({
   }, [auctionId, teamCode]);
 
   // ── realtime: auction status ───────────────────────────────────────────────
+  // Unique channel suffix ("-context") so this never collides with any other
+  // component subscribing to auction status changes for the same auctionId.
   useEffect(() => {
+    if (!auctionId) return;
+
     const sub = supabase
-      .channel(`owner-auction-${auctionId}`)
+      .channel(`owner-auction-${auctionId}-context`)
       .on(
         "postgres_changes",
         {

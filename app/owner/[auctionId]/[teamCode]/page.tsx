@@ -1,36 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 import { useRouter, useParams } from "next/navigation";
-import { supabase } from "@/lib/supabse";
-import { subscribeToTeamPurses } from "@/lib/auctionLiveDb";
+import { useOwner } from "@/context/OwnerContext";
 import BottomNavBar from "@/components/BottomNavBar";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────────────────────
-interface AuctionData {
-  id:     string;
-  name:   string;
-  logo:   string | null;   // ← NEW
-  status: "setup" | "live" | "paused" | "completed";
-}
-
-interface TeamData {
-  id:             string;
-  name:           string;
-  code:           string;
-  color:          string;
-  logo:           string | null;
-  remainingPurse: number;
-  roster:         number;
-}
-
-interface RulesData {
-  teamSize:     number;
-  totalPoints:  number;
-  timerSeconds: number;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
@@ -218,81 +191,17 @@ export default function OwnerIndexPage() {
   const auctionId = params.auctionId as string;
   const teamCode  = params.teamCode  as string;
 
-  const [auction, setAuction] = useState<AuctionData | null>(null);
-  const [team,    setTeam]    = useState<TeamData | null>(null);
-  const [rules,   setRules]   = useState<RulesData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const teamIdRef = useRef<string | null>(null);
-
-  // ── initial fetch ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!auctionId || !teamCode) return;
-
-    async function load() {
-    const [{ data: auc }, { data: tm }, { data: r }, { data: sc }] =
-    await Promise.all([
-        supabase.from("auctions").select("id, name, status").eq("id", auctionId).single(),
-        supabase.from("teams").select("id, name, code, color, logo, remaining_purse, roster")
-        .eq("auction_id", auctionId).ilike("code", teamCode).single(),
-        supabase.from("rules").select("team_size, total_points, tiers").eq("auction_id", auctionId).maybeSingle(),
-        supabase.from("session_config").select("timer_seconds, auction_logo").eq("auction_id", auctionId).maybeSingle(),
-    ]);
-
-    if (auc) setAuction({ id: auc.id, name: auc.name, status: auc.status, logo: sc?.auction_logo ?? null });
-
-      if (tm) {
-        teamIdRef.current = tm.id;
-        setTeam({
-          id: tm.id, name: tm.name, code: tm.code, color: tm.color,
-          logo: tm.logo ?? null, remainingPurse: tm.remaining_purse ?? 0, roster: tm.roster ?? 0,
-        });
-      }
-
-      if (r) {
-        setRules({
-          teamSize:     r.team_size    ?? 16,
-          totalPoints:  r.total_points ?? 50000,
-          timerSeconds: sc?.timer_seconds ?? 15,
-        });
-      }
-
-      setLoading(false);
-    }
-
-    load().catch(console.error);
-  }, [auctionId, teamCode]);
-
-  // ── realtime: auction status ───────────────────────────────────────────────
-  useEffect(() => {
-    if (!auctionId) return;
-    const sub = supabase
-      .channel(`owner-auction-${auctionId}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "auctions", filter: `id=eq.${auctionId}` },
-        (payload) => setAuction((prev) => prev ? { ...prev, status: payload.new.status } : prev)
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(sub); };
-  }, [auctionId]);
-
-  // ── realtime: purse / roster ───────────────────────────────────────────────
-  useEffect(() => {
-    if (!auctionId) return;
-    const sub = subscribeToTeamPurses(auctionId, (teamId, remaining, roster) => {
-      if (teamId === teamIdRef.current) {
-        setTeam((prev) => prev ? { ...prev, remainingPurse: remaining, roster } : prev);
-      }
-    });
-    return () => { supabase.removeChannel(sub); };
-  }, [auctionId]);
+  // Single source of truth — provided by OwnerProvider in the (protected)
+  // layout. No separate fetch/subscribe logic here, which avoids the
+  // duplicate-channel-topic collision that happens if two components both
+  // subscribe to `owner-auction-${auctionId}` independently.
+  const { auction, team, rules, loading } = useOwner();
 
   // ── derived ────────────────────────────────────────────────────────────────
   const status      = auction?.status ?? "setup";
   const isLive      = status === "live";
   const isPaused    = status === "paused";
   const isEnded     = status === "completed";
-  // Falls back to the globals.css theme-orange variable instead of a
-  // hardcoded hex, so the franchise accent re-themes along with the rest
-  // of the app whenever a team has no custom color of its own.
   const accent      = team?.color || "var(--color-theme-orange)";
   const purse       = team?.remainingPurse ?? 0;
   const roster      = team?.roster         ?? 0;

@@ -570,7 +570,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     return (
       <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
         <div className="text-center">
-          <span className="ms text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
+          <div className="w-10 h-10 border-[3px] border-theme-orange/15 border-t-theme-orange rounded-full animate-spin mx-auto mb-4" />
           <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading broadcast…</p>
         </div>
       </div>
