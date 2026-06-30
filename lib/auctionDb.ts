@@ -139,6 +139,7 @@ export async function loadAuction(auctionId: string): Promise<AuctionState | nul
         auctionDate:        sessionRaw.auction_date ?? "",
         auctionTime:        sessionRaw.auction_time ?? "",
         venue:              sessionRaw.venue ?? "",
+        auctionLogo:        sessionRaw.auction_logo ?? "",   // ← NEW
         timerSeconds:       sessionRaw.timer_seconds,
         accessMode:         sessionRaw.access_mode,
         spectatorLink:      sessionRaw.spectator_link ?? "",
@@ -436,6 +437,7 @@ export async function saveSession(auctionId: string, session: SessionConfig): Pr
       auction_date:        session.auctionDate,
       auction_time:        session.auctionTime,
       venue:               session.venue,
+      auction_logo:        session.auctionLogo,   // ← NEW
       timer_seconds:       session.timerSeconds,
       access_mode:         session.accessMode,
       spectator_link:      session.spectatorLink,
@@ -518,6 +520,7 @@ export const DEFAULT_SESSION: SessionConfig = {
   auctionDate:        "",
   auctionTime:        "",
   venue:              "",
+  auctionLogo:        "",   // ← NEW
   timerSeconds:       15,
   accessMode:         "spectator",
   spectatorLink:      "apl-auction.live/watch/s1",

@@ -12,6 +12,7 @@ import BottomNavBar from "@/components/BottomNavBar";
 interface AuctionData {
   id:     string;
   name:   string;
+  logo:   string | null;   // ← NEW
   status: "setup" | "live" | "paused" | "completed";
 }
 
@@ -228,16 +229,16 @@ export default function OwnerIndexPage() {
     if (!auctionId || !teamCode) return;
 
     async function load() {
-      const [{ data: auc }, { data: tm }, { data: r }, { data: sc }] =
-        await Promise.all([
-          supabase.from("auctions").select("id, name, status").eq("id", auctionId).single(),
-          supabase.from("teams").select("id, name, code, color, logo, remaining_purse, roster")
-            .eq("auction_id", auctionId).ilike("code", teamCode).single(),
-          supabase.from("rules").select("team_size, total_points, tiers").eq("auction_id", auctionId).maybeSingle(),
-          supabase.from("session_config").select("timer_seconds").eq("auction_id", auctionId).maybeSingle(),
-        ]);
+    const [{ data: auc }, { data: tm }, { data: r }, { data: sc }] =
+    await Promise.all([
+        supabase.from("auctions").select("id, name, status").eq("id", auctionId).single(),
+        supabase.from("teams").select("id, name, code, color, logo, remaining_purse, roster")
+        .eq("auction_id", auctionId).ilike("code", teamCode).single(),
+        supabase.from("rules").select("team_size, total_points, tiers").eq("auction_id", auctionId).maybeSingle(),
+        supabase.from("session_config").select("timer_seconds, auction_logo").eq("auction_id", auctionId).maybeSingle(),
+    ]);
 
-      if (auc) setAuction({ id: auc.id, name: auc.name, status: auc.status });
+    if (auc) setAuction({ id: auc.id, name: auc.name, status: auc.status, logo: sc?.auction_logo ?? null });
 
       if (tm) {
         teamIdRef.current = tm.id;
@@ -366,7 +367,7 @@ export default function OwnerIndexPage() {
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}>
             <img
-                src="/moon-knight-logo.png"
+                src={auction?.logo || "/moon-knight-logo.png"}
                 alt="Auction logo"
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />

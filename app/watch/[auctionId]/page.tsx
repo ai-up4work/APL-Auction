@@ -686,7 +686,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
             <div className="flex items-center gap-[13px]">
               <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
                 <img
-                  src="/moon-knight-logo.png"
+                  src={auction.session.auctionLogo || "/moon-knight-logo.png"}
                   alt="Auction logo"
                   className="w-full h-full object-cover"
                 />

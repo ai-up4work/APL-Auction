@@ -195,7 +195,6 @@ export default function SessionTab({ locked, session, onSessionChange }: Session
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-6">
-
           {/* Identity */}
           <Section title="Auction Identity" description="Name and branding shown to all participants and on the broadcast display.">
             <div className="grid grid-cols-2 gap-5">
@@ -210,6 +209,33 @@ export default function SessionTab({ locked, session, onSessionChange }: Session
               <div>
                 <FieldLabel>Venue</FieldLabel>
                 <TextInput value={session.venue} onChange={(v) => update("venue", v)} placeholder="e.g. Colombo Oval" disabled={locked} />
+              </div>
+
+              {/* NEW: Auction Logo — identifies WHO is conducting this auction, not a team logo */}
+              <div className="col-span-2">
+                <FieldLabel>Auction Logo (URL)</FieldLabel>
+                <div className="flex items-center gap-3">
+                  {session.auctionLogo && (
+                    <img
+                      src={session.auctionLogo}
+                      alt="Auction logo preview"
+                      className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                      style={{ border: "1px solid var(--color-border-overlay)" }}
+                    />
+                  )}
+                  <div className="flex-1">
+                    <TextInput
+                      value={session.auctionLogo}
+                      onChange={(v) => update("auctionLogo", v)}
+                      placeholder="https://… logo image URL"
+                      disabled={locked}
+                      mono
+                    />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>
+                  Shown on the broadcast display and spectator link header — represents the organizer, not any single team.
+                </p>
               </div>
             </div>
           </Section>
@@ -324,6 +350,7 @@ export default function SessionTab({ locked, session, onSessionChange }: Session
                 { label: "Date",        value: session.auctionDate  || "—" },
                 { label: "Time",        value: session.auctionTime  || "—" },
                 { label: "Venue",       value: session.venue        || "—" },
+                { label: "Logo",        value: session.auctionLogo ? "Set" : "—" },
                 { label: "Timer",       value: `${session.timerSeconds}s` },
                 { label: "Access",      value: session.accessMode },
               ].map((row) => (

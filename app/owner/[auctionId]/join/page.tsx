@@ -276,6 +276,7 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [loadError,    setLoadError]   = useState<string | null>(null);
   const [auctionName,  setAuctionName] = useState<string>("Auction");
+  const [auctionLogo,  setAuctionLogo] = useState<string | null>(null);  // ← NEW
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [pin,          setPin]         = useState("");
   const [verifyState,  setVerifyState] = useState<VerifyState>("idle");
@@ -286,20 +287,26 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
   // ── Load teams + auction name ─────────────────────────────────────────────
   useEffect(() => {
     async function fetchTeams() {
-      const [{ data, error }, { data: auctionRow }] = await Promise.all([
+        const [{ data, error }, { data: auctionRow }, { data: sc }] = await Promise.all([
         supabase
-          .from("teams")
-          .select("id, code, name, color, logo, owner")
-          .eq("auction_id", auctionId)
-          .order("created_at", { ascending: true }),
+            .from("teams")
+            .select("id, code, name, color, logo, owner")
+            .eq("auction_id", auctionId)
+            .order("created_at", { ascending: true }),
         supabase
-          .from("auctions")
-          .select("name")
-          .eq("id", auctionId)
-          .single(),
-      ]);
+            .from("auctions")
+            .select("name")
+            .eq("id", auctionId)
+            .single(),
+        supabase
+            .from("session_config")
+            .select("auction_logo")
+            .eq("auction_id", auctionId)
+            .maybeSingle(),
+        ]);
 
-      if (auctionRow?.name) setAuctionName(auctionRow.name);
+        if (auctionRow?.name) setAuctionName(auctionRow.name);
+        if (sc?.auction_logo) setAuctionLogo(sc.auction_logo);
 
       if (error || !data) {
         setLoadError("Couldn't load teams. Check the auction link.");
@@ -453,7 +460,7 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
         <div className="flex items-center gap-2.5">
           <div className="w-13 h-13 overflow-hidden flex items-center justify-center shrink-0">
             <img
-              src="/moon-knight-logo.png"
+              src={auctionLogo || "/moon-knight-logo.png"}
               alt="Auction logo"
               className="w-full h-full object-cover"
             />

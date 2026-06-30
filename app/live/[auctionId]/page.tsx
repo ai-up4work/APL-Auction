@@ -854,7 +854,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         <header className="fixed top-0 w-full z-50 flex justify-between items-center px-8 h-16 glass-panel border-b border-white/10">
           <div className="flex items-center gap-4">
             <img
-              src="/moon-knight-logo.png"
+              src={auction.session.auctionLogo || "/moon-knight-logo.png"}
               alt="Auction logo"
               className="w-15 h-15 object-contain"
             />

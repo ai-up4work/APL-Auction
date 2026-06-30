@@ -110,6 +110,7 @@ export interface SessionConfig {
   auctioneer:         string;
   auctionDate:        string;
   auctionTime:        string;
+  auctionLogo:        string;        
   venue:              string;
   timerSeconds:       number;
   accessMode:         "private" | "spectator" | "broadcast";

@@ -33,7 +33,7 @@ const MSYM_FILLED =
 // ─────────────────────────────────────────────
 //  Blocker shown on phones & tablets (< 1024px)
 // ─────────────────────────────────────────────
-function PhoneTabletBlocker({ auctionName }: { auctionName?: string }) {
+function PhoneTabletBlocker({ auctionName, auctionLogo }: { auctionName?: string; auctionLogo?: string | null }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
   // Subtle touch-parallax glow
@@ -102,7 +102,7 @@ function PhoneTabletBlocker({ auctionName }: { auctionName?: string }) {
         >
           <div className="flex items-center gap-3">
             <img
-              src="/moon-knight-logo.png"
+              src={auctionLogo || "/moon-knight-logo.png"}
               alt="Auction logo"
               style={{ height: "clamp(45px,6vw,36px)", width: "auto", objectFit: "cover" }}
             />
