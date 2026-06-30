@@ -11,6 +11,20 @@
 // A server-side fallback timeout (SHUFFLE_FALLBACK_MS) also calls
 // transitionLotToPending() so the auction can't get stuck if the watch
 // page is disconnected or slow.
+//
+// ── UNSOLD RE-ENTRY ROUNDS ──────────────────────────────────────────────────
+// closeLotUnsold no longer just flags the lot — it also marks the player row
+// `is_unsold = true` (sold_to_team_id stays null) so it can be picked up by
+// a re-entry round later. The auctioneer triggers startReentryRound() when
+// ready (always available once any unsold player exists). That function:
+//   1. Reads rules.current_round vs rules.unsold_reentry_rounds
+//   2. Checks whether ANY team can still afford the cheapest unsold player
+//      AND has roster space left
+//   3. If either check fails → marks all currently-unsold players
+//      is_unsold_final = true and returns { started: false, reason }
+//   4. Otherwise → increments rules.current_round, re-shuffles the unsold
+//      players' lot_order to the back of the queue, bumps their
+//      reentry_count, and returns { started: true, round, requeued }
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "./supabse";
@@ -52,6 +66,14 @@ export interface BidEntry {
   teamColor: string;
   amount:    number;
   placedAt:  string;
+}
+
+export interface ReentryRoundResult {
+  started:   boolean;
+  reason?:   "round_limit_reached" | "no_team_can_afford" | "no_unsold_players" | "all_squads_full";
+  round?:    number;
+  requeued?: number;
+  finalized?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,21 +234,35 @@ export async function startLot(
 }
 
 export async function startRandomLot(auctionId: string): Promise<AuctionLot> {
-  // Load players that haven't been called yet
+  // Lots that should block a player from being called again: currently
+  // active (shuffling/pending) or sold. A past "unsold" lot does NOT
+  // block on its own — what matters is the player's current is_unsold
+  // flag (cleared by a re-entry round), checked separately below.
   const { data: allLots } = await supabase
     .from("auction_lots")
-    .select("player_id, lot_number")
+    .select("player_id, lot_number, status")
     .eq("auction_id", auctionId)
     .order("lot_number", { ascending: false });
 
-  const usedIds   = new Set((allLots ?? []).map((l: any) => l.player_id));
+  const usedIds = new Set(
+    (allLots ?? [])
+      .filter((l: any) => l.status === "shuffling" || l.status === "pending" || l.status === "sold")
+      .map((l: any) => l.player_id)
+  );
   const nextNumber = ((allLots ?? [])[0]?.lot_number ?? 0) + 1;
 
-  // Pick the next player by lot_order
+  // Pick the next player by lot_order. Captains (owner_team_code set) are
+  // never given a lot_order, so they're naturally excluded here. Players
+  // already finalized as unsold (is_unsold_final) are excluded too, as
+  // are players currently flagged is_unsold (unsold this round, awaiting
+  // a re-entry round to requeue them — they shouldn't be callable until
+  // that happens).
   const { data: players } = await supabase
     .from("players")
     .select("*")
     .eq("auction_id", auctionId)
+    .eq("is_unsold_final", false)
+    .eq("is_unsold", false)
     .order("lot_order", { ascending: true });
 
   const remaining = (players ?? []).filter((p: any) => !usedIds.has(p.id));
@@ -304,10 +340,15 @@ export async function closeLotSold(
     if (purseErr) throw new Error(`closeLotSold(purse): ${purseErr.message}`);
   }
 
-  // Record sale against the player
+  // Record sale against the player. Clear any pending unsold flag since the
+  // player is now definitively sold and can never re-enter.
   const { data: playerData, error: playerErr } = await supabase
     .from("players")
-    .update({ sold_to_team_id: winningTeamId, sold_price: finalBid })
+    .update({
+      sold_to_team_id: winningTeamId,
+      sold_price:      finalBid,
+      is_unsold:       false,
+    })
     .eq("id", playerId)
     .eq("auction_id", auctionId)
     .select();
@@ -315,6 +356,11 @@ export async function closeLotSold(
   console.log("[closeLotSold] player update:", playerData, playerErr);
 }
 
+// Marks a lot unsold and flags the player as eligible for a future re-entry
+// round (is_unsold = true). reentry_count is NOT bumped here — it's bumped
+// only when a re-entry round actually starts and re-queues this player (see
+// startReentryRound below), since what matters is how many rounds have
+// happened, not how many times any single player has been called.
 export async function closeLotUnsold(lotId: string, playerId: string): Promise<void> {
   const { error } = await supabase
     .from("auction_lots")
@@ -324,8 +370,174 @@ export async function closeLotUnsold(lotId: string, playerId: string): Promise<v
 
   await supabase
     .from("players")
-    .update({ sold_to_team_id: null, sold_price: null })
+    .update({ sold_to_team_id: null, sold_price: null, is_unsold: true })
     .eq("id", playerId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNSOLD RE-ENTRY ROUND
+//
+// Always callable by the auctioneer once any is_unsold player exists. Gates,
+// checked in order:
+//   1. current_round >= unsold_reentry_rounds   → finalize everyone, refuse
+//   2. Every team's roster already == teamSize  → finalize everyone, refuse
+//   3. No team can afford the cheapest unsold player's base price
+//                                                → finalize everyone, refuse
+// Otherwise: bumps current_round (global, not per-player), clears each
+// unsold player's is_unsold flag so startRandomLot can pick it up again,
+// re-shuffles the unsold batch and appends it to the back of the lot_order
+// queue, and increments each requeued player's reentry_count by 1.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function startReentryRound(
+  auctionId: string,
+  rules: Pick<AuctionRules, "unsoldReentryRounds" | "teamSize">
+): Promise<ReentryRoundResult> {
+  // 1. Load unsold players (not yet finalized)
+  const { data: unsoldPlayers, error: playersErr } = await supabase
+    .from("players")
+    .select("id, price, reentry_count")
+    .eq("auction_id", auctionId)
+    .eq("is_unsold", true)
+    .eq("is_unsold_final", false);
+
+  if (playersErr) throw new Error(`startReentryRound(players): ${playersErr.message}`);
+
+  if (!unsoldPlayers || unsoldPlayers.length === 0) {
+    return { started: false, reason: "no_unsold_players" };
+  }
+
+  // 2. Load current_round from rules
+  const { data: rulesRow, error: rulesErr } = await supabase
+    .from("rules")
+    .select("current_round")
+    .eq("auction_id", auctionId)
+    .single();
+
+  if (rulesErr) throw new Error(`startReentryRound(rules): ${rulesErr.message}`);
+  const currentRound = rulesRow?.current_round ?? 0;
+
+  // 3. Load all teams' purses + rosters
+  const { data: teams, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, remaining_purse, roster")
+    .eq("auction_id", auctionId);
+
+  if (teamsErr) throw new Error(`startReentryRound(teams): ${teamsErr.message}`);
+
+  const cheapestBase = Math.min(...unsoldPlayers.map((p: any) => p.price ?? 0));
+
+  const anySquadSpace = (teams ?? []).some((t: any) => (t.roster ?? 0) < rules.teamSize);
+  const anyCanAfford  = (teams ?? []).some((t: any) => (t.remaining_purse ?? 0) >= cheapestBase);
+
+  // ── Gate checks — finalize instead of starting a new round ──────────────
+  if (currentRound >= rules.unsoldReentryRounds) {
+    await finalizeUnsoldPlayers(auctionId);
+    return { started: false, reason: "round_limit_reached", finalized: unsoldPlayers.length };
+  }
+  if (!anySquadSpace) {
+    await finalizeUnsoldPlayers(auctionId);
+    return { started: false, reason: "all_squads_full", finalized: unsoldPlayers.length };
+  }
+  if (!anyCanAfford) {
+    await finalizeUnsoldPlayers(auctionId);
+    return { started: false, reason: "no_team_can_afford", finalized: unsoldPlayers.length };
+  }
+
+  // ── Proceed: bump round, requeue, reshuffle to the back ──────────────────
+  const { data: maxLotRow } = await supabase
+    .from("players")
+    .select("lot_order")
+    .eq("auction_id", auctionId)
+    .order("lot_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let nextOrder = (maxLotRow?.lot_order ?? 0) + 1;
+
+  // Fisher-Yates shuffle the unsold batch before appending to the back
+  const ids = unsoldPlayers.map((p: any) => p.id as string);
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+
+  const reentryCountById = new Map(
+    unsoldPlayers.map((p: any) => [p.id, p.reentry_count ?? 0])
+  );
+
+  const updates = ids.map((id) =>
+    supabase
+      .from("players")
+      .update({
+        lot_order:     nextOrder++,
+        is_unsold:     false, // cleared so startRandomLot can pick it up again
+        reentry_count: (reentryCountById.get(id) ?? 0) + 1,
+      })
+      .eq("id", id)
+  );
+
+  const results = await Promise.all(updates);
+  for (const r of results) {
+    if (r.error) throw new Error(`startReentryRound(requeue): ${r.error.message}`);
+  }
+
+  const newRound = currentRound + 1;
+  const { error: roundErr } = await supabase
+    .from("rules")
+    .update({ current_round: newRound })
+    .eq("auction_id", auctionId);
+
+  if (roundErr) throw new Error(`startReentryRound(bump round): ${roundErr.message}`);
+
+  return { started: true, round: newRound, requeued: ids.length };
+}
+
+async function finalizeUnsoldPlayers(auctionId: string): Promise<void> {
+  const { error } = await supabase
+    .from("players")
+    .update({ is_unsold_final: true })
+    .eq("auction_id", auctionId)
+    .eq("is_unsold", true)
+    .eq("is_unsold_final", false);
+
+  if (error) throw new Error(`finalizeUnsoldPlayers: ${error.message}`);
+}
+
+export async function getCurrentRound(
+  auctionId: string
+): Promise<{ current: number; limit: number }> {
+  const { data, error } = await supabase
+    .from("rules")
+    .select("current_round, unsold_reentry_rounds")
+    .eq("auction_id", auctionId)
+    .single();
+
+  if (error) throw new Error(`getCurrentRound: ${error.message}`);
+  return { current: data?.current_round ?? 0, limit: data?.unsold_reentry_rounds ?? 0 };
+}
+
+export async function countPendingUnsold(auctionId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("players")
+    .select("id", { count: "exact", head: true })
+    .eq("auction_id", auctionId)
+    .eq("is_unsold", true)
+    .eq("is_unsold_final", false);
+
+  if (error) throw new Error(`countPendingUnsold: ${error.message}`);
+  return count ?? 0;
+}
+
+export async function loadFinalUnsoldPlayers(auctionId: string) {
+  const { data, error } = await supabase
+    .from("players")
+    .select("*")
+    .eq("auction_id", auctionId)
+    .eq("is_unsold_final", true);
+
+  if (error) throw new Error(`loadFinalUnsoldPlayers: ${error.message}`);
+  return data ?? [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -564,4 +776,38 @@ export async function initTeamPurses(
           .eq("id", t.id)
       )
   );
+}
+
+export function subscribeToPlayers(
+  auctionId: string,
+  onUpdate: (player: {
+    id:            string;
+    isUnsold:      boolean;
+    isUnsoldFinal: boolean;
+    reentryCount:  number;
+  }) => void
+) {
+  const channel = supabase
+    .channel(`players:${auctionId}`)
+    .on(
+      "postgres_changes",
+      {
+        event:  "UPDATE",
+        schema: "public",
+        table:  "players",
+        filter: `auction_id=eq.${auctionId}`,
+      },
+      (payload) => {
+        const row = payload.new as any;
+        onUpdate({
+          id:            row.id,
+          isUnsold:      !!row.is_unsold,
+          isUnsoldFinal: !!row.is_unsold_final,
+          reentryCount:  row.reentry_count ?? 0,
+        });
+      }
+    )
+    .subscribe();
+
+  return channel;
 }

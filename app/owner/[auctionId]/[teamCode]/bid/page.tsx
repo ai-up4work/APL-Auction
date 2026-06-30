@@ -21,6 +21,7 @@ import {
 } from "@/lib/auctionLiveDb";
 import { loadAuction } from "@/lib/auctionDb";
 import type { AuctionRules } from "@/types/auction";
+import Image from "next/image";
 
 const BID_COLOR = "#e45d35";
 
@@ -232,7 +233,20 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       }
 
       if (lot.status === "pending") {
+        // FIX: this branch must not assume the client already saw a
+        // "shuffling" event for this lot (mobile tabs can be backgrounded
+        // and miss that brief intermediate status). Always clear the
+        // sold/unsold stamp here — a "pending" lot should never show one,
+        // regardless of what the client previously rendered. bidHistory is
+        // only cleared when the lot actually changed, so a redundant
+        // re-fire of "pending" for the same lot won't wipe valid bids.
+        const isNewLot = cur?.id !== lot.id;
         setCurrentLot(lot);
+        if (isNewLot) {
+          setBidHistory([]);
+        }
+        setIsSold(false);
+        setIsUnsold(false);
         setBidError("");
         setBidSuccess(false);
         resetClock(lot.startedAt!);

@@ -46,9 +46,36 @@ export interface Player {
   img:     string;
   country: string;
 
-  lotOrder?: number;        // ← ADDED: for shuffling, null until shuffled
+  /** Position in the shuffled draw order — null until shuffled */
+  lotOrder?: number;
 
-  ownerTeamCode?: string;  // ← ADDED: for live auction, null until sold
+  /**
+   * The team code this player is a captain/owner of.
+   * When set, this player can only be purchased by the matching team,
+   * and their base price is overridden to ownerSelfPurchaseCost.
+   */
+  ownerTeamCode?: string;
+
+  /**
+   * True if this player is the captain of their team (ownerTeamCode must
+   * also be set). Triggers the restricted-bidding / elevated-base-price
+   * rules during the live auction.
+   */
+  isCaptain?: boolean;
+
+  /**
+   * How many re-entry rounds this player has been through.
+   * Incremented each time the player goes back into the pool unsold.
+   * Mirrors the reentry_count column in the DB.
+   */
+  reentryCount?: number;
+
+  /**
+   * Set to true once the auctioneer marks the auction complete while
+   * this player is still unsold — signals they won't be re-entered again.
+   * Mirrors is_unsold_final in the DB.
+   */
+  isUnsoldFinal?: boolean;
 }
 
 // ── Auction Rules ─────────────────────────────────────────────────────────────
@@ -62,8 +89,13 @@ export interface AuctionRules {
   totalPoints:           number;
   teamSize:              number;
   basePrice:             number;
-  targetPlayerCount:     number;   // ← ADDED: how many players must be in pool before launch
+  /** How many players must be in pool before launch */
+  targetPlayerCount:     number;
   ownerParticipation:    boolean;
+  /**
+   * The base price applied to a captain lot instead of the player's
+   * normal price. Defaults to 3000 in DEFAULT_RULES.
+   */
   ownerSelfPurchaseCost: number;
   maxOverseasPlayers:    number;
   reservePointsEnforced: boolean;

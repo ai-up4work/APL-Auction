@@ -99,16 +99,21 @@ export async function loadAuction(auctionId: string): Promise<AuctionState | nul
 
   let _playerIdCounter = 1;
   const players: Player[] = (playersRaw ?? []).map((p: any) => ({
-    id:         _playerIdCounter++,
-    supabaseId: p.id,
-    name:       p.name,
-    role:       p.role,
-    origin:     p.origin,
-    price:      p.price,
-    capped:     p.capped,
-    img:        p.img ?? "",
-    country:    p.country ?? "",
-    lotOrder:   p.lot_order ?? null,
+    id:            _playerIdCounter++,
+    supabaseId:    p.id,
+    name:          p.name,
+    role:          p.role,
+    origin:        p.origin,
+    price:         p.price,
+    capped:        p.capped,
+    img:           p.img ?? "",
+    country:       p.country ?? "",
+    lotOrder:      p.lot_order ?? null,
+    ownerTeamCode: p.owner_team_code ?? undefined,
+    // Derived purely from owner_team_code — no separate is_captain column.
+    isCaptain:     !!p.owner_team_code,
+    reentryCount:  p.reentry_count ?? 0,
+    isUnsoldFinal: p.is_unsold_final ?? false,
   }));
 
   const rules: AuctionRules = rulesRaw
@@ -210,13 +215,14 @@ export async function upsertPlayer(auctionId: string, player: Player): Promise<s
     const { error } = await supabase
       .from("players")
       .update({
-        name:    player.name,
-        role:    player.role,
-        origin:  player.origin,
-        price:   player.price,
-        capped:  player.capped,
-        img:     player.img,
-        country: player.country,
+        name:            player.name,
+        role:            player.role,
+        origin:          player.origin,
+        price:           player.price,
+        capped:          player.capped,
+        img:             player.img,
+        country:         player.country,
+        owner_team_code: player.ownerTeamCode ?? null,
       })
       .eq("id", player.supabaseId);
 
@@ -226,14 +232,15 @@ export async function upsertPlayer(auctionId: string, player: Player): Promise<s
     const { data, error } = await supabase
       .from("players")
       .insert({
-        auction_id: auctionId,
-        name:       player.name,
-        role:       player.role,
-        origin:     player.origin,
-        price:      player.price,
-        capped:     player.capped,
-        img:        player.img,
-        country:    player.country,
+        auction_id:      auctionId,
+        name:            player.name,
+        role:            player.role,
+        origin:          player.origin,
+        price:           player.price,
+        capped:          player.capped,
+        img:             player.img,
+        country:         player.country,
+        owner_team_code: player.ownerTeamCode ?? null,
       })
       .select("id")
       .single();
@@ -254,6 +261,10 @@ export async function deletePlayerFromDb(supabaseId: string): Promise<void> {
 // Fisher-Yates on player IDs, persisted to lot_order column via RPC.
 // Returns the exact order payload written to the DB so the caller can
 // update React state directly — no read-back or retry loop needed.
+//
+// IMPORTANT: captains (owner_team_code is set) are excluded from the shuffle
+// and from lot_order entirely — they never enter the live bid pool. They are
+// auto-assigned to their own team at launch time (see assignCaptains below).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function shufflePlayerOrder(
@@ -262,7 +273,8 @@ export async function shufflePlayerOrder(
   const { data, error } = await supabase
     .from("players")
     .select("id")
-    .eq("auction_id", auctionId);
+    .eq("auction_id", auctionId)
+    .is("owner_team_code", null);
 
   if (error) throw sbErr(error, "shufflePlayerOrder(fetch)");
   if (!data || data.length === 0) return [];
@@ -304,6 +316,85 @@ export async function shufflePlayerOrder(
   }
 
   return orderPayload;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTAIN AUTO-ASSIGNMENT
+//
+// Called once at launch (saveFullAuctionAndLaunch). Any player with
+// owner_team_code set is treated as that team's captain and is:
+//   1. Deducted ownerSelfPurchaseCost from their own team's purse
+//   2. Marked sold_to_team_id = (their own team), sold_price = ownerSelfPurchaseCost
+//   3. Given roster += 1 on their team
+//   4. Never given a lot_order — shufflePlayerOrder already excludes them,
+//      and startRandomLot only pulls from players with lot_order set.
+//
+// Idempotent: skips any captain that already has sold_to_team_id set, so
+// re-running launch (e.g. retry after a partial failure) won't double-charge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function assignCaptains(
+  auctionId: string,
+  ownerSelfPurchaseCost: number
+): Promise<void> {
+  const { data: captains, error } = await supabase
+    .from("players")
+    .select("id, owner_team_code, sold_to_team_id")
+    .eq("auction_id", auctionId)
+    .not("owner_team_code", "is", null);
+
+  if (error) throw sbErr(error, "assignCaptains(fetch players)");
+  if (!captains || captains.length === 0) return;
+
+  const pending = captains.filter((c: any) => !c.sold_to_team_id && c.owner_team_code);
+  if (pending.length === 0) return;
+
+  const codes = Array.from(new Set(pending.map((c: any) => c.owner_team_code)));
+  const { data: teams, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, code, remaining_purse, roster")
+    .eq("auction_id", auctionId)
+    .in("code", codes);
+
+  if (teamsErr) throw sbErr(teamsErr, "assignCaptains(fetch teams)");
+
+  const teamByCode = new Map((teams ?? []).map((t: any) => [t.code, t]));
+
+  for (const captain of pending) {
+    const team = teamByCode.get(captain.owner_team_code);
+    if (!team) {
+      console.warn(
+        `[assignCaptains] no team found for code "${captain.owner_team_code}" — skipping captain ${captain.id}`
+      );
+      continue;
+    }
+
+    const { error: playerErr } = await supabase
+      .from("players")
+      .update({
+        sold_to_team_id: team.id,
+        sold_price:      ownerSelfPurchaseCost,
+        price:           ownerSelfPurchaseCost,
+      })
+      .eq("id", captain.id);
+
+    if (playerErr) throw sbErr(playerErr, `assignCaptains(player ${captain.id})`);
+
+    const { error: teamErr } = await supabase
+      .from("teams")
+      .update({
+        remaining_purse: (team.remaining_purse ?? 0) - ownerSelfPurchaseCost,
+        roster:          (team.roster ?? 0) + 1,
+      })
+      .eq("id", team.id);
+
+    if (teamErr) throw sbErr(teamErr, `assignCaptains(team ${team.id})`);
+
+    // Keep local map in sync in case the same team has >1 captain (shouldn't
+    // normally happen, but guards against double-counting in this loop).
+    team.remaining_purse = (team.remaining_purse ?? 0) - ownerSelfPurchaseCost;
+    team.roster          = (team.roster ?? 0) + 1;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -386,6 +477,11 @@ export async function saveFullAuctionAndLaunch(state: AuctionState): Promise<str
 
   if (purseError) throw sbErr(purseError, "saveFullAuctionAndLaunch(set purse)");
 
+  // ← Auto-assign captains to their own teams BEFORE going live, so they
+  // never enter the shuffled lot pool. Must run after purses are set and
+  // after teams/players are upserted (needs real supabase IDs + codes).
+  await assignCaptains(auctionId, state.rules.ownerSelfPurchaseCost);
+
   await updateAuctionStatus(auctionId, "live", {
     launched_at: new Date().toISOString(),
   });
@@ -417,7 +513,7 @@ export const DEFAULT_RULES: AuctionRules = {
 };
 
 export const DEFAULT_SESSION: SessionConfig = {
-  auctionName:        "APL Season 1",
+  auctionName:        "APL Season 1 Auction",
   auctioneer:         "",
   auctionDate:        "",
   auctionTime:        "",
@@ -481,8 +577,16 @@ export async function cloneAuction(sourceId: string, newName: string): Promise<s
     saveRules(newId, source.rules),
     saveSession(newId, { ...source.session, auctionName: newName }),
     ...source.teams.map((t)   => upsertTeam(newId,   { ...t,   supabaseId: undefined, roster: 0 })),
-    // lotOrder cleared so the new auction requires a fresh shuffle
-    ...source.players.map((p) => upsertPlayer(newId, { ...p,   supabaseId: undefined, lotOrder: undefined })),
+    // lotOrder cleared so the new auction requires a fresh shuffle.
+    // reentryCount / isUnsoldFinal / captain-sold-state also reset since
+    // this is a brand new auction instance.
+    ...source.players.map((p) => upsertPlayer(newId, {
+      ...p,
+      supabaseId:    undefined,
+      lotOrder:      undefined,
+      reentryCount:  0,
+      isUnsoldFinal: false,
+    })),
   ]);
 
   return newId;

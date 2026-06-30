@@ -14,11 +14,15 @@ import {
   subscribeToBids,
   subscribeToTeamPurses,
   getNextBidAmount,
+  startRandomLot,
+  startReentryRound,
+  countPendingUnsold,
+  getCurrentRound,
   type AuctionLot,
   type BidEntry,
-  startRandomLot,
 } from "@/lib/auctionLiveDb";
 import { ensureTeamPurses, fmtPts, type TeamPurse } from "@/lib/auctionLiveUtils";
+import { supabase } from "@/lib/supabse";
 import type { Player } from "@/types/auction";
 import { FeedbackModal } from "@/components/FeedbackModal";
 
@@ -36,6 +40,63 @@ const PARTICLE_COLORS_SOLD   = ["#F5B400", "#C9920A", "#FDECC8", "#ffffff"];
 const PARTICLE_COLORS_UNSOLD = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
 
 let particleIdCtr = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper — re-fetch the live player queue from the DB.
+// "Queue" = players not finalized as unsold, not currently flagged is_unsold
+// (i.e. either never called, or already re-queued by a re-entry round), and
+// not already sold or mid-lot.
+// ─────────────────────────────────────────────────────────────────────────────
+async function fetchPlayerQueue(auctionId: string): Promise<Player[]> {
+  const { data: lotsRaw } = await supabase
+    .from("auction_lots")
+    .select("player_id, status")
+    .eq("auction_id", auctionId);
+
+  const { data: playersRaw } = await supabase
+    .from("players")
+    .select("*")
+    .eq("auction_id", auctionId)
+    .eq("is_unsold_final", false)
+    .not("lot_order", "is", null)
+    .order("lot_order", { ascending: true });
+
+  const activeLotPlayerIds = new Set(
+    (lotsRaw ?? [])
+      .filter((l: any) => l.status === "shuffling" || l.status === "pending")
+      .map((l: any) => l.player_id)
+  );
+
+  const soldPlayerIds = new Set(
+    (lotsRaw ?? [])
+      .filter((l: any) => l.status === "sold")
+      .map((l: any) => l.player_id)
+  );
+
+  return (playersRaw ?? [])
+    .filter(
+      (p: any) =>
+        !activeLotPlayerIds.has(p.id) &&
+        !soldPlayerIds.has(p.id) &&
+        !p.is_unsold
+    )
+    .map((p: any, i: number) => ({
+      id:            i + 1,
+      supabaseId:    p.id,
+      name:          p.name,
+      role:          p.role,
+      origin:        p.origin,
+      price:         p.price,
+      capped:        p.capped,
+      img:           p.img ?? "",
+      country:       p.country ?? "",
+      lotOrder:      p.lot_order ?? null,
+      ownerTeamCode: p.owner_team_code ?? undefined,
+      isCaptain:     !!p.owner_team_code,
+      reentryCount:  p.reentry_count ?? 0,
+      isUnsoldFinal: p.is_unsold_final ?? false,
+    }));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INNER CONTENT
@@ -73,6 +134,13 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
   const [feedbackTrigger, setFeedbackTrigger] = useState<"paused" | "completed">("completed");
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
+  // ── Re-entry round state ──────────────────────────────────────────────────
+  const [pendingUnsoldCount, setPendingUnsoldCount] = useState(0);
+  const [roundInfo,          setRoundInfo]          = useState<{ current: number; limit: number }>({ current: 0, limit: 0 });
+  const [isStartingRound,    setIsStartingRound]    = useState(false);
+  const [roundToast,         setRoundToast]         = useState<string | null>(null);
+  const [showReentryConfirm, setShowReentryConfirm] = useState(false);
+
   const flashTimeout  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentLotRef = useRef(currentLot);
   const auctionRef    = useRef(auction);
@@ -90,6 +158,20 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       loadFromDb(auctionId).catch(console.error);
     }
   }, [auctionId, auction?.auctionId, loadFromDb]);
+
+  // ── Refresh pending-unsold count + round info ────────────────────────────
+  const refreshReentryStatus = useCallback(async () => {
+    try {
+      const [pending, round] = await Promise.all([
+        countPendingUnsold(auctionId),
+        getCurrentRound(auctionId),
+      ]);
+      setPendingUnsoldCount(pending);
+      setRoundInfo(round);
+    } catch (err) {
+      console.error("[live] failed to refresh reentry status:", err);
+    }
+  }, [auctionId]);
 
   // ── Step 2: load live state once context is ready ─────────────────────────
   useEffect(() => {
@@ -125,9 +207,10 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         pauseClock();
       }
 
-      const usedIds = new Set(liveData.completedLots.map((l) => l.playerId));
-      if (liveData.currentLot) usedIds.add(liveData.currentLot.playerId);
-      setPlayerQueue(auction.players.filter((p) => !usedIds.has(p.supabaseId ?? "")));
+      const queue = await fetchPlayerQueue(auctionId);
+      setPlayerQueue(queue);
+
+      await refreshReentryStatus();
 
       setLoading(false);
     }
@@ -183,24 +266,17 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         setCompletedLots((prev) =>
           prev.some((l) => l.id === lot.id) ? prev : [lot, ...prev]
         );
-        if (auctionRef.current?.session.unsoldReintroduce) {
-          const player = auctionRef.current.players.find(
-            (p) => p.supabaseId === lot.playerId
-          );
-          if (player) {
-            setPlayerQueue((prev) => {
-              const already = prev.some((p) => p.supabaseId === lot.playerId);
-              return already ? prev : [...prev, player];
-            });
-          }
-        }
+        // Refresh the pending-unsold counter so the "Re-entry Round" button
+        // appears as soon as this lot's player becomes eligible.
+        refreshReentryStatus();
+        // Also refresh the queue itself so showReentryButton's
+        // playerQueue.length check reflects the true current state.
+        fetchPlayerQueue(auctionId).then(setPlayerQueue).catch(console.error);
       }
     }, getCurrentLotId);
 
     const bidSub = subscribeToBids(auctionId, (bid) => {
-      console.log('[live] bid event received, lotId=', bid.lotId, 'currentLot=', currentLotRef.current?.id);
       if (bid.lotId !== currentLotRef.current?.id) return;
-      console.log('[live] calling resetClock');
       setBidHistory((prev) => [bid, ...prev].slice(0, 30));
       setCurrentLot((prev) =>
         prev
@@ -222,7 +298,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       bidSub.unsubscribe();
       purseSub.unsubscribe();
     };
-  }, [auctionId, auction?.auctionId, getCurrentLotId, resetClock, freezeClock, pauseClock]);
+  }, [auctionId, auction?.auctionId, getCurrentLotId, resetClock, freezeClock, pauseClock, refreshReentryStatus]);
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -250,17 +326,68 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
 
   // ── Fix the pool ──────────────────────────────────────────────────────────
   async function handleFixShuffle() {
-    if (isShufflingPool) return;
-    setIsShufflingPool(true);
-    setActionError(null);
-    try {
-      await handleShuffle();
-    } catch (err: any) {
-      setActionError(err?.message ?? "Shuffle failed — please try again");
-    } finally {
-      setIsShufflingPool(false);
+      if (isShufflingPool) return;
+      setIsShufflingPool(true);
+      setActionError(null);
+      try {
+        await handleShuffle();
+      } catch (err: any) {
+        setActionError(err?.message ?? "Shuffle failed — please try again");
+        setTimeout(() => setActionError(null), 5000);
+      } finally {
+        setIsShufflingPool(false);
+      }
+    }
+
+  // ── Unsold Re-entry Round ─────────────────────────────────────────────────
+  function reasonToMessage(reason?: string, finalized?: number): string {
+    const n = finalized ?? 0;
+    switch (reason) {
+      case "round_limit_reached":
+        return `Re-entry round limit reached — ${n} player${n === 1 ? "" : "s"} marked Unsold (Final).`;
+      case "all_squads_full":
+        return `Every team's squad is full — ${n} player${n === 1 ? "" : "s"} marked Unsold (Final).`;
+      case "no_team_can_afford":
+        return `No team can afford the cheapest unsold player — ${n} player${n === 1 ? "" : "s"} marked Unsold (Final).`;
+      case "no_unsold_players":
+        return "No unsold players to re-enter.";
+      default:
+        return "Re-entry round could not be started.";
     }
   }
+
+  async function confirmStartReentryRound() {
+      if (isStartingRound) return;
+      setIsStartingRound(true);
+      setActionError(null);
+      setShowReentryConfirm(false);
+      try {
+        const result = await startReentryRound(auctionId, {
+          unsoldReentryRounds: auction.rules.unsoldReentryRounds,
+          teamSize:            auction.rules.teamSize,
+        });
+
+        if (!result.started) {
+          setRoundToast(reasonToMessage(result.reason, result.finalized));
+          setTimeout(() => setRoundToast(null), 5000);
+        } else {
+          setRoundToast(
+            `Re-entry Round ${result.round} started — ${result.requeued} player${result.requeued === 1 ? "" : "s"} shuffled back into the pool.`
+          );
+          setTimeout(() => setRoundToast(null), 5000);
+        }
+
+        // Refresh queue + round status regardless of outcome
+        const queue = await fetchPlayerQueue(auctionId);
+        setPlayerQueue(queue);
+        await refreshReentryStatus();
+      } catch (err: any) {
+        setActionError(err?.message ?? "Failed to start re-entry round");
+        setTimeout(() => setActionError(null), 5000);
+      } finally {
+        setIsStartingRound(false);
+      }
+    }
 
   // ── Auctioneer actions ────────────────────────────────────────────────────
   async function handleStartNextPlayer() {
@@ -275,6 +402,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       setBidHistory([]);
     } catch (err: any) {
       setActionError(err?.message ?? "Failed to start next player");
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setIsBusy(false);
     }
@@ -284,6 +412,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
     if (isBusy || soldState !== "pending" || !currentLot || isShuffling) return;
     if (!currentLot.winningTeamId) {
       setActionError("No bid placed — mark unsold instead");
+      setTimeout(() => setActionError(null), 5000);
       return;
     }
     setIsBusy(true);
@@ -304,6 +433,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       flashTimeout.current = setTimeout(() => setFlashActive(false), 100);
     } catch (err: any) {
       setActionError(err?.message ?? "Failed to close lot as sold");
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setIsBusy(false);
     }
@@ -320,6 +450,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       spawnParticles(PARTICLE_COLORS_UNSOLD);
     } catch (err: any) {
       setActionError(err?.message ?? "Failed to mark unsold");
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setIsBusy(false);
     }
@@ -383,6 +514,8 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
   const shotClockColor =
     shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#F5B400";
 
+  const showReentryButton = pendingUnsoldCount > 0 && playerQueue.length === 0;
+  
   // ── Loading ───────────────────────────────────────────────────────────────
   if (!auction || loading) {
     return (
@@ -580,6 +713,12 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             50%     { opacity: 0.5; }
           }
           .revealing-pulse { animation: revealing-pulse 1s ease-in-out infinite; }
+
+          @keyframes reentry-glow {
+            0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.35); }
+            50%     { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+          }
+          .reentry-glow { animation: reentry-glow 1.6s ease-in-out infinite; }
         `}</style>
 
         {/* Particles */}
@@ -644,8 +783,26 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           </div>
         )}
 
+        {/* Re-entry round toast */}
+        {roundToast && (
+          <div
+            className="fixed top-32 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold max-w-xl text-center"
+            style={{
+              background: "rgba(99,102,241,0.12)",
+              border: "1px solid rgba(99,102,241,0.4)",
+              color: "#a5b4fc",
+              fontFamily: "'Geist Mono', monospace",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>autorenew</span>
+            {roundToast}
+            <button onClick={() => setRoundToast(null)} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+          </div>
+        )}
+
         {/* Revealing banner */}
-        {isShuffling && (
+        {/* {isShuffling && (
           <div
             className="fixed top-20 left-1/2 -translate-x-1/2 z-[295] flex items-center gap-3 px-5 py-2 rounded-full text-xs font-bold revealing-pulse"
             style={{
@@ -659,7 +816,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             <span className="material-symbols-outlined" style={{ fontSize: 14 }}>animated_images</span>
             Revealing player on broadcast screen…
           </div>
-        )}
+        )} */}
 
         {/* Bidding locked banner */}
         {isLocked && soldState === "pending" && currentLot && !isShuffling && (
@@ -723,6 +880,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 Live: {auction.session.auctionName}
               </span>
             </div>
+            {roundInfo.current > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-400/10 border border-indigo-400/20 rounded-full">
+                <span className="material-symbols-outlined text-indigo-300 text-sm">autorenew</span>
+                <span className="font-mono-geist text-[10px] text-indigo-300 uppercase font-bold tracking-[0.14em]">
+                  Re-entry Round {roundInfo.current}/{roundInfo.limit}
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {currentLot && soldState === "pending" && !isShuffling && (
@@ -741,14 +906,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 </div>
               </div>
             )}
-            {isShuffling && (
+            {/* {isShuffling && (
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-amber-400 text-sm animate-spin">refresh</span>
                 <span className="font-mono-geist text-[10px] text-amber-400 uppercase tracking-[0.1em]">
                   Revealing…
                 </span>
               </div>
-            )}
+            )} */}
             <div className="flex items-center gap-2 text-on-surface-variant font-mono-geist text-[10px] uppercase tracking-[0.12em]">
               <span className="material-symbols-outlined text-sm">lock</span>
               Secure Admin Node
@@ -759,6 +924,23 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 #{lotNumber} / {auction.players.length}
               </div>
             </div>
+
+            {/* ── Re-entry Round — always visible once unsold players exist ── */}
+            {showReentryButton && (
+              <button
+                onClick={() => setShowReentryConfirm(true)}
+                disabled={isStartingRound}
+                className="reentry-glow flex items-center gap-1.5 bg-indigo-500/15 text-indigo-300 px-5 py-2 rounded font-mono-geist font-bold hover:bg-indigo-500/25 transition-all active:scale-95 border border-indigo-400/30 uppercase tracking-[0.16em] text-xs disabled:opacity-50"
+                title={`${pendingUnsoldCount} player${pendingUnsoldCount === 1 ? "" : "s"} unsold and eligible for re-entry`}
+              >
+                <span className={`material-symbols-outlined text-sm ${isStartingRound ? "animate-spin" : ""}`}>
+                  {isStartingRound ? "refresh" : "restart_alt"}
+                </span>
+                Re-entry Round
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-400/20 text-[9px]">{pendingUnsoldCount}</span>
+              </button>
+            )}
+
             <button
               onClick={handlePauseWithFeedback}
               className="bg-surface-variant text-on-surface-variant px-6 py-2 rounded font-mono-geist font-bold hover:brightness-110 transition-all active:scale-95 border border-white/10 uppercase tracking-[0.2em] text-xs"
@@ -798,6 +980,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                   {playerQueue.length} PENDING
                 </span>
               </div>
+              {pendingUnsoldCount > 0 && (
+                <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                  <span className="material-symbols-outlined text-indigo-300 text-sm">hourglass_top</span>
+                  <span className="font-mono-geist text-[10px] text-indigo-300 uppercase tracking-[0.1em]">
+                    {pendingUnsoldCount} awaiting re-entry
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-2">
@@ -810,8 +1000,13 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                     person
                   </span>
                   <div>
-                    <p className="font-archivo text-sm font-bold uppercase text-on-surface-variant group-hover:text-on-surface">
+                    <p className="font-archivo text-sm font-bold uppercase text-on-surface-variant group-hover:text-on-surface flex items-center gap-2">
                       {p.name}
+                      {(p.reentryCount ?? 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold normal-case" style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc" }}>
+                          R{p.reentryCount}
+                        </span>
+                      )}
                     </p>
                     <p className="font-mono-geist text-[10px] text-on-surface-variant">
                       {p.role} | {p.country}
@@ -828,6 +1023,11 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                   <p className="font-mono-geist text-xs text-on-surface-variant uppercase tracking-widest">
                     All players called
                   </p>
+                  {pendingUnsoldCount > 0 && (
+                    <p className="font-mono-geist text-[10px] text-indigo-300 uppercase tracking-widest mt-2">
+                      {pendingUnsoldCount} unsold — start a re-entry round above
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1013,6 +1213,11 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         {currentPlayer?.capped && (
                           <span className="px-3 py-1 bg-amber-400/10 border border-amber-400/20 rounded font-mono-geist text-[10px] uppercase tracking-[0.18em] text-amber-400">
                             Capped
+                          </span>
+                        )}
+                        {(currentPlayer?.reentryCount ?? 0) > 0 && (
+                          <span className="px-3 py-1 bg-indigo-400/10 border border-indigo-400/20 rounded font-mono-geist text-[10px] uppercase tracking-[0.18em] text-indigo-300">
+                            Re-entry Round {currentPlayer?.reentryCount}
                           </span>
                         )}
                       </div>
@@ -1235,6 +1440,93 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             trigger={feedbackTrigger}
             onClose={() => setShowFeedback(false)}
           />
+        )}
+
+        {/* Re-entry Round Confirm Modal */}
+        {showReentryConfirm && (
+          <div className="fixed inset-0 z-[400] flex items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowReentryConfirm(false)}
+            />
+            <div
+              className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
+              style={{
+                background: "rgba(16, 20, 21, 0.95)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                boxShadow: "0 0 80px rgba(99,102,241,0.12), 0 24px 64px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div className="flex items-center justify-center">
+                <div
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{ background: "rgba(99,102,241,0.10)", border: "1px solid rgba(99,102,241,0.25)" }}
+                >
+                  <span className="material-symbols-outlined text-indigo-300" style={{ fontSize: 32 }}>
+                    restart_alt
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-center space-y-2">
+                <h2 className="font-archivo text-2xl font-bold italic uppercase tracking-tight text-white">
+                  Start Re-entry Round?
+                </h2>
+                <p className="font-mono-geist text-[11px] text-on-surface-variant uppercase tracking-[0.12em] leading-relaxed">
+                  {pendingUnsoldCount} unsold player{pendingUnsoldCount === 1 ? "" : "s"} will be reshuffled<br />
+                  and added back to the end of the pool.
+                </p>
+              </div>
+
+              <div
+                className="grid grid-cols-2 gap-3 p-4 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                <div className="text-center">
+                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.15em] mb-1">
+                    Current Round
+                  </p>
+                  <p className="font-archivo text-2xl font-bold text-white">
+                    {roundInfo.current} / {roundInfo.limit}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.15em] mb-1">
+                    Unsold Players
+                  </p>
+                  <p className="font-archivo text-2xl font-bold text-white">
+                    {pendingUnsoldCount}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowReentryConfirm(false)}
+                  className="flex-1 py-3 rounded-xl font-mono-geist text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "#a0aec0",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmStartReentryRound}
+                  disabled={isStartingRound}
+                  className="flex-1 py-3 rounded-xl font-mono-geist text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+                  style={{
+                    background: "linear-gradient(135deg, #4338ca, #6366f1)",
+                    color: "#fff",
+                    boxShadow: "0 4px 24px rgba(99,102,241,0.3)",
+                  }}
+                >
+                  {isStartingRound ? "Starting…" : "Start Round"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* End Session Confirm Modal */}

@@ -13,74 +13,101 @@ interface ShuffleOverlayProps {
 const ACC = '#e45d35';
 const ACC_RGB = '228,93,53';
 
-// ── place dots in concentric rings on the radar ──────────────────────────────
-interface RadarDot {
-  player: Player;
-  x: number;       // relative to radar center
-  y: number;
-  baseX: number;
-  baseY: number;
-  angle: number;   // radians from center
-  dist: number;    // 0..1 (normalized ring distance)
-  radius: number;  // current rendered radius (grows on selection)
-  targetRadius: number;
-  alpha: number;   // 0..1 (fades out when disabled)
-  active: boolean; // still in pool
-  selected: boolean; // this was the pick — grows + shows avatar
-  flipT: number;   // 0..1 card-flip progress (after selection)
-  jitter: number;  // small random offset for organic feel
-  jitterAngle: number;
-  blip: number;    // ping animation timer
+// ── grid sizing: find rows x cols >= n, as close to a square as possible ────
+// e.g. 26 -> 5x6 (30 cells), not 13x2 or 9x3.
+function bestGridShape(n: number): { rows: number; cols: number } {
+  if (n <= 0) return { rows: 1, cols: 1 };
+  let best = { rows: 1, cols: n, score: Infinity };
+  const maxDim = Math.ceil(Math.sqrt(n)) + 6; // search window around sqrt(n)
+  for (let rows = 1; rows <= maxDim; rows++) {
+    const cols = Math.ceil(n / rows);
+    if (rows * cols < n) continue;
+    const overshoot = rows * cols - n;
+    const aspectRatio = Math.max(rows, cols) / Math.min(rows, cols);
+    // squareness (aspect ratio) dominates the choice; overshoot only breaks
+    // ties among shapes that are similarly square-ish.
+    const score = aspectRatio * 10 + overshoot * 0.3;
+    if (score < best.score) {
+      best = { rows, cols, score };
+    }
+  }
+  return { rows: best.rows, cols: best.cols };
 }
 
-function buildDots(players: Player[], W: number, H: number): RadarDot[] {
-  const R = Math.min(W, H) * 0.44; // radar usable radius
-  const active = players.filter((p) => p.status === 'locked');
-  const inactive = players.filter((p) => p.status !== 'locked');
-  const all = [...active, ...inactive];
-  const n = all.length;
-  if (n === 0) return [];
+interface GridCell {
+  player: Player | null; // null = empty/disabled padding cell
+  active: boolean;       // still pickable
+  row: number;
+  col: number;
+  cx: number;            // center x (relative to canvas)
+  cy: number;
+  size: number;
+  // animation state
+  lit: number;            // 0..1 current brightness from blinking
+  selected: boolean;
+  flipT: number;
+  pulsePhase: number;
+}
 
-  // distribute across 3 rings
-  const rings = [
-    { count: Math.ceil(n * 0.25), r: 0.32 },
-    { count: Math.ceil(n * 0.4),  r: 0.62 },
-    { count: n,                    r: 0.88 }, // outer catches remainder
-  ];
+function buildGrid(
+  players: Player[],
+  W: number,
+  H: number
+): { cells: GridCell[]; rows: number; cols: number } {
+  const pickable = players.filter((p) => p.status === 'locked');
+  const n = pickable.length;
+  if (n === 0) return { cells: [], rows: 0, cols: 0 };
 
-  const dots: RadarDot[] = [];
-  let placed = 0;
-  for (const ring of rings) {
-    const inRing = Math.min(ring.count, n - placed);
-    if (inRing <= 0) break;
-    for (let i = 0; i < inRing; i++) {
-      const player = all[placed + i];
-      const angle = ((2 * Math.PI) / inRing) * i - Math.PI / 2 + (ring.r * 0.3);
-      const d = ring.r * R;
-      const isActive = player.status === 'locked';
-      dots.push({
-        player,
-        x: Math.cos(angle) * d,
-        y: Math.sin(angle) * d,
-        baseX: Math.cos(angle) * d,
-        baseY: Math.sin(angle) * d,
-        angle,
-        dist: ring.r,
-        radius: isActive ? 5 : 3,
-        targetRadius: isActive ? 5 : 3,
-        alpha: isActive ? 1 : 0.18,
-        active: isActive,
-        selected: false,
-        flipT: 0,
-        jitter: Math.random() * 2 - 1,
-        jitterAngle: Math.random() * Math.PI * 2,
-        blip: Math.random() * 60,
-      });
-    }
-    placed += inRing;
-    if (placed >= n) break;
+  const { rows, cols } = bestGridShape(n);
+  const totalSlots = rows * cols;
+
+  // randomly choose which slots are "disabled" padding (totalSlots - n of them)
+  const slotIsPlayer: boolean[] = Array.from({ length: totalSlots }, (_, i) => i < n);
+  // Fisher-Yates shuffle of slot assignment so padding isn't all at the end
+  for (let i = slotIsPlayer.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [slotIsPlayer[i], slotIsPlayer[j]] = [slotIsPlayer[j], slotIsPlayer[i]];
   }
-  return dots;
+
+  // shuffle player order so it's not deterministic by original array order
+  const shuffledPlayers = [...pickable];
+  for (let i = shuffledPlayers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledPlayers[i], shuffledPlayers[j]] = [shuffledPlayers[j], shuffledPlayers[i]];
+  }
+
+  const pad = 28;
+  const gw = W - pad * 2;
+  const gh = H - pad * 2;
+  const cellW = gw / cols;
+  const cellH = gh / rows;
+  const size = Math.min(cellW, cellH) * 0.74;
+
+  const cells: GridCell[] = [];
+  let playerCursor = 0;
+  for (let i = 0; i < totalSlots; i++) {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const cx = pad + cellW * col + cellW / 2;
+    const cy = pad + cellH * row + cellH / 2;
+    const isPlayer = slotIsPlayer[i];
+    const player = isPlayer ? shuffledPlayers[playerCursor++] : null;
+    cells.push({
+      player,
+      active: isPlayer,
+      row,
+      col,
+      cx,
+      cy,
+      size,
+      lit: 0,
+      selected: false,
+      flipT: 0,
+      pulsePhase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  return { cells, rows, cols };
 }
 
 export function ShuffleOverlay({
@@ -89,27 +116,25 @@ export function ShuffleOverlay({
   players,
 }: ShuffleOverlayProps) {
   const pickablePlayers = useMemo(() => players.filter((p) => p.status === 'locked'), [players]);
-  const allVisiblePlayers = useMemo(() => players.filter(
-    (p) => p.status === 'locked' || p.status === 'sold' || p.status === 'pending'
-  ), [players]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number | null>(null);
 
   const stateRef = useRef({
-    phase: 0 as 0 | 1 | 2, // 0=sweeping 1=homing 2=locked
-    sweepAngle: 0,
-    sweepSpeed: 0.025,
+    phase: 0 as 0 | 1 | 2, // 0=random blinking 1=narrowing down 2=locked on winner
     t: 0,
-    dots: [] as RadarDot[],
-    winnerIdx: -1,
+    cells: [] as GridCell[],
+    rows: 0,
+    cols: 0,
     W: 0,
     H: 0,
-    cx: 0,
-    cy: 0,
-    R: 0,
-    trailDots: [] as { x: number; y: number; a: number }[],
-    homingT: 0,
+    winnerIdx: -1,
+    blinkTimer: 0,
+    blinkInterval: 4,     // frames between blink waves (speeds up via reduce)
+    blinkCount: 0,        // how many cells lit per wave (reduces over time)
+    activeBlinkSet: [] as number[], // indices currently lit this wave
+    narrowPool: [] as number[],     // shrinking candidate pool that always includes winner
+    settleStarted: false,
   });
 
   const [statusText, setStatusText] = useState('Scanning player pool…');
@@ -125,10 +150,11 @@ export function ShuffleOverlay({
     ctx.scale(2, 2);
     const s = stateRef.current;
     s.W = W; s.H = H;
-    s.cx = W / 2; s.cy = H / 2;
-    s.R = Math.min(W, H) * 0.44;
-    s.dots = buildDots(allVisiblePlayers, W, H);
-  }, [allVisiblePlayers]);
+    const { cells, rows, cols } = buildGrid(pickablePlayers, W, H);
+    s.cells = cells;
+    s.rows = rows;
+    s.cols = cols;
+  }, [pickablePlayers]);
 
   useEffect(() => {
     if (!isShuffling) return;
@@ -137,249 +163,202 @@ export function ShuffleOverlay({
     rebuild();
     const s = stateRef.current;
     s.phase = 0;
-    s.sweepAngle = -Math.PI / 2;
-    s.sweepSpeed = 0.025;
     s.t = 0;
-    s.trailDots = [];
-    s.homingT = 0;
+    s.blinkTimer = 0;
+    s.blinkInterval = 4;
+    s.settleStarted = false;
 
-    // pick winner
-    const winnerPlayer = pickablePlayers[Math.floor(Math.random() * pickablePlayers.length)];
-    s.winnerIdx = s.dots.findIndex((d) => d.player === winnerPlayer);
+    // pick winner among active (player-bearing) cells
+    const activeIndices = s.cells
+      .map((c, i) => (c.active ? i : -1))
+      .filter((i) => i >= 0);
+    s.winnerIdx = activeIndices[Math.floor(Math.random() * activeIndices.length)];
+    s.narrowPool = [...activeIndices];
+
+    // initial blink wave size: a healthy chunk of the active cells
+    s.blinkCount = Math.max(4, Math.round(activeIndices.length * 0.4));
+    s.activeBlinkSet = [];
 
     setStatusText('Scanning player pool…');
 
     if (animRef.current) cancelAnimationFrame(animRef.current);
 
-    const TRAIL_ARC = Math.PI * 0.55; // how much of the sweep trail to show
+    const TOTAL_DURATION = 220; // frames before we force-settle, matches prior ~2.2s+ feel
+    const SETTLE_AT = 190;      // frame at which we begin the final lock-on
+
+    function pickBlinkWave() {
+      // Always keep the winner eligible to appear in waves so the final
+      // reveal feels like it "found" the winner rather than teleporting.
+      const pool = s.narrowPool.length > 0 ? s.narrowPool : [s.winnerIdx];
+      const count = Math.min(s.blinkCount, pool.length);
+      const shuffled = [...pool];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      // ensure winner is included once we're narrowing down (phase progressing)
+      let picked = shuffled.slice(0, count);
+      if (s.t > 60 && !picked.includes(s.winnerIdx)) {
+        picked[picked.length - 1] = s.winnerIdx;
+      }
+      s.activeBlinkSet = picked;
+    }
 
     function frame() {
       const cv = canvasRef.current;
       if (!cv) return;
       const ctx = cv.getContext('2d')!;
-      const { W, H, cx, cy, R, dots } = s;
+      const { W, H, cells, rows, cols } = s;
 
       ctx.clearRect(0, 0, W, H);
       s.t++;
 
-      // ── draw radar rings ──────────────────────────────────────────────────
-      [0.32, 0.62, 0.88, 1.0].forEach((rf, i) => {
-        ctx.beginPath();
-        ctx.arc(cx, cy, rf * R, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${ACC_RGB},${0.06 + i * 0.03})`;
-        ctx.lineWidth = 0.6;
-        ctx.stroke();
-      });
-
-      // crosshairs
-      ctx.strokeStyle = `rgba(${ACC_RGB},0.08)`;
+      // ── background grid lines (subtle) ─────────────────────────────────
+      ctx.strokeStyle = `rgba(${ACC_RGB},0.05)`;
       ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
-      // diagonal guides
-      [45, 135].forEach((deg) => {
-        const rad = deg * Math.PI / 180;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(rad) * R, cy + Math.sin(rad) * R);
-        ctx.lineTo(cx - Math.cos(rad) * R, cy - Math.sin(rad) * R);
-        ctx.stroke();
-      });
-
-      // ── sweep arm ────────────────────────────────────────────────────────
-      if (s.phase === 0 || s.phase === 1) {
-        // gradient trail
-        for (let a = 0; a < TRAIL_ARC; a += 0.018) {
-          const ta = s.sweepAngle - a;
-          const fade = Math.pow(1 - a / TRAIL_ARC, 1.6);
-          // fill sector slice
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.arc(cx, cy, R * 1.01, ta, ta + 0.022);
-          ctx.closePath();
-          ctx.fillStyle = `rgba(${ACC_RGB},${fade * 0.18})`;
-          ctx.fill();
+      if (cells.length > 0) {
+        const pad = 28;
+        const cellW = (W - pad * 2) / cols;
+        const cellH = (H - pad * 2) / rows;
+        for (let c = 0; c <= cols; c++) {
+          const x = pad + c * cellW;
+          ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, H - pad); ctx.stroke();
         }
-        // bright leading edge line
-        const ex = cx + Math.cos(s.sweepAngle) * R;
-        const ey = cy + Math.sin(s.sweepAngle) * R;
-        const grad = ctx.createLinearGradient(cx, cy, ex, ey);
-        grad.addColorStop(0, `rgba(${ACC_RGB},0)`);
-        grad.addColorStop(0.6, `rgba(${ACC_RGB},0.3)`);
-        grad.addColorStop(1, `rgba(${ACC_RGB},0.9)`);
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
-        ctx.strokeStyle = grad; ctx.lineWidth = 1.5; ctx.stroke();
-
-        // center pulse dot
-        ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = ACC; ctx.fill();
+        for (let r = 0; r <= rows; r++) {
+          const y = pad + r * cellH;
+          ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad, y); ctx.stroke();
+        }
       }
 
-      // ── dots ─────────────────────────────────────────────────────────────
-      dots.forEach((dot, i) => {
-        const px = cx + dot.x;
-        const py = cy + dot.y;
+      // ── manage blink waves (phase 0/1) ──────────────────────────────────
+      if (s.phase === 0 || s.phase === 1) {
+        s.blinkTimer++;
+        if (s.blinkTimer >= s.blinkInterval) {
+          s.blinkTimer = 0;
+          pickBlinkWave();
 
-        // blip: light up when sweep passes over
-        const dotAngle = Math.atan2(dot.y, dot.x);
-        let sweepDelta = ((s.sweepAngle - dotAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-        if (sweepDelta > Math.PI) sweepDelta = 0;
-        const blipAlpha = dot.active ? Math.max(0, 1 - sweepDelta / (Math.PI * 0.6)) * 0.6 : 0;
+          // progressively narrow the candidate pool and speed up / shrink wave size
+          if (s.t > 40) {
+            // shrink pool toward winner over time
+            const shrinkTo = Math.max(
+              1,
+              Math.round(s.narrowPool.length * 0.78)
+            );
+            if (shrinkTo < s.narrowPool.length) {
+              const shuffledPool = [...s.narrowPool];
+              for (let i = shuffledPool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffledPool[i], shuffledPool[j]] = [shuffledPool[j], shuffledPool[i]];
+              }
+              const keep = new Set(shuffledPool.slice(0, shrinkTo));
+              keep.add(s.winnerIdx);
+              s.narrowPool = s.narrowPool.filter((i) => keep.has(i));
+            }
+            s.blinkCount = Math.max(1, Math.round(s.blinkCount * 0.9));
+            s.blinkInterval = Math.min(14, s.blinkInterval + 0.6);
+            s.phase = 1;
+            setStatusText('Narrowing down…');
+          }
+        }
+      }
 
-        // grow/shrink radius smoothly
-        dot.radius += (dot.targetRadius - dot.radius) * 0.12;
+      // ── settle into final winner ────────────────────────────────────────
+      if (s.t >= SETTLE_AT && !s.settleStarted) {
+        s.settleStarted = true;
+        s.phase = 2;
+        s.activeBlinkSet = [s.winnerIdx];
+        setStatusText('Locking on…');
+      }
 
-        if (dot.selected && dot.flipT < 1) {
-          dot.flipT = Math.min(1, dot.flipT + 0.025);
+      // update lit values toward target (smooth blink decay/attack)
+      cells.forEach((cell, i) => {
+        const isLitTarget =
+          s.phase === 2 ? i === s.winnerIdx : s.activeBlinkSet.includes(i);
+        const target = !cell.active ? 0 : isLitTarget ? 1 : 0;
+        cell.lit += (target - cell.lit) * (s.phase === 2 ? 0.08 : 0.35);
+      });
+
+      if (s.phase === 2 && s.t > SETTLE_AT + 18) {
+        const winnerCell = cells[s.winnerIdx];
+        if (winnerCell && !winnerCell.selected) {
+          winnerCell.selected = true;
+        }
+      }
+
+      // ── draw cells ───────────────────────────────────────────────────────
+      cells.forEach((cell, i) => {
+        const { cx, cy, size } = cell;
+        ctx.save();
+        ctx.translate(cx, cy);
+
+        if (!cell.active) {
+          // disabled / padding cell — faint ghost square
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = `rgba(40,48,50,1)`;
+          roundRect(ctx, -size / 2, -size / 2, size, size, 5);
+          ctx.fill();
+          ctx.restore();
+          return;
         }
 
-        const isWinner = i === s.winnerIdx;
-        const r = dot.radius;
+        if (cell.selected) {
+          const progress = cell.flipT = Math.min(1, cell.flipT + 0.05);
+          const r = size / 2 + progress * 6;
 
-        ctx.save();
-        ctx.translate(px, py);
-        ctx.globalAlpha = dot.alpha;
-
-        if (dot.selected) {
-          // ── selected: grow into avatar circle ────────────────────────────
-          const progress = dot.flipT;
-
-          // outer glow ring
+          // glow rings
           ctx.beginPath();
-          ctx.arc(0, 0, r + 4 + Math.sin(s.t * 0.1) * 2, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${ACC_RGB},${0.3 * progress})`;
+          ctx.arc(0, 0, r + 6 + Math.sin(s.t * 0.1) * 2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${ACC_RGB},${0.35 * progress})`;
           ctx.lineWidth = 1.5;
           ctx.stroke();
 
-          // second ring
-          ctx.beginPath();
-          ctx.arc(0, 0, r + 10 + Math.sin(s.t * 0.07) * 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${ACC_RGB},${0.15 * progress})`;
-          ctx.lineWidth = 0.8;
-          ctx.stroke();
-
-          // filled avatar circle
-          ctx.beginPath();
-          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.globalAlpha = 1;
+          roundRect(ctx, -r, -r, r * 2, r * 2, 8);
           ctx.fillStyle = ACC;
           ctx.fill();
 
-          // initials inside
           if (progress > 0.4) {
-            const fsize = Math.max(8, r * 0.5);
+            const fsize = Math.max(9, r * 0.7);
             ctx.fillStyle = `rgba(255,255,255,${(progress - 0.4) / 0.6})`;
             ctx.font = `900 ${fsize}px monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const initials = dot.player.name
+            const initials = (cell.player!.name || '')
               .split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
             ctx.fillText(initials, 0, 0);
           }
-
-          // name label below
-          if (progress > 0.6) {
-            const labelAlpha = (progress - 0.6) / 0.4;
-            ctx.fillStyle = `rgba(${ACC_RGB},${labelAlpha})`;
-            ctx.font = `700 ${Math.max(7, r * 0.28)}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(dot.player.name.split(' ')[0].toUpperCase(), 0, r + 6);
-          }
-
-        } else if (dot.active) {
-          // ── active dot: glowing blip ──────────────────────────────────────
-          // blip ring when sweep passes
-          if (blipAlpha > 0.01) {
-            ctx.beginPath();
-            ctx.arc(0, 0, r + 6, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(${ACC_RGB},${blipAlpha})`;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-
-          // core dot
-          ctx.beginPath();
-          ctx.arc(0, 0, r, 0, Math.PI * 2);
-          const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-          grd.addColorStop(0, `rgba(255,160,100,1)`);
-          grd.addColorStop(1, `rgba(${ACC_RGB},0.7)`);
-          ctx.fillStyle = grd;
-          ctx.fill();
-
-          // dim ring
-          ctx.beginPath();
-          ctx.arc(0, 0, r + 1.5, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${ACC_RGB},0.4)`;
-          ctx.lineWidth = 0.8;
-          ctx.stroke();
-
         } else {
-          // ── inactive / used dot: faded ghost ─────────────────────────────
-          ctx.beginPath();
-          ctx.arc(0, 0, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(30,40,42,1)`;
-          ctx.fill();
-          ctx.strokeStyle = `rgba(${ACC_RGB},0.12)`;
-          ctx.lineWidth = 0.6;
+          // active blinking square — always clearly visible at rest, brighter when lit
+          const lit = cell.lit;
+
+          ctx.globalAlpha = 1;
+          if (lit > 0.05) {
+            // glow behind lit cell
+            ctx.save();
+            ctx.shadowColor = `rgba(${ACC_RGB},${lit * 0.8})`;
+            ctx.shadowBlur = 14 * lit;
+            ctx.fillStyle = `rgba(${ACC_RGB},${0.18 + lit * 0.62})`;
+            roundRect(ctx, -size / 2, -size / 2, size, size, 5);
+            ctx.fill();
+            ctx.restore();
+          } else {
+            // resting state — still a clearly visible filled square, not near-invisible
+            ctx.fillStyle = `rgba(${ACC_RGB},0.16)`;
+            roundRect(ctx, -size / 2, -size / 2, size, size, 5);
+            ctx.fill();
+          }
+
+          ctx.strokeStyle = `rgba(${ACC_RGB},${0.45 + lit * 0.5})`;
+          ctx.lineWidth = 1.4;
+          roundRect(ctx, -size / 2, -size / 2, size, size, 5);
           ctx.stroke();
         }
 
         ctx.restore();
       });
 
-      // ── homing beam to winner ─────────────────────────────────────────────
-      if (s.phase === 1) {
-        const winner = dots[s.winnerIdx];
-        if (winner) {
-          const wx = cx + winner.x;
-          const wy = cy + winner.y;
-          s.homingT = Math.min(1, s.homingT + 0.04);
-          const beamAlpha = s.homingT * 0.6;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(wx, wy);
-          ctx.strokeStyle = `rgba(${ACC_RGB},${beamAlpha})`;
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-
-          // converging rings
-          const ringR = (1 - s.homingT) * 30 + 8;
-          ctx.beginPath();
-          ctx.arc(wx, wy, ringR, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${ACC_RGB},${s.homingT * 0.7})`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          if (s.homingT >= 1) {
-            s.phase = 2;
-            winner.selected = true;
-            winner.targetRadius = 28;
-            setStatusText('Player selected!');
-          }
-        }
-      }
-
-      // ── phase transitions ─────────────────────────────────────────────────
-      if (s.phase === 0) {
-        s.sweepAngle += s.sweepSpeed;
-
-        // slow down after enough rotations
-        if (s.t > 160) s.sweepSpeed = Math.max(0.004, s.sweepSpeed * 0.987);
-
-        // check if sweep line is close to winner
-        if (s.sweepSpeed < 0.007) {
-          const winner = dots[s.winnerIdx];
-          if (winner) {
-            const winAngle = Math.atan2(winner.y, winner.x);
-            let delta = ((s.sweepAngle - winAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-            if (delta > Math.PI) delta = Math.PI * 2 - delta;
-            // snap when line crosses winner
-            if (delta < 0.08) {
-              s.phase = 1;
-              s.homingT = 0;
-              setStatusText('Locking on…');
-            }
-          }
-        }
+      if (s.phase === 2 && cells[s.winnerIdx]?.flipT >= 1) {
+        // hold on final frame; the parent will swap shuffleTarget in shortly
       }
 
       animRef.current = requestAnimationFrame(frame);
@@ -417,12 +396,12 @@ export function ShuffleOverlay({
         {shuffleTarget ? 'Player Selected' : statusText}
       </h2>
 
-      {/* Radar canvas */}
+      {/* Heatmap canvas */}
       <div
-        className="relative z-10 rounded-full overflow-hidden border border-[#e45d35]/15"
+        className="relative z-10 rounded-2xl overflow-hidden border border-[#e45d35]/15"
         style={{
-          width: 'min(88vw, 520px)',
-          height: 'min(88vw, 520px)',
+          width: 'min(92vw, 620px)',
+          height: 'min(92vw, 460px)',
           background: 'radial-gradient(circle, #0c1012 60%, #080b0c 100%)',
           boxShadow: '0 0 60px rgba(228,93,53,0.06), inset 0 0 40px rgba(0,0,0,0.6)',
         }}
@@ -464,4 +443,22 @@ export function ShuffleOverlay({
       </p>
     </div>
   );
+}
+
+// ── helper: rounded rect path ────────────────────────────────────────────────
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

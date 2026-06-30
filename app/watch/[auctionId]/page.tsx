@@ -18,6 +18,7 @@ import {
   subscribeToLot,
   subscribeToBids,
   subscribeToTeamPurses,
+  subscribeToPlayers,
   getNextBidAmount,
   completeLotReveal,
   type AuctionLot,
@@ -56,7 +57,13 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
   const [bidHistory, setBidHistory]             = useState<BidEntry[]>([]);
   const [completedLots, setCompletedLots]       = useState<AuctionLot[]>([]);
   const [lotNumber, setLotNumber]               = useState(0);
-  const [remainingPlayers, setRemainingPlayers] = useState<Player[]>([]);
+
+  // ── Player flags (is_unsold / is_unsold_final / reentry_count) ───────────
+  // Kept live-synced via subscribeToPlayers so re-entry rounds (which never
+  // create a new lot row) still reflect on the watch screen without a reload.
+  const [playerFlags, setPlayerFlags] = useState<
+    Record<string, { isUnsold: boolean; isUnsoldFinal: boolean; reentryCount: number }>
+  >({});
 
   // ── Auction-level status (realtime) ───────────────────────────────────────
   // NOTE: The realtime subscription for status changes lives ONLY inside
@@ -98,13 +105,13 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
   const flashTimeout     = useRef<ReturnType<typeof setTimeout>  | null>(null);
 
   const auctionRef       = useRef(auction);
-  const remainingRef     = useRef(remainingPlayers);
   const currentLotRef    = useRef(currentLot);
   const completedLotsRef = useRef(completedLots);
+  const playerFlagsRef   = useRef(playerFlags);
   useEffect(() => { auctionRef.current       = auction;          }, [auction]);
-  useEffect(() => { remainingRef.current     = remainingPlayers; }, [remainingPlayers]);
   useEffect(() => { currentLotRef.current    = currentLot;       }, [currentLot]);
   useEffect(() => { completedLotsRef.current = completedLots;    }, [completedLots]);
+  useEffect(() => { playerFlagsRef.current   = playerFlags;      }, [playerFlags]);
 
   const isShufflingRef = useRef(isShuffling);
   useEffect(() => { isShufflingRef.current = isShuffling; }, [isShuffling]);
@@ -132,10 +139,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       setBidHistory(liveData.bidHistory);
       setCompletedLots(liveData.completedLots);
       setLotNumber(liveData.lotNumber);
-
-      const usedIds = new Set(liveData.completedLots.map((l) => l.playerId));
-      if (liveData.currentLot) usedIds.add(liveData.currentLot.playerId);
-      setRemainingPlayers(auction.players.filter((p) => !usedIds.has(p.supabaseId ?? "")));
 
       if (liveData.currentLot?.status === "sold") {
         setCurrentLot(liveData.currentLot);
@@ -172,6 +175,57 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     return () => { sub.unsubscribe(); };
   }, [auctionId, auction?.auctionId]);
 
+  // ── Player flags: seed from loaded auction, then keep live-synced ────────
+  useEffect(() => {
+    if (!auction) return;
+    setPlayerFlags((prev) => {
+      const next = { ...prev };
+      auction.players.forEach((p) => {
+        const id = p.supabaseId;
+        if (!id || next[id]) return;
+        next[id] = {
+          isUnsold:      false,
+          isUnsoldFinal: p.isUnsoldFinal ?? false,
+          reentryCount:  p.reentryCount ?? 0,
+        };
+      });
+      return next;
+    });
+  }, [auction]);
+
+  useEffect(() => {
+    if (!auction?.auctionId) return;
+    const sub = subscribeToPlayers(auctionId, (p) => {
+      setPlayerFlags((prev) => ({
+        ...prev,
+        [p.id]: { isUnsold: p.isUnsold, isUnsoldFinal: p.isUnsoldFinal, reentryCount: p.reentryCount },
+      }));
+    });
+    return () => { sub.unsubscribe(); };
+  }, [auctionId, auction?.auctionId]);
+
+  // ── Compute the live shuffle candidate pool fresh every time ─────────────
+  // Replaces the old static `remainingPlayers` state, which never picked up
+  // players requeued by a re-entry round (those don't create a new lot row,
+  // so nothing ever re-added them to a stale "remaining" list).
+  const getQueueCandidates = useCallback((): Player[] => {
+    const auc = auctionRef.current;
+    if (!auc) return [];
+    const soldIds = new Set(
+      completedLotsRef.current.filter((l) => l.status === "sold").map((l) => l.playerId)
+    );
+    const activeId = currentLotRef.current?.playerId;
+    return auc.players.filter((p) => {
+      const supId = p.supabaseId ?? "";
+      if (!supId) return false;
+      if (soldIds.has(supId)) return false;
+      if (activeId && supId === activeId) return false;
+      const flags = playerFlagsRef.current[supId];
+      if (flags?.isUnsoldFinal) return false; // permanently out — never a candidate
+      return true;
+    });
+  }, []);
+
   // Shuffle animation
   const triggerShuffleAndReveal = useCallback((lot: AuctionLot) => {
     setIsShuffling(true);
@@ -180,7 +234,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     setBidHistory([]);
     setShuffleTarget(null);
 
-    const candidates = remainingRef.current;
+    const candidates = getQueueCandidates();
 
     const rawPool: FlowPlayer[] = candidates.map((p) =>
       buildFlowPlayer({
@@ -228,9 +282,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
           setIsShuffling(false);
           setShuffleTarget(null);
           setLotNumber(lot.lotNumber);
-          setRemainingPlayers((prev) =>
-            prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
-          );
           try {
             const revealed = await completeLotReveal(lot.id);
             revealedLotIdRef.current = revealed.id;
@@ -245,7 +296,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       }
     }
     spin();
-  }, [resetClock]);
+  }, [resetClock, getQueueCandidates]);
 
   // Realtime: lot + bid changes
   useEffect(() => {
@@ -264,11 +315,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       if (lot.status === "pending") {
         if (isShufflingRef.current && currentLotRef.current?.id === lot.id) return;
         const wasShuffling = currentLotRef.current?.status === "shuffling";
-        if (isNewLot) {
-          setRemainingPlayers((prev) =>
-            prev.filter((p) => (p.supabaseId ?? "") !== lot.playerId)
-          );
-        }
         setCurrentLot(lot);
         setIsSold(false);
         setIsUnsold(false);
@@ -398,34 +444,56 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
     );
   }, [completedLots, auction?.session.auctionName]);
 
+  // ── Flow players — now carries isFinal / reentryCount so the sankey can
+  // visually distinguish "permanently unsold" from "awaiting re-entry" ─────
   const flowPlayers: FlowPlayer[] = useMemo(() => {
     if (!auction) return [];
     return auction.players.map((p) => {
       const supId = p.supabaseId ?? "";
+      const flags = playerFlags[supId];
+      const extra = {
+        isFinal:      flags?.isUnsoldFinal ?? false,
+        reentryCount: flags?.reentryCount ?? 0,
+      };
+
       if (currentLot && currentLot.playerId === supId) {
-        return buildFlowPlayer({
+        return {
+          ...buildFlowPlayer({
+            id: supId, name: p.name, img: p.img,
+            price: `${p.price.toLocaleString()} PTS`,
+            status: "pending",
+            teamShortCode: currentLot.winningTeamCode,
+          }),
+          ...extra,
+        };
+      }
+      const playerLots = completedLots.filter((l) => l.playerId === supId);
+            const closedLot = playerLots.length
+              ? playerLots.reduce((best, l) =>
+                l.status === "sold" && best.status !== "sold" ? l : best
+            )
+        : undefined;      
+        if (closedLot) {
+        return {
+          ...buildFlowPlayer({
+            id: supId, name: p.name, img: p.img,
+            price: `${p.price.toLocaleString()} PTS`,
+            status: closedLot.status === "sold" ? "sold" : "unsold" as any,
+            teamShortCode: closedLot.status === "sold" ? closedLot.winningTeamCode : null,
+          }),
+          ...extra,
+        };
+      }
+      return {
+        ...buildFlowPlayer({
           id: supId, name: p.name, img: p.img,
           price: `${p.price.toLocaleString()} PTS`,
-          status: "pending",
-          teamShortCode: currentLot.winningTeamCode,
-        });
-      }
-      const closedLot = completedLots.find((l) => l.playerId === supId);
-      if (closedLot) {
-        return buildFlowPlayer({
-          id: supId, name: p.name, img: p.img,
-          price: `${p.price.toLocaleString()} PTS`,
-          status: closedLot.status === "sold" ? "sold" : "unsold" as any,
-          teamShortCode: closedLot.status === "sold" ? closedLot.winningTeamCode : null,
-        });
-      }
-      return buildFlowPlayer({
-        id: supId, name: p.name, img: p.img,
-        price: `${p.price.toLocaleString()} PTS`,
-        status: "locked",
-      });
+          status: "locked",
+        }),
+        ...extra,
+      };
     });
-  }, [auction, currentLot, completedLots]);
+  }, [auction, currentLot, completedLots, playerFlags]);
 
   const flowTeams: FlowTeam[] = useMemo(() => {
     if (!auction) return [];
@@ -807,7 +875,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                   ) : (
                     // Between lots mid-auction
                     <div className="text-center max-w-md">
-                      <span className="ms text-[#2a3a44] text-6xl block mb-4">pending</span>
+                      <span className="ms text-[#2a3a44] text-8xl block mb-4">pending</span>
                       <h2 className="font-archivo text-3xl font-bold uppercase italic text-white mb-2">Next Lot Soon</h2>
                       <p className="font-mono-geist text-xs text-[#5a6a74] uppercase tracking-widest">
                         {completedLots.length} lot{completedLots.length !== 1 ? "s" : ""} completed — auctioneer is preparing the next player
@@ -967,7 +1035,11 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                             <p className={["font-semibold text-sm truncate font-archivo", isUnsoldP ? "text-white/30 line-through decoration-red-900/60" : "text-white"].join(" ")}>
                               {p.name}
                             </p>
-                            {isUnsoldP && <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-950/60 text-red-500/70 border border-red-900/40">UNSOLD</span>}
+                            {isUnsoldP && (
+                              <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-950/60 text-red-500/70 border border-red-900/40">
+                                {pAny.isFinal ? "UNSOLD · FINAL" : `UNSOLD${pAny.reentryCount > 0 ? ` · R${pAny.reentryCount}` : ""}`}
+                              </span>
+                            )}
                             {isPending && <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-[#e45d35]/15 text-[#e45d35] border border-[#e45d35]/30 animate-pulse">LIVE</span>}
                           </div>
                           <p className={["text-[10px] font-mono font-medium mt-0.5 uppercase",

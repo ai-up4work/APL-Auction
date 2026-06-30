@@ -11,113 +11,76 @@ interface ShuffleOverlayProps {
 }
 
 const ACC = '#e45d35';
+const ACC_RGB = '228,93,53';
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-interface PlayerCell {
+// ── place dots in concentric rings on the radar ──────────────────────────────
+interface RadarDot {
   player: Player;
-  x: number;
+  x: number;       // relative to radar center
   y: number;
-  w: number;
-  h: number;
-  scale: number;
+  baseX: number;
+  baseY: number;
+  angle: number;   // radians from center
+  dist: number;    // 0..1 (normalized ring distance)
+  radius: number;  // current rendered radius (grows on selection)
+  targetRadius: number;
+  alpha: number;   // 0..1 (fades out when disabled)
+  active: boolean; // still in pool
+  selected: boolean; // this was the pick — grows + shows avatar
+  flipT: number;   // 0..1 card-flip progress (after selection)
+  jitter: number;  // small random offset for organic feel
+  jitterAngle: number;
+  blip: number;    // ping animation timer
 }
 
-function buildGrid(players: Player[], W: number, H: number): PlayerCell[] {
-  if (players.length === 0 || W === 0 || H === 0) return [];
-  const n = players.length;
-  const cols = Math.ceil(Math.sqrt(n * (W / H)));
-  const rows = Math.ceil(n / cols);
-  const cellW = W / cols;
-  const cellH = H / rows;
-  const pw = Math.max(28, Math.min(64, cellW - 4));
-  const ph = Math.max(14, Math.min(28, cellH - 4));
-  return players.map((player, i) => ({
-    player,
-    x: (i % cols) * cellW + cellW / 2,
-    y: Math.floor(i / cols) * cellH + cellH / 2,
-    w: pw,
-    h: ph,
-    scale: 1,
-  }));
-}
+function buildDots(players: Player[], W: number, H: number): RadarDot[] {
+  const R = Math.min(W, H) * 0.44; // radar usable radius
+  const active = players.filter((p) => p.status === 'locked');
+  const inactive = players.filter((p) => p.status !== 'locked');
+  const all = [...active, ...inactive];
+  const n = all.length;
+  if (n === 0) return [];
 
-function drawGrid(
-  ctx: CanvasRenderingContext2D,
-  cells: PlayerCell[],
-  winnerIdx: number | null,
-  beamX: number,
-  beamY: number,
-  beamR: number,
-  locked: boolean
-) {
-  cells.forEach((cell, i) => {
-    const isWinner = i === winnerIdx && locked;
-    const dx = cell.x - beamX;
-    const dy = cell.y - beamY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const lit = beamR > 0 ? Math.max(0, 1 - dist / beamR) : 0;
+  // distribute across 3 rings
+  const rings = [
+    { count: Math.ceil(n * 0.25), r: 0.32 },
+    { count: Math.ceil(n * 0.4),  r: 0.62 },
+    { count: n,                    r: 0.88 }, // outer catches remainder
+  ];
 
-    ctx.save();
-    ctx.translate(cell.x, cell.y);
-    if (isWinner) ctx.scale(cell.scale, cell.scale);
-
-    const hw = cell.w / 2;
-    const hh = cell.h / 2;
-    const r = Math.min(3, hh * 0.4);
-
-    let bg: string, stroke: string, textCol: string;
-    if (isWinner) {
-      bg = ACC; stroke = '#ff8855'; textCol = '#fff';
-    } else if (lit > 0.05) {
-      bg = `rgba(${30 + Math.round(lit * 80)},${18 + Math.round(lit * 20)},${14 + Math.round(lit * 10)},1)`;
-      stroke = `rgba(228,93,53,${lit * 0.8})`;
-      textCol = `rgba(${180 + Math.round(lit * 75)},${80 + Math.round(lit * 100)},${50 + Math.round(lit * 80)},${0.4 + lit * 0.6})`;
-    } else {
-      bg = '#101415'; stroke = '#1a2022'; textCol = '#334';
+  const dots: RadarDot[] = [];
+  let placed = 0;
+  for (const ring of rings) {
+    const inRing = Math.min(ring.count, n - placed);
+    if (inRing <= 0) break;
+    for (let i = 0; i < inRing; i++) {
+      const player = all[placed + i];
+      const angle = ((2 * Math.PI) / inRing) * i - Math.PI / 2 + (ring.r * 0.3);
+      const d = ring.r * R;
+      const isActive = player.status === 'locked';
+      dots.push({
+        player,
+        x: Math.cos(angle) * d,
+        y: Math.sin(angle) * d,
+        baseX: Math.cos(angle) * d,
+        baseY: Math.sin(angle) * d,
+        angle,
+        dist: ring.r,
+        radius: isActive ? 5 : 3,
+        targetRadius: isActive ? 5 : 3,
+        alpha: isActive ? 1 : 0.18,
+        active: isActive,
+        selected: false,
+        flipT: 0,
+        jitter: Math.random() * 2 - 1,
+        jitterAngle: Math.random() * Math.PI * 2,
+        blip: Math.random() * 60,
+      });
     }
-
-    roundRect(ctx, -hw, -hh, cell.w, cell.h, r);
-    ctx.fillStyle = bg; ctx.fill();
-    ctx.strokeStyle = stroke; ctx.lineWidth = isWinner ? 1.5 : 0.8; ctx.stroke();
-
-    const fsize = Math.max(7, Math.min(10, cell.h * 0.38));
-    ctx.fillStyle = textCol;
-    ctx.font = `700 ${fsize}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    const initials = cell.player.name
-      .split(' ')
-      .map((w: string) => w[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
-    ctx.fillText(initials, 0, 0);
-
-    if (lit > 0.3 && !isWinner) {
-      ctx.strokeStyle = `rgba(228,93,53,${lit * 0.5})`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  });
+    placed += inRing;
+    if (placed >= n) break;
+  }
+  return dots;
 }
 
 export function ShuffleOverlay({
@@ -125,36 +88,33 @@ export function ShuffleOverlay({
   shuffleTarget,
   players,
 }: ShuffleOverlayProps) {
-  const availablePlayers = useMemo(
-    () => players.filter((p) => p.status === 'locked'),
-    [players]
-  );
+  const pickablePlayers = useMemo(() => players.filter((p) => p.status === 'locked'), [players]);
+  const allVisiblePlayers = useMemo(() => players.filter(
+    (p) => p.status === 'locked' || p.status === 'sold' || p.status === 'pending'
+  ), [players]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number | null>(null);
+
   const stateRef = useRef({
-    phase: 0,        // 0=sweep 1=homing 2=locked
-    angle: 0,
-    sweepSpeed: 0.16,
-    beamX: 0,
-    beamY: 0,
-    beamR: 0,
+    phase: 0 as 0 | 1 | 2, // 0=sweeping 1=homing 2=locked
+    sweepAngle: 0,
+    sweepSpeed: 0.025,
     t: 0,
-    pulseT: 0,
-    locked: false,
+    dots: [] as RadarDot[],
     winnerIdx: -1,
-    trailDots: [] as { x: number; y: number; alpha: number; vx: number; vy: number }[],
-    cells: [] as PlayerCell[],
     W: 0,
     H: 0,
+    cx: 0,
+    cy: 0,
+    R: 0,
+    trailDots: [] as { x: number; y: number; a: number }[],
+    homingT: 0,
   });
 
   const [statusText, setStatusText] = useState('Scanning player pool…');
-  const [pulseRings, setPulseRings] = useState<{ id: number; x: number; y: number; size: number }[]>([]);
-  const pulseIdRef = useRef(0);
 
-  // ── build / rebuild the grid ──────────────────────────────────────────────
-  const rebuildGrid = useCallback(() => {
+  const rebuild = useCallback(() => {
     const cv = canvasRef.current;
     if (!cv) return;
     const W = cv.clientWidth;
@@ -165,158 +125,271 @@ export function ShuffleOverlay({
     ctx.scale(2, 2);
     const s = stateRef.current;
     s.W = W; s.H = H;
-    s.cells = buildGrid(availablePlayers, W, H);
-  }, [availablePlayers]);
+    s.cx = W / 2; s.cy = H / 2;
+    s.R = Math.min(W, H) * 0.44;
+    s.dots = buildDots(allVisiblePlayers, W, H);
+  }, [allVisiblePlayers]);
 
-  // ── start animation when shuffling begins ─────────────────────────────────
   useEffect(() => {
-    if (!isShuffling && !shuffleTarget) return;
-    if (!isShuffling && shuffleTarget) return; // already finished, handled below
-    if (availablePlayers.length === 0) return;
+    if (!isShuffling) return;
+    if (pickablePlayers.length === 0) return;
 
-    rebuildGrid();
+    rebuild();
     const s = stateRef.current;
-    const cx = s.W / 2;
-    const cy = s.H / 2;
+    s.phase = 0;
+    s.sweepAngle = -Math.PI / 2;
+    s.sweepSpeed = 0.025;
+    s.t = 0;
+    s.trailDots = [];
+    s.homingT = 0;
 
     // pick winner
-    const winnerPlayerIdx = Math.floor(Math.random() * availablePlayers.length);
-    s.winnerIdx = winnerPlayerIdx;
-    s.phase = 0;
-    s.angle = 0;
-    s.sweepSpeed = 0.16;
-    s.beamX = cx;
-    s.beamY = cy;
-    s.beamR = Math.max(s.W, s.H) * 0.6;
-    s.t = 0;
-    s.pulseT = 0;
-    s.locked = false;
-    s.trailDots = [];
-
-    const target = s.cells[winnerPlayerIdx];
-    if (!target) return;
-    const targetX = target.x;
-    const targetY = target.y;
-    const sweepR = Math.max(s.W, s.H) * 0.65;
+    const winnerPlayer = pickablePlayers[Math.floor(Math.random() * pickablePlayers.length)];
+    s.winnerIdx = s.dots.findIndex((d) => d.player === winnerPlayer);
 
     setStatusText('Scanning player pool…');
 
     if (animRef.current) cancelAnimationFrame(animRef.current);
 
+    const TRAIL_ARC = Math.PI * 0.55; // how much of the sweep trail to show
+
     function frame() {
       const cv = canvasRef.current;
       if (!cv) return;
       const ctx = cv.getContext('2d')!;
-      const { W, H, cells } = s;
+      const { W, H, cx, cy, R, dots } = s;
 
       ctx.clearRect(0, 0, W, H);
       s.t++;
 
-      if (s.phase === 0) {
-        // rotating sweep from center
-        s.angle += s.sweepSpeed;
-        s.beamX = cx + Math.cos(s.angle) * sweepR * 0.6;
-        s.beamY = cy + Math.sin(s.angle) * sweepR * 0.4;
+      // ── draw radar rings ──────────────────────────────────────────────────
+      [0.32, 0.62, 0.88, 1.0].forEach((rf, i) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, rf * R, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${ACC_RGB},${0.06 + i * 0.03})`;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      });
 
-        // sweep trail
-        for (let a = 0; a < Math.PI * 0.65; a += 0.025) {
-          const ta = s.angle - a;
-          const ex = cx + Math.cos(ta) * sweepR * 0.8;
-          const ey = cy + Math.sin(ta) * sweepR * 0.55;
-          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
-          ctx.strokeStyle = `rgba(228,93,53,${(0.65 - a / Math.PI * 0.65) * 0.13})`;
-          ctx.lineWidth = 1.5; ctx.stroke();
+      // crosshairs
+      ctx.strokeStyle = `rgba(${ACC_RGB},0.08)`;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+      // diagonal guides
+      [45, 135].forEach((deg) => {
+        const rad = deg * Math.PI / 180;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(rad) * R, cy + Math.sin(rad) * R);
+        ctx.lineTo(cx - Math.cos(rad) * R, cy - Math.sin(rad) * R);
+        ctx.stroke();
+      });
+
+      // ── sweep arm ────────────────────────────────────────────────────────
+      if (s.phase === 0 || s.phase === 1) {
+        // gradient trail
+        for (let a = 0; a < TRAIL_ARC; a += 0.018) {
+          const ta = s.sweepAngle - a;
+          const fade = Math.pow(1 - a / TRAIL_ARC, 1.6);
+          // fill sector slice
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, R * 1.01, ta, ta + 0.022);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${ACC_RGB},${fade * 0.18})`;
+          ctx.fill();
         }
-        // sweep arm
-        ctx.beginPath(); ctx.moveTo(cx, cy);
-        ctx.lineTo(s.beamX * 1.25 - cx * 0.25, s.beamY * 1.25 - cy * 0.25);
-        ctx.strokeStyle = 'rgba(228,93,53,0.45)'; ctx.lineWidth = 1; ctx.stroke();
-        // center dot
-        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(228,93,53,0.6)'; ctx.fill();
+        // bright leading edge line
+        const ex = cx + Math.cos(s.sweepAngle) * R;
+        const ey = cy + Math.sin(s.sweepAngle) * R;
+        const grad = ctx.createLinearGradient(cx, cy, ex, ey);
+        grad.addColorStop(0, `rgba(${ACC_RGB},0)`);
+        grad.addColorStop(0.6, `rgba(${ACC_RGB},0.3)`);
+        grad.addColorStop(1, `rgba(${ACC_RGB},0.9)`);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+        ctx.strokeStyle = grad; ctx.lineWidth = 1.5; ctx.stroke();
 
-        if (s.t > 70) s.sweepSpeed = Math.max(0.008, s.sweepSpeed * 0.974);
-        if (s.sweepSpeed < 0.012) {
-          s.phase = 1;
-          setStatusText('Locking on…');
+        // center pulse dot
+        ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = ACC; ctx.fill();
+      }
+
+      // ── dots ─────────────────────────────────────────────────────────────
+      dots.forEach((dot, i) => {
+        const px = cx + dot.x;
+        const py = cy + dot.y;
+
+        // blip: light up when sweep passes over
+        const dotAngle = Math.atan2(dot.y, dot.x);
+        let sweepDelta = ((s.sweepAngle - dotAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+        if (sweepDelta > Math.PI) sweepDelta = 0;
+        const blipAlpha = dot.active ? Math.max(0, 1 - sweepDelta / (Math.PI * 0.6)) * 0.6 : 0;
+
+        // grow/shrink radius smoothly
+        dot.radius += (dot.targetRadius - dot.radius) * 0.12;
+
+        if (dot.selected && dot.flipT < 1) {
+          dot.flipT = Math.min(1, dot.flipT + 0.025);
         }
-      } else if (s.phase === 1) {
-        const dx = targetX - s.beamX;
-        const dy = targetY - s.beamY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        s.beamX += dx * 0.07;
-        s.beamY += dy * 0.07;
-        s.beamR = Math.max(55, s.beamR * 0.955);
 
-        // fading arm
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(s.beamX, s.beamY);
-        ctx.strokeStyle = 'rgba(228,93,53,0.2)'; ctx.lineWidth = 1; ctx.stroke();
+        const isWinner = i === s.winnerIdx;
+        const r = dot.radius;
 
-        // heat sparks
-        if (s.t % 3 === 0) {
-          s.trailDots.push({
-            x: s.beamX + (Math.random() - 0.5) * 28,
-            y: s.beamY + (Math.random() - 0.5) * 28,
-            alpha: 1,
-            vx: (targetX - s.beamX) * 0.04,
-            vy: (targetY - s.beamY) * 0.04,
-          });
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.globalAlpha = dot.alpha;
+
+        if (dot.selected) {
+          // ── selected: grow into avatar circle ────────────────────────────
+          const progress = dot.flipT;
+
+          // outer glow ring
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 4 + Math.sin(s.t * 0.1) * 2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${ACC_RGB},${0.3 * progress})`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // second ring
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 10 + Math.sin(s.t * 0.07) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${ACC_RGB},${0.15 * progress})`;
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+
+          // filled avatar circle
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fillStyle = ACC;
+          ctx.fill();
+
+          // initials inside
+          if (progress > 0.4) {
+            const fsize = Math.max(8, r * 0.5);
+            ctx.fillStyle = `rgba(255,255,255,${(progress - 0.4) / 0.6})`;
+            ctx.font = `900 ${fsize}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const initials = dot.player.name
+              .split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+            ctx.fillText(initials, 0, 0);
+          }
+
+          // name label below
+          if (progress > 0.6) {
+            const labelAlpha = (progress - 0.6) / 0.4;
+            ctx.fillStyle = `rgba(${ACC_RGB},${labelAlpha})`;
+            ctx.font = `700 ${Math.max(7, r * 0.28)}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(dot.player.name.split(' ')[0].toUpperCase(), 0, r + 6);
+          }
+
+        } else if (dot.active) {
+          // ── active dot: glowing blip ──────────────────────────────────────
+          // blip ring when sweep passes
+          if (blipAlpha > 0.01) {
+            ctx.beginPath();
+            ctx.arc(0, 0, r + 6, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${ACC_RGB},${blipAlpha})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+
+          // core dot
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+          grd.addColorStop(0, `rgba(255,160,100,1)`);
+          grd.addColorStop(1, `rgba(${ACC_RGB},0.7)`);
+          ctx.fillStyle = grd;
+          ctx.fill();
+
+          // dim ring
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 1.5, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${ACC_RGB},0.4)`;
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+
+        } else {
+          // ── inactive / used dot: faded ghost ─────────────────────────────
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(30,40,42,1)`;
+          ctx.fill();
+          ctx.strokeStyle = `rgba(${ACC_RGB},0.12)`;
+          ctx.lineWidth = 0.6;
+          ctx.stroke();
         }
-        s.trailDots.forEach((d) => { d.x += d.vx; d.y += d.vy; d.alpha -= 0.045; });
-        s.trailDots = s.trailDots.filter((d) => d.alpha > 0);
 
-        if (dist < 4) {
-          s.phase = 2;
-          s.pulseT = 0;
-          s.locked = true;
-          s.beamX = targetX;
-          s.beamY = targetY;
-          setStatusText('Player selected!');
-        }
-      } else if (s.phase === 2) {
-        s.pulseT++;
-        // winner card breathes
-        if (cells[s.winnerIdx]) {
-          cells[s.winnerIdx].scale = 1 + Math.sin(s.pulseT * 0.15) * 0.07;
-        }
-        s.beamR = Math.max(18, s.beamR * 0.9);
+        ctx.restore();
+      });
 
-        // spawn DOM pulse rings
-        if (s.pulseT % 18 === 0 && s.pulseT < 90) {
-          const wc = cells[s.winnerIdx];
-          if (wc) {
-            const id = pulseIdRef.current++;
-            setPulseRings((prev) => [
-              ...prev,
-              { id, x: wc.x, y: wc.y, size: wc.w * 1.8 },
-            ]);
-            setTimeout(() => {
-              setPulseRings((pr) => pr.filter((r) => r.id !== id));
-            }, 900);
+      // ── homing beam to winner ─────────────────────────────────────────────
+      if (s.phase === 1) {
+        const winner = dots[s.winnerIdx];
+        if (winner) {
+          const wx = cx + winner.x;
+          const wy = cy + winner.y;
+          s.homingT = Math.min(1, s.homingT + 0.04);
+          const beamAlpha = s.homingT * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(wx, wy);
+          ctx.strokeStyle = `rgba(${ACC_RGB},${beamAlpha})`;
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
+          // converging rings
+          const ringR = (1 - s.homingT) * 30 + 8;
+          ctx.beginPath();
+          ctx.arc(wx, wy, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${ACC_RGB},${s.homingT * 0.7})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          if (s.homingT >= 1) {
+            s.phase = 2;
+            winner.selected = true;
+            winner.targetRadius = 28;
+            setStatusText('Player selected!');
           }
         }
       }
 
-      // draw trail dots
-      s.trailDots.forEach((d) => {
-        ctx.beginPath(); ctx.arc(d.x, d.y, 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(228,93,53,${d.alpha * 0.6})`; ctx.fill();
-      });
+      // ── phase transitions ─────────────────────────────────────────────────
+      if (s.phase === 0) {
+        s.sweepAngle += s.sweepSpeed;
 
-      drawGrid(ctx, cells, s.locked ? s.winnerIdx : -1, s.beamX, s.beamY, s.beamR, s.locked);
+        // slow down after enough rotations
+        if (s.t > 160) s.sweepSpeed = Math.max(0.004, s.sweepSpeed * 0.987);
+
+        // check if sweep line is close to winner
+        if (s.sweepSpeed < 0.007) {
+          const winner = dots[s.winnerIdx];
+          if (winner) {
+            const winAngle = Math.atan2(winner.y, winner.x);
+            let delta = ((s.sweepAngle - winAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+            if (delta > Math.PI) delta = Math.PI * 2 - delta;
+            // snap when line crosses winner
+            if (delta < 0.08) {
+              s.phase = 1;
+              s.homingT = 0;
+              setStatusText('Locking on…');
+            }
+          }
+        }
+      }
 
       animRef.current = requestAnimationFrame(frame);
     }
 
     animRef.current = requestAnimationFrame(frame);
-
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isShuffling]);
 
-  // ── cleanup on close ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!isShuffling && !shuffleTarget) {
       if (animRef.current) cancelAnimationFrame(animRef.current);
@@ -324,93 +397,61 @@ export function ShuffleOverlay({
   }, [isShuffling, shuffleTarget]);
 
   if (!isShuffling && !shuffleTarget) return null;
-  if (availablePlayers.length === 0) return null;
-
-  const s = stateRef.current;
-  const canvasW = s.W || 600;
-  const canvasH = s.H || 340;
+  if (pickablePlayers.length === 0) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#0b0f10]/96 backdrop-blur-md">
+    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#06080a]/97 backdrop-blur-md">
 
-      {/* Background glow */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none flex items-center justify-center">
-        <div
-          className={`w-[700px] h-[700px] rounded-full blur-[140px] transition-all duration-1000 ease-out
-            ${shuffleTarget
-              ? 'bg-[#e45d35]/25 scale-150'
-              : 'bg-[#e45d35]/08 scale-100 animate-pulse'
-            }`}
-        />
+      {/* Ambient glow */}
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
+        <div className={`w-[600px] h-[600px] rounded-full blur-[160px] transition-all duration-1000
+          ${shuffleTarget ? 'bg-[#e45d35]/20 scale-125' : 'bg-[#e45d35]/06 animate-pulse'}`} />
       </div>
 
       {/* Headline */}
-      <h2
-        className={`relative z-10 text-2xl md:text-3xl font-bold tracking-[0.22em] uppercase mb-6 transition-all duration-500 text-center font-mono
-          ${shuffleTarget
-            ? 'text-[#e45d35] drop-shadow-[0_0_14px_rgba(228,93,53,0.8)] scale-105'
-            : 'text-white/60 animate-pulse'
-          }`}
-      >
+      <h2 className={`relative z-10 text-2xl md:text-3xl font-bold tracking-[0.22em] uppercase mb-5
+        transition-all duration-500 text-center font-mono
+        ${shuffleTarget
+          ? 'text-[#e45d35] drop-shadow-[0_0_18px_rgba(228,93,53,0.9)] scale-105'
+          : 'text-white/50 animate-pulse'}`}>
         {shuffleTarget ? 'Player Selected' : statusText}
       </h2>
 
-      {/* ── Canvas arena ── */}
+      {/* Radar canvas */}
       <div
-        className="relative z-10 rounded-2xl overflow-hidden border border-[#e45d35]/20"
-        style={{ width: 'min(92vw, 700px)', height: 'clamp(200px, 42vh, 380px)', background: '#080b0c' }}
+        className="relative z-10 rounded-full overflow-hidden border border-[#e45d35]/15"
+        style={{
+          width: 'min(88vw, 520px)',
+          height: 'min(88vw, 520px)',
+          background: 'radial-gradient(circle, #0c1012 60%, #080b0c 100%)',
+          boxShadow: '0 0 60px rgba(228,93,53,0.06), inset 0 0 40px rgba(0,0,0,0.6)',
+        }}
       >
         <canvas
           ref={canvasRef}
           style={{ width: '100%', height: '100%', display: 'block' }}
         />
-
-        {/* Pulse rings rendered over canvas */}
-        {pulseRings.map((ring) => (
-          <div
-            key={ring.id}
-            className="absolute rounded-full border-2 border-[#e45d35] pointer-events-none animate-ping"
-            style={{
-              left: ring.x - ring.size / 2,
-              top: ring.y - ring.size / 2,
-              width: ring.size,
-              height: ring.size,
-              animationDuration: '0.8s',
-              animationFillMode: 'forwards',
-            }}
-          />
-        ))}
-
-        {/* Vignette */}
-        <div
-          className="absolute inset-0 pointer-events-none rounded-2xl"
-          style={{ boxShadow: 'inset 0 0 60px rgba(8,11,12,0.85)' }}
-        />
       </div>
 
-      {/* ── Winner reveal card (shown when shuffleTarget is set) ── */}
+      {/* Winner card */}
       {shuffleTarget && (
-        <div
-          className="relative z-10 mt-8 flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-500"
-        >
-          {/* glow border */}
-          <div className="absolute -inset-1 bg-gradient-to-b from-[#e45d35] to-transparent rounded-[22px] blur-md opacity-50" />
-          <div className="relative bg-[#101415] border border-[#e45d35]/40 rounded-[18px] px-8 py-5 flex items-center gap-5 shadow-2xl">
-            {/* Avatar */}
-            <div className="w-12 h-12 rounded-xl bg-[#e45d35]/15 border border-[#e45d35]/30 flex items-center justify-center flex-shrink-0">
-              <span className="font-mono font-black text-[#e45d35] text-base">
+        <div className="relative z-10 mt-7 flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="absolute -inset-1 bg-gradient-to-b from-[#e45d35] to-transparent rounded-[22px] blur-md opacity-40" />
+          <div className="relative bg-[#101415] border border-[#e45d35]/40 rounded-[18px] px-8 py-4
+            flex items-center gap-5 shadow-2xl">
+            <div className="w-11 h-11 rounded-full bg-[#e45d35] flex items-center justify-center flex-shrink-0">
+              <span className="font-mono font-black text-[#0b0f10] text-sm">
                 {shuffleTarget.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
               </span>
             </div>
-            {/* Info */}
             <div>
               <p className="font-bold text-xl text-white tracking-tight">{shuffleTarget.name}</p>
-              <p className="font-mono text-xs text-[#e45d35]/70 tracking-widest uppercase mt-1">
+              <p className="font-mono text-xs text-[#e45d35]/70 tracking-widest uppercase mt-0.5">
                 Base: {shuffleTarget.price}
               </p>
             </div>
-            {/* Lot badge */}
-            <div className="ml-4 px-3 py-1 rounded-full bg-[#e45d35] text-[#0b0f10] text-[10px] font-black tracking-widest uppercase">
+            <div className="ml-3 px-3 py-1 rounded-full bg-[#e45d35] text-[#0b0f10] text-[10px]
+              font-black tracking-widest uppercase">
               On the block
             </div>
           </div>
@@ -418,8 +459,8 @@ export function ShuffleOverlay({
       )}
 
       {/* Pool counter */}
-      <p className="relative z-10 mt-5 font-mono text-[10px] text-white/25 tracking-widest uppercase">
-        {availablePlayers.length} player{availablePlayers.length !== 1 ? 's' : ''} remaining in pool
+      <p className="relative z-10 mt-4 font-mono text-[10px] text-white/20 tracking-widest uppercase">
+        {pickablePlayers.length} player{pickablePlayers.length !== 1 ? 's' : ''} remaining in pool
       </p>
     </div>
   );

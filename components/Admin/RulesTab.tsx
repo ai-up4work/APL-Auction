@@ -181,7 +181,7 @@ const DEFAULT_RULES: AuctionRules = {
   maxOverseasPlayers:    0,
   reservePointsEnforced: true,
   maxBidTimeSeconds:     300,
-  unsoldReentryRounds:   1,
+  unsoldReentryRounds:   2,
   tiers: [
     { from: 500,   to: 1000,  increment: 100  },
     { from: 1000,  to: 3000,  increment: 200  },
