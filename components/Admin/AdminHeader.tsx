@@ -207,6 +207,33 @@ function HeaderActionButton({
   );
 }
 
+// ── All Auctions (back to picker) button ─────────────────────────────────────
+// Lives inside the utility bar now instead of as a floating fixed-position
+// element, which used to sit on top of (and visually clash with) this same
+// header. Styled like a quiet, secondary nav action — not as loud as the
+// brand wordmark next to it, not as loud as the danger/primary controls.
+function AllAuctionsButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="flex items-center gap-1.5 h-[30px] pl-2 pr-3 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0"
+      style={{
+        fontFamily: "var(--font-label-mono)",
+        borderColor: hovered ? "var(--color-outline)" : "var(--color-border-overlay)",
+        background: hovered ? "var(--color-surface-container-high)" : "transparent",
+        color: hovered ? "var(--color-on-surface)" : "var(--color-on-surface-variant)",
+      }}
+      title="Back to all auctions"
+    >
+      <span className="material-symbols-outlined" style={{ fontSize: "15px" }}>arrow_back</span>
+      <span className="hidden lg:inline">All Auctions</span>
+    </button>
+  );
+}
+
 // ── Step definitions ──────────────────────────────────────────────────────────
 const STEPS = [
   { key: "teams",   label: "Teams",   icon: "group"         },
@@ -228,6 +255,7 @@ interface AdminHeaderProps {
   onResume?: () => void;
   onStop?: () => void;
   onReauction?: () => void | Promise<void>;
+  onAllAuctions?: () => void;
 }
 
 export default function AdminHeader({
@@ -238,6 +266,7 @@ export default function AdminHeader({
   onResume,
   onStop,
   onReauction,
+  onAllAuctions,
 }: AdminHeaderProps) {
   const [pendingAction, setPendingAction] = useState<ActionKey | null>(null);
   const [isConfirming,  setIsConfirming]  = useState(false);
@@ -277,8 +306,9 @@ export default function AdminHeader({
 
       {/* ── Utility Bar ── */}
       <div className="h-12 px-4 md:px-6 lg:px-10 flex items-center justify-between border-b" style={{ borderColor: "var(--color-outline-variant)" }}>
-        {/* Left: brand + status badge + auction switcher */}
+        {/* Left: all-auctions + brand + status badge + auction switcher */}
         <div className="flex items-center gap-2 md:gap-4 min-w-0 shrink-0">
+          
           <span
             className="font-black tracking-tighter uppercase text-sm md:text-base whitespace-nowrap"
             style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-theme-orange)" }}
@@ -304,6 +334,10 @@ export default function AdminHeader({
 
           {/* ── Auction switcher ── */}
           <div className="hidden sm:block h-4 w-px" style={{ background: "var(--color-outline-variant)" }} />
+          <div className="hidden sm:block h-4 w-px" style={{ background: "var(--color-outline-variant)" }} />
+
+          {onAllAuctions && <AllAuctionsButton onClick={onAllAuctions} />}
+
           <AuctionSwitcher />
         </div>
 

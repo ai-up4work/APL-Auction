@@ -130,21 +130,6 @@ export default function AdminPage() {
         }}
       />
 
-      {/* Back to picker */}
-      <button
-        onClick={() => setEntered(false)}
-        className="fixed top-3 left-3 z-[200] flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-        style={{
-          background: "var(--color-surface-container)",
-          border: "1px solid var(--color-border-overlay)",
-          color: "var(--color-on-surface-variant)",
-          fontFamily: "var(--font-label-mono)",
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>arrow_back</span>
-        All Auctions
-      </button>
-
       {/* Saving indicator */}
       {isSaving && (
         <div
@@ -187,6 +172,7 @@ export default function AdminPage() {
         onResume={handleResume}
         onStop={onStop}
         onReauction={onReauction}
+        onAllAuctions={() => setEntered(false)}  // ← Add this line
       />
 
       <main
