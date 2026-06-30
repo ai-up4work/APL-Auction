@@ -545,7 +545,7 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
                       <span className="font-bold" style={{ color: roleStyle.text }}>{count} players</span>
                     </div>
                     <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "var(--color-surface-variant)" }}>
-                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: roleStyle.text }} />
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: "var(--color-theme-orange)", }} />
                     </div>
                   </div>
                 );
@@ -632,7 +632,7 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
                       <span className="font-bold" style={{ color: item.color }}>{item.count} / {players.length}</span>
                     </div>
                     <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "var(--color-surface-variant)" }}>
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: item.color }} />
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--color-theme-orange)", }} />
                     </div>
                   </div>
                 );

@@ -4,7 +4,6 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import BottomNavBar from "@/components/BottomNavBar";
 import { supabase } from "@/lib/supabse";
 import { useOwner } from "@/context/OwnerContext";
@@ -246,29 +245,24 @@ export default function SquadPage() {
   // ── render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <MobileOnlyWrapper>
         <div className="bg-background min-h-screen flex items-center justify-center">
           <div className="text-center text-[#9a9aa3]">
             <div className="w-10 h-10 rounded-[10px] border-2 border-transparent border-t-theme-orange animate-spin mx-auto mb-3" />
             <p className="text-[13px]">Loading squad…</p>
           </div>
         </div>
-      </MobileOnlyWrapper>
     );
   }
 
   if (error) {
     return (
-      <MobileOnlyWrapper>
         <div className="bg-background min-h-screen flex items-center justify-center p-6">
           <p className="text-theme-orange text-center text-sm">{error}</p>
         </div>
-      </MobileOnlyWrapper>
     );
   }
 
   return (
-    <MobileOnlyWrapper>
       <div className="bg-background text-on-background min-h-screen font-inter">
 
         {/* ── Top App Bar ── */}
@@ -446,6 +440,5 @@ export default function SquadPage() {
 
         <BottomNavBar />
       </div>
-    </MobileOnlyWrapper>
   );
 }

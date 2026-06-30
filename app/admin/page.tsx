@@ -37,7 +37,10 @@ export default function AdminPage() {
     handleShuffle,
   } = useAuction();
 
-  const { status: auctionStatus, teams, players, rules, session } = auction;
+  // NOTE: adjust `auction.id` below to whatever field actually holds the
+  // auction's identifier on your `auction` object (e.g. auction.auctionId,
+  // auction.supabaseId, etc.) if it's not literally `id`.
+  const { id: auctionId, status: auctionStatus, teams, players, rules, session } = auction;
   const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
 
   function handleStepChange(step: string) {
@@ -135,6 +138,7 @@ export default function AdminPage() {
           <TeamsTab
             locked={auctionLocked}
             teams={teams}
+            auctionId={auctionId}
             onAddTeam={addTeam}
             onEditTeam={editTeam}
             onDeleteTeam={deleteTeam}
@@ -145,6 +149,7 @@ export default function AdminPage() {
             locked={auctionLocked}
             players={players}
             teams={teams}
+            auctionId={auctionId}
             onAddPlayer={addPlayer}
             onEditPlayer={editPlayer}   // ← new
             onDeletePlayer={deletePlayer}

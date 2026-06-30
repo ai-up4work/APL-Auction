@@ -409,7 +409,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
             <p className="f-display text-[15px] text-white leading-none tracking-[-0.01em]">
               {team?.name ?? teamCode.toUpperCase()}
             </p>
-            <p className="f-label-sm text-[#5a6a74] text-[9px] leading-none mt-[3px]">
+            <p className="f-label-sm text-[#a0aec0] text-[9px] leading-none mt-[3px]">
               {fmt(purse)} Points REMAINING
             </p>
           </div>
@@ -491,7 +491,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                   }}
                   className="shrink-0 flex flex-col items-center gap-0.5 py-1 w-full opacity-40"
                 >
-                  <span className="f-label text-[#c6c6cd] text-[9px]">PLACE BID</span>
+                  <span className="f-label text-[#c6c6cd] text-[12px]">PLACE BID</span>
                   <span className="ms text-[#c6c6cd] text-lg">expand_more</span>
                 </button>
               </div>
@@ -758,7 +758,7 @@ function PlayerCard({
           <p className="f-display text-[45px] text-white mb-1">
             {hasStarted ? "NEXT LOT SOON" : "AWAITING LOT"}
           </p>
-          <p className="f-label text-[9px] text-[#3a4a54]">
+          <p className="f-label text-[12px] text-[#3a4a54]">
             {hasStarted
               ? `${completedCount} LOT${completedCount !== 1 ? "S" : ""} COMPLETED — STAY READY`
               : "AUCTIONEER HASN'T STARTED YET"}

@@ -95,6 +95,18 @@ const STATUS_CSS = `
     -webkit-backdrop-filter: blur(28px);
   }
   .aso-divider { background: linear-gradient(to right,transparent,rgba(228,93,53,0.30),transparent); }
+
+  .aso-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(228,93,53,0.35) transparent;
+  }
+  .aso-scroll::-webkit-scrollbar { width: 4px; }
+  .aso-scroll::-webkit-scrollbar-track { background: transparent; }
+  .aso-scroll::-webkit-scrollbar-thumb {
+    background: rgba(228,93,53,0.35);
+    border-radius: 4px;
+  }
+  .aso-scroll::-webkit-scrollbar-thumb:hover { background: rgba(228,93,53,0.55); }
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +216,7 @@ export function CompletedContent({ stats }: { stats?: AuctionStats }) {
         </div>
 
         {/* RIGHT — top buys + team spend summary */}
-        <div className="w-full sm:w-[300px] shrink-0 flex flex-col gap-3 py-6 px-4 sm:pr-6 sm:pl-2 overflow-y-auto scrollbar-hide"> 
+        <div className="aso-scroll w-full sm:w-[300px] shrink-0 flex flex-col gap-3 py-6 px-4 sm:pr-6 sm:pl-2 overflow-y-auto"> 
 
           {stats && stats.topBuys.length > 0 && (
             <div className="aso-glass rounded-2xl border border-white/[0.07] p-5 shrink-0">

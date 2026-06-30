@@ -58,6 +58,19 @@ const STYLES = `
   .anim-up-3 { animation: floatUp 0.40s cubic-bezier(0.22,1,0.36,1) 0.14s both; }
   .anim-up-4 { animation: floatUp 0.40s cubic-bezier(0.22,1,0.36,1) 0.21s both; }
   .anim-up-5 { animation: floatUp 0.40s cubic-bezier(0.22,1,0.36,1) 0.28s both; }
+
+  /* Consistent themed scrollbar across browsers */
+  .owner-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.16) transparent;
+  }
+  .owner-scroll::-webkit-scrollbar { width: 4px; }
+  .owner-scroll::-webkit-scrollbar-track { background: transparent; }
+  .owner-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.16);
+    border-radius: 4px;
+  }
+  .owner-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -288,7 +301,7 @@ export default function OwnerIndexPage() {
                 color: "#e8ecf0", lineHeight: 1.1,
             }}>{auction?.name ?? "APL Auction"}</p>
             <p style={{
-                fontFamily: "'Geist Mono', monospace", fontSize: 8, color: "#2a3a44",
+                fontFamily: "'Geist Mono', monospace", fontSize: 8, color: "#a0aec0",
                 letterSpacing: "0.16em", textTransform: "uppercase",
             }}>Owner Portal</p>
             </div>
@@ -312,7 +325,7 @@ export default function OwnerIndexPage() {
         </header>
 
         {/* ── Body ── */}
-        <main style={{
+        <main className="owner-scroll" style={{
           flex: 1, overflowY: "auto", padding: "20px 18px 32px",
           display: "flex", flexDirection: "column", gap: 14, position: "relative", zIndex: 1,
         }}>
@@ -437,23 +450,6 @@ export default function OwnerIndexPage() {
             </div>
           )}
 
-          {isEnded && (
-            <div className="anim-up-2 bg-indigo-500/[0.06] border border-indigo-500/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
-              <div className="w-[38px] h-[38px] rounded-[10px] bg-indigo-500/10 border border-indigo-500/[0.22] flex items-center justify-center shrink-0">
-                <span className="ms ms-fill text-xl text-indigo-400" style={{ animation: "tickle 2s ease-in-out infinite" }}>
-                  check_circle
-                </span>
-              </div>
-              <div className="flex-1">
-                <p className="font-mono-geist text-[9px] font-bold text-indigo-400 tracking-[0.16em] uppercase mb-1">
-                  Auction Complete
-                </p>
-                <p className="font-inter text-xs text-outline leading-[1.5]">
-                  Bidding has ended. Your squad is locked — review your final roster and budget below.
-                </p>
-              </div>
-            </div>
-          )}
 
           {!isLive && !isPaused && !isEnded && (
             <div className="anim-up-2 bg-white/[0.02] border border-white/[0.06] rounded-2xl px-4 py-3 flex items-center gap-2.5">

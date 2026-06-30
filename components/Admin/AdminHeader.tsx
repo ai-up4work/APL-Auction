@@ -288,7 +288,7 @@ export default function AdminHeader({
           <div className="hidden sm:block h-4 w-px" style={{ background: "var(--color-outline-variant)" }} />
           <div
             className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border"
-            style={{ background: `${status.color}1a`, borderColor: `${status.color}4d` }}
+            style={{ background: `${status.color}1a`, borderColor: `${status.color}` }}
           >
             <span
               className={status.pulse ? "w-1.5 h-1.5 rounded-full animate-pulse" : "w-1.5 h-1.5 rounded-full"}
