@@ -38,10 +38,10 @@ const ACTION_CONFIG = {
     tone: "danger",
   },
   reauction: {
-    title: "Erase this auction and start over?",
+    title: "Start a fresh auction?",
     message:
-      "Every sold player, every point spent, and every team roster will be wiped. All teams return to Setup with a clean slate. This cannot be undone.",
-    confirmLabel: "Erase & Restart",
+      "This clears the auction history — every sold player, bid, and lot — and resets every team's roster and purse back to full. Your teams and player list stay exactly as they are now, so you can relaunch immediately or tweak the config first. This cannot be undone.",
+    confirmLabel: "Reset & Restart",
     tone: "danger",
     requireText: "RESET",
   },
@@ -227,7 +227,7 @@ interface AdminHeaderProps {
   onPause?: () => void;
   onResume?: () => void;
   onStop?: () => void;
-  onReauction?: () => void;
+  onReauction?: () => void | Promise<void>;
 }
 
 export default function AdminHeader({
@@ -240,16 +240,22 @@ export default function AdminHeader({
   onReauction,
 }: AdminHeaderProps) {
   const [pendingAction, setPendingAction] = useState<ActionKey | null>(null);
+  const [isConfirming,  setIsConfirming]  = useState(false);
 
   const status = STATUS_META[auctionStatus] ?? STATUS_META.setup;
   const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
 
-  function handleConfirm() {
-    if (pendingAction === "pause")     onPause?.();
-    if (pendingAction === "resume")    onResume?.();
-    if (pendingAction === "stop")      onStop?.();
-    if (pendingAction === "reauction") onReauction?.();
-    setPendingAction(null);
+  async function handleConfirm() {
+    setIsConfirming(true);
+    try {
+      if (pendingAction === "pause")     await onPause?.();
+      if (pendingAction === "resume")    await onResume?.();
+      if (pendingAction === "stop")      await onStop?.();
+      if (pendingAction === "reauction") await onReauction?.();
+      setPendingAction(null);
+    } finally {
+      setIsConfirming(false);
+    }
   }
 
   return (
@@ -265,7 +271,7 @@ export default function AdminHeader({
         <ConfirmDialog
           action={pendingAction}
           onConfirm={handleConfirm}
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => !isConfirming && setPendingAction(null)}
         />
       )}
 

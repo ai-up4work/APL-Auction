@@ -53,8 +53,8 @@ export default function AdminPage() {
     setActiveStep("launch");
   }
 
-  function onReauction() {
-    handleReauction();
+  async function onReauction() {
+    await handleReauction();
     setActiveStep("teams");
   }
 

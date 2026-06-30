@@ -10,8 +10,27 @@ interface ShuffleOverlayProps {
   shuffleIndex: number;
 }
 
-const ACC = '#e45d35';
-const ACC_RGB = '228,93,53';
+// Pulled from globals.css --color-theme-orange at runtime so this canvas
+// never drifts from the rest of the app's accent color again.
+// (Fallback values match --color-theme-orange's current value in globals.css.)
+let ACC = '#c9971f';
+let ACC_RGB = '201,151,31';
+
+function syncThemeColor() {
+  if (typeof window === 'undefined') return;
+  const hex = getComputedStyle(document.documentElement)
+    .getPropertyValue('--color-theme-orange')
+    .trim();
+  if (!hex) return;
+  ACC = hex;
+  const m = hex.replace('#', '');
+  const r = parseInt(m.substring(0, 2), 16);
+  const g = parseInt(m.substring(2, 4), 16);
+  const b = parseInt(m.substring(4, 6), 16);
+  if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+    ACC_RGB = `${r},${g},${b}`;
+  }
+}
 
 // ── grid sizing: find rows x cols >= n, as close to a square as possible ────
 // e.g. 26 -> 5x6 (30 cells), not 13x2 or 9x3.
@@ -159,6 +178,10 @@ export function ShuffleOverlay({
   useEffect(() => {
     if (!isShuffling) return;
     if (pickablePlayers.length === 0) return;
+
+    // Make sure the canvas always paints with whatever --color-theme-orange
+    // currently resolves to, instead of a baked-in hex value.
+    syncThemeColor();
 
     rebuild();
     const s = stateRef.current;
@@ -384,26 +407,26 @@ export function ShuffleOverlay({
       {/* Ambient glow */}
       <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
         <div className={`w-[600px] h-[600px] rounded-full blur-[160px] transition-all duration-1000
-          ${shuffleTarget ? 'bg-[#e45d35]/20 scale-125' : 'bg-[#e45d35]/06 animate-pulse'}`} />
+          ${shuffleTarget ? 'bg-theme-orange/20 scale-125' : 'bg-theme-orange/[0.06] animate-pulse'}`} />
       </div>
 
       {/* Headline */}
       <h2 className={`relative z-10 text-2xl md:text-3xl font-bold tracking-[0.22em] uppercase mb-5
         transition-all duration-500 text-center font-mono
         ${shuffleTarget
-          ? 'text-[#e45d35] drop-shadow-[0_0_18px_rgba(228,93,53,0.9)] scale-105'
+          ? 'text-theme-orange drop-shadow-[0_0_18px_rgba(201,151,31,0.9)] scale-105'
           : 'text-white/50 animate-pulse'}`}>
         {shuffleTarget ? 'Player Selected' : statusText}
       </h2>
 
       {/* Heatmap canvas */}
       <div
-        className="relative z-10 rounded-2xl overflow-hidden border border-[#e45d35]/15"
+        className="relative z-10 rounded-2xl overflow-hidden border border-theme-orange/15"
         style={{
           width: 'min(92vw, 620px)',
           height: 'min(92vw, 460px)',
           background: 'radial-gradient(circle, #0c1012 60%, #080b0c 100%)',
-          boxShadow: '0 0 60px rgba(228,93,53,0.06), inset 0 0 40px rgba(0,0,0,0.6)',
+          boxShadow: '0 0 60px rgba(201,151,31,0.06), inset 0 0 40px rgba(0,0,0,0.6)',
         }}
       >
         <canvas
@@ -415,21 +438,21 @@ export function ShuffleOverlay({
       {/* Winner card */}
       {shuffleTarget && (
         <div className="relative z-10 mt-7 flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="absolute -inset-1 bg-gradient-to-b from-[#e45d35] to-transparent rounded-[22px] blur-md opacity-40" />
-          <div className="relative bg-[#101415] border border-[#e45d35]/40 rounded-[18px] px-8 py-4
+          <div className="absolute -inset-1 bg-gradient-to-b from-theme-orange to-transparent rounded-[22px] blur-md opacity-40" />
+          <div className="relative bg-[#101415] border border-theme-orange/40 rounded-[18px] px-8 py-4
             flex items-center gap-5 shadow-2xl">
-            <div className="w-11 h-11 rounded-full bg-[#e45d35] flex items-center justify-center flex-shrink-0">
+            <div className="w-11 h-11 rounded-full bg-theme-orange flex items-center justify-center flex-shrink-0">
               <span className="font-mono font-black text-[#0b0f10] text-sm">
                 {shuffleTarget.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
               </span>
             </div>
             <div>
               <p className="font-bold text-xl text-white tracking-tight">{shuffleTarget.name}</p>
-              <p className="font-mono text-xs text-[#e45d35]/70 tracking-widest uppercase mt-0.5">
+              <p className="font-mono text-xs text-theme-orange/70 tracking-widest uppercase mt-0.5">
                 Base: {shuffleTarget.price}
               </p>
             </div>
-            <div className="ml-3 px-3 py-1 rounded-full bg-[#e45d35] text-[#0b0f10] text-[10px]
+            <div className="ml-3 px-3 py-1 rounded-full bg-theme-orange text-[#0b0f10] text-[10px]
               font-black tracking-widest uppercase">
               On the block
             </div>

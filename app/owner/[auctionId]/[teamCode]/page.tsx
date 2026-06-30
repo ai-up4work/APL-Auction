@@ -105,9 +105,9 @@ function getStatusTheme(status: string) {
     badgeColor: "#818cf8", label: "Ended",
   };
   if (status === "live") return {
-    dotColor: "#ef4444", dotAnim: "blink 1s ease-in-out infinite",
-    badgeBg: "rgba(127,29,29,0.25)", badgeBorder: "rgba(239,68,68,0.28)",
-    badgeColor: "#f87171", label: "Live",
+    dotColor: "#22c55e", dotAnim: "blink 1s ease-in-out infinite",
+    badgeBg: "rgba(34,197,94,0.14)", badgeBorder: "rgba(34,197,94,0.30)",
+    badgeColor: "#4ade80", label: "Live",
   };
   return {
     dotColor: "#3a4a54", dotAnim: "none",
@@ -289,7 +289,10 @@ export default function OwnerIndexPage() {
   const isLive      = status === "live";
   const isPaused    = status === "paused";
   const isEnded     = status === "completed";
-  const accent      = team?.color || "#e45d35";
+  // Falls back to the globals.css theme-orange variable instead of a
+  // hardcoded hex, so the franchise accent re-themes along with the rest
+  // of the app whenever a team has no custom color of its own.
+  const accent      = team?.color || "var(--color-theme-orange)";
   const purse       = team?.remainingPurse ?? 0;
   const roster      = team?.roster         ?? 0;
   const totalSlots  = rules?.teamSize       ?? 16;
@@ -312,15 +315,15 @@ export default function OwnerIndexPage() {
       <>
         <style>{STYLES}</style>
         <div style={{
-          background: "#0b0f10", height: "100dvh",
+          background: "var(--color-background)", height: "100dvh",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14,
         }}>
           <div style={{
-            width: 36, height: 36, border: "2px solid rgba(228,93,53,0.12)",
-            borderTop: "2px solid #e45d35", borderRadius: "50%", animation: "spin 0.9s linear infinite",
+            width: 36, height: 36, border: "2px solid color-mix(in srgb, var(--color-theme-orange) 12%, transparent)",
+            borderTop: "2px solid var(--color-theme-orange)", borderRadius: "50%", animation: "spin 0.9s linear infinite",
           }} />
           <p style={{
-            fontFamily: "'Geist Mono', monospace", fontSize: 9, color: "#3a4a54",
+            fontFamily: "'Geist Mono', monospace", fontSize: 9, color: "var(--color-theme-orange)",
             textTransform: "uppercase", letterSpacing: "0.2em",
           }}>Loading…</p>
         </div>
@@ -333,7 +336,7 @@ export default function OwnerIndexPage() {
     <>
       <style>{STYLES}</style>
       <div style={{
-        background: "#0b0f10", color: "#e0e3e4", minHeight: "100dvh",
+        background: "var(--color-background)", color: "var(--color-on-background)", minHeight: "100dvh",
         fontFamily: "'Inter', sans-serif", display: "flex", flexDirection: "column",
         position: "relative", overflow: "hidden", paddingBottom: 68,
       }}>
@@ -351,47 +354,51 @@ export default function OwnerIndexPage() {
 
         {/* ── Header ── */}
         <header style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)",
-          background: "rgba(11,15,16,0.88)", backdropFilter: "blur(24px)",
-          WebkitBackdropFilter: "blur(24px)", flexShrink: 0,
-          position: "sticky", top: 0, zIndex: 40,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "4px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)",
+            background: "rgba(11,15,16,0.88)", backdropFilter: "blur(24px)",
+            WebkitBackdropFilter: "blur(24px)", flexShrink: 0,
+            position: "sticky", top: 0, zIndex: 40,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
-              width: 32, height: 32, borderRadius: 8, background: "#e45d35",
-              display: "flex", alignItems: "center", justifyContent: "center",
+            width: 50, height: 50, borderRadius: 8, overflow: "hidden",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}>
-              <span className="ms ms-fill" style={{ fontSize: 17, color: "#0b0f10" }}>sports_cricket</span>
+            <img
+                src="/moon-knight-logo.png"
+                alt="Auction logo"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
             </div>
             <div>
-              <p style={{
+            <p style={{
                 fontFamily: "'Archivo Narrow', sans-serif", fontSize: 15, fontWeight: 700,
                 fontStyle: "italic", textTransform: "uppercase", letterSpacing: "-0.2px",
                 color: "#e8ecf0", lineHeight: 1.1,
-              }}>{auction?.name ?? "APL Auction"}</p>
-              <p style={{
+            }}>{auction?.name ?? "APL Auction"}</p>
+            <p style={{
                 fontFamily: "'Geist Mono', monospace", fontSize: 8, color: "#2a3a44",
                 letterSpacing: "0.16em", textTransform: "uppercase",
-              }}>Owner Portal</p>
+            }}>Owner Portal</p>
             </div>
-          </div>
+        </div>
 
-          {/* Status badge */}
-          <div style={{
+        {/* Status badge */}
+        <div style={{
             display: "flex", alignItems: "center", gap: 6,
             background: theme.badgeBg, border: `1px solid ${theme.badgeBorder}`,
             borderRadius: 99, padding: "5px 11px",
-          }}>
+        }}>
             <span style={{
-              width: 6, height: 6, borderRadius: "50%", background: theme.dotColor,
-              display: "inline-block", animation: theme.dotAnim,
+            width: 6, height: 6, borderRadius: "50%", background: theme.dotColor,
+            display: "inline-block", animation: theme.dotAnim,
             }} />
             <span style={{
-              fontFamily: "'Geist Mono', monospace", fontSize: 8, fontWeight: 700,
-              letterSpacing: "0.18em", textTransform: "uppercase", color: theme.badgeColor,
+            fontFamily: "'Geist Mono', monospace", fontSize: 8, fontWeight: 700,
+            letterSpacing: "0.18em", textTransform: "uppercase", color: theme.badgeColor,
             }}>{theme.label}</span>
-          </div>
+        </div>
         </header>
 
         {/* ── Body ── */}
@@ -423,7 +430,7 @@ export default function OwnerIndexPage() {
               }}>
                 {team?.logo ? (
                   <img src={team.logo} alt={team.name}
-                    style={{ width: "100%", height: "100%", objectFit: "contain", padding: 8 }} />
+                    style={{ width: "100%", height: "100%", objectFit: "cover", padding: 0 }} />
                 ) : (
                   <span style={{
                     fontFamily: "'Archivo Narrow', sans-serif", fontSize: 20, fontWeight: 800,
@@ -472,19 +479,22 @@ export default function OwnerIndexPage() {
           {/* ── Status banner ── */}
           {isLive && (
             <div className="anim-up-2" style={{
-              background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)",
+              background: "color-mix(in srgb, var(--color-theme-orange) 6%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 18%, transparent)",
               borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10,
             }}>
               <div style={{
-                width: 36, height: 36, borderRadius: 9, background: "rgba(239,68,68,0.10)",
-                border: "1px solid rgba(239,68,68,0.22)", display: "flex", alignItems: "center",
+                width: 36, height: 36, borderRadius: 9,
+                background: "color-mix(in srgb, var(--color-theme-orange) 10%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-theme-orange) 22%, transparent)",
+                display: "flex", alignItems: "center",
                 justifyContent: "center", flexShrink: 0,
               }}>
-                <span className="ms ms-fill" style={{ fontSize: 18, color: "#f87171" }}>sensors</span>
+                <span className="ms ms-fill" style={{ fontSize: 18, color: "var(--color-theme-orange)" }}>sensors</span>
               </div>
               <div>
                 <p style={{
-                  fontFamily: "'Geist Mono', monospace", fontSize: 9, fontWeight: 700, color: "#f87171",
+                  fontFamily: "'Geist Mono', monospace", fontSize: 9, fontWeight: 700, color: "var(--color-theme-orange)",
                   letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 3,
                 }}>Auction is Live</p>
                 <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#5a6a74", lineHeight: 1.5 }}>
@@ -495,35 +505,22 @@ export default function OwnerIndexPage() {
           )}
 
           {isPaused && (
-            <div className="anim-up-2" style={{
-              background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.20)",
-              borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "flex-start", gap: 12,
-            }}>
-              <div style={{
-                width: 38, height: 38, borderRadius: 10, background: "rgba(245,158,11,0.10)",
-                border: "1px solid rgba(245,158,11,0.22)", display: "flex", alignItems: "center",
-                justifyContent: "center", flexShrink: 0,
-              }}>
-                <span className="ms ms-fill" style={{ fontSize: 20, color: "#f59e0b", animation: "amberPulse 1.6s ease-in-out infinite" }}>
+            <div className="anim-up-2 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
+              <div className="w-[38px] h-[38px] rounded-[10px] bg-amber-500/10 border border-amber-500/[0.22] flex items-center justify-center shrink-0">
+                <span className="ms ms-fill text-xl text-amber-500" style={{ animation: "amberPulse 1.6s ease-in-out infinite" }}>
                   pause_circle
                 </span>
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <p style={{
-                    fontFamily: "'Geist Mono', monospace", fontSize: 9, fontWeight: 700,
-                    color: "#f59e0b", letterSpacing: "0.16em", textTransform: "uppercase",
-                  }}>Short Break</p>
-                  <div style={{ display: "flex", gap: 4 }}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-mono-geist text-[9px] font-bold text-amber-500 tracking-[0.16em] uppercase">Short Break</p>
+                  <div className="flex gap-1">
                     {[0, 0.3, 0.6].map((d, i) => (
-                      <div key={i} style={{
-                        width: 4, height: 4, borderRadius: "50%", background: "#f59e0b",
-                        animation: `dotSeq 1.4s ease-in-out ${d}s infinite`,
-                      }} />
+                      <div key={i} className="w-1 h-1 rounded-full bg-amber-500" style={{ animation: `dotSeq 1.4s ease-in-out ${d}s infinite` }} />
                     ))}
                   </div>
                 </div>
-                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#5a6a74", lineHeight: 1.5 }}>
+                <p className="font-inter text-xs text-outline leading-[1.5]">
                   The auctioneer has paused bidding. You can still browse your squad and budget below.
                 </p>
               </div>
@@ -531,25 +528,17 @@ export default function OwnerIndexPage() {
           )}
 
           {isEnded && (
-            <div className="anim-up-2" style={{
-              background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.20)",
-              borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "flex-start", gap: 12,
-            }}>
-              <div style={{
-                width: 38, height: 38, borderRadius: 10, background: "rgba(99,102,241,0.10)",
-                border: "1px solid rgba(99,102,241,0.22)", display: "flex", alignItems: "center",
-                justifyContent: "center", flexShrink: 0,
-              }}>
-                <span className="ms ms-fill" style={{ fontSize: 20, color: "#818cf8", animation: "tickle 2s ease-in-out infinite" }}>
+            <div className="anim-up-2 bg-indigo-500/[0.06] border border-indigo-500/20 rounded-2xl px-4 py-3.5 flex items-start gap-3">
+              <div className="w-[38px] h-[38px] rounded-[10px] bg-indigo-500/10 border border-indigo-500/[0.22] flex items-center justify-center shrink-0">
+                <span className="ms ms-fill text-xl text-indigo-400" style={{ animation: "tickle 2s ease-in-out infinite" }}>
                   check_circle
                 </span>
               </div>
-              <div style={{ flex: 1 }}>
-                <p style={{
-                  fontFamily: "'Geist Mono', monospace", fontSize: 9, fontWeight: 700, color: "#818cf8",
-                  letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 4,
-                }}>Auction Complete</p>
-                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#5a6a74", lineHeight: 1.5 }}>
+              <div className="flex-1">
+                <p className="font-mono-geist text-[9px] font-bold text-indigo-400 tracking-[0.16em] uppercase mb-1">
+                  Auction Complete
+                </p>
+                <p className="font-inter text-xs text-outline leading-[1.5]">
                   Bidding has ended. Your squad is locked — review your final roster and budget below.
                 </p>
               </div>
@@ -557,12 +546,9 @@ export default function OwnerIndexPage() {
           )}
 
           {!isLive && !isPaused && !isEnded && (
-            <div className="anim-up-2" style={{
-              background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10,
-            }}>
-              <span className="ms ms-300" style={{ fontSize: 22, color: "#3a4a54" }}>hourglass_empty</span>
-              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#4a5a64", lineHeight: 1.5 }}>
+            <div className="anim-up-2 bg-white/[0.02] border border-white/[0.06] rounded-2xl px-4 py-3 flex items-center gap-2.5">
+              <span className="ms ms-300 text-[22px] text-outline-variant">hourglass_empty</span>
+              <p className="font-inter text-xs text-[#4a5a64] leading-[1.5]">
                 Auction hasn't started yet. Stand by — the bid room will open soon.
               </p>
             </div>
@@ -573,35 +559,21 @@ export default function OwnerIndexPage() {
             {isLive && (
               <button
                 onClick={() => router.push(`${base}/bid`)}
+                className="w-full h-16 rounded-2xl border-none flex items-center justify-center gap-2.5 cursor-pointer font-archivo text-xl font-bold italic uppercase tracking-[0.05em] text-background transition-transform duration-150 active:scale-[0.97]"
                 style={{
-                  width: "100%", height: 64, borderRadius: 16, border: "none",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                  cursor: "pointer", fontFamily: "'Archivo Narrow', sans-serif", fontSize: 20,
-                  fontWeight: 700, fontStyle: "italic", textTransform: "uppercase",
-                  letterSpacing: "0.05em", color: "#0b0f10",
                   background: `linear-gradient(135deg, ${accent} 0%, ${accent}cc 100%)`,
-                  boxShadow: `0 8px 36px ${accent}45`, transition: "transform 0.15s",
+                  boxShadow: `0 8px 36px ${accent}45`,
                 }}
-                onPointerDown={(e) => { (e.currentTarget as HTMLElement).style.transform = "scale(0.97)"; }}
-                onPointerUp={(e)   => { (e.currentTarget as HTMLElement).style.transform = "scale(1)"; }}
-                onPointerLeave={(e)=> { (e.currentTarget as HTMLElement).style.transform = "scale(1)"; }}
               >
-                <span className="ms ms-fill" style={{ fontSize: 24 }}>gavel</span>
+                <span className="ms ms-fill text-2xl">gavel</span>
                 Enter Bid Room
-                <span className="ms ms-300" style={{ fontSize: 18, opacity: 0.7 }}>arrow_forward</span>
+                <span className="ms ms-300 text-lg opacity-70">arrow_forward</span>
               </button>
             )}
 
             {isPaused && (
-              <button disabled style={{
-                width: "100%", height: 64, borderRadius: 16,
-                border: "1px solid rgba(245,158,11,0.18)", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 10, cursor: "not-allowed",
-                fontFamily: "'Archivo Narrow', sans-serif", fontSize: 20, fontWeight: 700,
-                fontStyle: "italic", textTransform: "uppercase", letterSpacing: "0.05em",
-                color: "#f59e0b", background: "rgba(245,158,11,0.06)", opacity: 0.9,
-              }}>
-                <span className="ms ms-fill" style={{ fontSize: 22, animation: "amberPulse 1.4s ease-in-out infinite" }}>
+              <button disabled className="w-full h-16 rounded-2xl border border-amber-500/[0.18] flex items-center justify-center gap-2.5 cursor-not-allowed font-archivo text-xl font-bold italic uppercase tracking-[0.05em] text-amber-500 bg-amber-500/[0.06] opacity-90">
+                <span className="ms ms-fill text-[22px]" style={{ animation: "amberPulse 1.4s ease-in-out infinite" }}>
                   pause_circle
                 </span>
                 Bidding Paused
@@ -609,46 +581,29 @@ export default function OwnerIndexPage() {
             )}
 
             {isEnded && (
-              <button disabled style={{
-                width: "100%", height: 64, borderRadius: 16,
-                border: "1px solid rgba(99,102,241,0.18)", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 10, cursor: "not-allowed",
-                fontFamily: "'Archivo Narrow', sans-serif", fontSize: 20, fontWeight: 700,
-                fontStyle: "italic", textTransform: "uppercase", letterSpacing: "0.05em",
-                color: "#818cf8", background: "rgba(99,102,241,0.06)",
-              }}>
-                <span className="ms ms-fill" style={{ fontSize: 22 }}>check_circle</span>
+              <button disabled className="w-full h-16 rounded-2xl border border-indigo-500/[0.18] flex items-center justify-center gap-2.5 cursor-not-allowed font-archivo text-xl font-bold italic uppercase tracking-[0.05em] text-indigo-400 bg-indigo-500/[0.06]">
+                <span className="ms ms-fill text-[22px]">check_circle</span>
                 Bidding Closed
               </button>
             )}
 
             {!isLive && !isPaused && !isEnded && (
-              <button disabled style={{
-                width: "100%", height: 64, borderRadius: 16,
-                border: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 10, cursor: "not-allowed",
-                fontFamily: "'Archivo Narrow', sans-serif", fontSize: 20, fontWeight: 700,
-                fontStyle: "italic", textTransform: "uppercase", letterSpacing: "0.05em",
-                color: "#3a4a54", background: "rgba(255,255,255,0.02)",
-              }}>
-                <span className="ms ms-300" style={{ fontSize: 22 }}>hourglass_empty</span>
+              <button disabled className="w-full h-16 rounded-2xl border border-white/[0.06] flex items-center justify-center gap-2.5 cursor-not-allowed font-archivo text-xl font-bold italic uppercase tracking-[0.05em] text-outline bg-white/[0.02]">
+                <span className="ms ms-300 text-[22px]">hourglass_empty</span>
                 Auction Not Started
               </button>
             )}
           </div>
 
           {/* Divider */}
-          <div className="anim-up-4" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.05)" }} />
-            <p style={{
-              fontFamily: "'Geist Mono', monospace", fontSize: 8,
-              letterSpacing: "0.18em", textTransform: "uppercase", color: "#2a3a44",
-            }}>Quick Access</p>
-            <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.05)" }} />
+          <div className="anim-up-4 flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/5" />
+            <p className="font-mono-geist text-[8px] tracking-[0.18em] uppercase text-[#2a3a44]">Quick Access</p>
+            <div className="flex-1 h-px bg-white/5" />
           </div>
 
           {/* Nav cards */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="flex flex-col gap-2">
             {NAV_ITEMS.map((item, i) => (
               <NavCard
                 key={item.segment}

@@ -536,7 +536,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
   // Shot clock colour
   const shotClockColor =
-    shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#e45d35";
+    shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#c9971f";
 
   // ── Awaiting placeholder: only when truly no lots have happened yet ───────
   const showAwaitingPlaceholder =
@@ -568,10 +568,10 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
   if (!auction || loadingLive) {
     return (
-      <div className="h-screen bg-[#0b0f10] flex items-center justify-center">
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
         <div className="text-center">
-          <span className="ms text-[#e45d35] text-5xl animate-spin block mb-4">progress_activity</span>
-          <p className="font-mono-geist text-[#5a6a74] text-sm uppercase tracking-widest">Loading broadcast…</p>
+          <span className="ms text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
+          <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading broadcast…</p>
         </div>
       </div>
     );
@@ -586,7 +586,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         .ms { font-family:'Material Symbols Outlined'; font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; font-style:normal; line-height:1; display:inline-block; text-transform:none; letter-spacing:normal; user-select:none; }
         .ms-fill { font-variation-settings:'FILL' 1,'wght' 400,'GRAD' 0,'opsz' 24; }
 
-        @keyframes pulse-bid { 0%,100%{filter:drop-shadow(0 0 7px rgba(228,93,53,0.45))} 50%{filter:drop-shadow(0 0 19px rgba(228,93,53,0.85))} }
+        @keyframes pulse-bid { 0%,100%{filter:drop-shadow(0 0 7px rgba(201,151,31,0.45))} 50%{filter:drop-shadow(0 0 19px rgba(201,151,31,0.85))} }
         .bid-animate { animation:pulse-bid 2s infinite ease-in-out; }
 
         @keyframes ticker-scroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
@@ -604,8 +604,8 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         @keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
         .dot-pulse { animation:dot-pulse 1.5s ease-in-out infinite; }
 
-        .glass-panel { background:rgba(16,20,21,0.50); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px); }
-        .flare { position:absolute; border-radius:50%; background:radial-gradient(circle,rgba(228,93,53,0.13) 0%,transparent 70%); filter:blur(70px); pointer-events:none; }
+        .glass-panel { background:var(--color-surface-glass); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px); }
+        .flare { position:absolute; border-radius:50%; background:radial-gradient(circle,rgba(201,151,31,0.13) 0%,transparent 70%); filter:blur(70px); pointer-events:none; }
         .font-archivo { font-family:'Archivo Narrow',sans-serif; }
         .font-mono-geist { font-family:'Geist Mono',monospace; }
         .font-inter { font-family:'Inter',sans-serif; }
@@ -655,7 +655,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       `}</style>
 
       {flashOverlay && (
-        <div className="fixed inset-0 pointer-events-none z-[200]" style={{ background: "rgba(228,93,53,0.05)" }} />
+        <div className="fixed inset-0 pointer-events-none z-[200]" style={{ background: "rgba(201,151,31,0.05)" }} />
       )}
 
       {activeView === "live" && (
@@ -676,26 +676,30 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         onStatusChange={setAuctionStatus}
       />
 
-      <div className="font-inter bg-[#0b0f10] text-[#e0e3e4] fixed inset-0 flex flex-col overflow-hidden select-none">
+      <div className="font-inter bg-background text-on-background fixed inset-0 flex flex-col overflow-hidden select-none">
         <div className="flare w-[430px] h-[430px]" style={{ top: -140, left: -140 }} />
         <div className="flare w-[430px] h-[430px]" style={{ bottom: -140, right: -140 }} />
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at center,rgba(228,93,53,0.10) 0%,transparent 70%)" }} />
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at center,rgba(201,151,31,0.10) 0%,transparent 70%)" }} />
 
         {/* HEADER */}
-        <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(11,15,16,0.85)] header-blur border-b border-white/5">
-          <div className="flex items-center gap-[13px]">
-            <div className="w-9 h-9 rounded-[7px] bg-[#e45d35] flex items-center justify-center shrink-0">
-              <span className="ms ms-fill text-[20px] text-[#0b0f10]">sports_cricket</span>
-            </div>
-            <div>
-              <div className="header-logo-text font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">
-                {auction.session.auctionName}
+        <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
+            <div className="flex items-center gap-[13px]">
+              <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
+                <img
+                  src="/moon-knight-logo.png"
+                  alt="Auction logo"
+                  className="w-full h-full object-cover"
+                />
               </div>
-              <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">
-                Broadcast Feed • Lot #{currentLot?.lotNumber ?? lotNumber} of {auction.players.length}
+              <div>
+                <div className="header-logo-text font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">
+                  {auction.session.auctionName}
+                </div>
+                <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">
+                  Broadcast Feed • Lot #{currentLot?.lotNumber ?? lotNumber} of {auction.players.length}
+                </div>
               </div>
             </div>
-          </div>
 
           <div className="flex items-center gap-[16px] sm:gap-[30px]">
             {currentLot && !isSold && !isUnsold && auctionStatus === "live" && (
@@ -714,7 +718,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                 setActiveView((v) => (v === "live" ? "flow" : "live"));
                 clearFlowSelection();
               }}
-              className="text-[10px] font-mono-geist px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md border border-white/10 transition-colors uppercase tracking-widest text-[#e45d35]"
+              className="text-[10px] font-mono-geist px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md border border-white/10 transition-colors uppercase tracking-widest text-theme-orange"
             >
               {activeView === "live" ? "View Full Board" : "View Live Bid"}
             </button>
@@ -752,9 +756,9 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
           {activeView === "live" && showLeaderboard && topBuys.length > 0 && auctionStatus === "live" && (
             <div className="absolute left-8 top-8 z-40 animate-slide-in">
-              <div className="glass-panel p-5 rounded-2xl border border-[#e45d35]/30 w-72" style={{ background: "rgba(11,15,16,0.85)" }}>
+              <div className="glass-panel p-5 rounded-2xl border border-theme-orange/30 w-72" style={{ background: "rgba(13,17,23,0.85)" }}>
                 <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
-                  <span className="ms ms-fill text-[#e45d35]">leaderboard</span>
+                  <span className="ms ms-fill text-theme-orange">leaderboard</span>
                   <span className="font-mono-geist text-[10px] text-white uppercase tracking-[0.2em] font-bold">Top Buys</span>
                 </div>
                 <div className="space-y-3">
@@ -764,7 +768,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         <div className="font-archivo font-bold text-white text-sm">{lot.playerName}</div>
                         <div className="font-mono-geist text-[8px] text-white/50 uppercase">{lot.winningTeamCode ?? "—"}</div>
                       </div>
-                      <div className="font-archivo text-[#e45d35] font-bold">{lot.currentBid.toLocaleString()}</div>
+                      <div className="font-archivo text-theme-orange font-bold">{lot.currentBid.toLocaleString()}</div>
                     </div>
                   ))}
                 </div>
@@ -786,9 +790,9 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                 <section className="hero-section flex-1 flex flex-col items-center justify-center px-[34px] sm:px-[20px] py-[10px] relative min-w-0">
                   {showAwaitingPlaceholder ? (
                     <div className="text-center max-w-md">
-                      <span className="ms text-[#2a3a44] text-6xl block mb-4">hourglass_empty</span>
+                      <span className="ms text-outline-variant text-6xl block mb-4">hourglass_empty</span>
                       <h2 className="font-archivo text-3xl font-bold uppercase italic text-white mb-2">Awaiting First Lot</h2>
-                      <p className="font-mono-geist text-xs text-[#5a6a74] uppercase tracking-widest">
+                      <p className="font-mono-geist text-xs text-outline uppercase tracking-widest">
                         The auctioneer hasn't started the auction yet
                       </p>
                     </div>
@@ -798,11 +802,11 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         {(isSold || isUnsold) && (
                           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 animate-stamp pointer-events-none">
                             <div
-                              className={`border-[6px] ${isSold ? "border-[#e45d35] text-[#e45d35]" : "border-gray-400 text-gray-400"} rounded-xl px-6 py-2 transform -rotate-12 backdrop-blur-sm bg-black/20`}
-                              style={{ boxShadow: `0 0 40px ${isSold ? "rgba(228,93,53,0.5)" : "rgba(156,163,175,0.5)"}, inset 0 0 20px ${isSold ? "rgba(228,93,53,0.5)" : "rgba(156,163,175,0.5)"}` }}
+                              className={`border-[6px] ${isSold ? "border-theme-orange text-theme-orange" : "border-gray-400 text-gray-400"} rounded-xl px-6 py-2 transform -rotate-12 backdrop-blur-sm bg-black/20`}
+                              style={{ boxShadow: `0 0 40px ${isSold ? "rgba(201,151,31,0.5)" : "rgba(156,163,175,0.5)"}, inset 0 0 20px ${isSold ? "rgba(201,151,31,0.5)" : "rgba(156,163,175,0.5)"}` }}
                             >
                               <span className="font-archivo text-6xl font-black italic tracking-tighter uppercase"
-                                style={{ textShadow: `0 0 20px ${isSold ? "rgba(228,93,53,0.8)" : "rgba(156,163,175,0.8)"}` }}>
+                                style={{ textShadow: `0 0 20px ${isSold ? "rgba(201,151,31,0.8)" : "rgba(156,163,175,0.8)"}` }}>
                                 {isSold ? "SOLD" : "UNSOLD"}
                               </span>
                             </div>
@@ -816,11 +820,11 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           {currentLot?.playerImg ? (
                             <img src={currentLot.playerImg} alt={currentLot.playerName} className="w-full h-full object-cover object-top" style={{ filter: "grayscale(0.15) contrast(1.2)" }} />
                           ) : (
-                            <div className="w-full h-full bg-[#1c2021] flex items-center justify-center">
-                              <span className="ms text-[#2a3a44] text-9xl">person</span>
+                            <div className="w-full h-full bg-surface-container flex items-center justify-center">
+                              <span className="ms text-outline-variant text-9xl">person</span>
                             </div>
                           )}
-                          <div className="absolute inset-0" style={{ background: "linear-gradient(to top,#0b0f10 0%,transparent 55%)" }} />
+                          <div className="absolute inset-0" style={{ background: "linear-gradient(to top,var(--color-background) 0%,transparent 55%)" }} />
                           {currentLot && !isSold && !isUnsold && (
                             <div className="absolute bottom-0 left-0 right-0 h-1.5">
                               <div className="h-full transition-all duration-100"
@@ -830,8 +834,8 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         </div>
 
                         <div
-                          className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-[#e45d35] text-[#0b0f10] font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
-                          style={{ boxShadow: "0 4px 16px rgba(228,93,53,0.45)" }}
+                          className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-theme-orange text-background font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
+                          style={{ boxShadow: "0 4px 16px rgba(201,151,31,0.45)" }}
                         >
                           LOT #{currentLot?.lotNumber ?? lotNumber} • {isSold ? "SOLD" : isUnsold ? "UNSOLD" : isLocked ? "LOCKED" : "ON THE BLOCK"}
                         </div>
@@ -843,10 +847,10 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           {currentLot?.playerName ?? "—"}
                         </h2>
                         <div className="flex items-center justify-center gap-3 sm:gap-5 flex-wrap">
-                          <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-[#e45d35] tracking-[0.18em]">
+                          <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-theme-orange tracking-[0.18em]">
                             {(currentLot?.playerRole ?? "—").toUpperCase()}
                           </span>
-                          <div className="w-[5px] h-[5px] rounded-full bg-[rgba(228,93,53,0.45)]" />
+                          <div className="w-[5px] h-[5px] rounded-full bg-[rgba(201,151,31,0.45)]" />
                           <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
                             BASE: {fmtPts(currentLot?.basePrice)} <span className="text-[10px] opacity-60">PTS</span>
                           </span>
@@ -855,7 +859,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
 
                       <div
                         className="stats-row flex items-center gap-16 mt-[32px] px-11 py-3 rounded-[17px] border border-white/[0.08]"
-                        style={{ background: "rgba(11,15,16,0.42)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "0 8px 42px rgba(0,0,0,0.55)" }}
+                        style={{ background: "rgba(13,17,23,0.42)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "0 8px 42px rgba(0,0,0,0.55)" }}
                       >
                         {[
                           { label: "Country", value: currentLot?.playerCountry || "—" },
@@ -875,9 +879,9 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                   ) : (
                     // Between lots mid-auction
                     <div className="text-center max-w-md">
-                      <span className="ms text-[#2a3a44] text-8xl block mb-4">pending</span>
+                      <span className="ms text-outline-variant text-8xl block mb-4">pending</span>
                       <h2 className="font-archivo text-3xl font-bold uppercase italic text-white mb-2">Next Lot Soon</h2>
-                      <p className="font-mono-geist text-xs text-[#5a6a74] uppercase tracking-widest">
+                      <p className="font-mono-geist text-xs text-outline uppercase tracking-widest">
                         {completedLots.length} lot{completedLots.length !== 1 ? "s" : ""} completed — auctioneer is preparing the next player
                       </p>
                     </div>
@@ -887,23 +891,23 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                 {/* RIGHT: Bid + Team */}
                 <aside className="aside-panel w-[26%] shrink-0 flex flex-col py-4 gap-3 min-h-0">
                   <div
-                    className="bid-card glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(228,93,53,0.18)]"
-                    style={{ background: "linear-gradient(135deg,rgba(39,43,44,0.45) 0%,rgba(11,15,16,0.82) 100%)" }}
+                    className="bid-card glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(201,151,31,0.18)]"
+                    style={{ background: "linear-gradient(135deg,rgba(39,43,44,0.45) 0%,rgba(13,17,23,0.82) 100%)" }}
                   >
                     <div className="absolute -top-8 -right-8 opacity-[0.05] pointer-events-none">
                       <span className="ms ms-fill text-white" style={{ fontSize: 220 }}>gavel</span>
                     </div>
 
                     <div className="text-center w-full relative z-10">
-                      <span className="bid-label font-mono-geist text-[#e45d35] text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
+                      <span className="bid-label font-mono-geist text-theme-orange text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
                         Current High Bid
                       </span>
-                      <div className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-[#e45d35] mb-[15px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}>
+                      <div className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-theme-orange mb-[15px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}>
                         {fmtPts(currentLot?.currentBid)}
                       </div>
 
                       {currentLot && !isSold && !isUnsold && !isLocked && (
-                        <p className="font-mono-geist text-[9px] text-[#5a6a74] uppercase tracking-widest mb-[15px]">
+                        <p className="font-mono-geist text-[9px] text-outline uppercase tracking-widest mb-[15px]">
                           Next bid: {fmtPts(nextBid)} PTS
                         </p>
                       )}
@@ -913,10 +917,10 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         </p>
                       )}
 
-                      <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right,transparent,rgba(228,93,53,0.30),transparent)" }} />
+                      <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right,transparent,rgba(201,151,31,0.30),transparent)" }} />
                       <div className="flex items-center justify-center gap-3 sm:gap-4">
-                        <div className="bid-leading-icon w-[58px] h-[58px] rounded-xl bg-[rgba(228,93,53,0.10)] border border-[rgba(228,93,53,0.20)] flex items-center justify-center">
-                          <span className="ms ms-fill text-[28px] text-[#e45d35]">groups</span>
+                        <div className="bid-leading-icon w-[58px] h-[58px] rounded-xl bg-theme-orange/10 border border-theme-orange/20 flex items-center justify-center">
+                          <span className="ms ms-fill text-[28px] text-theme-orange">groups</span>
                         </div>
                         <div>
                           <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-1 font-bold">Leading Team</div>
@@ -935,7 +939,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                     <div className="flex items-center justify-between mb-3">
                       <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Team Statistics</span>
                       <div className="flex gap-[5px]">
-                        <div className="w-4 h-[3px] bg-[#e45d35] rounded-full" />
+                        <div className="w-4 h-[3px] bg-theme-orange rounded-full" />
                         <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
                         <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
                       </div>
@@ -945,8 +949,8 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         {winningTeam?.name ?? "No Leader Yet"}
                       </h3>
                       {winningTeam && (
-                        <div className="px-[10px] py-[3px] bg-[rgba(228,93,53,0.10)] rounded-[6px] border border-[rgba(228,93,53,0.22)]">
-                          <span className="font-mono-geist text-[#e45d35] text-[8px] font-bold tracking-[0.12em]">LEADING</span>
+                        <div className="px-[10px] py-[3px] bg-theme-orange/10 rounded-[6px] border border-theme-orange/20">
+                          <span className="font-mono-geist text-theme-orange text-[8px] font-bold tracking-[0.12em]">LEADING</span>
                         </div>
                       )}
                     </div>
@@ -958,21 +962,21 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                             {winningPurse?.roster ?? 0} <span className="text-[10px] opacity-40">/ {auction.rules.teamSize}</span>
                           </span>
                           <div className="flex-1 h-[5px] bg-white/[0.06] rounded-full overflow-hidden">
-                            <div className="h-full bg-[#e45d35] rounded-full"
+                            <div className="h-full bg-theme-orange rounded-full"
                               style={{ width: `${Math.min(((winningPurse?.roster ?? 0) / Math.max(auction.rules.teamSize, 1)) * 100, 100)}%` }} />
                           </div>
                         </div>
                       </div>
                       <div className="flex flex-col items-end">
                         <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
-                        <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-[#e45d35]">
+                        <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-theme-orange">
                           {fmtPts(winningPurse?.remaining ?? auction.rules.totalPoints)} <span className="text-[9px] opacity-50">PTS</span>
                         </span>
                       </div>
                     </div>
                     <div className="team-top-buy flex items-center justify-between px-3 py-2 bg-white/[0.04] rounded-[10px] border border-white/[0.05]">
                       <div className="flex items-center gap-[10px]">
-                        <span className="ms ms-fill text-[13px] text-[#e45d35]">star</span>
+                        <span className="ms ms-fill text-[13px] text-theme-orange">star</span>
                         <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
                       </div>
                       <span className="font-mono-geist text-[10px] text-white">
@@ -1020,15 +1024,15 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         className={[
                           "glass-panel p-3 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
                           isLocked2 ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
-                          isHighlighted ? "ring-1 ring-[#e45d35] shadow-[0_0_15px_rgba(228,93,53,0.3)] bg-white/10" : "border border-white/5",
+                          isHighlighted ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10" : "border border-white/5",
                           isDimmed    ? "opacity-30" : "",
                           isUnsoldP && !isHighlighted ? "border-l-2 border-l-red-900/60" : "",
                           isSoldP   && !isHighlighted ? "border-r-2 border-r-green-500/50" : "",
-                          isPending && !isHighlighted ? "border border-[#e45d35]/40" : "",
+                          isPending && !isHighlighted ? "border border-theme-orange/40" : "",
                         ].filter(Boolean).join(" ")}
                       >
-                        <div className={["w-10 h-10 rounded-lg overflow-hidden flex-shrink-0", isUnsoldP ? "grayscale opacity-40" : "bg-[#313536]"].join(" ")}>
-                          {p.img ? <img src={p.img} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-[#313536]" />}
+                        <div className={["w-10 h-10 rounded-lg overflow-hidden flex-shrink-0", isUnsoldP ? "grayscale opacity-40" : "bg-surface-container-highest"].join(" ")}>
+                          {p.img ? <img src={p.img} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-surface-container-highest" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -1040,10 +1044,10 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                                 {pAny.isFinal ? "UNSOLD · FINAL" : `UNSOLD${pAny.reentryCount > 0 ? ` · R${pAny.reentryCount}` : ""}`}
                               </span>
                             )}
-                            {isPending && <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-[#e45d35]/15 text-[#e45d35] border border-[#e45d35]/30 animate-pulse">LIVE</span>}
+                            {isPending && <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-theme-orange/15 text-theme-orange border border-theme-orange/30 animate-pulse">LIVE</span>}
                           </div>
                           <p className={["text-[10px] font-mono font-medium mt-0.5 uppercase",
-                            isSoldP ? "text-green-400" : isUnsoldP ? "text-red-900/80" : isPending ? "text-[#e45d35]" : "text-[#c6c6cd]"].join(" ")}>
+                            isSoldP ? "text-green-400" : isUnsoldP ? "text-red-900/80" : isPending ? "text-theme-orange" : "text-on-surface-variant"].join(" ")}>
                             {isSoldP ? `SOLD • ${pAny.teamShortCode}` : isUnsoldP ? `BASE: ${pAny.price}` : isPending ? "ON THE BLOCK" : `BASE: ${pAny.price}`}
                           </p>
                         </div>
@@ -1074,15 +1078,15 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                       <div key={t.id} id={`team-${t.shortCode}`}
                         onClick={() => toggleTeam(t)}
                         className={`glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300
-                          ${isHighlighted ? "ring-1 ring-[#e45d35] shadow-[0_0_15px_rgba(228,93,53,0.3)] bg-white/10" : "border border-white/5 hover:border-[#e45d35]"}
+                          ${isHighlighted ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10" : "border border-white/5 hover:border-theme-orange"}
                           ${isDimmed ? "opacity-30" : "opacity-100"}`}
                       >
-                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#1c2021] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
                           {t.logoUrl && <img src={t.logoUrl} className="w-full h-full object-cover" alt="" />}
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">{t.name}</p>
-                          <p className="text-[10px] font-mono text-[#e45d35] mt-0.5 tracking-wider">{t.purse}</p>
+                          <p className="text-[10px] font-mono text-theme-orange mt-0.5 tracking-wider">{t.purse}</p>
                         </div>
                       </div>
                     );
@@ -1094,20 +1098,20 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         </main>
 
         {/* TICKER */}
-        <div className="absolute bottom-0 left-0 right-0 h-10 bg-[#e45d35] z-50 flex items-center overflow-hidden border-t border-[#e45d35]/50">
-          <div className="bg-[#0b0f10] text-[#e45d35] h-full px-4 flex items-center shrink-0 z-10 border-r border-[#e45d35]/30">
+        <div className="absolute bottom-0 left-0 right-0 h-10 bg-theme-orange z-50 flex items-center overflow-hidden border-t border-theme-orange/50">
+          <div className="bg-background text-theme-orange h-full px-4 flex items-center shrink-0 z-10 border-r border-theme-orange/30">
             <span className="font-mono-geist text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-[#e45d35] animate-pulse" />
+              <div className="w-2 h-2 rounded-full bg-theme-orange animate-pulse" />
               LIVE NEWS
             </span>
           </div>
           <div className="flex-1 overflow-hidden h-full flex items-center">
-            <div className="ticker-track flex whitespace-nowrap text-[#0b0f10] font-archivo font-bold text-sm uppercase tracking-wide">
+            <div className="ticker-track flex whitespace-nowrap text-background font-archivo font-bold text-sm uppercase tracking-wide">
               {[...Array(2)].map((_, i) => (
                 <div key={i} className="flex items-center">
                   {tickerMessages.map((msg, j) => (
                     <span key={j} className="px-6 flex items-center gap-2">
-                      <span className="w-1 h-1 bg-[#0b0f10]/50 rounded-full" />
+                      <span className="w-1 h-1 bg-background/50 rounded-full" />
                       {msg}
                     </span>
                   ))}
@@ -1130,10 +1134,10 @@ function WatchWithClock({ auctionId }: { auctionId: string }) {
 
   if (!auction?.session?.timerSeconds) {
     return (
-      <div className="h-screen bg-[#0b0f10] flex items-center justify-center">
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
         <div className="text-center">
-          <span className="ms text-[#e45d35] text-5xl animate-spin block mb-4">progress_activity</span>
-          <p className="font-mono-geist text-[#5a6a74] text-sm uppercase tracking-widest">Loading broadcast…</p>
+          <span className="ms text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
+          <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading broadcast…</p>
         </div>
       </div>
     );

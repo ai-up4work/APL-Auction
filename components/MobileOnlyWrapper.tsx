@@ -20,7 +20,7 @@ function DesktopBlocker() {
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       if (x > 0 && y > 0 && x < rect.width && y < rect.height) {
-        card.style.boxShadow = `0 10px 40px -10px rgba(0,0,0,0.5), ${x / 10}px ${y / 10}px 100px -50px rgba(228, 93, 53, 0.2)`;
+        card.style.boxShadow = `0 10px 40px -10px rgba(0,0,0,0.5), ${x / 10}px ${y / 10}px 100px -50px rgba(201, 151, 31, 0.2)`;
       }
     };
     document.addEventListener("mousemove", handleMouseMove);
@@ -55,19 +55,19 @@ function DesktopBlocker() {
         @keyframes apl-spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
-      <div className="fixed inset-0 overflow-hidden bg-[#0b0f10] text-[#e0e3e4] font-sans z-[9999] flex flex-col">
+      <div className="fixed inset-0 overflow-hidden bg-background text-on-background font-sans z-[9999] flex flex-col">
         {/* ── Atmospheric blobs ── */}
         <div className="fixed inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-[10%] -right-[10%] w-[50vw] h-[50vw] rounded-full bg-[#ffb5a0] opacity-10 [animation:apl-pulse-glow_4s_ease-in-out_infinite]" />
-          <div className="absolute -bottom-[10%] -left-[10%] w-[60vw] h-[60vw] rounded-full bg-[#972700] opacity-5 [animation:apl-pulse-glow_4s_ease-in-out_infinite]" />
+          <div className="absolute -top-[10%] -right-[10%] w-[50vw] h-[50vw] rounded-full bg-theme-orange opacity-10 [animation:apl-pulse-glow_4s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-[10%] -left-[10%] w-[60vw] h-[60vw] rounded-full bg-theme-orange opacity-5 [animation:apl-pulse-glow_4s_ease-in-out_infinite]" />
         </div>
 
         {/* ── Header ── */}
         <header className="fixed inset-x-0 top-0 z-50 flex items-center justify-center h-[clamp(64px,8vw,72px)] px-[clamp(20px,4vw,40px)]">
           <div className="flex items-center gap-2.5">
-            <span className={`${ICON_FILLED} text-[#ffb5a0] text-[clamp(22px,2.4vw,28px)]`}>security</span>
-            <h1 className="font-['Archivo_Narrow',sans-serif] font-bold uppercase text-white tracking-[0.04em] leading-tight text-[clamp(22px,2.4vw,30px)] m-0">
-              APL <span className="text-[#ffb5a0]">OWNER CONSOLE</span>
+            <span className={`${ICON_FILLED} text-theme-orange text-[clamp(22px,2.4vw,28px)]`}>security</span>
+            <h1 className="font-archivo font-bold uppercase text-white tracking-[0.04em] leading-tight text-[clamp(22px,2.4vw,30px)] m-0">
+              APL <span className="text-theme-orange">OWNER CONSOLE</span>
             </h1>
           </div>
         </header>
@@ -78,24 +78,24 @@ function DesktopBlocker() {
           {/* ── Center Console Card ── */}
           <div
             ref={cardRef}
-            className="relative flex-shrink-0 w-full max-w-[clamp(560px,90vw,920px)] flex flex-row items-center overflow-visible rounded-lg border border-white/10 bg-[#101415]/60 backdrop-blur-[20px] shadow-2xl p-[clamp(24px,4vw,36px)_clamp(28px,5vw,40px)] gap-[clamp(24px,5vw,180px)]"
+            className="relative flex-shrink-0 w-full max-w-[clamp(560px,90vw,920px)] flex flex-row items-center overflow-visible rounded-lg border border-white/10 bg-surface-container/60 backdrop-blur-[20px] shadow-2xl p-[clamp(24px,4vw,36px)_clamp(28px,5vw,40px)] gap-[clamp(24px,5vw,180px)]"
           >
             {/* Internal glow */}
-            <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-[#ffb5a0]/10 blur-2xl pointer-events-none" />
+            <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-theme-orange/10 blur-2xl pointer-events-none" />
 
             {/* ── Phone graphic ── */}
             <div className="flex-shrink-0 flex items-center justify-center">
               <div className="group relative inline-block">
                 {/* Rotating dashed ring */}
-                <div className="absolute -top-3.5 -right-3.5 -bottom-3.5 -left-3.5 rounded-[44px] border-[1.5px] border-dashed border-[#ffb5a0]/30 [animation:apl-spin-slow_20s_linear_infinite]" />
+                <div className="absolute -top-3.5 -right-3.5 -bottom-3.5 -left-3.5 rounded-[44px] border-[1.5px] border-dashed border-theme-orange/30 [animation:apl-spin-slow_20s_linear_infinite]" />
                 {/* Phone frame */}
-                <div className="relative w-[clamp(160px,18vw,200px)] aspect-[200/370] bg-[#101415] border-[5px] border-[#313536] rounded-[34px] overflow-hidden shadow-[0_24px_48px_-10px_rgba(0,0,0,0.6)]">
+                <div className="relative w-[clamp(160px,18vw,200px)] aspect-[200/370] bg-surface-container border-[5px] border-surface-container-high rounded-[34px] overflow-hidden shadow-[0_24px_48px_-10px_rgba(0,0,0,0.6)]">
                   {/* Notch */}
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-5 bg-[#313536] rounded-b-[10px] z-20" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-5 bg-surface-container-high rounded-b-[10px] z-20" />
                   {/* Phone content */}
-                  <div className="absolute inset-0 flex flex-col items-center gap-3 p-[clamp(14px,2vw,18px)] pt-9 bg-gradient-to-br from-[#181c1d] to-[#313536]">
-                    <div className="w-full h-1.5 rounded-full bg-[#ffb5a0]/20" />
-                    <div className="self-start w-2/3 h-1.5 rounded-full bg-[#c6c6cd]/20" />
+                  <div className="absolute inset-0 flex flex-col items-center gap-3 p-[clamp(14px,2vw,18px)] pt-9 bg-gradient-to-br from-surface-container to-surface-container-high">
+                    <div className="w-full h-1.5 rounded-full bg-theme-orange/20" />
+                    <div className="self-start w-2/3 h-1.5 rounded-full bg-secondary/20" />
                     {/* QR */}
                     <div className="mt-5 p-3 rounded-xl bg-white shadow-[0_10px_15px_-3px_rgba(0,0,0,0.3)]">
                       <img
@@ -106,7 +106,7 @@ function DesktopBlocker() {
                       />
                     </div>
                     <div className="mt-5 flex flex-col gap-2.5 w-full">
-                      <div className="w-full h-[26px] rounded bg-[#ffb5a0] shadow-[0_4px_16px_rgba(228,93,53,0.3)]" />
+                      <div className="w-full h-[26px] rounded bg-theme-orange shadow-[0_4px_16px_rgba(201,151,31,0.3)]" />
                       <div className="w-full h-[26px] rounded bg-white/5" />
                     </div>
                   </div>
@@ -119,20 +119,20 @@ function DesktopBlocker() {
             {/* ── Content side ── */}
             <div className="flex-1 flex flex-col gap-[clamp(14px,2vw,18px)]">
               {/* Protocol Active badge */}
-              <div className="w-fit flex items-center gap-[7px] px-3 py-1 rounded-full bg-[#972700]/30 border border-[#ffb5a0]/20 text-[#ffb5a0] font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em]">
+              <div className="w-fit flex items-center gap-[7px] px-3 py-1 rounded-full bg-theme-orange/10 border border-theme-orange/20 text-theme-orange font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em]">
                 <span className="relative flex w-[7px] h-[7px]">
-                  <span className="absolute inset-0 rounded-full bg-[#ffb5a0] opacity-75 animate-ping" />
-                  <span className="relative w-[7px] h-[7px] rounded-full bg-[#ffb5a0] inline-block" />
+                  <span className="absolute inset-0 rounded-full bg-theme-orange opacity-75 animate-ping" />
+                  <span className="relative w-[7px] h-[7px] rounded-full bg-theme-orange inline-block" />
                 </span>
                 Protocol Active
               </div>
 
               {/* Heading */}
               <div className="flex flex-col gap-2.5">
-                <h2 className="font-['Archivo_Narrow',sans-serif] font-bold uppercase text-white tracking-[0.02em] leading-[1.18] text-[clamp(26px,3vw,34px)] m-0">
-                  MOBILE DEVICE <br /><span className="text-[#ffb5a0]">REQUIRED</span>
+                <h2 className="font-archivo font-bold uppercase text-white tracking-[0.02em] leading-[1.18] text-[clamp(26px,3vw,34px)] m-0">
+                  MOBILE DEVICE <br /><span className="text-theme-orange">REQUIRED</span>
                 </h2>
-                <p className="m-0 text-[#c6c6cd] leading-[1.55] text-[clamp(13px,1.3vw,14px)]">
+                <p className="m-0 text-on-surface-variant leading-[1.55] text-[clamp(13px,1.3vw,14px)]">
                   The APL Owner Console is a high-performance environment optimized exclusively for mobile bidding. Please scan the code or access this link on your smartphone to join the auction.
                 </p>
               </div>
@@ -141,13 +141,13 @@ function DesktopBlocker() {
               <div className="flex flex-col gap-3">
                 <button
                   onClick={handleCopy}
-                  className="relative flex items-center justify-center gap-2.5 w-full px-5 py-[13px] rounded text-white font-['Archivo_Narrow',sans-serif] font-semibold cursor-pointer border-none text-[clamp(16px,1.8vw,20px)] bg-[#ffb5a0] hover:bg-[#e45d35] active:scale-95 transition-[background-color,transform] duration-150 shadow-[0_4px_20px_rgba(228,93,53,0.3)]"
+                  className="relative flex items-center justify-center gap-2.5 w-full px-5 py-[13px] rounded text-background font-archivo font-semibold cursor-pointer border-none text-[clamp(16px,1.8vw,20px)] bg-theme-orange hover:brightness-90 active:scale-95 transition-[filter,transform] duration-150 shadow-[0_4px_20px_rgba(201,151,31,0.3)]"
                 >
                   <span className={`${ICON_BASE} text-[20px]`}>content_copy</span>
                   <span>COPY SECURE LINK</span>
                   <span
                     id="apl-copy-success"
-                    className="absolute inset-0 flex items-center justify-center rounded bg-green-600 text-white font-['Archivo_Narrow',sans-serif] font-semibold text-[clamp(16px,1.8vw,20px)] opacity-0 pointer-events-none transition-opacity duration-300"
+                    className="absolute inset-0 flex items-center justify-center rounded bg-green-600 text-white font-archivo font-semibold text-[clamp(16px,1.8vw,20px)] opacity-0 pointer-events-none transition-opacity duration-300"
                   >
                     <span className={`${ICON_BASE} mr-2`}>check_circle</span>
                     LINK COPIED
@@ -155,13 +155,13 @@ function DesktopBlocker() {
                 </button>
 
                 {/* OR VISIT divider */}
-                <div className="flex items-center gap-3 text-[#c6c6cd]/40">
+                <div className="flex items-center gap-3 text-on-surface-variant/40">
                   <hr className="flex-1 m-0 border-0 border-t border-white/10" />
                   <span className="whitespace-nowrap font-['Geist',sans-serif] text-xs font-medium tracking-[0.05em]">OR VISIT</span>
                   <hr className="flex-1 m-0 border-0 border-t border-white/10" />
                 </div>
 
-                <div className="text-center text-[#ffb5a0] font-['Geist',sans-serif] text-[13px] font-medium tracking-[0.05em] cursor-pointer hover:underline hover:underline-offset-4">
+                <div className="text-center text-theme-orange font-['Geist',sans-serif] text-[13px] font-medium tracking-[0.05em] cursor-pointer hover:underline hover:underline-offset-4">
                   console.apl.pro/live-auction-node-4
                 </div>
               </div>
@@ -175,11 +175,11 @@ function DesktopBlocker() {
               { icon: "phonelink_setup",      title: "Secure Identity",    desc: "Leverage FaceID or Biometrics for instant, multi-factor bid authorization." },
               { icon: "notifications_active", title: "Push Overrides",     desc: "Never miss a closing window with critical haptic auction feedback." },
             ].map((c) => (
-              <div key={c.icon} className="flex items-start gap-3.5 rounded-lg border border-white/10 bg-[#101415]/60 backdrop-blur-[20px] p-[clamp(14px,2vw,18px)_clamp(16px,2.2vw,20px)]">
-                <span className={`${ICON_FILLED} flex-shrink-0 text-[#ffb5a0] text-[20px]`}>{c.icon}</span>
+              <div key={c.icon} className="flex items-start gap-3.5 rounded-lg border border-white/10 bg-surface-container/60 backdrop-blur-[20px] p-[clamp(14px,2vw,18px)_clamp(16px,2.2vw,20px)]">
+                <span className={`${ICON_FILLED} flex-shrink-0 text-theme-orange text-[20px]`}>{c.icon}</span>
                 <div>
-                  <h4 className="m-0 mb-1 font-['Archivo_Narrow',sans-serif] font-semibold uppercase text-white text-xs tracking-[0.06em]">{c.title}</h4>
-                  <p className="m-0 font-sans text-xs leading-[18px] text-[#c6c6cd]">{c.desc}</p>
+                  <h4 className="m-0 mb-1 font-archivo font-semibold uppercase text-white text-xs tracking-[0.06em]">{c.title}</h4>
+                  <p className="m-0 font-sans text-xs leading-[18px] text-on-surface-variant">{c.desc}</p>
                 </div>
               </div>
             ))}
@@ -187,12 +187,12 @@ function DesktopBlocker() {
         </main>
 
         {/* ── Footer ── */}
-        <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between h-[52px] px-[clamp(20px,4vw,40px)] border-t border-white/5 bg-[#101415]/80 backdrop-blur-md">
-          <div className="flex items-center gap-[7px] font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em] text-[#c6c6cd]/60">
-            <span className="inline-block w-[7px] h-[7px] rounded-full bg-[#ffb4ab]" />
+        <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between h-[52px] px-[clamp(20px,4vw,40px)] border-t border-white/5 bg-surface-container/80 backdrop-blur-md">
+          <div className="flex items-center gap-[7px] font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em] text-on-surface-variant/60">
+            <span className="inline-block w-[7px] h-[7px] rounded-full bg-status-live" />
             Auction Node Status: Operational
           </div>
-          <div className="font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em] text-[#c6c6cd]/40">
+          <div className="font-['Geist',sans-serif] text-[10px] font-medium uppercase tracking-[0.1em] text-on-surface-variant/40">
             © 2024 APL INTERNATIONAL • WAR ROOM TERMINAL V4.2
           </div>
         </footer>

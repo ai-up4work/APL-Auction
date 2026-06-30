@@ -17,14 +17,9 @@ import {
   type BidEntry,
 } from "@/lib/auctionLiveDb";
 
-// ── style tokens ────────────────────────────────────────────────────────────
-const CARD_BG       = "rgba(16, 20, 21, 0.6)";
-const CARD_BORDER   = "1px solid rgba(255,255,255,0.07)";
-const ORANGE        = "#e45d35";
-const TEXT_DIM      = "#7a7d88";
-const TEXT_MID      = "#9a9aa3";
-const TEXT_WHITE    = "#e8ecf0";
-const TEXT_BLUE     = "#dae2fd";
+// Matches --color-theme-orange in globals.css — fallback accent when a team
+// has no color of its own.
+const ORANGE = "#c9971f";
 
 // ── types ────────────────────────────────────────────────────────────────────
 interface SoldPlayer {
@@ -251,20 +246,11 @@ export default function SquadPage() {
   if (loading) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: "#101415", minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{ textAlign: "center", color: TEXT_MID }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: 10,
-              border: "2px solid transparent", borderTopColor: ORANGE,
-              animation: "squadSpin 1s linear infinite",
-              margin: "0 auto 12px",
-            }} />
-            <p style={{ fontSize: 13 }}>Loading squad…</p>
+        <div className="bg-background min-h-screen flex items-center justify-center">
+          <div className="text-center text-[#9a9aa3]">
+            <div className="w-10 h-10 rounded-[10px] border-2 border-transparent border-t-theme-orange animate-spin mx-auto mb-3" />
+            <p className="text-[13px]">Loading squad…</p>
           </div>
-          <style>{`@keyframes squadSpin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </MobileOnlyWrapper>
     );
@@ -273,12 +259,8 @@ export default function SquadPage() {
   if (error) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: "#101415", minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 24,
-        }}>
-          <p style={{ color: ORANGE, textAlign: "center", fontSize: 14 }}>{error}</p>
+        <div className="bg-background min-h-screen flex items-center justify-center p-6">
+          <p className="text-theme-orange text-center text-sm">{error}</p>
         </div>
       </MobileOnlyWrapper>
     );
@@ -286,253 +268,162 @@ export default function SquadPage() {
 
   return (
     <MobileOnlyWrapper>
-      <div style={{ background: "#101415", color: "#e0e3e4", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+      <div className="bg-background text-on-background min-h-screen font-inter">
 
         {/* ── Top App Bar ── */}
-        <header style={{
-          position: "sticky", top: 0, zIndex: 50,
-          background: "#101415",
-          borderBottom: "1px solid rgba(255,255,255,0.07)",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 16px",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 10,
-              background: team?.color ? `${team.color}22` : "#1e2324",
-              boxShadow: `0 0 18px ${team?.color ?? ORANGE}33`,
-              border: `1px solid ${team?.color ?? ORANGE}44`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              overflow: "hidden", flexShrink: 0,
-            }}>
+        <header className="sticky top-0 z-50 bg-background border-b border-white/[0.07] flex items-center justify-between px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-11 h-11 rounded-[10px] flex items-center justify-center overflow-hidden shrink-0"
+              style={{
+                background: team?.color ? `${team.color}22` : "#1e2324",
+                boxShadow: `0 0 18px ${team?.color ?? ORANGE}33`,
+                border: `1px solid ${team?.color ?? ORANGE}44`,
+              }}
+            >
               {team?.logo ? (
                 <Image
                   src={team.logo}
                   alt={team.name}
                   width={44}
                   height={44}
-                  style={{ objectFit: "contain", width: "100%", height: "100%", padding: 4 }}
+                  className="object-contain w-full h-full p-0"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <span style={{
-                  fontFamily: "'Archivo Narrow', sans-serif",
-                  fontSize: 13, fontWeight: 800,
-                  color: team?.color ?? ORANGE,
-                  letterSpacing: "-0.5px",
-                  textTransform: "uppercase",
-                }}>
+                <span
+                  className="font-archivo text-[13px] font-extrabold tracking-[-0.5px] uppercase"
+                  style={{ color: team?.color ?? ORANGE }}
+                >
                   {(team?.code ?? teamCode).slice(0, 3)}
                 </span>
               )}
             </div>
             <div>
-              <span style={{
-                fontFamily: "'Archivo Narrow', sans-serif",
-                fontSize: 22, fontWeight: 700, color: TEXT_BLUE,
-                letterSpacing: "-0.5px", textTransform: "uppercase",
-                display: "block",
-              }}>{team?.name ?? teamCode} SQUAD</span>
-              {/* live indicator */}
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <div style={{
-                  width: 6, height: 6, borderRadius: "50%",
-                  background: ORANGE,
-                  opacity: bright ? 1 : 0.3,
-                  transition: "opacity 0.3s",
-                }} />
-                <span style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                  Live
-                </span>
-              </div>
+              <span className="font-archivo text-[22px] font-bold text-[#dae2fd] tracking-[-0.5px] uppercase block">
+                {team?.name ?? teamCode} SQUAD
+              </span>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 18 }}>
+          <div className="flex gap-[18px]">
             {["notifications", "settings"].map((icon) => (
-              <span key={icon} className="material-symbols-outlined"
-                style={{ color: TEXT_MID, fontSize: 24 }}>{icon}</span>
+              <span key={icon} className="material-symbols-outlined text-[#9a9aa3] text-2xl">{icon}</span>
             ))}
           </div>
         </header>
 
         {/* ── Scroll body ── */}
-        <main style={{ padding: "14px 14px 100px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <main className="px-3.5 pt-3.5 pb-[100px] flex flex-col gap-3.5">
 
           {/* ── Players Bought Card ── */}
-          <div style={{
-            background: "rgba(16, 20, 21, 0.6)",
-            borderTop:    `1px solid ${ORANGE}`,
-            borderRight:  `1px solid ${ORANGE}`,
-            borderBottom: `1px solid ${ORANGE}`,
-            borderLeft:   `4px solid ${ORANGE}`,
-            borderRadius: 14,
-            padding: "18px 18px 16px",
-          }}>
-            <p style={{
-              fontSize: 11, fontWeight: 600,
-              letterSpacing: "0.13em", textTransform: "uppercase",
-              color: TEXT_MID, marginBottom: 6,
-            }}>Players Bought</p>
+          <div
+            className="bg-[rgba(16,20,21,0.6)] rounded-2xl px-[18px] pt-[18px] pb-4"
+            style={{
+              borderTop: `1px solid ${ORANGE}`,
+              borderRight: `1px solid ${ORANGE}`,
+              borderBottom: `1px solid ${ORANGE}`,
+              borderLeft: `4px solid ${ORANGE}`,
+            }}
+          >
+            <p className="text-[11px] font-semibold tracking-[0.13em] uppercase text-[#9a9aa3] mb-1.5">
+              Players Bought
+            </p>
 
-            <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+            <div className="flex items-end justify-between">
               <div>
-                <span style={{
-                  fontFamily: "'Archivo Narrow', sans-serif",
-                  fontSize: 68, fontWeight: 700, color: TEXT_BLUE, lineHeight: 1,
-                }}>{playersBought}</span>
-                <span style={{
-                  fontFamily: "'Archivo Narrow', sans-serif",
-                  fontSize: 28, fontWeight: 600, color: "#6b6e7a",
-                }}>/{totalSlots}</span>
+                <span className="font-archivo text-[68px] font-bold text-[#dae2fd] leading-none">{playersBought}</span>
+                <span className="font-archivo text-[28px] font-semibold text-[#6b6e7a]">/{totalSlots}</span>
               </div>
 
               {/* Remaining purse */}
-              <div style={{ textAlign: "right" }}>
-                <p style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>
+              <div className="text-right">
+                <p className="text-[10px] text-[#7a7d88] tracking-[0.1em] uppercase mb-0.5">
                   Purse Left
                 </p>
-                <span style={{
-                  fontFamily: "'Archivo Narrow', sans-serif",
-                  fontSize: 28, fontWeight: 700, color: TEXT_BLUE,
-                }}>{formatPts(purse.remaining)}</span>
+                <span className="font-archivo text-[28px] font-bold text-[#dae2fd]">{formatPts(purse.remaining)}</span>
               </div>
             </div>
 
             {/* Progress bar */}
-            <div style={{
-              marginTop: 14, background: "#272b2c",
-              borderRadius: 99, height: 5, overflow: "hidden",
-            }}>
-              <div style={{
-                height: "100%", borderRadius: 99, background: ORANGE,
-                width: `${progressPct}%`,
-                boxShadow: "0 0 8px rgba(228,93,53,0.5)",
-                transition: "width 0.6s ease",
-              }} />
+            <div className="mt-3.5 bg-[#272b2c] rounded-full h-[5px] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-theme-orange transition-[width] duration-500 ease-out"
+                style={{ width: `${progressPct}%`, boxShadow: "0 0 8px rgba(201,151,31,0.5)" }}
+              />
             </div>
           </div>
 
           {/* ── Composition grid — always shows all 4 role buckets ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="grid grid-cols-2 gap-2.5">
             {composition.map(({ label, icon, value }) => (
-              <div key={label} style={{
-                background: CARD_BG,
-                border: value > 0 ? `1px solid rgba(228,93,53,0.2)` : CARD_BORDER,
-                borderRadius: 12, padding: "14px 14px 12px",
-              }}>
-                <p style={{
-                  fontSize: 10, fontWeight: 600,
-                  letterSpacing: "0.12em", textTransform: "uppercase",
-                  color: TEXT_DIM, marginBottom: 8,
-                }}>{label}</p>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span className="material-symbols-outlined"
-                    style={{ color: value > 0 ? ORANGE : "#3d4047", fontSize: 17 }}>{icon}</span>
-                  <span style={{
-                    fontFamily: "'Archivo Narrow', sans-serif",
-                    fontSize: 30, fontWeight: 700,
-                    color: value > 0 ? TEXT_WHITE : "#3d4047",
-                    lineHeight: 1,
-                  }}>{value}</span>
+              <div
+                key={label}
+                className={`bg-[rgba(16,20,21,0.6)] rounded-xl px-3.5 pt-3.5 pb-3 border ${value > 0 ? "border-theme-orange/20" : "border-white/[0.07]"}`}
+              >
+                <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-[#7a7d88] mb-2">{label}</p>
+                <div className="flex items-center gap-[7px]">
+                  <span className={`material-symbols-outlined text-[17px] ${value > 0 ? "text-theme-orange" : "text-[#3d4047]"}`}>{icon}</span>
+                  <span className={`font-archivo text-[30px] font-bold leading-none ${value > 0 ? "text-[#e8ecf0]" : "text-[#3d4047]"}`}>{value}</span>
                 </div>
               </div>
             ))}
           </div>
 
           {/* ── Section header ── */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{
-              fontFamily: "'Archivo Narrow', sans-serif",
-              fontSize: 18, fontWeight: 700, textTransform: "uppercase",
-              color: TEXT_WHITE, letterSpacing: "-0.2px",
-            }}>Recent Acquisitions</span>
-            <span style={{
-              fontSize: 10, fontWeight: 600, letterSpacing: "0.1em",
-              textTransform: "uppercase", color: TEXT_MID,
-              background: "#242829", border: CARD_BORDER,
-              borderRadius: 6, padding: "4px 9px",
-            }}>Sort by: Latest</span>
+          <div className="flex items-center justify-between">
+            <span className="font-archivo text-lg font-bold uppercase text-[#e8ecf0] tracking-[-0.2px]">
+              Recent Acquisitions
+            </span>
+            <span className="text-[10px] font-semibold tracking-[0.1em] uppercase text-[#9a9aa3] bg-[#242829] border border-white/[0.07] rounded-md px-2.5 py-1">
+              Sort by: Latest
+            </span>
           </div>
 
           {/* ── Player Cards ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="flex flex-col gap-2">
             {soldPlayers.map(({ id, name, role, origin, price, img }) => (
-              <div key={id} style={{
-                background: CARD_BG, border: CARD_BORDER,
-                borderRadius: 12, overflow: "hidden",
-                display: "flex", height: 108,
-              }}>
+              <div key={id} className="bg-[rgba(16,20,21,0.6)] border border-white/[0.07] rounded-xl overflow-hidden flex h-[108px]">
                 {/* Photo */}
-                <div style={{ width: 90, height: "100%", position: "relative", flexShrink: 0, overflow: "hidden" }}>
+                <div className="w-full h-full relative shrink-0 overflow-hidden p-0">
                   {img ? (
                     <Image src={img} alt={name} fill
-                      style={{ objectFit: "cover", objectPosition: "top center" }}
+                      className="object-cover w-full h-full"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <div style={{
-                      width: "100%", height: "100%",
-                      background: "#1e2324",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      <span className="material-symbols-outlined"
-                        style={{ color: TEXT_DIM, fontSize: 32 }}>person</span>
+                    <div className="w-full h-full bg-[#1e2324] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-[#7a7d88] text-[32px]">person</span>
                     </div>
                   )}
-                  <div style={{
-                    position: "absolute", inset: 0,
-                    background: "linear-gradient(to right, transparent 40%, #161b1c 100%)",
-                  }} />
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent to-[#161b1c]" style={{ backgroundImage: "linear-gradient(to right, transparent 40%, #161b1c 100%)" }} />
                 </div>
 
                 {/* Info */}
-                <div style={{
-                  flex: 1, padding: "13px 14px",
-                  display: "flex", flexDirection: "column", justifyContent: "space-between",
-                  minWidth: 0,
-                }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{
-                        fontFamily: "'Archivo Narrow', sans-serif",
-                        fontSize: 19, fontWeight: 700, color: TEXT_WHITE,
-                        lineHeight: 1.1, textTransform: "uppercase",
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      }}>{name}</div>
-                      <div style={{
-                        fontSize: 10, fontWeight: 600,
-                        letterSpacing: "0.1em", textTransform: "uppercase",
-                        color: ORANGE, marginTop: 3,
-                      }}>{role}{origin ? ` · ${origin}` : ""}</div>
+                <div className="flex-1 px-3.5 py-[13px] flex flex-col justify-between min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-archivo text-[19px] font-bold text-[#e8ecf0] leading-[1.1] uppercase whitespace-nowrap overflow-hidden text-ellipsis">
+                        {name}
+                      </div>
+                      <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-theme-orange mt-[3px]">
+                        {role}{origin ? ` · ${origin}` : ""}
+                      </div>
                     </div>
-                    <span className="material-symbols-outlined"
-                      style={{ fontSize: 18, color: "#3d4047", flexShrink: 0 }}>verified</span>
+                    <span className="material-symbols-outlined text-[18px] text-[#3d4047] shrink-0">verified</span>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, letterSpacing: "0.09em",
-                      textTransform: "uppercase", color: TEXT_DIM,
-                    }}>Sold for</span>
-                    <span style={{
-                      fontFamily: "'Archivo Narrow', sans-serif",
-                      fontSize: 24, fontWeight: 700, color: TEXT_BLUE,
-                    }}>{formatPts(price)}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold tracking-[0.09em] uppercase text-[#7a7d88]">Sold for</span>
+                    <span className="font-archivo text-2xl font-bold text-[#dae2fd]">{formatPts(price)}</span>
                   </div>
                 </div>
               </div>
             ))}
 
             {/* Empty / remaining slots */}
-            <div style={{
-              border: "1.5px dashed rgba(255,255,255,0.15)",
-              borderRadius: 14, padding: "32px 20px",
-              display: "flex", flexDirection: "column",
-              alignItems: "center", textAlign: "center", gap: 8,
-            }}>
-              <span className="material-symbols-outlined"
-                style={{ fontSize: 38, color: "#6b6e7a" }}>person_add</span>
-              <p style={{ fontSize: 14, color: TEXT_MID, lineHeight: 1.6 }}>
+            <div className="border-[1.5px] border-dashed border-white/[0.15] rounded-2xl px-5 py-8 flex flex-col items-center text-center gap-2">
+              <span className="material-symbols-outlined text-[38px] text-[#6b6e7a]">person_add</span>
+              <p className="text-sm text-[#9a9aa3] leading-relaxed">
                 {slotsRemaining > 0
                   ? <>{slotsRemaining} slot{slotsRemaining !== 1 ? "s" : ""} remaining in squad.<br />Waiting for the next pick…</>
                   : <>Squad is full!</>
@@ -541,8 +432,6 @@ export default function SquadPage() {
             </div>
           </div>
         </main>
-
-        <style>{`@keyframes squadSpin { to { transform: rotate(360deg); } }`}</style>
 
         <BottomNavBar />
       </div>

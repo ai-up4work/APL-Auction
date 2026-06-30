@@ -6,19 +6,14 @@ import Image from "next/image";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabse";
 
-// ── style tokens ─────────────────────────────────────────────────────────────
-const BG           = "#101415";
-const CARD_BG      = "rgba(16, 20, 21, 0.6)";
-const CARD_BORDER  = "1px solid rgba(255, 255, 255, 0.1)";
-const ORANGE       = "#e45d35";
+// Matches --color-theme-orange in globals.css.
+const ORANGE       = "#c9971f";
 const ERROR        = "#ffb4ab";
 const TEXT_WHITE   = "#e0e3e4";
 const TEXT_DIM     = "#c6c6cd";
 const TEXT_MUTED   = "rgba(198,198,205,0.6)";
 const TEXT_BLUE    = "#dae2fd";
 const TEXT_TERT    = "#d8e2ff";
-const SURFACE_HIGH = "#272b2c";
-const OUTLINE_VAR  = "#45464d";
 
 const PAGE_SIZE = 5;
 
@@ -35,6 +30,14 @@ interface AuctionEvent {
   time:      string;       // formatted timestamp
   img:       string;
   sortedAt:  string;       // ISO — used for chronological sort (desc)
+}
+
+interface TeamInfo {
+  id:    string;
+  name:  string;
+  code:  string;
+  color: string;
+  logo:  string;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -204,34 +207,47 @@ export default function HistoryPage() {
   const auctionId = params?.auctionId as string;
   const teamCode  = (params?.teamCode as string)?.toUpperCase();
 
-  const [teamId,        setTeamId]        = useState<string | null>(null);
+  const [team,          setTeam]          = useState<TeamInfo | null>(null);
   const [allEvents,     setAllEvents]     = useState<AuctionEvent[]>([]);
   const [totalBids,     setTotalBids]     = useState(0);
   const [successfulWins,setSuccessfulWins]= useState(0);
   const [visibleCount,  setVisibleCount]  = useState(PAGE_SIZE);
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
+  const [bright,        setBright]        = useState(true);
 
-  // ── resolve team id once ──────────────────────────────────────────────────
+  // blinking dot for "live" indicator (matches squad page)
+  useEffect(() => {
+    const id = setInterval(() => setBright((p) => !p), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── resolve team identity once ────────────────────────────────────────────
   useEffect(() => {
     if (!auctionId || !teamCode) return;
     supabase
       .from("teams")
-      .select("id")
+      .select("id, name, code, color, logo")
       .eq("auction_id", auctionId)
       .eq("code", teamCode)
       .maybeSingle()
       .then(({ data, error: e }) => {
         if (e || !data) { setError("Team not found."); setLoading(false); return; }
-        setTeamId(data.id);
+        setTeam({
+          id:    data.id,
+          name:  data.name,
+          code:  data.code,
+          color: data.color,
+          logo:  data.logo ?? "",
+        });
       });
   }, [auctionId, teamCode]);
 
   // ── load history whenever team id is ready ────────────────────────────────
   const reload = useCallback(async () => {
-    if (!auctionId || !teamId) return;
+    if (!auctionId || !team?.id) return;
     try {
-      const result = await fetchHistoryEvents(auctionId, teamId);
+      const result = await fetchHistoryEvents(auctionId, team.id);
       setAllEvents(result.events);
       setTotalBids(result.totalBids);
       setSuccessfulWins(result.successfulWins);
@@ -240,13 +256,14 @@ export default function HistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [auctionId, teamId]);
+  }, [auctionId, team?.id]);
 
   useEffect(() => { reload(); }, [reload]);
 
   // ── realtime: re-fetch whenever a lot closes or a new bid is placed ───────
   useEffect(() => {
-    if (!auctionId || !teamId) return;
+    if (!auctionId || !team?.id) return;
+    const teamId = team.id;
 
     const lotSub = supabase
       .channel(`history-lots-${auctionId}-${teamId}`)
@@ -277,7 +294,7 @@ export default function HistoryPage() {
       supabase.removeChannel(lotSub);
       supabase.removeChannel(bidSub);
     };
-  }, [auctionId, teamId, reload]);
+  }, [auctionId, team?.id, reload]);
 
   // ── derived ───────────────────────────────────────────────────────────────
   const visibleEvents = allEvents.slice(0, visibleCount);
@@ -287,19 +304,11 @@ export default function HistoryPage() {
   if (loading) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: BG, minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{ textAlign: "center", color: TEXT_DIM }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              border: "2px solid transparent", borderTopColor: ORANGE,
-              animation: "spin 1s linear infinite", margin: "0 auto 12px",
-            }} />
-            <p style={{ fontSize: 13 }}>Loading history…</p>
+        <div className="bg-background min-h-screen flex items-center justify-center">
+          <div className="text-center text-[#c6c6cd]">
+            <div className="w-8 h-8 rounded-lg border-2 border-transparent border-t-theme-orange animate-spin mx-auto mb-3" />
+            <p className="text-[13px]">Loading history…</p>
           </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </MobileOnlyWrapper>
     );
@@ -308,11 +317,8 @@ export default function HistoryPage() {
   if (error) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: BG, minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-        }}>
-          <p style={{ color: ORANGE, textAlign: "center", fontSize: 14 }}>{error}</p>
+        <div className="bg-background min-h-screen flex items-center justify-center p-6">
+          <p className="text-theme-orange text-center text-sm">{error}</p>
         </div>
       </MobileOnlyWrapper>
     );
@@ -320,11 +326,7 @@ export default function HistoryPage() {
 
   return (
     <MobileOnlyWrapper>
-      <div style={{
-        background: BG, color: TEXT_WHITE, minHeight: "100vh",
-        fontFamily: "'Inter', sans-serif",
-        scrollbarWidth: "none",
-      }}>
+      <div className="bg-background text-on-background min-h-screen font-inter [scrollbar-width:none]">
         <style>{`
           ::-webkit-scrollbar { display: none; }
           @keyframes pulseDot {
@@ -336,131 +338,110 @@ export default function HistoryPage() {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
           }
-          @keyframes spin { to { transform: rotate(360deg); } }
         `}</style>
 
-        {/* ── Top App Bar ── */}
-        <header style={{
-          position: "sticky", top: 0, zIndex: 50,
-          background: BG,
-          borderBottom: `1px solid ${OUTLINE_VAR}`,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px",
-        }}>
-          <span style={{
-            fontFamily: "'Archivo Narrow', sans-serif",
-            fontSize: 28, fontWeight: 700, color: TEXT_BLUE,
-            letterSpacing: "-0.5px", textTransform: "uppercase",
-          }}>APL AUCTION</span>
-          <div style={{ display: "flex", gap: 16 }}>
+        {/* ── Top App Bar — team identity header (matches squad/bid pages) ── */}
+        <header className="sticky top-0 z-50 bg-background border-b border-outline-variant flex items-center justify-between px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-11 h-11 rounded-[10px] flex items-center justify-center overflow-hidden shrink-0"
+              style={{
+                backgroundColor: team?.logo ? "transparent" : (team?.color ? `${team.color}22` : "#1e2324"),
+                boxShadow: `0 0 18px ${team?.color ?? ORANGE}33`,
+                border: `1px solid ${team?.color ?? ORANGE}44`,
+              }}
+            >
+              {team?.logo ? (
+                <Image
+                  src={team.logo}
+                  alt={team.name}
+                  width={44}
+                  height={44}
+                  className="object-contain w-full h-full p-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span
+                  className="font-archivo text-[13px] font-extrabold tracking-[-0.5px] uppercase"
+                  style={{ color: team?.color ?? ORANGE }}
+                >
+                  {(team?.code ?? teamCode).slice(0, 3)}
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="font-archivo text-[22px] font-bold text-[#dae2fd] tracking-[-0.5px] uppercase block">
+                {team?.name ?? teamCode} HISTORY
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-[18px]">
             {["notifications", "settings"].map((icon) => (
-              <span key={icon} className="material-symbols-outlined"
-                style={{ color: TEXT_DIM, fontSize: 24, cursor: "pointer" }}>{icon}</span>
+              <span key={icon} className="material-symbols-outlined text-[#c6c6cd] text-2xl cursor-pointer">{icon}</span>
             ))}
           </div>
         </header>
 
         {/* ── Main ── */}
-        <main style={{ padding: "24px 16px 100px", maxWidth: 512, margin: "0 auto" }}>
+        <main className="px-4 pt-6 pb-[100px] max-w-[512px] mx-auto">
 
           {/* ── Screen Title ── */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+          <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 style={{
-                fontFamily: "'Archivo Narrow', sans-serif",
-                fontSize: 24, fontWeight: 600, color: TEXT_WHITE,
-                letterSpacing: "-0.2px", textTransform: "uppercase", margin: 0,
-              }}>AUCTION HISTORY</h1>
-              <p style={{
-                fontSize: 10, fontWeight: 500, letterSpacing: "0.1em",
-                textTransform: "uppercase", color: TEXT_DIM,
-                marginTop: 4, marginBottom: 0,
-              }}>Live Activity Log</p>
+              <h1 className="font-archivo text-2xl font-semibold text-[#e0e3e4] tracking-[-0.2px] uppercase m-0">
+                AUCTION HISTORY
+              </h1>
+              <p className="text-[10px] font-medium tracking-[0.1em] uppercase text-[#c6c6cd] mt-1 mb-0">
+                Live Activity Log
+              </p>
             </div>
-            <div style={{
-              display: "flex", alignItems: "center", gap: 8,
-              background: SURFACE_HIGH, borderRadius: 99,
-              padding: "4px 12px", border: "1px solid rgba(255,255,255,0.05)",
-            }}>
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: ORANGE, display: "inline-block",
-                animation: "pulseDot 2s infinite",
-              }} />
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
-                textTransform: "uppercase", color: TEXT_WHITE,
-              }}>Live</span>
+            <div className="flex items-center gap-2 bg-surface-container-high rounded-full px-3 py-1 border border-white/5">
+              <span className="w-2 h-2 rounded-full bg-theme-orange inline-block" style={{ animation: "pulseDot 2s infinite" }} />
+              <span className="text-[10px] font-bold tracking-[0.1em] uppercase text-[#e0e3e4]">Live</span>
             </div>
           </div>
 
           {/* ── Summary Stats ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 32 }}>
-            <div style={{
-              background: CARD_BG, border: CARD_BORDER,
-              borderLeft: `2px solid ${ORANGE}`,
-              borderRadius: 12, padding: 16,
-              display: "flex", flexDirection: "column", justifyContent: "space-between",
-            }}>
-              <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: TEXT_DIM }}>
+          <div className="grid grid-cols-2 gap-3 mb-8">
+            <div className="bg-[rgba(16,20,21,0.6)] border border-white/10 rounded-xl p-4 flex flex-col justify-between border-l-2"
+                 style={{ borderLeftColor: ORANGE }}>
+              <span className="text-[10px] font-medium tracking-[0.1em] uppercase text-[#c6c6cd]">
                 Total Bids Placed
               </span>
-              <span style={{
-                fontFamily: "'Archivo Narrow', sans-serif",
-                fontSize: 40, fontWeight: 700, color: TEXT_WHITE,
-                lineHeight: 1, marginTop: 8,
-              }}>{String(totalBids).padStart(2, "0")}</span>
+              <span className="font-archivo text-[40px] font-bold text-[#e0e3e4] leading-none mt-2">
+                {String(totalBids).padStart(2, "0")}
+              </span>
             </div>
-            <div style={{
-              background: CARD_BG, border: CARD_BORDER,
-              borderLeft: `2px solid ${TEXT_BLUE}`,
-              borderRadius: 12, padding: 16,
-              display: "flex", flexDirection: "column", justifyContent: "space-between",
-            }}>
-              <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: TEXT_DIM }}>
+            <div className="bg-[rgba(16,20,21,0.6)] border border-white/10 rounded-xl p-4 flex flex-col justify-between border-l-2 border-l-[#dae2fd]">
+              <span className="text-[10px] font-medium tracking-[0.1em] uppercase text-[#c6c6cd]">
                 Successful Wins
               </span>
-              <span style={{
-                fontFamily: "'Archivo Narrow', sans-serif",
-                fontSize: 40, fontWeight: 700, color: TEXT_BLUE,
-                lineHeight: 1, marginTop: 8,
-              }}>{String(successfulWins).padStart(2, "0")}</span>
+              <span className="font-archivo text-[40px] font-bold text-[#dae2fd] leading-none mt-2">
+                {String(successfulWins).padStart(2, "0")}
+              </span>
             </div>
           </div>
 
           {/* ── Timeline ── */}
           {allEvents.length === 0 ? (
-            <div style={{
-              border: "1.5px dashed rgba(255,255,255,0.1)",
-              borderRadius: 14, padding: "40px 20px",
-              display: "flex", flexDirection: "column",
-              alignItems: "center", textAlign: "center", gap: 8,
-            }}>
-              <span className="material-symbols-outlined"
-                style={{ fontSize: 38, color: "#3d4047" }}>history</span>
-              <p style={{ fontSize: 14, color: TEXT_DIM, lineHeight: 1.6 }}>
+            <div className="border-[1.5px] border-dashed border-white/10 rounded-2xl px-5 py-10 flex flex-col items-center text-center gap-2">
+              <span className="material-symbols-outlined text-[38px] text-[#3d4047]">history</span>
+              <p className="text-sm text-[#c6c6cd] leading-relaxed">
                 No activity yet.<br />Events will appear here as the auction progresses.
               </p>
             </div>
           ) : (
-            <div style={{ position: "relative" }}>
-              <div style={{
-                position: "absolute", left: 20, top: 0, bottom: 0,
-                width: 1, background: "rgba(255,255,255,0.05)", zIndex: 0,
-              }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <div className="relative">
+              <div className="absolute left-5 top-0 bottom-0 w-px bg-white/5 z-0" />
+              <div className="flex flex-col gap-6">
                 {visibleEvents.map((ev) => {
                   const { dot, dotGlow } = dotProps(ev.type);
                   return (
-                    <div key={ev.id} style={{ position: "relative", paddingLeft: 48 }}>
-                      <div style={{
-                        position: "absolute", left: 14, top: 8,
-                        width: 12, height: 12, borderRadius: "50%",
-                        background: dot,
-                        border: `2px solid ${BG}`,
-                        zIndex: 1,
-                        boxShadow: dotGlow,
-                      }} />
+                    <div key={ev.id} className="relative pl-12">
+                      <div
+                        className="absolute left-3.5 top-2 w-3 h-3 rounded-full z-[1] border-2 border-background"
+                        style={{ background: dot, boxShadow: dotGlow }}
+                      />
                       <EventCard ev={ev} />
                     </div>
                   );
@@ -474,30 +455,18 @@ export default function HistoryPage() {
             hasMore ? (
               <button
                 onClick={() => setVisibleCount((c) => Math.min(c + PAGE_SIZE, allEvents.length))}
-                style={{
-                  width: "100%", padding: "16px 0", marginTop: 32,
-                  background: CARD_BG, border: CARD_BORDER,
-                  borderRadius: 12, cursor: "pointer",
-                  fontFamily: "'Geist', monospace",
-                  fontSize: 14, fontWeight: 500, letterSpacing: "0.05em",
-                  color: TEXT_DIM,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                }}
+                className="w-full py-4 mt-8 bg-[rgba(16,20,21,0.6)] border border-white/10 rounded-xl cursor-pointer font-mono-geist text-sm font-medium tracking-wide text-[#c6c6cd] flex items-center justify-center gap-2"
               >
                 LOAD OLDER EVENTS
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>expand_more</span>
+                <span className="material-symbols-outlined text-lg">expand_more</span>
               </button>
             ) : (
-              <div style={{
-                width: "100%", padding: "16px 0", marginTop: 32,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              }}>
-                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.05)" }} />
-                <span style={{
-                  fontFamily: "'Geist', monospace", fontSize: 10,
-                  letterSpacing: "0.1em", textTransform: "uppercase", color: TEXT_MUTED,
-                }}>All events loaded</span>
-                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.05)" }} />
+              <div className="w-full py-4 mt-8 flex items-center justify-center gap-2">
+                <div className="flex-1 h-px bg-white/5" />
+                <span className="font-mono-geist text-[10px] tracking-[0.1em] uppercase text-[#c6c6cd]/60">
+                  All events loaded
+                </span>
+                <div className="flex-1 h-px bg-white/5" />
               </div>
             )
           )}
@@ -513,42 +482,31 @@ export default function HistoryPage() {
 function EventCard({ ev }: { ev: AuctionEvent }) {
   if (ev.type === "BOUGHT") {
     return (
-      <div style={{ background: CARD_BG, border: CARD_BORDER, borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: "50%",
-              overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)",
-              background: "#313536", flexShrink: 0, position: "relative",
-            }}>
+      <div className="bg-[rgba(16,20,21,0.6)] border border-white/10 rounded-xl p-4">
+        <div className="flex justify-between items-start mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full overflow-hidden border border-white/10 bg-[#313536] shrink-0 relative">
               {ev.img && (
                 <Image src={ev.img} alt={ev.name} fill
-                  style={{ objectFit: "cover" }} referrerPolicy="no-referrer" />
+                  className="object-cover" referrerPolicy="no-referrer" />
               )}
             </div>
             <div>
-              <h3 style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT_WHITE, margin: 0 }}>{ev.name}</h3>
-              <p style={{ fontSize: 10, color: TEXT_DIM, margin: "2px 0 0", letterSpacing: "0.05em" }}>{ev.sub}</p>
+              <h3 className="font-inter text-lg font-bold text-[#e0e3e4] m-0">{ev.name}</h3>
+              <p className="text-[10px] text-[#c6c6cd] mt-0.5 mb-0 tracking-wide">{ev.sub}</p>
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <span style={{ fontFamily: "'Geist', monospace", fontSize: 14, fontWeight: 500, color: TEXT_BLUE, letterSpacing: "0.05em" }}>{ev.price}</span>
-            <p style={{ fontSize: 10, color: TEXT_MUTED, textTransform: "uppercase", margin: "2px 0 0", letterSpacing: "0.05em" }}>{ev.time}</p>
+          <div className="text-right">
+            <span className="font-mono-geist text-sm font-medium text-[#dae2fd] tracking-wide">{ev.price}</span>
+            <p className="text-[10px] text-[#c6c6cd]/60 uppercase mt-0.5 mb-0 tracking-wide">{ev.time}</p>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <span style={{
-            padding: "4px 8px", borderRadius: 99,
-            background: "rgba(218,226,253,0.1)", border: "1px solid rgba(218,226,253,0.2)",
-            fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", color: TEXT_BLUE,
-          }}>BOUGHT</span>
-          <span style={{
-            padding: "4px 8px", borderRadius: 99,
-            background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)",
-            fontSize: 10, fontWeight: 500, letterSpacing: "0.05em", color: "#4ade80",
-            display: "flex", alignItems: "center", gap: 4,
-          }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+        <div className="flex gap-2 mt-4">
+          <span className="px-2 py-1 rounded-full bg-[#dae2fd]/10 border border-[#dae2fd]/20 text-[10px] font-bold tracking-[0.1em] text-[#dae2fd]">
+            BOUGHT
+          </span>
+          <span className="px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-[10px] font-medium tracking-wide text-green-400 flex items-center gap-1">
+            <span className="material-symbols-outlined text-xs [font-variation-settings:'FILL'_1]">check_circle</span>
             ACQUIRED
           </span>
         </div>
@@ -558,20 +516,16 @@ function EventCard({ ev }: { ev: AuctionEvent }) {
 
   if (ev.type === "OUTBID") {
     return (
-      <div style={{
-        background: CARD_BG, border: CARD_BORDER,
-        borderLeft: "4px solid rgba(228,93,53,0.5)",
-        borderRadius: 12, padding: 16,
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div className="bg-[rgba(16,20,21,0.6)] border border-white/10 border-l-4 border-l-theme-orange/50 rounded-xl p-4">
+        <div className="flex justify-between items-start">
           <div>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: ORANGE }}>{ev.type}</span>
-            <h3 style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT_WHITE, margin: "4px 0 0" }}>{ev.name}</h3>
-            <p style={{ fontSize: 10, color: TEXT_DIM, margin: "2px 0 0", fontStyle: "italic" }}>{ev.sub}</p>
+            <span className="text-[10px] font-bold tracking-[0.1em] uppercase text-theme-orange">{ev.type}</span>
+            <h3 className="font-inter text-lg font-bold text-[#e0e3e4] mt-1 mb-0">{ev.name}</h3>
+            <p className="text-[10px] text-[#c6c6cd] mt-0.5 mb-0 italic">{ev.sub}</p>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <span style={{ fontFamily: "'Geist', monospace", fontSize: 14, fontWeight: 500, color: TEXT_DIM, letterSpacing: "0.05em" }}>{ev.price}</span>
-            <p style={{ fontSize: 10, color: TEXT_MUTED, textTransform: "uppercase", margin: "2px 0 0", letterSpacing: "0.05em" }}>{ev.time}</p>
+          <div className="text-right">
+            <span className="font-mono-geist text-sm font-medium text-[#c6c6cd] tracking-wide">{ev.price}</span>
+            <p className="text-[10px] text-[#c6c6cd]/60 uppercase mt-0.5 mb-0 tracking-wide">{ev.time}</p>
           </div>
         </div>
       </div>
@@ -580,20 +534,19 @@ function EventCard({ ev }: { ev: AuctionEvent }) {
 
   if (ev.type === "BIDDING WAR") {
     return (
-      <div style={{ background: "rgba(24,28,29,0.3)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div className="bg-[rgba(24,28,29,0.3)] border border-white/5 rounded-xl p-4">
+        <div className="flex justify-between items-start">
           <div>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: TEXT_TERT }}>{ev.type}</span>
-            <h3 style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT_WHITE, margin: "4px 0 0" }}>{ev.name}</h3>
-            <p style={{ fontSize: 10, color: TEXT_DIM, margin: "2px 0 0", fontStyle: "italic" }}>{ev.sub}</p>
+            <span className="text-[10px] font-bold tracking-[0.1em] uppercase text-[#d8e2ff]">{ev.type}</span>
+            <h3 className="font-inter text-lg font-bold text-[#e0e3e4] mt-1 mb-0">{ev.name}</h3>
+            <p className="text-[10px] text-[#c6c6cd] mt-0.5 mb-0 italic">{ev.sub}</p>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <span style={{
-              fontFamily: "'Geist', monospace", fontSize: 14, fontWeight: 500,
-              color: TEXT_BLUE, letterSpacing: "0.05em",
-              animation: "pulseFade 2s infinite", display: "inline-block",
-            }}>{ev.price}</span>
-            <p style={{ fontSize: 10, color: TEXT_MUTED, textTransform: "uppercase", margin: "2px 0 0", letterSpacing: "0.05em" }}>{ev.time}</p>
+          <div className="text-right">
+            <span
+              className="font-mono-geist text-sm font-medium text-[#dae2fd] tracking-wide inline-block"
+              style={{ animation: "pulseFade 2s infinite" }}
+            >{ev.price}</span>
+            <p className="text-[10px] text-[#c6c6cd]/60 uppercase mt-0.5 mb-0 tracking-wide">{ev.time}</p>
           </div>
         </div>
       </div>
@@ -602,20 +555,16 @@ function EventCard({ ev }: { ev: AuctionEvent }) {
 
   // WITHDRAWN (unsold while this team held highest bid)
   return (
-    <div style={{
-      background: CARD_BG, border: CARD_BORDER,
-      borderLeft: "4px solid rgba(255,180,171,0.3)",
-      borderRadius: 12, padding: 16,
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+    <div className="bg-[rgba(16,20,21,0.6)] border border-white/10 border-l-4 border-l-[#ffb4ab]/30 rounded-xl p-4">
+      <div className="flex justify-between items-start">
         <div>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: ERROR }}>{ev.type}</span>
-          <h3 style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT_WHITE, margin: "4px 0 0" }}>{ev.name}</h3>
-          <p style={{ fontSize: 10, color: TEXT_DIM, margin: "2px 0 0" }}>{ev.sub}</p>
+          <span className="text-[10px] font-bold tracking-[0.1em] uppercase text-error">{ev.type}</span>
+          <h3 className="font-inter text-lg font-bold text-[#e0e3e4] mt-1 mb-0">{ev.name}</h3>
+          <p className="text-[10px] text-[#c6c6cd] mt-0.5 mb-0">{ev.sub}</p>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={{ fontFamily: "'Geist', monospace", fontSize: 14, fontWeight: 500, color: "rgba(255,180,171,0.6)", letterSpacing: "0.05em" }}>{ev.price}</span>
-          <p style={{ fontSize: 10, color: TEXT_MUTED, textTransform: "uppercase", margin: "2px 0 0", letterSpacing: "0.05em" }}>{ev.time}</p>
+        <div className="text-right">
+          <span className="font-mono-geist text-sm font-medium text-[#ffb4ab]/60 tracking-wide">{ev.price}</span>
+          <p className="text-[10px] text-[#c6c6cd]/60 uppercase mt-0.5 mb-0 tracking-wide">{ev.time}</p>
         </div>
       </div>
     </div>

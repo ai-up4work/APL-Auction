@@ -273,7 +273,7 @@ function FranchiseModal({ initial, existingCodes, onClose, onSave }: FranchiseMo
             <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden shrink-0"
               style={{ background: "#313536", border: `2px solid ${form.color}55` }}>
               {form.logo
-                ? <img src={form.logo} alt="" className="w-9 h-9 object-contain" />
+                ? <img src={form.logo} alt="" className="w-10 h-10 object-cover" />
                 : <span className="text-[10px] font-black" style={{ color: form.color, fontFamily: "'Geist', monospace" }}>{form.code || "—"}</span>
               }
             </div>
@@ -386,7 +386,7 @@ function TeamCard({
           <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden shadow-lg"
             style={{ background: "#313536", border: isActive ? "2px solid rgba(228,93,53,0.5)" : "1px solid #45464d" }}>
             {team.logo
-              ? <img src={team.logo} alt={team.name} className="w-14 h-14 object-contain" />
+              ? <img src={team.logo} alt={team.name} className="w-16 h-16 object-cover" />
               : <span className="text-sm font-black" style={{ color: team.color, fontFamily: "'Geist', monospace" }}>{team.code}</span>
             }
           </div>

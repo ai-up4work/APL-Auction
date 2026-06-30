@@ -23,22 +23,24 @@ import { loadAuction } from "@/lib/auctionDb";
 import type { AuctionRules } from "@/types/auction";
 import Image from "next/image";
 
-const BID_COLOR = "#e45d35";
+// Matches --color-theme-orange in globals.css. Used as the fallback accent
+// whenever a team has no color of its own.
+const BID_COLOR = "#c9971f";
 
 const GLOBAL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,400;1,700&family=Geist+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
   @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
   @keyframes pulse-glow {
-    0%,100% { text-shadow: 0 0 20px rgba(228,93,53,0.3); }
-    50%      { text-shadow: 0 0 60px rgba(228,93,53,0.9), 0 0 120px rgba(228,93,53,0.4); }
+    0%,100% { text-shadow: 0 0 20px rgba(201,151,31,0.3); }
+    50%      { text-shadow: 0 0 60px rgba(201,151,31,0.9), 0 0 120px rgba(201,151,31,0.4); }
   }
   @keyframes ping-ring {
     0%   { transform: scale(1); opacity: 0.75; }
     100% { transform: scale(2.5); opacity: 0; }
   }
   @keyframes bid-flash {
-    0%   { background: rgba(228,93,53,0.18); }
+    0%   { background: rgba(201,151,31,0.18); }
     100% { background: transparent; }
   }
   @keyframes slide-up {
@@ -69,10 +71,10 @@ const GLOBAL_STYLES = `
     border: 1px solid rgba(255,255,255,0.08);
   }
   .glass-hot {
-    background: rgba(228,93,53,0.06);
+    background: rgba(201,151,31,0.06);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(228,93,53,0.22);
+    border: 1px solid rgba(201,151,31,0.22);
   }
 
   .ms {
@@ -98,11 +100,11 @@ const GLOBAL_STYLES = `
   .bid-history-scroll {
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: rgba(228,93,53,0.4) rgba(255,255,255,0.03);
+    scrollbar-color: rgba(201,151,31,0.4) rgba(255,255,255,0.03);
   }
   .bid-history-scroll::-webkit-scrollbar { width: 3px; }
   .bid-history-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 99px; }
-  .bid-history-scroll::-webkit-scrollbar-thumb { background: rgba(228,93,53,0.45); border-radius: 99px; }
+  .bid-history-scroll::-webkit-scrollbar-thumb { background: rgba(201,151,31,0.45); border-radius: 99px; }
 
   .f-display  { font-family: 'Archivo Narrow', sans-serif; font-style: italic; font-weight: 700; text-transform: uppercase; letter-spacing: -0.02em; }
   .f-label    { font-family: 'Geist Mono', monospace; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; }
@@ -116,6 +118,7 @@ interface TeamInfo {
   name:  string;
   code:  string;
   color: string;
+  logo:  string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +132,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   const { shotClock, isLocked, resetClock, freezeClock, pauseClock } = useShotClock();
 
   const [team,          setTeam]          = useState<TeamInfo | null>(null);
+  const [teamLogos,     setTeamLogos]     = useState<Record<string, string>>({});
   const [rules,         setRules]         = useState<AuctionRules | null>(null);
   const [currentLot,    setCurrentLot]    = useState<AuctionLot | null>(null);
   const [bidHistory,    setBidHistory]    = useState<BidEntry[]>([]);
@@ -184,11 +188,19 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
             name:  found.name,
             code:  found.code,
             color: found.color,
+            logo:  (found as any).logo ?? "",
           });
           const myPurse = found.supabaseId ? purses[found.supabaseId] : null;
           setPurse(myPurse?.remaining ?? auctionState.rules.totalPoints);
           setRoster(myPurse?.roster ?? found.roster ?? 0);
         }
+
+        const logoMap: Record<string, string> = {};
+        auctionState.teams.forEach((t) => {
+          const logo = (t as any).logo;
+          if (logo) logoMap[t.code.toLowerCase()] = logo;
+        });
+        setTeamLogos(logoMap);
       }
 
       setCurrentLot(liveData.currentLot);
@@ -386,9 +398,9 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
   if (loading) {
     return (
-      <div className="h-[100dvh] bg-[#0b0f10] flex items-center justify-center">
+      <div className="h-dvh bg-background flex items-center justify-center">
         <div className="text-center">
-          <span className="ms ms-fill text-[#e45d35] text-5xl animate-spin block mb-4">progress_activity</span>
+          <span className="ms ms-fill text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
           <p className="f-label text-[#5a6a74] text-[10px]">Loading Auction Room</p>
         </div>
       </div>
@@ -399,26 +411,34 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
   // The outer shell (header + BottomNavBar) always stays visible.
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="bg-[#0b0f10] text-[#e0e3e4] h-[100dvh] flex flex-col overflow-hidden"
-      style={{ fontFamily: "'Inter', sans-serif" }}
-    >
+    <div className="bg-background text-on-background h-dvh flex flex-col overflow-hidden font-inter">
       <div ref={flashRef} className="fixed inset-0 pointer-events-none z-[999]" />
 
       {/* ── HEADER ── always visible */}
-      <header className="shrink-0 z-50 h-[56px] flex items-center justify-between px-4
-                         bg-[rgba(11,15,16,0.92)] backdrop-blur-xl border-b border-white/[0.07]">
+      <header className="shrink-0 z-50 h-14 flex items-center justify-between px-4
+                         bg-background/[0.92] backdrop-blur-xl border-b border-white/[0.07]">
         <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-            style={{ backgroundColor: team?.color || BID_COLOR }}
+            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+            style={{ backgroundColor: team?.logo ? "transparent" : (team?.color || BID_COLOR) }}
           >
-            <span className="f-display text-[13px] text-white" style={{ fontStyle: "normal" }}>
-              {team?.code.slice(0, 2) ?? "—"}
-            </span>
+            {team?.logo ? (
+              <Image
+                src={team.logo}
+                alt={team.name}
+                width={32}
+                height={32}
+                className="object-cover w-full h-full"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <span className="f-display text-[13px] text-white not-italic">
+                {team?.code.slice(0, 2) ?? "—"}
+              </span>
+            )}
           </div>
           <div>
-            <p className="f-display text-[15px] text-white leading-none" style={{ letterSpacing: "-0.01em" }}>
+            <p className="f-display text-[15px] text-white leading-none tracking-[-0.01em]">
               {team?.name ?? teamCode.toUpperCase()}
             </p>
             <p className="f-label-sm text-[#5a6a74] text-[9px] leading-none mt-[3px]">
@@ -429,30 +449,25 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
         <div className="flex items-center gap-2">
           {isLeading && !isSold && !isUnsold && auctionStatus === "live" && (
-            <div
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-              style={{ background: "rgba(228,93,53,0.15)", border: `1px solid ${BID_COLOR}50` }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: BID_COLOR }} />
-              <span className="f-label text-[9px]" style={{ color: BID_COLOR }}>LEADING</span>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-theme-orange/15 border border-theme-orange/50">
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-theme-orange" />
+              <span className="f-label text-[9px] text-theme-orange">LEADING</span>
             </div>
           )}
 
           {/* Status pill reflects real auction status */}
           <div
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-            style={{
-              background: isPaused ? "rgba(245,158,11,0.12)" : isEnded ? "rgba(107,114,128,0.12)" : "rgba(34,197,94,0.08)",
-              border: `1px solid ${isPaused ? "rgba(245,158,11,0.3)" : isEnded ? "rgba(107,114,128,0.3)" : "rgba(34,197,94,0.2)"}`,
-            }}
+            className={[
+              "flex items-center gap-1.5 px-3 py-1 rounded-full border",
+              isPaused ? "bg-amber-500/[0.12] border-amber-500/30"
+                : isEnded ? "bg-gray-500/[0.12] border-gray-500/30"
+                : "bg-emerald-500/[0.08] border-emerald-500/20",
+            ].join(" ")}
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${auctionStatus === "live" ? "bg-emerald-400 animate-pulse" : isPaused ? "bg-amber-400" : "bg-gray-400"}`}
             />
-            <span
-              className="f-label text-[9px]"
-              style={{ color: isPaused ? "#fbbf24" : isEnded ? "#9ca3af" : "#34d399" }}
-            >
+            <span className={`f-label text-[9px] ${isPaused ? "text-amber-400" : isEnded ? "text-gray-400" : "text-emerald-400"}`}>
               {auctionStatus.toUpperCase()}
             </span>
           </div>
@@ -461,7 +476,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
       {/* ── CONTENT AREA — switches between bid room and status block ── */}
       {/* BottomNavBar pb spacer is always present below */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden" style={{ paddingBottom: 68 }}>
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden pb-[68px]">
 
         {/* PAUSED or COMPLETED: render inline status block, hide bid content */}
         {(isPaused || isEnded) ? (
@@ -489,8 +504,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
             <div ref={scrollRef} className="snap-scroll flex-1 min-h-0">
 
               {/* ══ PAGE 1: Player card ══ */}
-              <div className="snap-target flex flex-col gap-3 p-3"
-                   style={{ height: "calc(100dvh - 56px - 68px)" }}>
+              <div className="snap-target flex flex-col gap-3 p-3 h-[calc(100dvh-56px-68px)]">
                 <PlayerCard
                   lot={currentLot}
                   isSold={isSold}
@@ -507,8 +521,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                       scrollRef.current.scrollTop;
                     scrollRef.current.scrollTo({ top, behavior: "smooth" });
                   }}
-                  className="shrink-0 flex flex-col items-center gap-0.5 py-1 w-full"
-                  style={{ opacity: 0.4 }}
+                  className="shrink-0 flex flex-col items-center gap-0.5 py-1 w-full opacity-40"
                 >
                   <span className="f-label text-[#c6c6cd] text-[9px]">PLACE BID</span>
                   <span className="ms text-[#c6c6cd] text-lg">expand_more</span>
@@ -516,8 +529,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
               </div>
 
               {/* ══ PAGE 2: Bid controls ══ */}
-              <div className="snap-target flex flex-col gap-3 p-3"
-                   style={{ height: "calc(100dvh - 56px - 68px)" }}>
+              <div className="snap-target flex flex-col gap-3 p-3 h-[calc(100dvh-56px-68px)]">
 
                 {/* ── Current bid card ── */}
                 <div
@@ -532,9 +544,8 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
                   <div className="flex items-end gap-2 mb-1">
                     <span
-                      className={`f-display leading-none ${currentLot && !isLocked && !isSold && !isUnsold && !isRevealing ? "animate-pulse-bid" : ""}`}
+                      className={`f-display leading-none text-[clamp(72px,18vw,96px)] ${currentLot && !isLocked && !isSold && !isUnsold && !isRevealing ? "animate-pulse-bid" : ""}`}
                       style={{
-                        fontSize: "clamp(72px, 18vw, 96px)",
                         color: isSold ? BID_COLOR : isUnsold ? "#6b7280" : isLocked || isRevealing ? "#374151" : BID_COLOR,
                       }}
                     >
@@ -544,7 +555,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                   </div>
 
                   {isRevealing && (
-                    <p className="f-label text-[10px] text-[#e45d35] animate-timer-pulse mb-3">
+                    <p className="f-label text-[10px] text-theme-orange animate-timer-pulse mb-3">
                       AWAITING REVEAL ON BROADCAST SCREEN…
                     </p>
                   )}
@@ -555,18 +566,16 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                     </p>
                   )}
 
-                  <div className="w-full h-px mb-3"
-                       style={{ background: "linear-gradient(to right, transparent, rgba(228,93,53,0.25), transparent)" }} />
+                  <div className="w-full h-px mb-3 bg-gradient-to-r from-transparent via-theme-orange/25 to-transparent" />
 
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                           style={{ background: "rgba(228,93,53,0.12)", border: `1px solid ${BID_COLOR}25` }}>
-                        <span className="ms ms-fill text-[16px]" style={{ color: BID_COLOR }}>groups</span>
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-theme-orange/[0.12] border border-theme-orange/25">
+                        <span className="ms ms-fill text-[16px] text-theme-orange">groups</span>
                       </div>
                       <div>
                         <p className="f-label-sm text-[8px] text-[#5a6a74]">LEADER</p>
-                        <p className="f-display text-[18px] text-white leading-none" style={{ fontStyle: "normal" }}>
+                        <p className="f-display text-[18px] text-white leading-none not-italic">
                           {isRevealing ? "—" : (currentLot?.winningTeamCode ?? "—")}
                         </p>
                       </div>
@@ -575,20 +584,19 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                     {currentLot && !isSold && !isUnsold && !isRevealing && !isLocked && !isLeading && (
                       <div className="text-right">
                         <p className="f-label-sm text-[8px] text-[#5a6a74]">NEXT BID</p>
-                        <p className="f-num text-[18px]" style={{ color: BID_COLOR }}>{fmt(nextBid)} Points</p>
+                        <p className="f-num text-[18px] text-theme-orange">{fmt(nextBid)} Points</p>
                       </div>
                     )}
                     {isLeading && !isSold && !isUnsold && !isRevealing && !isLocked && (
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
-                           style={{ background: "rgba(228,93,53,0.10)", border: `1px solid ${BID_COLOR}25` }}>
-                        <span className="ms ms-fill text-[14px]" style={{ color: BID_COLOR }}>emoji_events</span>
-                        <span className="f-label text-[9px]" style={{ color: BID_COLOR }}>YOU'RE LEADING</span>
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-theme-orange/10 border border-theme-orange/25">
+                        <span className="ms ms-fill text-[14px] text-theme-orange">emoji_events</span>
+                        <span className="f-label text-[9px] text-theme-orange">YOU'RE LEADING</span>
                       </div>
                     )}
-                    {isSold && <span className="f-display text-[18px]" style={{ color: BID_COLOR }}>SOLD</span>}
+                    {isSold && <span className="f-display text-[18px] text-theme-orange">SOLD</span>}
                     {isUnsold && <span className="f-display text-[18px] text-gray-400">UNSOLD</span>}
                     {isRevealing && (
-                      <div className="flex items-center gap-1.5 text-[#e45d35]">
+                      <div className="flex items-center gap-1.5 text-theme-orange">
                         <span className="ms ms-fill text-[18px] animate-spin">autorenew</span>
                         <span className="f-label text-[10px]">REVEALING</span>
                       </div>
@@ -612,7 +620,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                         {fmt(purse)} <span className="text-[#5a6a74] text-[11px] font-normal">/ {fmt(totalPoints)}</span>
                       </span>
                     </div>
-                    <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                    <div className="w-full h-2 rounded-full overflow-hidden bg-white/[0.06]">
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{
@@ -633,8 +641,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
 
                 {/* ── Error ── */}
                 {bidError && (
-                  <div className="shrink-0 px-4 py-3 rounded-xl animate-slide-up"
-                       style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  <div className="shrink-0 px-4 py-3 rounded-xl animate-slide-up bg-red-500/[0.08] border border-red-500/20">
                     <p className="f-label text-[10px] text-red-400">{bidError}</p>
                   </div>
                 )}
@@ -643,9 +650,12 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                 <button
                   onClick={handleBid}
                   disabled={!canBid}
-                  className="shrink-0 w-full py-[18px] rounded-xl flex items-center justify-center gap-3
-                             active:scale-[0.97] transition-all duration-150
-                             disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={[
+                    "shrink-0 w-full py-[18px] rounded-xl flex items-center justify-center gap-3",
+                    "active:scale-[0.97] transition-all duration-150",
+                    "disabled:opacity-40 disabled:cursor-not-allowed",
+                    isLeading ? "border border-theme-orange/30" : isLocked || isRevealing ? "border border-red-500/30" : "border-none",
+                  ].join(" ")}
                   style={{
                     background:
                       bidSuccess  ? "#22c55e"
@@ -657,24 +667,19 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                       canBid && !isLocked && !isLeading && !isRevealing
                         ? `0 6px 32px ${BID_COLOR}50`
                         : "none",
-                    border:
-                      isLeading            ? `1px solid ${BID_COLOR}30`
-                      : isLocked || isRevealing ? "1px solid rgba(239,68,68,0.3)"
-                      : "none",
                   }}
                 >
                   <span className={`ms ms-fill text-[22px] text-white ${isPlacing ? "animate-spin" : isLocked || isRevealing ? "animate-timer-pulse" : ""}`}>
                     {bidIcon}
                   </span>
-                  <span className="f-display text-[17px] text-white" style={{ fontStyle: "normal", letterSpacing: "0.04em" }}>
+                  <span className="f-display text-[17px] text-white not-italic tracking-[0.04em]">
                     {bidLabel}
                   </span>
                 </button>
 
                 {/* ── Bid History ── */}
                 <div className="flex-1 min-h-0 glass rounded-xl overflow-hidden flex flex-col">
-                  <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex justify-between items-center"
-                       style={{ background: "rgba(16,20,21,0.60)" }}>
+                  <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex justify-between items-center bg-[rgba(16,20,21,0.60)]">
                     <p className="f-label text-[10px] text-[#c6c6cd]">BID HISTORY</p>
                     <div className="flex items-center gap-1.5">
                       <span className="relative flex h-1.5 w-1.5">
@@ -698,21 +703,30 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                         return (
                           <div
                             key={bid.id}
-                            className={`px-4 py-3 flex items-center justify-between transition-colors ${isTop ? "animate-slide-up" : ""}`}
-                            style={isMe ? { background: "rgba(228,93,53,0.05)" } : {}}
+                            className={`px-4 py-3 flex items-center justify-between transition-colors ${isTop ? "animate-slide-up" : ""} ${isMe ? "bg-theme-orange/5" : ""}`}
                           >
                             <div className="flex items-center gap-3 min-w-0">
                               <div
-                                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                                style={{
-                                  background: isMe ? `${BID_COLOR}18` : "rgba(255,255,255,0.05)",
-                                  border: isMe ? `1px solid ${BID_COLOR}35` : "1px solid rgba(255,255,255,0.07)",
-                                }}
+                                className={[
+                                  "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden",
+                                  teamLogos[bid.teamCode.toLowerCase()] ? "bg-transparent" : isMe ? "bg-theme-orange/[0.10]" : "bg-white/5",
+                                  isMe ? "border border-theme-orange/35" : "border border-white/[0.07]",
+                                ].join(" ")}
                               >
-                                <span className="f-display text-[11px]"
-                                      style={{ color: isMe ? BID_COLOR : "#c6c6cd", fontStyle: "normal" }}>
-                                  {bid.teamCode.slice(0, 2)}
-                                </span>
+                                {teamLogos[bid.teamCode.toLowerCase()] ? (
+                                  <Image
+                                    src={teamLogos[bid.teamCode.toLowerCase()]}
+                                    alt={bid.teamName}
+                                    width={28}
+                                    height={28}
+                                    className="object-contain w-full h-full p-0"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <span className={`f-display text-[11px] not-italic ${isMe ? "text-theme-orange" : "text-[#c6c6cd]"}`}>
+                                    {bid.teamCode.slice(0, 2)}
+                                  </span>
+                                )}
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -720,8 +734,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                                     {bid.teamName}
                                   </p>
                                   {isMe && (
-                                    <span className="f-label text-[8px] px-1.5 py-0.5 rounded shrink-0"
-                                          style={{ background: `${BID_COLOR}18`, color: BID_COLOR, border: `1px solid ${BID_COLOR}30` }}>
+                                    <span className="f-label text-[8px] px-1.5 py-0.5 rounded shrink-0 bg-theme-orange/[0.18] text-theme-orange border border-theme-orange/30">
                                       YOU
                                     </span>
                                   )}
@@ -733,10 +746,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
                                 </p>
                               </div>
                             </div>
-                            <span
-                              className="f-num text-[16px] shrink-0 tabular-nums"
-                              style={{ color: isTop ? BID_COLOR : isMe ? `${BID_COLOR}bb` : "#e0e3e4" }}
-                            >
+                            <span className={`f-num text-[16px] shrink-0 tabular-nums ${isTop ? "text-theme-orange" : isMe ? "text-theme-orange/75" : "text-[#e0e3e4]"}`}>
                               {fmt(bid.amount)}
                             </span>
                           </div>
@@ -812,14 +822,10 @@ function PlayerCard({
           </div>
         )}
 
-        <div className="absolute inset-0"
-             style={{ background: "linear-gradient(to top, #0b0f10 0%, rgba(11,15,16,0.3) 50%, transparent 100%)" }} />
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
 
         <div className="absolute top-3 left-3 z-10">
-          <span
-            className="f-label text-[9px] px-3 py-1 rounded-full"
-            style={{ background: BID_COLOR, color: "#0b0f10" }}
-          >
+          <span className="f-label text-[9px] px-3 py-1 rounded-full bg-theme-orange text-background">
             LOT #{lot.lotNumber} • {isRevealing ? "REVEALING" : isSold ? "SOLD" : isUnsold ? "UNSOLD" : "ON THE BLOCK"}
           </span>
         </div>
@@ -827,13 +833,10 @@ function PlayerCard({
         {(isSold || isUnsold) && (
           <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
             <div
-              className="animate-stamp border-[5px] rounded-xl px-5 py-2"
-              style={{
-                borderColor: isSold ? BID_COLOR : "#6b7280",
-                color:       isSold ? BID_COLOR : "#6b7280",
-                background:  "rgba(11,15,16,0.35)",
-                transform:   "rotate(-12deg)",
-              }}
+              className={[
+                "animate-stamp border-[5px] rounded-xl px-5 py-2 bg-background/35 -rotate-12",
+                isSold ? "border-theme-orange text-theme-orange" : "border-gray-500 text-gray-500",
+              ].join(" ")}
             >
               <span className="f-display text-[40px]">{isSold ? "SOLD" : "UNSOLD"}</span>
             </div>
@@ -842,8 +845,8 @@ function PlayerCard({
 
         {isRevealing && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 pointer-events-none">
-            <span className="ms ms-fill text-[#e45d35] animate-spin" style={{ fontSize: 40 }}>autorenew</span>
-            <p className="f-label text-[10px] text-[#e45d35]">REVEALING ON BROADCAST…</p>
+            <span className="ms ms-fill text-theme-orange animate-spin" style={{ fontSize: 40 }}>autorenew</span>
+            <p className="f-label text-[10px] text-theme-orange">REVEALING ON BROADCAST…</p>
           </div>
         )}
 
@@ -852,10 +855,10 @@ function PlayerCard({
             {isRevealing ? "???" : lot.playerName}
           </h1>
           <div className="flex items-center gap-2">
-            <span className="f-label text-[10px]" style={{ color: BID_COLOR }}>
+            <span className="f-label text-[10px] text-theme-orange">
               {isRevealing ? "—" : lot.playerRole.toUpperCase()}
             </span>
-            <span className="w-[4px] h-[4px] rounded-full bg-[#3a4a54]" />
+            <span className="w-1 h-1 rounded-full bg-[#3a4a54]" />
             <span className="f-label-sm text-[9px] text-[#c6c6cd]">
               {isRevealing ? "—" : (lot.playerCountry || "—")}
             </span>
@@ -869,10 +872,9 @@ function PlayerCard({
           { label: "COUNTRY", value: isRevealing ? "—" : (lot.playerCountry || "—"),              accent: false },
           { label: "ROLE",    value: isRevealing ? "—" : (lot.playerRole    || "—"),              accent: false },
         ].map((s) => (
-          <div key={s.label} className="p-2.5 rounded-lg"
-               style={{ background: "#141818", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div key={s.label} className="p-2.5 rounded-lg bg-[#141818] border border-white/[0.06]">
             <p className="f-label-sm text-[8px] text-[#5a6a74] mb-1">{s.label}</p>
-            <p className="f-num text-[14px] truncate" style={{ color: s.accent ? BID_COLOR : "#e0e3e4" }}>
+            <p className={`f-num text-[14px] truncate ${s.accent ? "text-theme-orange" : "text-[#e0e3e4]"}`}>
               {s.value}
             </p>
           </div>

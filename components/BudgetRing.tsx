@@ -61,8 +61,10 @@ export default function BudgetRing({
           width:        size,
           height:       size,
           borderRadius: "8%",
-          background:   `conic-gradient(#e45d35 ${pct}%, #2a2e2f 0)`,
-          boxShadow:    "0 0 32px rgba(228,93,53,0.35)",
+          // was: `conic-gradient(#e45d35 ${pct}%, #2a2e2f 0)` — now reads
+          // the same --color-theme-orange var the rest of the app uses.
+          background:   `conic-gradient(var(--color-theme-orange) ${pct}%, #2a2e2f 0)`,
+          boxShadow:    "0 0 32px color-mix(in srgb, var(--color-theme-orange) 35%, transparent)",
           display:      "flex",
           alignItems:   "center",
           justifyContent: "center",
@@ -106,7 +108,7 @@ export default function BudgetRing({
             fontFamily:    "'Geist', sans-serif",
             fontSize:      fontSize.util,
             fontWeight:    500,
-            color:         "#e45d35",
+            color:         "var(--color-theme-orange)",
             letterSpacing: "0.05em",
           }}>
             {pct}% used

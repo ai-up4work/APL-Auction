@@ -593,6 +593,25 @@ export async function cloneAuction(sourceId: string, newName: string): Promise<s
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RESET AUCTION (Re-auction)
+//
+// Resets an auction IN PLACE: deletes bid_history / auction_lots / feedback,
+// resets players' sold/lot/unsold/reentry fields back to fresh, resets
+// teams' roster/remaining_purse, resets rules.current_round, and sets
+// auctions.status back to 'setup'. Teams, players (identity fields), rules
+// (config), and session_config are all preserved — only auction *progress*
+// is wiped. Implemented as a single Postgres RPC (see reset_auction.sql)
+// so the whole operation is atomic on the DB side.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function resetAuctionInDb(auctionId: string): Promise<void> {
+  const { error } = await supabase.rpc("reset_auction", {
+    p_auction_id: auctionId,
+  });
+  if (error) throw sbErr(error, "resetAuctionInDb");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GENERATE LINKS
 // ─────────────────────────────────────────────────────────────────────────────
 

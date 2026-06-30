@@ -2,12 +2,17 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import InlineBottomNav from "@/components/InlineBottomNav";
 import BudgetRing from "@/components/BudgetRing";
 import { supabase } from "@/lib/supabse";
 
-const BID_COLOR = "#e45d35";
+// NOTE: BID_COLOR constant removed — it was a hardcoded "#e45d35" that
+// bypassed globals.css entirely. Every place that used it now uses the
+// `theme-orange` Tailwind utility classes (text-theme-orange, bg-theme-orange,
+// border-theme-orange, border-l-theme-orange) which read from
+// `--color-theme-orange` in globals.css, exactly like squad/history pages do.
 
 // ── types ─────────────────────────────────────────────────────────────────────
 interface BudgetState {
@@ -16,6 +21,14 @@ interface BudgetState {
   totalPoints:    number;   // rules.total_points
   teamSize:       number;   // rules.team_size
   basePrice:      number;   // rules.base_price  (min reserve per slot)
+}
+
+interface TeamInfo {
+  id:    string;
+  name:  string;
+  code:  string;
+  color: string;
+  logo:  string;
 }
 
 // ── derived helpers ───────────────────────────────────────────────────────────
@@ -43,11 +56,18 @@ export default function FinancialsPage() {
   const auctionId = params?.auctionId as string;
   const teamCode  = (params?.teamCode as string)?.toUpperCase();
 
-  const [teamId,      setTeamId]      = useState<string | null>(null);
+  const [team,        setTeam]        = useState<TeamInfo | null>(null);
   const [budget,      setBudget]      = useState<BudgetState | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
   const [showAvgSpend,setShowAvgSpend]= useState(true);
+  const [bright,      setBright]      = useState(true);
+
+  // blinking dot for "live" indicator (matches squad/history pages)
+  useEffect(() => {
+    const id = setInterval(() => setBright((p) => !p), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── overflow check (unchanged from original) ──────────────────────────────
   useEffect(() => {
@@ -72,13 +92,19 @@ export default function FinancialsPage() {
       // Resolve team
       const { data: teamRow, error: tErr } = await supabase
         .from("teams")
-        .select("id, remaining_purse, roster")
+        .select("id, name, code, color, logo, remaining_purse, roster")
         .eq("auction_id", auctionId)
         .eq("code", teamCode)
         .maybeSingle();
 
       if (tErr || !teamRow) { setError("Team not found."); setLoading(false); return; }
-      setTeamId(teamRow.id);
+      setTeam({
+        id:    teamRow.id,
+        name:  teamRow.name,
+        code:  teamRow.code,
+        color: teamRow.color,
+        logo:  teamRow.logo ?? "",
+      });
 
       // Fetch rules
       const { data: rulesRow } = await supabase
@@ -105,7 +131,8 @@ export default function FinancialsPage() {
 
   // ── realtime: purse / roster changes ─────────────────────────────────────
   useEffect(() => {
-    if (!auctionId || !teamId) return;
+    if (!auctionId || !team?.id) return;
+    const teamId = team.id;
 
     const sub = supabase
       .channel(`budget-team-${auctionId}-${teamId}`)
@@ -132,25 +159,17 @@ export default function FinancialsPage() {
       .subscribe();
 
     return () => { supabase.removeChannel(sub); };
-  }, [auctionId, teamId]);
+  }, [auctionId, team?.id]);
 
   // ── loading / error ───────────────────────────────────────────────────────
   if (loading) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: "#101415", minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{ textAlign: "center", color: "#c6c6cd" }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              border: "2px solid transparent", borderTopColor: BID_COLOR,
-              animation: "spin 1s linear infinite", margin: "0 auto 12px",
-            }} />
-            <p style={{ fontSize: 13 }}>Loading financials…</p>
+        <div className="bg-background min-h-screen flex items-center justify-center">
+          <div className="text-center text-[#c6c6cd]">
+            <div className="w-8 h-8 rounded-lg border-2 border-transparent border-t-theme-orange animate-spin mx-auto mb-3" />
+            <p className="text-[13px]">Loading financials…</p>
           </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </MobileOnlyWrapper>
     );
@@ -159,11 +178,8 @@ export default function FinancialsPage() {
   if (error || !budget) {
     return (
       <MobileOnlyWrapper>
-        <div style={{
-          background: "#101415", minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-        }}>
-          <p style={{ color: BID_COLOR, textAlign: "center", fontSize: 14 }}>
+        <div className="bg-background min-h-screen flex items-center justify-center p-6">
+          <p className="text-theme-orange text-center text-sm">
             {error ?? "No data available."}
           </p>
         </div>
@@ -188,15 +204,46 @@ export default function FinancialsPage() {
         }
       `}</style>
 
-      <div className="bg-[#101415] text-[#e0e3e4] h-[100dvh] flex flex-col overflow-hidden">
+      <div className="bg-background text-on-background h-[100dvh] flex flex-col overflow-hidden font-inter">
 
-        {/* ── Header ── */}
+        {/* ── Header — team identity header (matches squad/bid/history pages) ── */}
         <header className="shrink-0 h-16 flex items-center justify-between px-4
-                           border-b border-white/10
+                           border-b border-outline-variant
                            bg-[rgba(16,20,21,0.6)] backdrop-blur-xl z-20">
-          <h1 className="font-['Archivo_Narrow'] text-[28px] font-bold uppercase tracking-tighter text-[#dae2fd] leading-none">
-            FINANCIALS
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-[38px] h-[38px] rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+              style={{
+                backgroundColor: team?.logo ? "transparent" : (team?.color ? `${team.color}22` : "#1e2324"),
+                boxShadow: `0 0 18px ${team?.color ?? "var(--color-theme-orange)"}33`,
+                border: `1px solid ${team?.color ?? "var(--color-theme-orange)"}44`,
+              }}
+            >
+              {team?.logo ? (
+                <Image
+                  src={team.logo}
+                  alt={team.name}
+                  width={38}
+                  height={38}
+                  style={{ objectFit: "contain", width: "100%", height: "100%", padding: 0 }}
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span
+                  className="font-['Archivo_Narrow'] text-[12px] font-extrabold uppercase tracking-tighter"
+                  style={{ color: team?.color ?? "var(--color-theme-orange)" }}
+                >
+                  {(team?.code ?? teamCode)?.slice(0, 3)}
+                </span>
+              )}
+            </div>
+            <div>
+              <h1 className="font-['Archivo_Narrow'] text-[20px] font-bold uppercase tracking-tighter text-[#dae2fd] leading-none">
+                {team?.name ?? teamCode} FINANCIALS
+              </h1>
+              
+            </div>
+          </div>
           <div className="flex items-center gap-4">
             <span className="material-symbols-outlined text-[#dae2fd]">notifications</span>
             <span className="material-symbols-outlined text-[#dae2fd]">settings</span>
@@ -235,7 +282,7 @@ export default function FinancialsPage() {
               >
                 <div className="flex items-center gap-1.5 mb-1">
                   <span
-                    className="material-symbols-outlined text-[#ffb5a0]"
+                    className="material-symbols-outlined text-theme-orange"
                     style={{ fontSize: "clamp(14px, 2svh, 18px)" }}
                   >payments</span>
                   <span
@@ -252,10 +299,9 @@ export default function FinancialsPage() {
                   style={{ background: "#1e2223" }}
                 >
                   <div
-                    className="h-full rounded-full"
+                    className="h-full rounded-full bg-theme-orange"
                     style={{
                       width: `${spentPct}%`,
-                      background: "linear-gradient(90deg, #e45d35 0%, #ffb5a0 100%)",
                       transition: "width 0.6s ease",
                     }}
                   />
@@ -269,7 +315,7 @@ export default function FinancialsPage() {
               >
                 <div className="flex items-center gap-1.5 mb-1">
                   <span
-                    className="material-symbols-outlined text-[#ffb5a0]"
+                    className="material-symbols-outlined text-theme-orange"
                     style={{ fontSize: "clamp(14px, 2svh, 18px)" }}
                   >groups</span>
                   <span
@@ -302,7 +348,7 @@ export default function FinancialsPage() {
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1.5 mb-1">
                       <span
-                        className="material-symbols-outlined text-[#ffb5a0]"
+                        className="material-symbols-outlined text-theme-orange"
                         style={{ fontSize: "clamp(14px, 2svh, 18px)" }}
                       >leaderboard</span>
                       <span
@@ -327,7 +373,7 @@ export default function FinancialsPage() {
                       style={{ fontSize: "clamp(8px, 1.1svh, 10px)" }}
                     >Target Avg</div>
                     <div
-                      className="font-['Inter'] text-[#ffb5a0]"
+                      className="font-['Inter'] text-theme-orange"
                       style={{ fontSize: "clamp(12px, 2svh, 16px)" }}
                     >{fmt(targetAvg)} Points</div>
                   </div>
@@ -336,17 +382,16 @@ export default function FinancialsPage() {
 
               {/* Max Bid Capacity */}
               <div
-                className="glass-panel rounded-xl col-span-2 flex flex-col gap-1.5 border-l-4"
+                className="glass-panel rounded-xl col-span-2 flex flex-col gap-1.5 border-l-4 border-l-theme-orange"
                 style={{
                   padding: "clamp(10px, 1.8svh, 20px)",
                   background: "linear-gradient(135deg, #1c2021, #272b2c)",
-                  borderLeftColor: BID_COLOR,
                 }}
               >
                 <div className="flex items-center gap-2">
                   <span
-                    className="material-symbols-outlined"
-                    style={{ color: BID_COLOR, fontSize: "clamp(16px, 2.2svh, 20px)" }}
+                    className="material-symbols-outlined text-theme-orange"
+                    style={{ fontSize: "clamp(16px, 2.2svh, 20px)" }}
                   >gavel</span>
                   <span
                     className="font-['Geist'] text-[#c6c6cd] uppercase font-bold tracking-wider"
@@ -355,8 +400,8 @@ export default function FinancialsPage() {
                 </div>
                 <div className="flex items-baseline gap-2">
                   <span
-                    className="font-['Archivo_Narrow'] font-bold"
-                    style={{ fontSize: "clamp(26px, 4.5svh, 36px)", color: BID_COLOR }}
+                    className="font-['Archivo_Narrow'] font-bold text-theme-orange"
+                    style={{ fontSize: "clamp(26px, 4.5svh, 36px)" }}
                   >{fmt(maxBidCapacity)}</span>
                   <span
                     className="font-['Archivo_Narrow'] text-[#c6c6cd]"

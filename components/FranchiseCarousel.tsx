@@ -121,15 +121,28 @@ export default function FranchiseCarousel({
                     }}
                   />
 
-                  {/* full-bleed image */}
-                  <div className="relative w-full" style={{ height: 148 }}>
-                    <Image
-                      src={f.image}
-                      alt={f.name}
-                      fill
-                      className="object-cover"
-                      referrerPolicy="no-referrer"
-                    />
+                  {/* logo frame — crest is object-contain and scaled up so it
+                      visually fills the box, since source crests are square
+                      PNGs with their own transparent padding around the
+                      badge (object-cover alone just zooms into that
+                      transparency rather than the artwork). */}
+                  <div
+                    className="relative w-full flex items-center justify-center overflow-hidden"
+                    style={{
+                      height: 148,
+                      background:
+                        "radial-gradient(circle at 50% 42%, rgba(255,255,255,0.05) 0%, transparent 70%)",
+                    }}
+                  >
+                    <div className="relative" style={{ width: "82%", height: "82%" }}>
+                      <Image
+                        src={f.image}
+                        alt={f.name}
+                        fill
+                        className="object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
                     {/* bottom fade into card body */}
                     <div
                       className="absolute bottom-0 left-0 right-0 h-10 pointer-events-none"

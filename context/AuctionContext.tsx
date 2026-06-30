@@ -30,6 +30,7 @@ import {
   loadAuction,
   listAuctions,
   cloneAuction,
+  resetAuctionInDb,
   generateLinks,
   shufflePlayerOrder,
   DEFAULT_RULES,
@@ -66,7 +67,7 @@ interface AuctionContextValue {
   handlePause:     () => Promise<void>;
   handleResume:    () => Promise<void>;
   handleStop:      () => Promise<void>;
-  handleReauction: () => void;
+  handleReauction: () => Promise<void>;
   handleShuffle:   () => Promise<void>;
 
   createNew:          (name?: string) => void;
@@ -532,13 +533,31 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // FIX: handleReauction now uses the shared resetIdCounters() helper
-  // instead of duplicating the counter reset inline.
-  const handleReauction = useCallback(() => {
-    localStorage.removeItem("apl_auction_id");
-    resetIdCounters();
-    setShuffleReady(false);
-    setAuction(buildInitialState());
+  // Resets the CURRENT auction in place (DB-side: clears bid_history /
+  // auction_lots / feedback, resets player sold/lot/unsold/reentry fields,
+  // resets team roster/remaining_purse, resets rules.current_round, sets
+  // auctions.status back to 'setup') and reloads it — keeping the same
+  // teams/players/rules/session rather than wiping back to
+  // DEFAULT_TEAMS/DEFAULT_PLAYERS. Falls back to a local-only reset if
+  // there's no persisted auction yet (nothing in the DB to reset).
+  const handleReauction = useCallback(async () => {
+    const id = auctionRef.current.auctionId;
+    if (!id) {
+      localStorage.removeItem("apl_auction_id");
+      resetIdCounters();
+      setShuffleReady(false);
+      setAuction(buildInitialState());
+      return;
+    }
+
+    await withSave(async () => {
+      await resetAuctionInDb(id);
+      const state = await loadAuction(id);
+      if (state) {
+        applyLoadedState(state);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Cleanup ───────────────────────────────────────────────────────────────

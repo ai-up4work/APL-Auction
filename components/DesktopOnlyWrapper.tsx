@@ -5,7 +5,7 @@
  *
  * Shows the auction admin page only on desktop/laptop (lg = 1024px+).
  * On mobile phones and tablets (< 1024px) it renders a full-screen
- * blocker styled to match the APL Auction UI.
+ * blocker styled to match the Moon Knight Super League Auction UI.
  *
  * Usage:
  *   <DesktopOnlyWrapper>
@@ -33,7 +33,7 @@ const MSYM_FILLED =
 // ─────────────────────────────────────────────
 //  Blocker shown on phones & tablets (< 1024px)
 // ─────────────────────────────────────────────
-function PhoneTabletBlocker() {
+function PhoneTabletBlocker({ auctionName }: { auctionName?: string }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
   // Subtle touch-parallax glow
@@ -47,7 +47,7 @@ function PhoneTabletBlocker() {
       const y = touch.clientY - r.top;
       card.style.boxShadow =
         `0 10px 40px -10px rgba(0,0,0,0.5), ` +
-        `${x / 12}px ${y / 12}px 80px -40px rgba(245,180,0,0.12)`;
+        `${x / 12}px ${y / 12}px 80px -40px rgba(201,151,31,0.12)`;
     };
     document.addEventListener("touchmove", onMove, { passive: true });
     return () => document.removeEventListener("touchmove", onMove);
@@ -73,20 +73,20 @@ function PhoneTabletBlocker() {
         }
       `}</style>
 
-      {/* Root: fixed full-screen, dark background matching the admin page */}
+      {/* Root: fixed full-screen, dark navy background matching the admin page */}
       <div
         className="fixed inset-0 z-[9999] flex flex-col overflow-hidden"
-        style={{ background: "#0d1113", color: "#e0e3e4", fontFamily: "'Inter', sans-serif" }}
+        style={{ background: "#0c0f17", color: "#e3e6ef", fontFamily: "'Inter', sans-serif" }}
       >
         {/* ── Atmospheric blobs ── */}
         <div className="pointer-events-none fixed inset-0 overflow-hidden">
           <div
             className="absolute -top-[20%] -right-[15%] w-[70vw] h-[70vw] rounded-full"
-            style={{ background: "#C9920A", animation: "apl-blob 4s ease-in-out infinite" }}
+            style={{ background: "#A87815", animation: "apl-blob 4s ease-in-out infinite" }}
           />
           <div
             className="absolute -bottom-[20%] -left-[15%] w-[80vw] h-[80vw] rounded-full"
-            style={{ background: "#7A5800", animation: "apl-blob 4s ease-in-out infinite 1.2s" }}
+            style={{ background: "#5c3d00", animation: "apl-blob 4s ease-in-out infinite 1.2s" }}
           />
         </div>
 
@@ -95,18 +95,17 @@ function PhoneTabletBlocker() {
           className="fixed inset-x-0 top-0 z-50 flex items-center justify-center"
           style={{
             height: "clamp(56px,8vw,64px)",
-            background: "rgba(16,20,21,0.65)",
+            background: "rgba(13,17,23,0.65)",
             backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.08)",
           }}
         >
           <div className="flex items-center gap-3">
-            <span
-              className={MSYM_FILLED}
-              style={{ color: "#F5B400", fontSize: "clamp(22px,5vw,28px)" }}
-            >
-              sports_cricket
-            </span>
+            <img
+              src="/moon-knight-logo.png"
+              alt="Auction logo"
+              style={{ height: "clamp(45px,6vw,36px)", width: "auto", objectFit: "cover" }}
+            />
             <h1
               className="m-0 font-bold uppercase tracking-[0.04em] text-white"
               style={{
@@ -114,7 +113,7 @@ function PhoneTabletBlocker() {
                 fontSize: "clamp(18px,4.5vw,24px)",
               }}
             >
-              APL <span style={{ color: "#F5B400" }}>AUCTION</span>
+              {auctionName ?? "Auction"}
             </h1>
           </div>
         </header>
@@ -131,7 +130,7 @@ function PhoneTabletBlocker() {
             style={{
               maxWidth: 480,
               padding: "clamp(24px,6vw,36px) clamp(20px,5vw,32px)",
-              background: "rgba(16,20,21,0.65)",
+              background: "rgba(13,17,23,0.65)",
               backdropFilter: "blur(20px)",
               border: "1px solid rgba(255,255,255,0.08)",
             }}
@@ -139,7 +138,7 @@ function PhoneTabletBlocker() {
             {/* Ambient inner glow */}
             <div
               className="pointer-events-none absolute -top-8 -right-8 w-28 h-28 rounded-full"
-              style={{ background: "rgba(245,180,0,0.07)", filter: "blur(32px)" }}
+              style={{ background: "rgba(201,151,31,0.07)", filter: "blur(32px)" }}
             />
 
             {/* Monitor illustration */}
@@ -149,7 +148,7 @@ function PhoneTabletBlocker() {
                 className="absolute rounded-[22px]"
                 style={{
                   inset: -10,
-                  border: "1.5px dashed rgba(245,180,0,0.28)",
+                  border: "1.5px dashed rgba(201,151,31,0.28)",
                   animation: "apl-spin 24s linear infinite",
                 }}
               />
@@ -159,34 +158,34 @@ function PhoneTabletBlocker() {
                 style={{
                   width: "clamp(130px,32vw,160px)",
                   height: "clamp(96px,24vw,118px)",
-                  background: "#101415",
-                  border: "3px solid #313536",
+                  background: "#0d1117",
+                  border: "3px solid #2a2f3d",
                   borderRadius: 12,
                 }}
               >
                 {/* Title bar */}
                 <div
                   className="flex items-center justify-end gap-1 px-2 flex-shrink-0"
-                  style={{ height: 16, background: "#1a1e1f", borderBottom: "1px solid #2a2e2f" }}
+                  style={{ height: 16, background: "#141925", borderBottom: "1px solid #232838" }}
                 >
-                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#3a3e3f" }} />
-                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#3a3e3f" }} />
-                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#F5B400" }} />
+                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#3c4256" }} />
+                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#3c4256" }} />
+                  <div className="w-[5px] h-[5px] rounded-full" style={{ background: "#c9971f" }} />
                 </div>
                 {/* Screen content */}
                 <div
                   className="flex flex-1 flex-col items-center justify-center gap-2 p-3"
-                  style={{ background: "linear-gradient(135deg,#181c1d,#0d1113)" }}
+                  style={{ background: "linear-gradient(135deg,#181d29,#0c0f17)" }}
                 >
                   <span
                     className={MSYM}
-                    style={{ color: "#F5B400", fontSize: "clamp(22px,5vw,28px)" }}
+                    style={{ color: "#c9971f", fontSize: "clamp(22px,5vw,28px)" }}
                   >
                     desktop_windows
                   </span>
                   <div
                     className="rounded-full"
-                    style={{ width: "60%", height: 3, background: "rgba(245,180,0,0.3)" }}
+                    style={{ width: "60%", height: 3, background: "rgba(201,151,31,0.3)" }}
                   />
                   <div
                     className="rounded-full"
@@ -197,11 +196,11 @@ function PhoneTabletBlocker() {
               {/* Stand */}
               <div
                 className="mx-auto rounded-b"
-                style={{ width: 34, height: 10, background: "#313536" }}
+                style={{ width: 34, height: 10, background: "#2a2f3d" }}
               />
               <div
                 className="mx-auto rounded"
-                style={{ width: 56, height: 4, background: "#3a3e3f" }}
+                style={{ width: 56, height: 4, background: "#3c4256" }}
               />
             </div>
 
@@ -210,21 +209,21 @@ function PhoneTabletBlocker() {
               className="flex items-center gap-2 rounded-full"
               style={{
                 padding: "5px 14px",
-                background: "rgba(201,146,10,0.18)",
-                border: "1px solid rgba(245,180,0,0.2)",
+                background: "rgba(168,120,21,0.18)",
+                border: "1px solid rgba(201,151,31,0.2)",
               }}
             >
               <span className="relative flex" style={{ width: 8, height: 8 }}>
                 <span
                   className="absolute inset-0 rounded-full"
                   style={{
-                    background: "#F5B400",
+                    background: "#c9971f",
                     animation: "apl-ping 1.4s cubic-bezier(0,0,.2,1) infinite",
                   }}
                 />
                 <span
                   className="relative block w-full h-full rounded-full"
-                  style={{ background: "#F5B400" }}
+                  style={{ background: "#c9971f" }}
                 />
               </span>
               <span
@@ -234,7 +233,7 @@ function PhoneTabletBlocker() {
                   fontWeight: 700,
                   textTransform: "uppercase",
                   letterSpacing: "0.14em",
-                  color: "#F5B400",
+                  color: "#c9971f",
                 }}
               >
                 Desktop Only
@@ -253,19 +252,19 @@ function PhoneTabletBlocker() {
                 }}
               >
                 OPEN ON A<br />
-                <span style={{ color: "#F5B400" }}>LARGER SCREEN</span>
+                <span style={{ color: "#c9971f" }}>LARGER SCREEN</span>
               </h2>
               <p
                 className="mt-3 mb-0"
                 style={{
-                  color: "#a0a8b0",
+                  color: "#9aa1b5",
                   fontSize: "clamp(13px,3.2vw,14px)",
                   lineHeight: 1.65,
                 }}
               >
-                The APL Auction Admin Console is a multi-column, data-dense environment
-                built for desktop and laptop screens (1024px+). Please switch to a
-                computer to access the live auction controls.
+                The {auctionName ?? "Auction"} Admin Console is a multi-column,
+                data-dense environment built for desktop and laptop screens (1024px+).
+                Please switch to a computer to access the live auction controls.
               </p>
             </div>
 
@@ -285,7 +284,7 @@ function PhoneTabletBlocker() {
                     border: "1px solid rgba(255,255,255,0.08)",
                   }}
                 >
-                  <span className={MSYM} style={{ color: "#F5B400", fontSize: 14 }}>
+                  <span className={MSYM} style={{ color: "#c9971f", fontSize: 14 }}>
                     {icon}
                   </span>
                   <span
@@ -295,7 +294,7 @@ function PhoneTabletBlocker() {
                       fontWeight: 700,
                       textTransform: "uppercase",
                       letterSpacing: "0.1em",
-                      color: "#a0a8b0",
+                      color: "#9aa1b5",
                     }}
                   >
                     {label}
@@ -332,12 +331,12 @@ function PhoneTabletBlocker() {
                 className="flex flex-col gap-2 rounded-xl"
                 style={{
                   padding: "clamp(12px,3vw,16px)",
-                  background: "rgba(16,20,21,0.6)",
+                  background: "rgba(13,17,23,0.6)",
                   border: "1px solid rgba(255,255,255,0.08)",
                   backdropFilter: "blur(12px)",
                 }}
               >
-                <span className={MSYM_FILLED} style={{ color: "#F5B400", fontSize: 20 }}>
+                <span className={MSYM_FILLED} style={{ color: "#c9971f", fontSize: 20 }}>
                   {icon}
                 </span>
                 <h4
@@ -352,7 +351,7 @@ function PhoneTabletBlocker() {
                 >
                   {title}
                 </h4>
-                <p style={{ margin: 0, fontSize: 11, color: "#a0a8b0", lineHeight: 1.55 }}>
+                <p style={{ margin: 0, fontSize: 11, color: "#9aa1b5", lineHeight: 1.55 }}>
                   {desc}
                 </p>
               </div>
@@ -367,7 +366,7 @@ function PhoneTabletBlocker() {
             height: 48,
             padding: "0 clamp(16px,4vw,28px)",
             borderTop: "1px solid rgba(255,255,255,0.05)",
-            background: "rgba(16,20,21,0.85)",
+            background: "rgba(13,17,23,0.85)",
             backdropFilter: "blur(12px)",
           }}
         >
@@ -378,7 +377,7 @@ function PhoneTabletBlocker() {
               fontSize: 10,
               textTransform: "uppercase",
               letterSpacing: "0.12em",
-              color: "rgba(160,168,176,0.55)",
+              color: "rgba(154,161,181,0.55)",
             }}
           >
             <span
@@ -393,10 +392,10 @@ function PhoneTabletBlocker() {
               fontSize: 10,
               textTransform: "uppercase",
               letterSpacing: "0.1em",
-              color: "rgba(160,168,176,0.35)",
+              color: "rgba(154,161,181,0.35)",
             }}
           >
-            © 2024 APL · Admin Console V4.2
+            © 2024 {auctionName ?? "Auction"} · Admin Console V4.2
           </div>
         </footer>
       </div>
@@ -415,14 +414,16 @@ function PhoneTabletBlocker() {
  */
 export default function DesktopOnlyWrapper({
   children,
+  auctionName,
 }: {
   children: React.ReactNode;
+  auctionName?: string;
 }) {
   return (
     <>
       {/* Mobile + tablet (< 1024px): show blocker */}
       <div className="block lg:hidden">
-        <PhoneTabletBlocker />
+        <PhoneTabletBlocker auctionName={auctionName} />
       </div>
 
       {/* Desktop / laptop (≥ 1024px): render the real page */}

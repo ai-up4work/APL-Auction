@@ -36,7 +36,7 @@ type Particle = {
   duration: number;
 };
 
-const PARTICLE_COLORS_SOLD   = ["#F5B400", "#C9920A", "#FDECC8", "#ffffff"];
+const PARTICLE_COLORS_SOLD   = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
 const PARTICLE_COLORS_UNSOLD = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
 
 let particleIdCtr = 0;
@@ -512,17 +512,17 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
       : 0;
 
   const shotClockColor =
-    shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#F5B400";
+    shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#c9971f";
 
   const showReentryButton = pendingUnsoldCount > 0 && playerQueue.length === 0;
   
   // ── Loading ───────────────────────────────────────────────────────────────
   if (!auction || loading) {
     return (
-      <div className="h-screen bg-[#0b0f10] flex items-center justify-center">
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
         <div className="text-center">
           <span
-            className="material-symbols-outlined text-[#e45d35] animate-spin block mb-4"
+            className="material-symbols-outlined text-theme-orange animate-spin block mb-4"
             style={{ fontSize: 48 }}
           >
             progress_activity
@@ -530,7 +530,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           <p
             style={{
               fontFamily: "'Geist Mono', monospace",
-              color: "#5a6a74",
+              color: "var(--color-outline)",
               fontSize: 12,
               textTransform: "uppercase",
               letterSpacing: "0.12em",
@@ -570,9 +570,9 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           }
 
           .glass-panel {
-            background: rgba(16, 20, 21, 0.6);
+            background: var(--color-surface-glass);
             backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
+            border: 1px solid var(--color-border-overlay);
           }
 
           .custom-scrollbar::-webkit-scrollbar       { width: 4px; }
@@ -604,12 +604,12 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           }
           .sold-stamp-face {
             position: relative; padding: 20px 52px 18px;
-            border: 4px solid #C9920A; border-radius: 4px;
-            overflow: hidden; background: rgba(197,134,10,0.07);
+            border: 4px solid #A87815; border-radius: 4px;
+            overflow: hidden; background: rgba(201,151,31,0.07);
           }
           .sold-inner-ring {
             position: absolute; inset: 5px;
-            border: 1px solid rgba(201,146,10,0.32); border-radius: 2px;
+            border: 1px solid rgba(201,151,31,0.32); border-radius: 2px;
             pointer-events: none; z-index: 1;
           }
           .sold-hatch-layer {
@@ -617,7 +617,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             background: repeating-linear-gradient(
               108deg,
               transparent 0px, transparent 13px,
-              rgba(245,180,0,0.07) 13px, rgba(245,180,0,0.07) 14px
+              rgba(232,196,104,0.07) 13px, rgba(232,196,104,0.07) 14px
             );
             pointer-events: none;
           }
@@ -625,9 +625,9 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             font-family: 'Archivo Narrow', sans-serif;
             font-size: 76px; font-weight: 700; font-style: italic;
             letter-spacing: 0.14em; text-transform: uppercase;
-            color: #F5B400; line-height: 1; display: block;
+            color: #E8C468; line-height: 1; display: block;
             position: relative; z-index: 2;
-            text-shadow: 0 0 60px rgba(245,180,0,0.25);
+            text-shadow: 0 0 60px rgba(232,196,104,0.25);
           }
           .sold-dots {
             display: flex; gap: 6px; justify-content: center;
@@ -635,19 +635,19 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           }
           .sold-dot {
             display: block; width: 5px; height: 5px; border-radius: 50%;
-            background: rgba(245,180,0,0.45);
+            background: rgba(232,196,104,0.45);
           }
           .sold-sub {
             display: block; text-align: center;
             font-family: 'Geist Mono', monospace;
             font-size: 9px; font-weight: 500;
             letter-spacing: 0.42em; text-transform: uppercase;
-            color: rgba(245,180,0,0.6);
+            color: rgba(232,196,104,0.6);
             margin-top: 8px; position: relative; z-index: 2;
           }
           .sold-bar {
             position: absolute; left: 0; right: 0; bottom: 0;
-            height: 6px; background: #C9920A;
+            height: 6px; background: #A87815;
           }
 
           .auction-unsold-stamp {
@@ -741,7 +741,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         <div
           className={`fixed inset-0 pointer-events-none z-[60] transition-opacity duration-75 ${
             soldState === "sold"
-              ? "bg-amber-400/10"
+              ? "bg-theme-orange/10"
               : soldState === "unsold"
               ? "bg-slate-400/5"
               : "bg-white/0"
@@ -759,7 +759,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             style={{
               background:
                 soldState === "sold"
-                  ? "rgba(245,180,0,0.18)"
+                  ? "rgba(201,151,31,0.18)"
                   : "rgba(113,128,150,0.12)",
             }}
           />
@@ -800,23 +800,6 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             <button onClick={() => setRoundToast(null)} className="ml-2 opacity-60 hover:opacity-100">✕</button>
           </div>
         )}
-
-        {/* Revealing banner */}
-        {/* {isShuffling && (
-          <div
-            className="fixed top-20 left-1/2 -translate-x-1/2 z-[295] flex items-center gap-3 px-5 py-2 rounded-full text-xs font-bold revealing-pulse"
-            style={{
-              background: "rgba(245,180,0,0.10)",
-              border: "1px solid rgba(245,180,0,0.4)",
-              color: "#F5B400",
-              fontFamily: "'Geist Mono', monospace",
-              backdropFilter: "blur(12px)",
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>animated_images</span>
-            Revealing player on broadcast screen…
-          </div>
-        )} */}
 
         {/* Bidding locked banner */}
         {isLocked && soldState === "pending" && currentLot && !isShuffling && (
@@ -870,16 +853,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         {/* ══════════ TOP BAR ══════════ */}
         <header className="fixed top-0 w-full z-50 flex justify-between items-center px-8 h-16 glass-panel border-b border-white/10">
           <div className="flex items-center gap-4">
-            <span className="material-symbols-outlined text-amber-400 text-3xl">sports_cricket</span>
-            <h1 className="font-archivo text-2xl font-bold tracking-tighter text-on-background">
-              APL <span className="text-amber-400">AUCTION</span>
+            <img
+              src="/moon-knight-logo.png"
+              alt="Auction logo"
+              className="w-15 h-15 object-contain"
+            />
+            <h1 className="font-archivo text-2xl font-bold italic tracking-tighter text-theme-orange uppercase">
+              {auction.session.auctionName}
             </h1>
-            <div className="ml-8 flex items-center gap-3 px-4 py-1.5 bg-amber-400/10 border border-amber-400/20 rounded-full">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="font-mono-geist text-xs text-amber-400 uppercase font-bold tracking-[0.18em]">
-                Live: {auction.session.auctionName}
-              </span>
-            </div>
             {roundInfo.current > 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-400/10 border border-indigo-400/20 rounded-full">
                 <span className="material-symbols-outlined text-indigo-300 text-sm">autorenew</span>
@@ -906,21 +887,13 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 </div>
               </div>
             )}
-            {/* {isShuffling && (
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-amber-400 text-sm animate-spin">refresh</span>
-                <span className="font-mono-geist text-[10px] text-amber-400 uppercase tracking-[0.1em]">
-                  Revealing…
-                </span>
-              </div>
-            )} */}
             <div className="flex items-center gap-2 text-on-surface-variant font-mono-geist text-[10px] uppercase tracking-[0.12em]">
               <span className="material-symbols-outlined text-sm">lock</span>
               Secure Admin Node
             </div>
             <div className="font-mono-geist text-[10px] text-right">
               <div className="text-on-surface-variant uppercase tracking-[0.1em]">Lot</div>
-              <div className="text-amber-400 font-bold">
+              <div className="text-theme-orange font-bold">
                 #{lotNumber} / {auction.players.length}
               </div>
             </div>
@@ -962,8 +935,8 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
           <aside className="hidden xl:flex flex-col h-full bg-surface-container-lowest border-r border-outline-variant shrink-0 overflow-hidden">
             <div className="px-8 pt-8 pb-6 border-b border-outline-variant">
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-amber-400 text-xl">manage_accounts</span>
+                <div className="w-10 h-10 rounded-xl bg-theme-orange/10 border border-theme-orange/20 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-theme-orange text-xl">manage_accounts</span>
                 </div>
                 <div>
                   <p className="font-inter text-on-surface font-bold text-sm">Chief Auctioneer</p>
@@ -1040,7 +1013,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 isShuffling
                   ? "opacity-60"
                   : soldState === "sold"
-                  ? "scale-[1.01] shadow-[0_0_80px_rgba(245,180,0,0.12)]"
+                  ? "scale-[1.01] shadow-[0_0_80px_rgba(201,151,31,0.12)]"
                   : soldState === "unsold"
                   ? "scale-[1.01] shadow-[0_0_60px_rgba(113,128,150,0.1)]"
                   : isLocked
@@ -1048,7 +1021,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                   : ""
               }`}
             >
-              <div className="absolute -top-20 -right-20 w-80 h-80 bg-amber-400/5 blur-[100px] rounded-full" />
+              <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full" />
 
               {soldState === "sold"   && !isShuffling && <AuctionStamp state="sold"   />}
               {soldState === "unsold" && !isShuffling && <AuctionStamp state="unsold" />}
@@ -1063,8 +1036,8 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         src={currentLot.playerImg}
                       />
                     ) : (
-                      <div className="w-full h-full bg-[#1c2021] flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[#2a3a44]" style={{ fontSize: 64 }}>
+                      <div className="w-full h-full bg-surface-container flex items-center justify-center">
+                        <span className="material-symbols-outlined text-outline-variant" style={{ fontSize: 64 }}>
                           {isShuffling ? "animated_images" : "person"}
                         </span>
                       </div>
@@ -1091,9 +1064,9 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                       <div
                         className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] uppercase tracking-[0.2em]"
                         style={{
-                          background: "rgba(245,180,0,0.06)",
-                          border: "1px solid rgba(245,180,0,0.2)",
-                          color: "#F5B400",
+                          background: "rgba(201,151,31,0.06)",
+                          border: "1px solid rgba(201,151,31,0.2)",
+                          color: "#c9971f",
                         }}
                       >
                         <span className="material-symbols-outlined text-sm animate-spin">refresh</span>
@@ -1108,8 +1081,8 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           disabled={isBusy || !currentLot.winningTeamId}
                           className="flex items-center justify-center gap-1 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-lg border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                           style={{
-                            background: "linear-gradient(135deg,#C9920A,#F5B400)",
-                            color: "#1a0e00",
+                            background: "linear-gradient(135deg,#A87815,#E8C468)",
+                            color: "#1a1304",
                           }}
                           title={!currentLot.winningTeamId ? "No bids yet" : "Hammer sold"}
                         >
@@ -1132,7 +1105,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         <button
                           onClick={handleStartNextPlayer}
                           disabled={isBusy || playerQueue.length === 0}
-                          className="col-span-2 flex items-center justify-center gap-2 bg-primary text-on-primary py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="col-span-2 flex items-center justify-center gap-2 bg-primary text-on-background py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {playerQueue.length === 0 ? "No more players" : "Next Player"}
                           {playerQueue.length > 0 && (
@@ -1143,7 +1116,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         <button
                           onClick={handleFixShuffle}
                           disabled={isShufflingPool}
-                          className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 border border-amber-400/30 bg-amber-400/10 text-amber-400"
+                          className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 border border-theme-orange/30 bg-theme-orange/10 text-theme-orange"
                         >
                           <span className={`material-symbols-outlined text-sm ${isShufflingPool ? "animate-spin" : ""}`}>
                             {isShufflingPool ? "refresh" : "shuffle"}
@@ -1159,7 +1132,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           onClick={handleStartNextPlayer}
                           disabled={isBusy}
                           className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40"
-                          style={{ background: "linear-gradient(135deg,#C9920A,#F5B400)", color: "#1a0e00" }}
+                          style={{ background: "linear-gradient(135deg,#A87815,#E8C468)", color: "#1a1304" }}
                         >
                           <span className="material-symbols-outlined text-sm">play_arrow</span>
                           Start First Player
@@ -1168,7 +1141,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                         <button
                           onClick={handleFixShuffle}
                           disabled={isShufflingPool}
-                          className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 border border-amber-400/30 bg-amber-400/10 text-amber-400"
+                          className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl disabled:opacity-40 border border-theme-orange/30 bg-theme-orange/10 text-theme-orange"
                         >
                           <span className={`material-symbols-outlined text-sm ${isShufflingPool ? "animate-spin" : ""}`}>
                             {isShufflingPool ? "refresh" : "shuffle"}
@@ -1187,14 +1160,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                       style={{
                         color:
                           isShuffling
-                            ? "#F5B400"
+                            ? "#c9971f"
                             : soldState === "sold"
-                            ? "#F5B400"
+                            ? "#c9971f"
                             : soldState === "unsold"
                             ? "#718096"
                             : isLocked
                             ? "#ef4444"
-                            : "#e45d35",
+                            : "#c9971f",
                       }}
                     >
                       {blockLabel}
@@ -1211,7 +1184,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           Base: {fmtPts(currentLot?.basePrice)} pts
                         </span>
                         {currentPlayer?.capped && (
-                          <span className="px-3 py-1 bg-amber-400/10 border border-amber-400/20 rounded font-mono-geist text-[10px] uppercase tracking-[0.18em] text-amber-400">
+                          <span className="px-3 py-1 bg-theme-orange/10 border border-theme-orange/20 rounded font-mono-geist text-[10px] uppercase tracking-[0.18em] text-theme-orange">
                             Capped
                           </span>
                         )}
@@ -1234,7 +1207,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] mb-1">
                             Current High Bid
                           </p>
-                          <p className="font-archivo text-4xl font-bold text-amber-400">
+                          <p className="font-archivo text-4xl font-bold text-theme-orange">
                             {fmtPts(currentLot.currentBid)}
                             <span className="text-sm opacity-50 ml-1">pts</span>
                           </p>
@@ -1250,7 +1223,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                       </div>
                       {soldState === "pending" && !isLocked && (
                         <p className="font-mono-geist text-[10px] text-on-surface-variant">
-                          Next bid: <span className="text-amber-400 font-bold">{fmtPts(nextBidAmount)} pts</span>
+                          Next bid: <span className="text-theme-orange font-bold">{fmtPts(nextBidAmount)} pts</span>
                         </p>
                       )}
                       {isLocked && soldState === "pending" && (
@@ -1268,7 +1241,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             <div className="flex-1 min-h-0 glass-panel rounded-2xl flex flex-col overflow-hidden bg-surface-container-lowest">
               <div className="px-8 py-5 border-b border-white/10 flex justify-between items-center bg-white/5">
                 <h3 className="font-mono-geist text-xs text-on-surface uppercase flex items-center gap-3 font-bold tracking-[0.2em]">
-                  <span className="material-symbols-outlined text-amber-400 text-lg">monitoring</span>
+                  <span className="material-symbols-outlined text-theme-orange text-lg">monitoring</span>
                   Live Bidding Feed
                 </h3>
                 <div className="flex items-center gap-3">
@@ -1317,7 +1290,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                               <span className="font-archivo font-semibold">{b.teamName}</span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 font-archivo font-semibold text-amber-400">
+                          <td className="px-6 py-4 font-archivo font-semibold text-theme-orange">
                             {fmtPts(b.amount)} pts
                           </td>
                           <td className="px-6 py-4 text-right opacity-40 italic font-inter text-[10px]">
@@ -1374,7 +1347,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                     className={`p-5 glass-panel rounded-xl transition-all relative overflow-hidden group ${
                       isFull
                         ? "opacity-50 grayscale cursor-not-allowed"
-                        : "hover:border-amber-400/40 cursor-pointer"
+                        : "hover:border-theme-orange/40 cursor-pointer"
                     }`}
                   >
                     {isFull && <div className="absolute inset-0 bg-black/20 z-10" />}
@@ -1404,7 +1377,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           </span>
                         </div>
                       </div>
-                      <span className="material-symbols-outlined text-on-surface-variant group-hover:text-amber-400 transition-colors">
+                      <span className="material-symbols-outlined text-on-surface-variant group-hover:text-theme-orange transition-colors">
                         {isFull ? "lock" : "info"}
                       </span>
                     </div>
@@ -1420,7 +1393,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           className="h-full transition-all duration-1000"
                           style={{
                             width: `${pctFilled}%`,
-                            background: isFull ? "rgba(255,255,255,0.2)" : "linear-gradient(90deg,#C9920A,#F5B400)",
+                            background: isFull ? "rgba(255,255,255,0.2)" : "linear-gradient(90deg,#A87815,#E8C468)",
                           }}
                         />
                       </div>
@@ -1452,7 +1425,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             <div
               className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
               style={{
-                background: "rgba(16, 20, 21, 0.95)",
+                background: "var(--color-surface-container-lowest)",
                 border: "1px solid rgba(99,102,241,0.25)",
                 boxShadow: "0 0 80px rgba(99,102,241,0.12), 0 24px 64px rgba(0,0,0,0.6)",
               }}
@@ -1542,7 +1515,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
             <div
               className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
               style={{
-                background: "rgba(16, 20, 21, 0.95)",
+                background: "var(--color-surface-container-lowest)",
                 border: "1px solid rgba(248,113,113,0.2)",
                 boxShadow: "0 0 80px rgba(239,68,68,0.12), 0 24px 64px rgba(0,0,0,0.6)",
               }}
@@ -1652,9 +1625,16 @@ export default function LiveAuctioneerPage({
   const { auctionId } = use(params);
   return (
     <AuctionProvider>
-      <DesktopOnlyWrapper>
-        <AuctioneerWithClock auctionId={auctionId} />
-      </DesktopOnlyWrapper>
+      <AuctionNameAwareWrapper auctionId={auctionId} />
     </AuctionProvider>
+  );
+}
+
+function AuctionNameAwareWrapper({ auctionId }: { auctionId: string }) {
+  const { auction } = useAuction();
+  return (
+    <DesktopOnlyWrapper auctionName={auction?.session?.auctionName}>
+      <AuctioneerWithClock auctionId={auctionId} />
+    </DesktopOnlyWrapper>
   );
 }

@@ -540,7 +540,7 @@ function AuctionAdminContent() {
                   {soldState !== "pending" && (
                     <button
                       onClick={handleNextPlayer}
-                      className="col-span-2 flex items-center justify-center gap-2 bg-primary text-on-primary py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl"
+                      className="col-span-2 flex items-center justify-center gap-2 bg-primary text-on-background py-3 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all active:scale-95 shadow-xl"
                     >
                       Next Player{" "}
                       <span className="material-symbols-outlined text-sm">arrow_forward</span>
