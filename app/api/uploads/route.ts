@@ -18,21 +18,22 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+const { supabase } = await import("@/lib/supabse");
 
-const BUCKET = "auction-media";
+const BUCKET = "Auction-Images";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"];
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
+    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  if (!url || !supabaseAnon) {
     throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars"
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY env vars"
     );
   }
-  return createClient(url, key, { auth: { persistSession: false } });
+  return createClient(url, supabaseAnon, { auth: { persistSession: false } });
 }
 
 function safeFileName(originalName: string): string {

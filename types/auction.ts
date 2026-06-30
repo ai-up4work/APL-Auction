@@ -140,6 +140,7 @@ export interface AuctionSummary {
   completedAt:  string | null;
   teamCount:    number;
   playerCount:  number;
+  auctionLogo:  string | null;
 }
 
 // ── Auction Links ─────────────────────────────────────────────────────────────

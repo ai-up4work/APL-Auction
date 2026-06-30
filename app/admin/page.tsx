@@ -2,12 +2,13 @@
 "use client";
 
 import { useState } from "react";
-import AdminHeader  from "@/components/Admin/AdminHeader";
-import TeamsTab     from "@/components/Admin/TeamsTab";
-import PlayersTab   from "@/components/Admin/PlayersTab";
-import RulesTab     from "@/components/Admin/RulesTab";
-import SessionTab   from "@/components/Admin/SessionTab";
-import LaunchTab    from "@/components/Admin/LaunchTab";
+import AdminHeader   from "@/components/Admin/AdminHeader";
+import AuctionPicker from "@/components/Admin/AuctionPicker";
+import TeamsTab      from "@/components/Admin/TeamsTab";
+import PlayersTab    from "@/components/Admin/PlayersTab";
+import RulesTab      from "@/components/Admin/RulesTab";
+import SessionTab    from "@/components/Admin/SessionTab";
+import LaunchTab     from "@/components/Admin/LaunchTab";
 import { useAuction } from "@/context/AuctionContext";
 
 const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
@@ -15,12 +16,21 @@ const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
 export default function AdminPage() {
   const [activeStep, setActiveStep] = useState("teams");
 
+  // The admin page always opens on the picker. There is no auto-skip based
+  // on a restored auctionId — the user explicitly chooses (or creates) an
+  // auction every time they land on /admin. This is intentional: it's what
+  // prevents the "always shows the last/default auction" behavior. Once
+  // they pick something, `entered` flips true for the rest of this visit.
+  const [entered, setEntered] = useState(false);
+
   const {
     auction,
     isSaving,
     saveError,
     shuffleReady,
+    isHydrated,
     links,
+    createNew,
     addTeam,
     editTeam,
     deleteTeam,
@@ -37,11 +47,20 @@ export default function AdminPage() {
     handleShuffle,
   } = useAuction();
 
-  // NOTE: adjust `auction.id` below to whatever field actually holds the
-  // auction's identifier on your `auction` object (e.g. auction.auctionId,
-  // auction.supabaseId, etc.) if it's not literally `id`.
-  const { id: auctionId, status: auctionStatus, teams, players, rules, session } = auction;
+  const { auctionId, status: auctionStatus, teams, players, rules, session } = auction;
   const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
+
+  function handleCreateNew(name?: string) {
+    createNew(name);
+    setEntered(true);
+  }
+
+  // Fired by AuctionPicker after switchAuction() resolves successfully —
+  // i.e. an existing auction was loaded into context and it's safe to
+  // leave the picker and render the dashboard for it.
+  function handleSelectAuction(_id: string) {
+    setEntered(true);
+  }
 
   function handleStepChange(step: string) {
     if (auctionLocked && CONFIG_STEPS.includes(step as any)) return;
@@ -60,6 +79,31 @@ export default function AdminPage() {
   async function onReauction() {
     await handleReauction();
     setActiveStep("teams");
+  }
+
+  // ── Waiting on rehydration (so localStorage / DB state is settled
+  // before we decide what to render) ──────────────────────────────────────
+  if (!isHydrated) {
+    return (
+      <div
+        className="min-h-screen w-full flex items-center justify-center"
+        style={{ background: "var(--color-background)", color: "var(--color-outline)" }}
+      >
+        <span className="material-symbols-outlined animate-spin" style={{ fontSize: 28 }}>
+          progress_activity
+        </span>
+      </div>
+    );
+  }
+
+  // ── No auction chosen yet this visit — always show the picker first ─────
+  if (!entered) {
+    return (
+      <AuctionPicker
+        onCreateNew={handleCreateNew}
+        onSelectAuction={handleSelectAuction}
+      />
+    );
   }
 
   return (
@@ -85,6 +129,21 @@ export default function AdminPage() {
           zIndex: 0,
         }}
       />
+
+      {/* Back to picker */}
+      <button
+        onClick={() => setEntered(false)}
+        className="fixed top-3 left-3 z-[200] flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+        style={{
+          background: "var(--color-surface-container)",
+          border: "1px solid var(--color-border-overlay)",
+          color: "var(--color-on-surface-variant)",
+          fontFamily: "var(--font-label-mono)",
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>arrow_back</span>
+        All Auctions
+      </button>
 
       {/* Saving indicator */}
       {isSaving && (
@@ -138,7 +197,7 @@ export default function AdminPage() {
           <TeamsTab
             locked={auctionLocked}
             teams={teams}
-            auctionId={auctionId}
+            auctionId={auctionId!}
             onAddTeam={addTeam}
             onEditTeam={editTeam}
             onDeleteTeam={deleteTeam}
@@ -149,9 +208,9 @@ export default function AdminPage() {
             locked={auctionLocked}
             players={players}
             teams={teams}
-            auctionId={auctionId}
+            auctionId={auctionId!}
             onAddPlayer={addPlayer}
-            onEditPlayer={editPlayer}   // ← new
+            onEditPlayer={editPlayer}
             onDeletePlayer={deletePlayer}
           />
         )}

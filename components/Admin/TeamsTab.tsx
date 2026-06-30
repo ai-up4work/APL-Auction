@@ -24,7 +24,7 @@ const EMPTY_FORM: Omit<Team, "id" | "roster" | "supabaseId"> = {
 interface TeamsTabProps {
   locked: boolean;
   teams: Team[];
-  auctionId: string; // needed so uploaded logos land in {auctionId}/Auction-Images/team-images/
+  auctionId?: string; // needed so uploaded logos land in {auctionId}/Auction-Images/team-images/
   onAddTeam: (data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
   onEditTeam: (id: number, data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
   onDeleteTeam: (id: number) => Promise<void>;
@@ -143,7 +143,7 @@ function PinInput({
 interface FranchiseModalProps {
   initial?: Team;
   existingCodes: string[];
-  auctionId: string;
+  auctionId?: string;
   onClose: () => void;
   onSave: (data: Omit<Team, "id" | "roster" | "supabaseId">) => void;
 }
@@ -259,7 +259,7 @@ function FranchiseModal({ initial, existingCodes, auctionId, onClose, onSave }: 
                (onSave → teams.logo) is unchanged. ── */}
           <div>
             <ImageUploadField
-              auctionId={auctionId}
+              auctionId={auctionId ?? ""}
               kind="team"
               value={form.logo}
               onChange={(url) => set("logo", url)}

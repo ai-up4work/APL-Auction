@@ -49,9 +49,29 @@ interface AuctionContextValue {
   saveError:     string | null;
   shuffleReady:  boolean;
 
+  // FIX (race-condition bug): becomes true once the mount-time rehydration
+  // effect has either (a) loaded a previously-saved auction from
+  // localStorage/Supabase, or (b) confirmed there was nothing saved to
+  // load. Until this flips true, callers MUST NOT call ensureAuctionId(),
+  // because doing so before hydration finishes will create a brand-new
+  // "default" auction and overwrite the saved apl_auction_id in
+  // localStorage — wiping out whatever auction the user was actually
+  // working on, every single refresh.
+  isHydrated: boolean;
+
   auctionList:   AuctionSummary[];
   isLoadingList: boolean;
   links:         AuctionLinks | null;
+
+  // Ensures the auction row exists in Supabase (creating it on first call,
+  // persisting any not-yet-saved teams/players) and returns its id.
+  // Exposed so callers (e.g. the admin page) can eagerly provision an
+  // auctionId before the user has saved anything — needed for things like
+  // image uploads that require a real auctionId to scope the storage path.
+  //
+  // IMPORTANT: callers should gate this on `isHydrated` being true first
+  // (see admin/page.tsx) or risk creating a duplicate auction on refresh.
+  ensureAuctionId: () => Promise<string>;
 
   addTeam:    (data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
   editTeam:   (id: number, data: Omit<Team, "id" | "roster" | "supabaseId">) => Promise<void>;
@@ -190,9 +210,17 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   const [links,         setLinks]         = useState<AuctionLinks | null>(null);
   const [shuffleReady,  setShuffleReady]  = useState(false);
 
+  // FIX: see isHydrated doc-comment on AuctionContextValue above.
+  const [isHydrated, setIsHydrated] = useState(false);
+
   const auctionRef   = useRef<AuctionState>(INITIAL_STATE);
   const rulesTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Guards against multiple concurrent callers (e.g. the eager mount-time
+  // call from the admin page racing with a user action like addTeam) both
+  // trying to create the auction row at the same time.
+  const ensureAuctionIdPromiseRef = useRef<Promise<string> | null>(null);
 
   useEffect(() => { auctionRef.current = auction; }, [auction]);
 
@@ -201,38 +229,59 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     const current = auctionRef.current;
     if (current.auctionId) return current.auctionId;
 
-    // Create the auction row
-    const id = await createAuction(current.session.auctionName || "APL Auction");
+    // If a call is already in flight, piggyback on it instead of creating
+    // a second auction row.
+    if (ensureAuctionIdPromiseRef.current) {
+      return ensureAuctionIdPromiseRef.current;
+    }
 
-    // Persist all teams that have no supabaseId yet
-    const savedTeams = await Promise.all(
-      current.teams.map(async (t) => {
-        if (t.supabaseId) return t;
-        const supabaseId = await upsertTeam(id, t);
-        return { ...t, supabaseId };
-      })
-    );
+    const run = async () => {
+      // Re-check immediately before creating — in case hydration (or
+      // another caller) finished and populated auctionId while this
+      // function was waiting to run.
+      if (auctionRef.current.auctionId) {
+        return auctionRef.current.auctionId;
+      }
 
-    // Persist all players that have no supabaseId yet
-    const savedPlayers = await Promise.all(
-      current.players.map(async (p) => {
-        if (p.supabaseId) return p;
-        const supabaseId = await upsertPlayer(id, p);
-        return { ...p, supabaseId };
-      })
-    );
+      // Create the auction row
+      const id = await createAuction(current.session.auctionName || "APL Auction");
 
-    // Commit everything to state atomically
-    setAuction((prev) => ({
-      ...prev,
-      auctionId: id,
-      teams:   savedTeams,
-      players: savedPlayers,
-    }));
+      // Persist all teams that have no supabaseId yet
+      const savedTeams = await Promise.all(
+        current.teams.map(async (t) => {
+          if (t.supabaseId) return t;
+          const supabaseId = await upsertTeam(id, t);
+          return { ...t, supabaseId };
+        })
+      );
 
-    localStorage.setItem("apl_auction_id", id);
-    return id;
-}
+      // Persist all players that have no supabaseId yet
+      const savedPlayers = await Promise.all(
+        current.players.map(async (p) => {
+          if (p.supabaseId) return p;
+          const supabaseId = await upsertPlayer(id, p);
+          return { ...p, supabaseId };
+        })
+      );
+
+      // Commit everything to state atomically
+      setAuction((prev) => ({
+        ...prev,
+        auctionId: id,
+        teams:   savedTeams,
+        players: savedPlayers,
+      }));
+
+      localStorage.setItem("apl_auction_id", id);
+      return id;
+    };
+
+    const promise = run().finally(() => {
+      ensureAuctionIdPromiseRef.current = null;
+    });
+    ensureAuctionIdPromiseRef.current = promise;
+    return promise;
+  }
 
   function withSave<T>(fn: () => Promise<T>): Promise<T> {
     setIsSaving(true);
@@ -275,22 +324,43 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   }, [auction.auctionId, auction.teams]);
 
   // ── Re-hydrate on mount ───────────────────────────────────────────────────
+  // FIX: this used to be a "fire and forget" effect. Nothing told the rest
+  // of the app whether it had finished, so app/admin/page.tsx's own
+  // mount-time effect (which calls ensureAuctionId() if auctionId is still
+  // null) would race ahead of this and create a brand-new default auction
+  // before this load had a chance to resolve. That new auction's id then
+  // overwrote "apl_auction_id" in localStorage — permanently losing track
+  // of whatever auction (e.g. "Moon Night Auction") was actually saved,
+  // and repeating on every refresh.
+  //
+  // Fix: track completion explicitly via isHydrated, and have every code
+  // path through this effect — found data, found empty shell, found
+  // nothing, or errored — end by setting isHydrated(true) exactly once.
   useEffect(() => {
     const savedId = localStorage.getItem("apl_auction_id");
 
-    if (savedId) {
-      loadAuction(savedId)
-        .then((state) => {
-          if (!state) { localStorage.removeItem("apl_auction_id"); return; }
-          const hasData = state.teams.length > 0 || state.players.length > 0;
-          if (hasData) {
-            applyLoadedState(state);
-          } else {
-            setAuction((prev) => ({ ...prev, auctionId: state.auctionId }));
-          }
-        })
-        .catch(console.error);
+    if (!savedId) {
+      setIsHydrated(true);
+      return;
     }
+
+    loadAuction(savedId)
+      .then((state) => {
+        if (!state) {
+          // Saved id no longer exists in the DB (e.g. deleted elsewhere) —
+          // clear it so we don't keep trying to load a dead auction.
+          localStorage.removeItem("apl_auction_id");
+          return;
+        }
+        const hasData = state.teams.length > 0 || state.players.length > 0;
+        if (hasData) {
+          applyLoadedState(state);
+        } else {
+          setAuction((prev) => ({ ...prev, auctionId: state.auctionId }));
+        }
+      })
+      .catch(console.error)
+      .finally(() => setIsHydrated(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -480,7 +550,7 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   const handleShuffle = useCallback(async () => {
     await withSave(async () => {
       const id = await ensureAuctionId(); // this already persists unpersisted teams/players
-      
+
       // Re-read from ref after ensureAuctionId, which may have updated state
       // Wait a tick for state to settle
       await new Promise(r => setTimeout(r, 50));
@@ -592,9 +662,11 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     isSaving,
     saveError,
     shuffleReady,
+    isHydrated,
     auctionList,
     isLoadingList,
     links,
+    ensureAuctionId,
     addTeam,
     editTeam,
     deleteTeam,

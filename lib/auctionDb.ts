@@ -541,6 +541,7 @@ export interface AuctionSummary {
   completedAt: string | null;
   teamCount:   number;
   playerCount: number;
+  auctionLogo: string | null;
 }
 
 export async function listAuctions(): Promise<AuctionSummary[]> {
@@ -549,7 +550,8 @@ export async function listAuctions(): Promise<AuctionSummary[]> {
     .select(`
       id, name, status, created_at, launched_at, completed_at,
       teams:teams(count),
-      players:players(count)
+      players:players(count),
+      session_config(auction_logo)
     `)
     .order("created_at", { ascending: false });
 
@@ -564,6 +566,9 @@ export async function listAuctions(): Promise<AuctionSummary[]> {
     completedAt: a.completed_at ?? null,
     teamCount:   a.teams[0]?.count   ?? 0,
     playerCount: a.players[0]?.count ?? 0,
+    auctionLogo: Array.isArray(a.session_config)
+      ? (a.session_config[0]?.auction_logo ?? null)
+      : (a.session_config?.auction_logo ?? null),
   }));
 }
 
@@ -648,3 +653,4 @@ export async function loadAuctionFromUrl(): Promise<string | null> {
   const params = new URLSearchParams(window.location.search);
   return params.get("auction");
 }
+
