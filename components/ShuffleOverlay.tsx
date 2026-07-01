@@ -1,7 +1,7 @@
 'use client';
 
 import { Player } from '@/types/sankeytype';
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 interface ShuffleOverlayProps {
   isShuffling: boolean;
@@ -10,9 +10,8 @@ interface ShuffleOverlayProps {
   shuffleIndex: number;
 }
 
-// Pulled from globals.css --color-theme-orange at runtime so this canvas
-// never drifts from the rest of the app's accent color again.
-// (Fallback values match --color-theme-orange's current value in globals.css.)
+// Synced from --color-theme-orange at runtime so every glow/rgba effect here
+// always matches the live app accent instead of a baked-in hex value.
 let ACC = '#c9971f';
 let ACC_RGB = '201,151,31';
 
@@ -32,428 +31,384 @@ function syncThemeColor() {
   }
 }
 
-// ── grid sizing: find rows x cols >= n, as close to a square as possible ────
-// e.g. 26 -> 5x6 (30 cells), not 13x2 or 9x3.
-function bestGridShape(n: number): { rows: number; cols: number } {
-  if (n <= 0) return { rows: 1, cols: 1 };
-  let best = { rows: 1, cols: n, score: Infinity };
-  const maxDim = Math.ceil(Math.sqrt(n)) + 6; // search window around sqrt(n)
-  for (let rows = 1; rows <= maxDim; rows++) {
-    const cols = Math.ceil(n / rows);
-    if (rows * cols < n) continue;
-    const overshoot = rows * cols - n;
-    const aspectRatio = Math.max(rows, cols) / Math.min(rows, cols);
-    // squareness (aspect ratio) dominates the choice; overshoot only breaks
-    // ties among shapes that are similarly square-ish.
-    const score = aspectRatio * 10 + overshoot * 0.3;
-    if (score < best.score) {
-      best = { rows, cols, score };
-    }
-  }
-  return { rows: best.rows, cols: best.cols };
+function initials(name: string) {
+  return (name || '')
+    .split(' ')
+    .map((w) => w[0])
+    .filter(Boolean)
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 }
 
-interface GridCell {
-  player: Player | null; // null = empty/disabled padding cell
-  active: boolean;       // still pickable
-  row: number;
-  col: number;
-  cx: number;            // center x (relative to canvas)
-  cy: number;
+const SPIN_PHRASES = [
+  'Spinning the reels…',
+  'Scanning the player pool…',
+  'Building suspense…',
+  'Almost there…',
+];
+
+// ── one card inside a reel column ────────────────────────────────────────
+function ReelCard({
+  player,
+  size,
+  dim,
+  glow,
+}: {
+  player: Player | null;
   size: number;
-  // animation state
-  lit: number;            // 0..1 current brightness from blinking
-  selected: boolean;
-  flipT: number;
-  pulsePhase: number;
+  dim: boolean;
+  glow: boolean;
+}) {
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => setImgOk(true), [player?.id]);
+
+  if (!player) {
+    return <div style={{ width: size, height: size * 1.2 }} />;
+  }
+
+  return (
+    <div
+      className="relative rounded-xl overflow-hidden border-2 shrink-0"
+      style={{
+        width: size,
+        height: size * 1.2,
+        borderColor: glow ? ACC : 'rgba(255,255,255,0.10)',
+        background: '#0d1113',
+        opacity: dim ? 0.35 : 1,
+        boxShadow: glow
+          ? `0 0 26px rgba(${ACC_RGB},0.75), 0 0 54px rgba(${ACC_RGB},0.35)`
+          : '0 4px 14px rgba(0,0,0,0.5)',
+        transition: 'opacity 150ms ease, border-color 150ms ease, box-shadow 150ms ease',
+      }}
+    >
+      {player.img && imgOk ? (
+        <img
+          src={player.img}
+          alt={player.name}
+          className="w-full h-full object-cover object-top"
+          onError={() => setImgOk(false)}
+        />
+      ) : (
+        <div
+          className="w-full h-full flex items-center justify-center"
+          style={{ background: `linear-gradient(135deg, rgba(${ACC_RGB},0.28), rgba(0,0,0,0.5))` }}
+        >
+          <span className="font-mono font-black text-white/85" style={{ fontSize: size * 0.26 }}>
+            {initials(player.name)}
+          </span>
+        </div>
+      )}
+      {glow && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: `linear-gradient(to top, rgba(${ACC_RGB},0.38), transparent 55%)` }}
+        />
+      )}
+    </div>
+  );
 }
 
-function buildGrid(
-  players: Player[],
-  W: number,
-  H: number
-): { cells: GridCell[]; rows: number; cols: number } {
-  const pickable = players.filter((p) => p.status === 'locked');
-  const n = pickable.length;
-  if (n === 0) return { cells: [], rows: 0, cols: 0 };
+// ── a single spinning reel column ────────────────────────────────────────
+function ReelColumn({
+  pool,
+  centerIndex,
+  offset,
+  cardSize,
+  locked,
+  lockedPlayer,
+  transitionMs,
+  blurPx,
+}: {
+  pool: Player[];
+  centerIndex: number;
+  offset: number;
+  cardSize: number;
+  locked: boolean;
+  lockedPlayer: Player | null;
+  transitionMs: number;
+  blurPx: number;
+}) {
+  const half = 1; // 3 visible rows: one above, center, one below
+  const n = pool.length;
 
-  const { rows, cols } = bestGridShape(n);
-  const totalSlots = rows * cols;
-
-  // randomly choose which slots are "disabled" padding (totalSlots - n of them)
-  const slotIsPlayer: boolean[] = Array.from({ length: totalSlots }, (_, i) => i < n);
-  // Fisher-Yates shuffle of slot assignment so padding isn't all at the end
-  for (let i = slotIsPlayer.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [slotIsPlayer[i], slotIsPlayer[j]] = [slotIsPlayer[j], slotIsPlayer[i]];
+  const items: (Player | null)[] = [];
+  for (let d = -half; d <= half; d++) {
+    if (locked) {
+      items.push(lockedPlayer);
+      continue;
+    }
+    if (n === 0) {
+      items.push(null);
+      continue;
+    }
+    const idx = (((centerIndex + offset + d) % n) + n) % n;
+    items.push(pool[idx]);
   }
 
-  // shuffle player order so it's not deterministic by original array order
-  const shuffledPlayers = [...pickable];
-  for (let i = shuffledPlayers.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledPlayers[i], shuffledPlayers[j]] = [shuffledPlayers[j], shuffledPlayers[i]];
-  }
-
-  const pad = 28;
-  const gw = W - pad * 2;
-  const gh = H - pad * 2;
-  const cellW = gw / cols;
-  const cellH = gh / rows;
-  const size = Math.min(cellW, cellH) * 0.74;
-
-  const cells: GridCell[] = [];
-  let playerCursor = 0;
-  for (let i = 0; i < totalSlots; i++) {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const cx = pad + cellW * col + cellW / 2;
-    const cy = pad + cellH * row + cellH / 2;
-    const isPlayer = slotIsPlayer[i];
-    const player = isPlayer ? shuffledPlayers[playerCursor++] : null;
-    cells.push({
-      player,
-      active: isPlayer,
-      row,
-      col,
-      cx,
-      cy,
-      size,
-      lit: 0,
-      selected: false,
-      flipT: 0,
-      pulsePhase: Math.random() * Math.PI * 2,
-    });
-  }
-
-  return { cells, rows, cols };
+  return (
+    <div
+      key={locked ? 'locked' : centerIndex}
+      className="flex flex-col items-center"
+      style={{
+        gap: 8,
+        animation: locked
+          ? 'reel-settle 380ms cubic-bezier(0.18,0.9,0.32,1.2) both'
+          : `reel-tick ${transitionMs}ms linear both`,
+        filter: locked ? 'none' : `blur(${blurPx}px)`,
+      }}
+    >
+      {items.map((p, i) => (
+        <ReelCard
+          key={p ? `${p.id ?? p.name}-${i}` : `empty-${i}`}
+          player={p}
+          size={cardSize}
+          dim={i !== half}
+          glow={locked && i === half}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function ShuffleOverlay({
   isShuffling,
   shuffleTarget,
   players,
+  shuffleIndex,
 }: ShuffleOverlayProps) {
-  const pickablePlayers = useMemo(() => players.filter((p) => p.status === 'locked'), [players]);
+  // `players` is already the pool built by the caller for this shuffle
+  // (candidates + the target spliced in) — use it directly rather than
+  // re-deriving a subset, so the reel always matches the real pool.
+  const pool = useMemo(() => players, [players]);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number | null>(null);
-
-  const stateRef = useRef({
-    phase: 0 as 0 | 1 | 2, // 0=random blinking 1=narrowing down 2=locked on winner
-    t: 0,
-    cells: [] as GridCell[],
-    rows: 0,
-    cols: 0,
-    W: 0,
-    H: 0,
-    winnerIdx: -1,
-    blinkTimer: 0,
-    blinkInterval: 4,     // frames between blink waves (speeds up via reduce)
-    blinkCount: 0,        // how many cells lit per wave (reduces over time)
-    activeBlinkSet: [] as number[], // indices currently lit this wave
-    narrowPool: [] as number[],     // shrinking candidate pool that always includes winner
-    settleStarted: false,
-  });
-
-  const [statusText, setStatusText] = useState('Scanning player pool…');
-
-  const rebuild = useCallback(() => {
-    const cv = canvasRef.current;
-    if (!cv) return;
-    const W = cv.clientWidth;
-    const H = cv.clientHeight;
-    cv.width = W * 2;
-    cv.height = H * 2;
-    const ctx = cv.getContext('2d')!;
-    ctx.scale(2, 2);
-    const s = stateRef.current;
-    s.W = W; s.H = H;
-    const { cells, rows, cols } = buildGrid(pickablePlayers, W, H);
-    s.cells = cells;
-    s.rows = rows;
-    s.cols = cols;
-  }, [pickablePlayers]);
+  const [phrase, setPhrase] = useState(SPIN_PHRASES[0]);
+  const [transitionMs, setTransitionMs] = useState(90);
+  const [blurPx, setBlurPx] = useState(5);
+  const lastTickRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    if (!isShuffling) return;
-    if (pickablePlayers.length === 0) return;
-
-    // Make sure the canvas always paints with whatever --color-theme-orange
-    // currently resolves to, instead of a baked-in hex value.
     syncThemeColor();
+  }, []);
 
-    rebuild();
-    const s = stateRef.current;
-    s.phase = 0;
-    s.t = 0;
-    s.blinkTimer = 0;
-    s.blinkInterval = 4;
-    s.settleStarted = false;
-
-    // pick winner among active (player-bearing) cells
-    const activeIndices = s.cells
-      .map((c, i) => (c.active ? i : -1))
-      .filter((i) => i >= 0);
-    s.winnerIdx = activeIndices[Math.floor(Math.random() * activeIndices.length)];
-    s.narrowPool = [...activeIndices];
-
-    // initial blink wave size: a healthy chunk of the active cells
-    s.blinkCount = Math.max(4, Math.round(activeIndices.length * 0.4));
-    s.activeBlinkSet = [];
-
-    setStatusText('Scanning player pool…');
-
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-
-    const TOTAL_DURATION = 220; // frames before we force-settle, matches prior ~2.2s+ feel
-    const SETTLE_AT = 190;      // frame at which we begin the final lock-on
-
-    function pickBlinkWave() {
-      // Always keep the winner eligible to appear in waves so the final
-      // reveal feels like it "found" the winner rather than teleporting.
-      const pool = s.narrowPool.length > 0 ? s.narrowPool : [s.winnerIdx];
-      const count = Math.min(s.blinkCount, pool.length);
-      const shuffled = [...pool];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      // ensure winner is included once we're narrowing down (phase progressing)
-      let picked = shuffled.slice(0, count);
-      if (s.t > 60 && !picked.includes(s.winnerIdx)) {
-        picked[picked.length - 1] = s.winnerIdx;
-      }
-      s.activeBlinkSet = picked;
-    }
-
-    function frame() {
-      const cv = canvasRef.current;
-      if (!cv) return;
-      const ctx = cv.getContext('2d')!;
-      const { W, H, cells, rows, cols } = s;
-
-      ctx.clearRect(0, 0, W, H);
-      s.t++;
-
-      // ── background grid lines (subtle) ─────────────────────────────────
-      ctx.strokeStyle = `rgba(${ACC_RGB},0.05)`;
-      ctx.lineWidth = 0.5;
-      if (cells.length > 0) {
-        const pad = 28;
-        const cellW = (W - pad * 2) / cols;
-        const cellH = (H - pad * 2) / rows;
-        for (let c = 0; c <= cols; c++) {
-          const x = pad + c * cellW;
-          ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, H - pad); ctx.stroke();
-        }
-        for (let r = 0; r <= rows; r++) {
-          const y = pad + r * cellH;
-          ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad, y); ctx.stroke();
-        }
-      }
-
-      // ── manage blink waves (phase 0/1) ──────────────────────────────────
-      if (s.phase === 0 || s.phase === 1) {
-        s.blinkTimer++;
-        if (s.blinkTimer >= s.blinkInterval) {
-          s.blinkTimer = 0;
-          pickBlinkWave();
-
-          // progressively narrow the candidate pool and speed up / shrink wave size
-          if (s.t > 40) {
-            // shrink pool toward winner over time
-            const shrinkTo = Math.max(
-              1,
-              Math.round(s.narrowPool.length * 0.78)
-            );
-            if (shrinkTo < s.narrowPool.length) {
-              const shuffledPool = [...s.narrowPool];
-              for (let i = shuffledPool.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [shuffledPool[i], shuffledPool[j]] = [shuffledPool[j], shuffledPool[i]];
-              }
-              const keep = new Set(shuffledPool.slice(0, shrinkTo));
-              keep.add(s.winnerIdx);
-              s.narrowPool = s.narrowPool.filter((i) => keep.has(i));
-            }
-            s.blinkCount = Math.max(1, Math.round(s.blinkCount * 0.9));
-            s.blinkInterval = Math.min(14, s.blinkInterval + 0.6);
-            s.phase = 1;
-            setStatusText('Narrowing down…');
-          }
-        }
-      }
-
-      // ── settle into final winner ────────────────────────────────────────
-      if (s.t >= SETTLE_AT && !s.settleStarted) {
-        s.settleStarted = true;
-        s.phase = 2;
-        s.activeBlinkSet = [s.winnerIdx];
-        setStatusText('Locking on…');
-      }
-
-      // update lit values toward target (smooth blink decay/attack)
-      cells.forEach((cell, i) => {
-        const isLitTarget =
-          s.phase === 2 ? i === s.winnerIdx : s.activeBlinkSet.includes(i);
-        const target = !cell.active ? 0 : isLitTarget ? 1 : 0;
-        cell.lit += (target - cell.lit) * (s.phase === 2 ? 0.08 : 0.35);
-      });
-
-      if (s.phase === 2 && s.t > SETTLE_AT + 18) {
-        const winnerCell = cells[s.winnerIdx];
-        if (winnerCell && !winnerCell.selected) {
-          winnerCell.selected = true;
-        }
-      }
-
-      // ── draw cells ───────────────────────────────────────────────────────
-      cells.forEach((cell, i) => {
-        const { cx, cy, size } = cell;
-        ctx.save();
-        ctx.translate(cx, cy);
-
-        if (!cell.active) {
-          // disabled / padding cell — faint ghost square
-          ctx.globalAlpha = 0.12;
-          ctx.fillStyle = `rgba(40,48,50,1)`;
-          roundRect(ctx, -size / 2, -size / 2, size, size, 5);
-          ctx.fill();
-          ctx.restore();
-          return;
-        }
-
-        if (cell.selected) {
-          const progress = cell.flipT = Math.min(1, cell.flipT + 0.05);
-          const r = size / 2 + progress * 6;
-
-          // glow rings
-          ctx.beginPath();
-          ctx.arc(0, 0, r + 6 + Math.sin(s.t * 0.1) * 2, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${ACC_RGB},${0.35 * progress})`;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-
-          ctx.globalAlpha = 1;
-          roundRect(ctx, -r, -r, r * 2, r * 2, 8);
-          ctx.fillStyle = ACC;
-          ctx.fill();
-
-          if (progress > 0.4) {
-            const fsize = Math.max(9, r * 0.7);
-            ctx.fillStyle = `rgba(255,255,255,${(progress - 0.4) / 0.6})`;
-            ctx.font = `900 ${fsize}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const initials = (cell.player!.name || '')
-              .split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
-            ctx.fillText(initials, 0, 0);
-          }
-        } else {
-          // active blinking square — always clearly visible at rest, brighter when lit
-          const lit = cell.lit;
-
-          ctx.globalAlpha = 1;
-          if (lit > 0.05) {
-            // glow behind lit cell
-            ctx.save();
-            ctx.shadowColor = `rgba(${ACC_RGB},${lit * 0.8})`;
-            ctx.shadowBlur = 14 * lit;
-            ctx.fillStyle = `rgba(${ACC_RGB},${0.18 + lit * 0.62})`;
-            roundRect(ctx, -size / 2, -size / 2, size, size, 5);
-            ctx.fill();
-            ctx.restore();
-          } else {
-            // resting state — still a clearly visible filled square, not near-invisible
-            ctx.fillStyle = `rgba(${ACC_RGB},0.16)`;
-            roundRect(ctx, -size / 2, -size / 2, size, size, 5);
-            ctx.fill();
-          }
-
-          ctx.strokeStyle = `rgba(${ACC_RGB},${0.45 + lit * 0.5})`;
-          ctx.lineWidth = 1.4;
-          roundRect(ctx, -size / 2, -size / 2, size, size, 5);
-          ctx.stroke();
-        }
-
-        ctx.restore();
-      });
-
-      if (s.phase === 2 && cells[s.winnerIdx]?.flipT >= 1) {
-        // hold on final frame; the parent will swap shuffleTarget in shortly
-      }
-
-      animRef.current = requestAnimationFrame(frame);
-    }
-
-    animRef.current = requestAnimationFrame(frame);
-    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isShuffling]);
-
+  // cycle flavour text while spinning
   useEffect(() => {
-    if (!isShuffling && !shuffleTarget) {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    }
+    if (!isShuffling || shuffleTarget) return;
+    let i = 0;
+    const id = setInterval(() => {
+      i = (i + 1) % SPIN_PHRASES.length;
+      setPhrase(SPIN_PHRASES[i]);
+    }, 750);
+    return () => clearInterval(id);
   }, [isShuffling, shuffleTarget]);
 
-  if (!isShuffling && !shuffleTarget) return null;
-  if (pickablePlayers.length === 0) return null;
+  // Infer real spin speed from the actual time between shuffleIndex ticks
+  // (the caller already decelerates this over time), so the reel's motion
+  // blur and tick duration track the true spin curve instead of a guess.
+  useEffect(() => {
+    const now = Date.now();
+    const dt = now - lastTickRef.current;
+    lastTickRef.current = now;
+    if (dt <= 0 || dt > 2000) return;
+    const dur = Math.min(Math.max(dt * 0.9, 40), 260);
+    setTransitionMs(dur);
+    setBlurPx(dt < 90 ? 6 : dt < 160 ? 3.5 : dt < 260 ? 1.5 : 0);
+  }, [shuffleIndex]);
+
+  const locked = !!shuffleTarget;
+
+  if (!isShuffling && !locked) return null;
+  if (pool.length === 0) return null;
+
+  const n = pool.length;
+  const offsetB = Math.floor(n / 3) || 1;
+  const offsetC = Math.floor((n * 2) / 3) || 2;
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#06080a]/97 backdrop-blur-md">
+    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-[#06080a]/97 backdrop-blur-md overflow-hidden">
+      <style>{`
+        @keyframes reel-tick {
+          from { transform: translateY(-22px); opacity: 0.5; }
+          to   { transform: translateY(0);      opacity: 1;   }
+        }
+        @keyframes reel-settle {
+          0%   { transform: translateY(-14px) scale(0.9);  opacity: 0.4; }
+          55%  { transform: translateY(4px)   scale(1.05); opacity: 1;   }
+          100% { transform: translateY(0)     scale(1);    opacity: 1;   }
+        }
+        @keyframes bulb-blink {
+          0%, 100% { opacity: 0.25; }
+          50%      { opacity: 1;    }
+        }
+        @keyframes confetti-burst {
+          0%   { transform: translate(0,0) scale(1); opacity: 1; }
+          100% { transform: translate(var(--tx), var(--ty)) scale(0.3); opacity: 0; }
+        }
+      `}</style>
 
       {/* Ambient glow */}
       <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
-        <div className={`w-[600px] h-[600px] rounded-full blur-[160px] transition-all duration-1000
-          ${shuffleTarget ? 'bg-theme-orange/20 scale-125' : 'bg-theme-orange/[0.06] animate-pulse'}`} />
+        <div
+          className="rounded-full blur-[160px] transition-all duration-1000"
+          style={{
+            width: 620,
+            height: 620,
+            background: locked ? `rgba(${ACC_RGB},0.22)` : `rgba(${ACC_RGB},0.06)`,
+            transform: locked ? 'scale(1.25)' : 'scale(1)',
+          }}
+        />
       </div>
 
       {/* Headline */}
-      <h2 className={`relative z-10 text-2xl md:text-3xl font-bold tracking-[0.22em] uppercase mb-5
-        transition-all duration-500 text-center font-mono
-        ${shuffleTarget
-          ? 'text-theme-orange drop-shadow-[0_0_18px_rgba(201,151,31,0.9)] scale-105'
-          : 'text-white/50 animate-pulse'}`}>
-        {shuffleTarget ? 'Player Selected' : statusText}
-      </h2>
-
-      {/* Heatmap canvas */}
-      <div
-        className="relative z-10 rounded-2xl overflow-hidden border border-theme-orange/15"
+      <h2
+        className="relative z-10 text-2xl md:text-3xl font-bold tracking-[0.22em] uppercase mb-6 text-center font-mono transition-all duration-500"
         style={{
-          width: 'min(92vw, 620px)',
-          height: 'min(92vw, 460px)',
-          background: 'radial-gradient(circle, #0c1012 60%, #080b0c 100%)',
-          boxShadow: '0 0 60px rgba(201,151,31,0.06), inset 0 0 40px rgba(0,0,0,0.6)',
+          color: locked ? ACC : 'rgba(255,255,255,0.55)',
+          textShadow: locked ? `0 0 18px rgba(${ACC_RGB},0.9)` : 'none',
+          transform: locked ? 'scale(1.05)' : 'scale(1)',
         }}
       >
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%', display: 'block' }}
-        />
+        {locked ? '🎉 Player Selected!' : phrase}
+      </h2>
+
+      {/* Cabinet */}
+      <div
+        className="relative z-10 rounded-[28px] p-5 md:p-7"
+        style={{
+          background: 'linear-gradient(180deg, #171011 0%, #0c0908 100%)',
+          border: `3px solid rgba(${ACC_RGB},0.45)`,
+          boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 30px 70px rgba(0,0,0,0.7), inset 0 0 40px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* marquee bulbs */}
+        <div className="flex justify-between px-2 mb-4">
+          {Array.from({ length: 14 }).map((_, i) => (
+            <span
+              key={i}
+              className="rounded-full"
+              style={{
+                width: 6,
+                height: 6,
+                background: ACC,
+                animation: 'bulb-blink 1.1s ease-in-out infinite',
+                animationDelay: `${(i % 7) * 0.12}s`,
+                boxShadow: `0 0 6px rgba(${ACC_RGB},0.9)`,
+              }}
+            />
+          ))}
+        </div>
+
+        {/* reel window */}
+        <div
+          className="relative flex items-center justify-center gap-3 md:gap-5 rounded-2xl overflow-hidden px-4 md:px-6 py-4"
+          style={{
+            background: 'radial-gradient(circle, #14181a 55%, #0a0d0e 100%)',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <div
+            className="absolute inset-x-0 top-0 h-10 z-20 pointer-events-none"
+            style={{ background: 'linear-gradient(#0a0d0e, transparent)' }}
+          />
+          <div
+            className="absolute inset-x-0 bottom-0 h-10 z-20 pointer-events-none"
+            style={{ background: 'linear-gradient(transparent, #0a0d0e)' }}
+          />
+          <div
+            className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-px z-20 pointer-events-none"
+            style={{ background: `rgba(${ACC_RGB},${locked ? 0.5 : 0.18})` }}
+          />
+
+          <ReelColumn
+            pool={pool}
+            centerIndex={shuffleIndex}
+            offset={0}
+            cardSize={62}
+            locked={locked}
+            lockedPlayer={shuffleTarget}
+            transitionMs={transitionMs}
+            blurPx={Math.max(0, blurPx - 1.5)}
+          />
+          <ReelColumn
+            pool={pool}
+            centerIndex={shuffleIndex}
+            offset={offsetB}
+            cardSize={92}
+            locked={locked}
+            lockedPlayer={shuffleTarget}
+            transitionMs={transitionMs}
+            blurPx={blurPx}
+          />
+          <ReelColumn
+            pool={pool}
+            centerIndex={shuffleIndex}
+            offset={offsetC}
+            cardSize={62}
+            locked={locked}
+            lockedPlayer={shuffleTarget}
+            transitionMs={transitionMs}
+            blurPx={Math.max(0, blurPx - 1.5)}
+          />
+        </div>
+
+        {/* confetti burst on win */}
+        {locked && (
+          <div
+            key={shuffleTarget?.id ?? 'win'}
+            className="absolute inset-0 pointer-events-none z-30 flex items-center justify-center"
+          >
+            {Array.from({ length: 26 }).map((_, i) => {
+              const angle = (i / 26) * Math.PI * 2;
+              const dist = 90 + Math.random() * 60;
+              const tx = Math.cos(angle) * dist;
+              const ty = Math.sin(angle) * dist;
+              return (
+                <span
+                  key={i}
+                  className="absolute rounded-full"
+                  style={
+                    {
+                      width: 5,
+                      height: 5,
+                      background: i % 2 === 0 ? ACC : '#ffffff',
+                      '--tx': `${tx}px`,
+                      '--ty': `${ty}px`,
+                      animation: `confetti-burst ${0.7 + Math.random() * 0.5}s ease-out forwards`,
+                    } as CSSProperties
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Winner card */}
       {shuffleTarget && (
         <div className="relative z-10 mt-7 flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="absolute -inset-1 bg-gradient-to-b from-theme-orange to-transparent rounded-[22px] blur-md opacity-40" />
-          <div className="relative bg-[#101415] border border-theme-orange/40 rounded-[18px] px-8 py-4
-            flex items-center gap-5 shadow-2xl">
-            <div className="w-11 h-11 rounded-full bg-theme-orange flex items-center justify-center flex-shrink-0">
+          <div
+            className="absolute -inset-1 rounded-[22px] blur-md opacity-40"
+            style={{ background: `linear-gradient(to bottom, ${ACC}, transparent)` }}
+          />
+          <div
+            className="relative bg-[#101415] rounded-[18px] px-8 py-4 flex items-center gap-5 shadow-2xl"
+            style={{ border: `1px solid rgba(${ACC_RGB},0.4)` }}
+          >
+            <div className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: ACC }}>
               <span className="font-mono font-black text-[#0b0f10] text-sm">
-                {shuffleTarget.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                {initials(shuffleTarget.name)}
               </span>
             </div>
             <div>
               <p className="font-bold text-xl text-white tracking-tight">{shuffleTarget.name}</p>
-              <p className="font-mono text-xs text-theme-orange/70 tracking-widest uppercase mt-0.5">
+              <p className="font-mono text-xs tracking-widest uppercase mt-0.5" style={{ color: `rgba(${ACC_RGB},0.75)` }}>
                 Base: {shuffleTarget.price}
               </p>
             </div>
-            <div className="ml-3 px-3 py-1 rounded-full bg-theme-orange text-[#0b0f10] text-[10px]
-              font-black tracking-widest uppercase">
+            <div
+              className="ml-3 px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase"
+              style={{ background: ACC, color: '#0b0f10' }}
+            >
               On the block
             </div>
           </div>
@@ -462,26 +417,8 @@ export function ShuffleOverlay({
 
       {/* Pool counter */}
       <p className="relative z-10 mt-4 font-mono text-[10px] text-white/20 tracking-widest uppercase">
-        {pickablePlayers.length} player{pickablePlayers.length !== 1 ? 's' : ''} remaining in pool
+        {pool.length} player{pool.length !== 1 ? 's' : ''} remaining in pool
       </p>
     </div>
   );
-}
-
-// ── helper: rounded rect path ────────────────────────────────────────────────
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
 }
