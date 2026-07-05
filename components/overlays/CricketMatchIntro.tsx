@@ -304,141 +304,98 @@ export default function CricketMatchIntro() {
                         </div>
                       </div>
                     </div>
-
-                    {/* Glass banner footer — each stat now reads as its own small
-                        unit (icon + label + value), separated by soft gradient
-                        hairlines instead of a single hard border. */}
+                    {/* Footer — ticket stub. Compartment gets its own faint paper tint so it 
+                        reads as a separate piece of stock, and its print switches to monospace 
+                        (real ticket printers are always dot-matrix/monospace, never a display face). */}
                     <div
-                      className="glass-panel relative z-10 px-6 sm:px-10 py-6"
+                      className="glass-panel relative z-10"
                       style={{ borderLeft: "none", borderRight: "none", borderBottom: "none" }}
                     >
-                      <div className="flex flex-col sm:flex-row items-center sm:items-stretch justify-between gap-5 sm:gap-0">
-                        {/* Match preview — team dots + short codes */}
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center -space-x-1.5">
-                            <span
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{
-                                background: TEAM_A.color,
-                                border: "2px solid var(--color-surface-container-lowest)",
-                              }}
-                            />
-                            <span
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{
-                                background: TEAM_B.color,
-                                border: "2px solid var(--color-surface-container-lowest)",
-                              }}
-                            />
-                          </div>
-                          <div className="leading-tight text-left">
-                            <span
-                              className="font-bold tracking-[0.25em] uppercase text-[9px] block mb-0.5"
-                              style={{ color: "var(--color-theme-orange)" }}
-                            >
-                              Match Preview
-                            </span>
-                            <p
-                              className="font-heading text-sm sm:text-base font-bold"
-                              style={{ color: "var(--color-on-surface)" }}
-                            >
-                              {TEAM_A.short}{" "}
-                              <span style={{ color: "var(--color-outline)" }}>vs</span>{" "}
-                              {TEAM_B.short}
-                            </p>
-                          </div>
-                        </div>
+                      <div
+                        className="absolute -left-[9px] top-0 w-[18px] h-[18px] rounded-full -translate-y-1/2"
+                        style={{ background: "rgba(8,8,10,0.94)", boxShadow: "inset -2px 0 4px rgba(0,0,0,0.5)" }}
+                      />
+                      <div
+                        className="absolute -right-[9px] top-0 w-[18px] h-[18px] rounded-full -translate-y-1/2"
+                        style={{ background: "rgba(8,8,10,0.94)", boxShadow: "inset 2px 0 4px rgba(0,0,0,0.5)" }}
+                      />
+                      <div
+                        className="absolute left-3 right-3 top-0 h-px -translate-y-1/2"
+                        style={{
+                          backgroundImage:
+                            "repeating-linear-gradient(90deg, var(--color-outline) 0 5px, transparent 5px 11px)",
+                          opacity: 0.5,
+                        }}
+                      />
 
-                        {/* Vertical hairline divider — fades top/bottom rather
-                            than a hard-edged border */}
-                        <div
-                          className="hidden sm:block w-px mx-6"
-                          style={{
-                            background:
-                              "linear-gradient(180deg, transparent, var(--color-border-overlay) 20%, var(--color-border-overlay) 80%, transparent)",
-                          }}
-                        />
-
-                        {/* Venue */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                            style={{ background: "var(--color-surface-container-high)" }}
-                          >
-                            <MapPin className="w-3.5 h-3.5" style={{ color: "var(--color-theme-orange)" }} />
-                          </div>
-                          <div className="leading-tight text-left">
+                      <div className="flex flex-col sm:flex-row">
+                        <div className="flex-1 flex items-center gap-8 px-6 sm:px-10 py-6">
+                          <div>
                             <span
-                              className="font-bold tracking-widest uppercase text-[9px] block mb-0.5"
+                              className="block font-bold tracking-[0.25em] uppercase text-[9px]"
                               style={{ color: "var(--color-outline)" }}
                             >
                               Venue
                             </span>
                             <p
-                              className="font-bold text-sm uppercase tracking-tight"
+                              className="font-heading text-base sm:text-lg font-black uppercase tracking-tight"
                               style={{ color: "var(--color-on-surface)" }}
                             >
                               {MATCH_META.venue}
                             </p>
                           </div>
-                        </div>
-
-                        <div
-                          className="hidden sm:block w-px mx-6"
-                          style={{
-                            background:
-                              "linear-gradient(180deg, transparent, var(--color-border-overlay) 20%, var(--color-border-overlay) 80%, transparent)",
-                          }}
-                        />
-
-                        {/* Format */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                            style={{ background: "var(--color-surface-container-high)" }}
-                          >
-                            <Swords className="w-3.5 h-3.5" style={{ color: "var(--color-theme-orange)" }} />
-                          </div>
-                          <div className="leading-tight text-left">
+                          <div className="w-px self-stretch my-1" style={{ background: "var(--color-border-overlay)" }} />
+                          <div>
                             <span
-                              className="font-bold tracking-widest uppercase text-[9px] block mb-0.5"
+                              className="block font-bold tracking-[0.25em] uppercase text-[9px]"
                               style={{ color: "var(--color-outline)" }}
                             >
-                              Format
+                              Kickoff
                             </span>
-                            <p className="font-bold text-sm" style={{ color: "var(--color-theme-orange)" }}>
-                              {MATCH_META.format}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div
-                          className="hidden sm:block w-px mx-6"
-                          style={{
-                            background:
-                              "linear-gradient(180deg, transparent, var(--color-border-overlay) 20%, var(--color-border-overlay) 80%, transparent)",
-                          }}
-                        />
-
-                        {/* Time */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                            style={{ background: "var(--color-surface-container-high)" }}
-                          >
-                            <Clock3 className="w-3.5 h-3.5" style={{ color: "var(--color-theme-orange)" }} />
-                          </div>
-                          <div className="leading-tight text-left">
-                            <span
-                              className="font-bold tracking-widest uppercase text-[9px] block mb-0.5"
-                              style={{ color: "var(--color-outline)" }}
+                            <p
+                              className="font-heading text-base sm:text-lg font-black tabular-nums"
+                              style={{ color: "var(--color-theme-orange)" }}
                             >
-                              Time
-                            </span>
-                            <p className="font-bold text-sm" style={{ color: "var(--color-on-surface)" }}>
                               {MATCH_META.time}
                             </p>
                           </div>
+                        </div>
+
+                        {/* Stub compartment — faint warm paper tint distinguishes it as its own 
+                            piece of stock, torn from the main ticket body on the left */}
+                        <div
+                          className="relative flex flex-col justify-center gap-2 px-6 sm:px-8 py-4 sm:w-[220px] shrink-0 border-t sm:border-t-0 sm:border-l border-dashed"
+                          style={{
+                            borderColor: "var(--color-border-overlay)",
+                            background:
+                              "linear-gradient(135deg, rgba(201,151,31,0.05), rgba(201,151,31,0.02))",
+                          }}
+                        >
+                          <p
+                            className="font-mono text-[9px] font-semibold uppercase tracking-[0.15em] leading-relaxed"
+                            style={{ color: "var(--color-outline)" }}
+                          >
+                            {TEAM_A.short}·{TEAM_B.short} — {MATCH_META.format}
+                          </p>
+                          <div className="flex items-end gap-[2px] h-6" aria-hidden="true">
+                            {[3, 1, 2, 1, 4, 1, 2, 3, 1, 2, 1, 3, 1, 2].map((w, idx) => (
+                              <span
+                                key={idx}
+                                style={{
+                                  width: w,
+                                  height: idx % 4 === 0 ? "100%" : "60%",
+                                  background: "var(--color-outline)",
+                                  opacity: 0.55,
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <span
+                            className="font-mono text-[8px] tracking-[0.2em]"
+                            style={{ color: "var(--color-outline)", opacity: 0.6 }}
+                          >
+                            NO. 003417
+                          </span>
                         </div>
                       </div>
                     </div>

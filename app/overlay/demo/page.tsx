@@ -1,5 +1,5 @@
 // app/overlay/demo/page.tsx
-import TaskNotificationPanel from "@/components/CricketMatchIntro";
+import TaskNotificationPanel from "@/components/overlays/CricketMatchIntro";
 
 export default function Page() {
     return (
