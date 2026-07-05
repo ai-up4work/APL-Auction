@@ -61,41 +61,82 @@ const OVERS_LABEL = `${LIVE.oversDone}.${LIVE.ballsDone}`;
 const ENTRANCE_MS = 900;
 const EXIT_MS = 650;
 
-// Cricket-ball styled chip: a filled circle (with a soft spherical highlight)
-// instead of a flat square, so "this over" reads as a row of balls.
-function BallChip({ value }) {
+// Cricket-ball styled chip: a small rendered sphere with a stitched seam
+// (like an actual cricket ball) instead of a flat gradient circle.
+// - Pops in with a little overshoot, staggered left-to-right so a fresh
+//   over reads as a quick cascade rather than appearing all at once.
+// - The most recently bowled ball gets a soft "live" pulse ring so the eye
+//   knows where to look.
+// - Boundaries get a slow diagonal shine sweep across the sphere.
+function BallChip({ value, index = 0, isLatest = false }) {
   const isEmpty = value == null;
   const isWicket = value === "W";
   const isExtra = value === "wd" || value === "nb";
   const isBoundary = value === "4" || value === "6";
   const isDot = value === ".";
 
-  const fill = isEmpty
-    ? "transparent"
-    : isWicket
-    ? "radial-gradient(circle at 32% 28%, #e2685a 0%, #b73224 65%, #8f2419 100%)"
+  const sphereFill = isWicket
+    ? "radial-gradient(circle at 32% 26%, #f0a091 0%, #cf4a37 42%, #7c1d13 88%, #5c130c 100%)"
     : isBoundary
-    ? "radial-gradient(circle at 32% 28%, #ffe2a3 0%, var(--color-theme-orange) 60%, #a9720f 100%)"
-    : "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.1) 55%, rgba(255,255,255,0.04) 100%)";
+    ? "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange) 68%, #8a5c0d 100%)"
+    : isExtra
+    ? "radial-gradient(circle at 32% 26%, #f3f3f3 0%, #cfcfd2 45%, #8f8f95 85%, #6b6b70 100%)"
+    : "radial-gradient(circle at 32% 26%, #7a828f 0%, #545a63 45%, #2c2f36 85%, #1b1d22 100%)";
+
+  const seamColor = isBoundary ? "rgba(58,37,4,0.55)" : "rgba(255,255,255,0.5)";
+  const labelColor = isWicket ? "#fff" : isBoundary ? "#3a2504" : isExtra ? "#2b2b2e" : "rgba(255,255,255,0.6)";
 
   return (
     <span
-      className="inline-flex items-center justify-center font-heading font-black uppercase shrink-0 rounded-full"
+      className="relative inline-flex items-center justify-center shrink-0 rounded-full ball-chip"
       style={{
-        width: 19,
-        height: 19,
-        fontSize: 8.5,
-        background: fill,
-        color: isEmpty ? "transparent" : isDot ? "rgba(255,255,255,0.55)" : isBoundary ? "#3a2504" : "#fff",
-        border: isEmpty
-          ? "1px solid rgba(255,255,255,0.2)"
-          : isExtra
-          ? "1px solid rgba(255,255,255,0.4)"
-          : "1px solid rgba(0,0,0,0.25)",
-        boxShadow: isBoundary || isWicket ? "0 1px 3px rgba(0,0,0,0.45)" : "none",
+        width: 20,
+        height: 20,
+        animationDelay: isEmpty ? "0ms" : `${index * 70}ms`,
       }}
     >
-      {isDot ? "•" : isEmpty ? "" : value}
+      {/* Live pulse ring — only on the most recently bowled ball */}
+      {isLatest && !isEmpty && (
+        <span
+          className="absolute -inset-[3px] rounded-full pointer-events-none ball-pulse"
+          style={{ border: `1.5px solid ${isWicket ? "#e2685a" : isBoundary ? "var(--color-theme-orange)" : "rgba(255,255,255,0.55)"}` }}
+        />
+      )}
+
+      {isEmpty ? (
+        <span
+          className="w-full h-full rounded-full"
+          style={{ border: "1px dashed rgba(255,255,255,0.22)" }}
+        />
+      ) : (
+        <span
+          className="relative w-full h-full rounded-full overflow-hidden ball-sphere"
+          style={{
+            background: sphereFill,
+            border: "1px solid rgba(0,0,0,0.35)",
+            boxShadow: "inset 0 -3px 4px rgba(0,0,0,0.5), inset 0 2px 2px rgba(255,255,255,0.25), 0 1px 3px rgba(0,0,0,0.4)",
+          }}
+        >
+          {/* Stitched seam — two curved dashed arcs, like the real thing */}
+          <svg viewBox="0 0 20 20" className="absolute inset-0 w-full h-full" style={{ opacity: 0.8 }}>
+            <path d="M3,2 Q9,10 3,18" stroke={seamColor} strokeWidth="0.9" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+            <path d="M17,2 Q11,10 17,18" stroke={seamColor} strokeWidth="0.9" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+          </svg>
+
+          {/* Diagonal shine sweep — boundaries only */}
+          {isBoundary && (
+            <span className="absolute inset-0 ball-shine pointer-events-none" />
+          )}
+
+          {/* Label — dot gets a small mark, others get their glyph */}
+          <span
+            className="relative z-10 flex items-center justify-center w-full h-full font-heading font-black uppercase"
+            style={{ fontSize: 8.5, color: labelColor }}
+          >
+            {isDot ? "•" : value}
+          </span>
+        </span>
+      )}
     </span>
   );
 }
@@ -216,6 +257,7 @@ export default function LiveScoreBar() {
     ...LIVE.thisOver,
     ...Array(Math.max(0, BALLS_PER_OVER - LIVE.thisOver.length)).fill(null),
   ];
+  const latestBallIndex = LIVE.thisOver.length - 1;
 
   return (
     <>
@@ -459,7 +501,7 @@ export default function LiveScoreBar() {
                       </span>
                       <div className="flex items-center gap-1">
                         {overChips.map((b, i) => (
-                          <BallChip key={i} value={b} />
+                          <BallChip key={i} value={b} index={i} isLatest={i === latestBallIndex} />
                         ))}
                       </div>
                     </div>
@@ -583,7 +625,53 @@ export default function LiveScoreBar() {
           to { transform: rotate(360deg); }
         }
 
+        /* Ball chips ("this over" row) */
+        .ball-chip {
+          animation: ballPopIn 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        @keyframes ballPopIn {
+          0% { opacity: 0; transform: scale(0.3) rotate(-25deg); }
+          65% { opacity: 1; transform: scale(1.15) rotate(4deg); }
+          100% { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+        .ball-pulse {
+          animation: ballPulse 1.6s ease-out infinite;
+        }
+        @keyframes ballPulse {
+          0% { opacity: 0.9; transform: scale(0.85); }
+          70% { opacity: 0; transform: scale(1.35); }
+          100% { opacity: 0; transform: scale(1.35); }
+        }
+        .ball-shine::before {
+          content: "";
+          position: absolute;
+          top: -60%;
+          left: -60%;
+          width: 60%;
+          height: 220%;
+          background: linear-gradient(
+            100deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.75) 45%,
+            transparent 90%
+          );
+          transform: rotate(20deg);
+          animation: ballShineSweep 2.6s ease-in-out infinite;
+        }
+        @keyframes ballShineSweep {
+          0% { left: -60%; }
+          45% { left: 130%; }
+          100% { left: 130%; }
+        }
+
         @media (prefers-reduced-motion: reduce) {
+          .ball-chip,
+          .ball-pulse,
+          .ball-shine::before {
+            animation-duration: 1ms !important;
+            animation-delay: 0ms !important;
+            animation-iteration-count: 1 !important;
+          }
           .lsb-wrap,
           .lsb-log-badge {
             animation-duration: 1ms !important;
