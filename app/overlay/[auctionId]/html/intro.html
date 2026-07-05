@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CrickPro - Match Preview Overlay</title>
+<!-- Tailwind CSS CDN with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Inter for clean UI, Montserrat for headings -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&amp;family=Montserrat:wght@800;900&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            aplBlue: '#3B8BD4',
+            aplGreen: '#2A9D5C',
+            aplNavy: '#0A0E1A',
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            heading: ['Montserrat', 'sans-serif'],
+          },
+          animation: {
+            'fade-in-up': 'fadeInUp 0.8s ease-out forwards',
+            'glow-pulse': 'glowPulse 3s infinite ease-in-out',
+            'slide-in-left': 'slideInLeft 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            'slide-in-right': 'slideInRight 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            'scale-in': 'scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+          },
+          keyframes: {
+            fadeInUp: {
+              '0%': { opacity: '0', transform: 'translateY(20px)' },
+              '100%': { opacity: '1', transform: 'translateY(0)' },
+            },
+            glowPulse: {
+              '0%, 100%': { filter: 'drop-shadow(0 0 10px rgba(59, 139, 212, 0.4))' },
+              '50%': { filter: 'drop-shadow(0 0 25px rgba(59, 139, 212, 0.8))' },
+            },
+            slideInLeft: {
+              '0%': { opacity: '0', transform: 'translateX(-50px)' },
+              '100%': { opacity: '1', transform: 'translateX(0)' },
+            },
+            slideInRight: {
+              '0%': { opacity: '0', transform: 'translateX(50px)' },
+              '100%': { opacity: '1', transform: 'translateX(0)' },
+            },
+            scaleIn: {
+              '0%': { opacity: '0', transform: 'scale(0.5)' },
+              '100%': { opacity: '1', transform: 'scale(1)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="custom-gradients">
+    /* Deep atmospheric background with localized glows - matches reference: blue left, green right */
+    .bg-cinematic {
+      background: radial-gradient(circle at center, #0d1826 0%, #05070a 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bg-overlay-fx {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 15% 55%, rgba(59, 139, 212, 0.18) 0%, transparent 45%),
+        radial-gradient(circle at 85% 55%, rgba(42, 157, 92, 0.16) 0%, transparent 45%);
+      pointer-events: none;
+    }
+
+    /* Glassmorphism for the bottom banner */
+    .glass-banner {
+      background: rgba(10, 14, 26, 0.6);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Specific glow for the vs badge - neutral so it doesn't favor either team color */
+    .vs-glow {
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.15), inset 0 0 15px rgba(255, 255, 255, 0.08);
+    }
+
+    /* Line decorations */
+    .divider-line {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+      width: 100%;
+    }
+
+    /* Shining rotating loop around the team logo circles - matches reference image */
+    .shine-ring {
+      position: absolute;
+      inset: -10px;
+      border-radius: 50%;
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+      mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+      animation: spin 3.5s linear infinite;
+    }
+    .shine-ring-blue {
+      background: conic-gradient(from 0deg, transparent 0%, transparent 78%, rgba(59, 139, 212, 0.9) 92%, #9ecbf0 98%, transparent 100%);
+    }
+    .shine-ring-green {
+      background: conic-gradient(from 180deg, transparent 0%, transparent 78%, rgba(42, 157, 92, 0.9) 92%, #8fe0b0 98%, transparent 100%);
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Team name block matching reference: bold label sitting beside the circle, with a glowing underline */
+    .team-name-label {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 800;
+      font-size: 2.25rem;
+      letter-spacing: 0.05em;
+      color: #fff;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .team-underline {
+      height: 2px;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .team-underline-blue { background: linear-gradient(90deg, #3B8BD4, transparent); }
+    .team-underline-green { background: linear-gradient(90deg, transparent, #2A9D5C); }
+  </style>
+</head>
+<body class="bg-black text-white font-sans antialiased">
+<!-- BEGIN: Cinematic Match Preview Container -->
+<main class="relative h-screen w-full flex flex-col justify-between bg-cinematic" data-purpose="match-preview-screen">
+<!-- Background Visual Effects (Dust/Particles Simulation) -->
+<div class="bg-overlay-fx"></div>
+<!-- BEGIN: Top Branding Section -->
+<header class="relative z-10 flex flex-col items-center pt-8 px-12" data-purpose="header-branding">
+<div class="w-full flex justify-between items-start">
+<!-- CrickPro Bug -->
+<div class="bg-black/80 px-4 py-1.5 rounded-full border border-white/10 flex items-center gap-2" data-purpose="logo-bug">
+<span class="font-heading font-black tracking-tighter text-lg italic">CRICKPRO</span>
+<div class="w-2 h-2 rounded-full bg-aplBlue animate-pulse"></div>
+</div>
+<!-- Live Badge -->
+<div class="flex items-center gap-2 bg-red-600 px-3 py-1 rounded text-[10px] font-bold tracking-widest uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-white"></span> LIVE
+        </div>
+</div>
+<!-- Match Title -->
+<div class="mt-4 text-center animate-fade-in-up" style="animation-delay: 0.2s">
+<h2 class="font-heading text-sm sm:text-lg tracking-[0.4em] uppercase text-white/80">
+          Women's Premier League T20
+        </h2>
+</div>
+</header>
+<!-- END: Top Branding Section -->
+<!-- BEGIN: Main Vs Section -->
+<section class="relative z-10 flex-grow flex items-center justify-center px-4" data-purpose="versus-display">
+<div class="w-full max-w-6xl flex flex-col md:flex-row items-center justify-center gap-8 md:gap-16">
+<!-- Team A (GRG) - blue -->
+<div class="flex flex-col md:flex-row items-center gap-6 animate-slide-in-left" style="animation-delay: 0.4s">
+<div class="order-2 md:order-1 flex flex-col items-center md:items-start" data-purpose="team-name-a">
+<span class="team-name-label">GRG</span>
+<div class="team-underline team-underline-blue"></div>
+</div>
+<div class="order-1 md:order-2 relative group" data-purpose="team-logo-a">
+<div class="absolute -inset-4 bg-aplBlue/20 rounded-full blur-xl opacity-50 group-hover:opacity-100 transition-opacity"></div>
+<!-- Shining rotating loop -->
+<div class="shine-ring shine-ring-blue"></div>
+<div class="relative w-40 h-40 md:w-56 md:h-56 rounded-full border-4 border-white/10 p-4 bg-gradient-to-b from-aplNavy to-black overflow-hidden shadow-2xl">
+<img alt="GRG XI Logo" class="w-full h-full object-contain" src="https://lh3.googleusercontent.com/aida/AP1WRLuSV1r1sxil5nzb1p6N87hNpeOJ4xyWLa-2ddp9b3-lToartvOVYlHU4WAmGs6O3FEQcRNMeukyCLTSEViThFa3N80HxN_RIDFeqkBF563bZXxjrEtzpesVaLlXoBYjsFG08yhw-PGnnmIQ4woFfPFskotK5cd1H2UNIqS35FuYIrn7lfi_wDIC6wYgqTJVkmLXw-jwxKFBVMuGUltoYLotYgwurl-8vN4lMBC7jzeD8eaziL4yHxcGD8g"/>
+</div>
+<!-- Static thin ring -->
+<div class="absolute -inset-2 border border-aplBlue/30 rounded-full"></div>
+</div>
+</div>
+<!-- VS Badge -->
+<div class="relative animate-scale-in" data-purpose="vs-divider" style="animation-delay: 0.8s">
+<div class="vs-glow bg-aplNavy border-2 border-white/20 w-20 h-20 md:w-24 md:h-24 flex items-center justify-center rounded-2xl transform rotate-45 animate-glow-pulse">
+<span class="font-heading text-3xl md:text-4xl font-black italic -rotate-45 tracking-tighter text-white">VS</span>
+</div>
+<!-- Vertical glowing lines -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[200px] w-0.5 bg-gradient-to-b from-transparent via-white/20 to-transparent"></div>
+</div>
+<!-- Team B (GG) - green -->
+<div class="flex flex-col md:flex-row items-center gap-6 animate-slide-in-right" style="animation-delay: 0.4s">
+<div class="relative group" data-purpose="team-logo-b">
+<div class="absolute -inset-4 bg-aplGreen/20 rounded-full blur-xl opacity-50 group-hover:opacity-100 transition-opacity"></div>
+<!-- Shining rotating loop -->
+<div class="shine-ring shine-ring-green"></div>
+<div class="relative w-40 h-40 md:w-56 md:h-56 rounded-full border-4 border-white/10 p-4 bg-gradient-to-b from-aplNavy to-black overflow-hidden shadow-2xl">
+<img alt="GG Logo" class="w-full h-full object-contain" src="https://lh3.googleusercontent.com/aida/AP1WRLsgD6qfNJzwXUL-IM7O6hmkyTSbcxKxUWe_j0ql7ScT4f_JJArqmIfIFb-vdtVoTZtJMPbXRPt6yTDb3DV7JCsZIzl71-szl8pvVGY3F_eZ1Iii3ubYhgXVX3zyNCIfF3dSuCh7Mwwa5OLdV-ReCO8e9t1vgp1eOB8DpmJEhBfm40tBhPRQjzxQsJKTKEPJEXEPEW-CSzcRi1rklZPAPkqjpiFDm-mi3EbO9juhSaFd8PG7ssbHdi0scw"/>
+</div>
+<!-- Static thin ring -->
+<div class="absolute -inset-2 border border-aplGreen/30 rounded-full"></div>
+</div>
+<div class="flex flex-col items-center md:items-end" data-purpose="team-name-b">
+<span class="team-name-label">GG</span>
+<div class="team-underline team-underline-green"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: Main Vs Section -->
+<!-- BEGIN: Bottom Info Banner -->
+<footer class="relative z-20 glass-banner py-10 px-6 md:px-20 animate-fade-in-up" data-purpose="bottom-info-banner" style="animation-delay: 1s">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+<!-- Match Status / Type -->
+<div class="flex flex-col items-center md:items-start">
+<span class="text-aplBlue font-bold tracking-[0.3em] uppercase text-[10px] mb-1">Match Preview</span>
+<p class="font-heading text-lg md:text-xl font-bold">GRG XI <span class="text-aplGreen">vs</span> GG</p>
+</div>
+<!-- Venue -->
+<div class="flex flex-col items-center">
+<span class="text-white/40 font-bold tracking-widest uppercase text-[10px] mb-1">Venue</span>
+<p class="font-bold text-lg md:text-xl uppercase tracking-tighter">Inland Cricket Ground</p>
+</div>
+<!-- Format / Timing -->
+<div class="flex items-center gap-8 border-l border-white/10 pl-8">
+<div class="flex flex-col items-center md:items-end">
+<span class="text-white/40 font-bold tracking-widest uppercase text-[10px] mb-1">Format</span>
+<p class="font-bold text-lg md:text-xl text-aplBlue">20 OVERS</p>
+</div>
+<div class="flex flex-col items-center md:items-end">
+<span class="text-white/40 font-bold tracking-widest uppercase text-[10px] mb-1">Time</span>
+<p class="font-bold text-lg md:text-xl">19:30 IST</p>
+</div>
+</div>
+</div>
+</footer>
+<!-- END: Bottom Info Banner -->
+</main>
+<!-- END: Cinematic Match Preview Container -->
+</body></html>

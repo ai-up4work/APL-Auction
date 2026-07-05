@@ -3,6 +3,20 @@
 
 import React, { use, useEffect, useRef, useState } from "react";
 import { connectOverlayBus, type OverlayEvent, type StampState, type SoldBoardEntry } from "@/lib/overlayBus";
+import {
+  overlayFonts,
+  MainScoreboard,
+  BatsmanStatsPanel,
+  BowlerStatsPanel,
+  PartnershipTracker,
+  OverSummaryStrip,
+  PowerplayBadge,
+  MilestonePopup,
+  WicketGraphic,
+  PointsTable,
+  PlayerOfMatchBanner,
+  type Batsman,
+} from "@/components/overlays/CricketMatchOverlays";
 
 type Particle = { id: number; tx: number; ty: number; color: string; duration: number };
 type TickerItem = { id: number; message: string };
@@ -10,24 +24,38 @@ type TickerItem = { id: number; message: string };
 let idCtr = 0;
 const nextId = () => idCtr++;
 
-const GOLD_COLORS  = ["#E8C468", "#A87815", "#FDECC8", "#ffffff", "#c9971f"];
-const GRAY_COLORS  = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
+const GOLD_COLORS = ["#E8C468", "#A87815", "#FDECC8", "#ffffff", "#c9971f"];
+const GRAY_COLORS = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
 
 export default function OverlayPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
 
-  // ── FX state ───────────────────────────────────────────────────────────
-  const [stamp, setStamp]           = useState<{ state: StampState; key: number } | null>(null);
-  const [particles, setParticles]   = useState<Particle[]>([]);
+  // ── Existing auction FX state ─────────────────────────────────────────
+  const [stamp, setStamp] = useState<{ state: StampState; key: number } | null>(null);
+  const [particles, setParticles] = useState<Particle[]>([]);
   const [flashColor, setFlashColor] = useState<string | null>(null);
   const [lowerThird, setLowerThird] = useState<{ show: boolean; tag?: string; title?: string; subtitle?: string }>({ show: false });
   const [scoreboard, setScoreboard] = useState<{ show: boolean; label?: string; value?: string; sub?: string }>({ show: false });
   const [tickerQueue, setTickerQueue] = useState<TickerItem[]>([]);
-  const [replayOn, setReplayOn]     = useState(false);
-  const [soldBoard, setSoldBoard]   = useState<{ show: boolean; entries: SoldBoardEntry[] }>({ show: false, entries: [] });
-  const [connected, setConnected]   = useState(false);
+  const [replayOn, setReplayOn] = useState(false);
+  const [soldBoard, setSoldBoard] = useState<{ show: boolean; entries: SoldBoardEntry[] }>({ show: false, entries: [] });
+  const [connected, setConnected] = useState(false);
+
+  // ── New cricket-match overlay state — every one starts hidden ─────────
+  const [powerplay, setPowerplay] = useState<{ show: boolean; label?: string }>({ show: false });
+  const [pointsTable, setPointsTable] = useState<{ show: boolean }>({ show: false });
+  const [mainScoreboard, setMainScoreboard] = useState<{ show: boolean } & Record<string, string | undefined>>({ show: false });
+  const [battingPanel, setBattingPanel] = useState<{ show: boolean; batsmen?: Batsman[] }>({ show: false });
+  const [bowlingPanel, setBowlingPanel] = useState<{ show: boolean }>({ show: false });
+  const [partnership, setPartnership] = useState<{ show: boolean; runs?: number; balls?: number }>({ show: false });
+  const [overSummary, setOverSummary] = useState<{ show: boolean; balls?: string[] }>({ show: false });
+  const [milestone, setMilestone] = useState<{ key: number; player?: string; milestone?: string; ballsTaken?: number } | null>(null);
+  const [wicket, setWicket] = useState<{ key: number; batsman?: string; dismissal?: string; runs?: number; balls?: number } | null>(null);
+  const [playerOfMatch, setPlayerOfMatch] = useState<{ show: boolean }>({ show: false });
 
   const stampTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const milestoneTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wicketTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function spawnParticles(colors: string[], count = 60) {
     const created: Particle[] = Array.from({ length: count }, () => ({
@@ -45,6 +73,7 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
 
   function handleEvent(evt: OverlayEvent) {
     switch (evt.type) {
+      // ── existing auction cases ──────────────────────────────────────
       case "stamp": {
         if (stampTimeout.current) clearTimeout(stampTimeout.current);
         setStamp({ state: evt.state, key: nextId() });
@@ -82,6 +111,45 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
         });
         break;
       }
+
+      // ── new cricket-match cases ─────────────────────────────────────
+      case "powerplay":
+        setPowerplay({ show: evt.show, label: evt.label });
+        break;
+      case "pointsTable":
+        setPointsTable({ show: evt.show });
+        break;
+      case "mainScoreboard":
+        setMainScoreboard({ show: evt.show, team: evt.team, score: evt.score, overs: evt.overs, crr: evt.crr, target: evt.target, rrr: evt.rrr });
+        break;
+      case "batting":
+        setBattingPanel({ show: evt.show, batsmen: evt.batsmen });
+        break;
+      case "bowling":
+        setBowlingPanel({ show: evt.show });
+        break;
+      case "partnership":
+        setPartnership({ show: evt.show, runs: evt.runs, balls: evt.balls });
+        break;
+      case "overSummary":
+        setOverSummary({ show: evt.show, balls: evt.balls });
+        break;
+      case "milestone": {
+        if (milestoneTimeout.current) clearTimeout(milestoneTimeout.current);
+        setMilestone({ key: nextId(), player: evt.player, milestone: evt.milestone, ballsTaken: evt.ballsTaken });
+        milestoneTimeout.current = setTimeout(() => setMilestone(null), 4000);
+        break;
+      }
+      case "wicket": {
+        if (wicketTimeout.current) clearTimeout(wicketTimeout.current);
+        setWicket({ key: nextId(), batsman: evt.batsman, dismissal: evt.dismissal, runs: evt.runs, balls: evt.balls });
+        wicketTimeout.current = setTimeout(() => setWicket(null), 4000);
+        break;
+      }
+      case "playerOfMatch":
+        setPlayerOfMatch({ show: evt.show });
+        break;
+
       case "clearAll":
         setStamp(null);
         setParticles([]);
@@ -91,6 +159,16 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
         setTickerQueue([]);
         setReplayOn(false);
         setSoldBoard({ show: false, entries: [] });
+        setPowerplay({ show: false });
+        setPointsTable({ show: false });
+        setMainScoreboard({ show: false });
+        setBattingPanel({ show: false });
+        setBowlingPanel({ show: false });
+        setPartnership({ show: false });
+        setOverSummary({ show: false });
+        setMilestone(null);
+        setWicket(null);
+        setPlayerOfMatch({ show: false });
         break;
     }
   }
@@ -101,6 +179,8 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
     return () => {
       bus.disconnect();
       if (stampTimeout.current) clearTimeout(stampTimeout.current);
+      if (milestoneTimeout.current) clearTimeout(milestoneTimeout.current);
+      if (wicketTimeout.current) clearTimeout(wicketTimeout.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auctionId]);
@@ -108,15 +188,10 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
   return (
     <>
       <style>{`
+        ${overlayFonts}
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Geist+Mono:wght@400;500;700&display=swap');
 
-        /* Fully transparent canvas — OBS Browser Source composites this
-           directly on top of your camera source. Do NOT put a background
-           color on <html>/<body> anywhere in global CSS for this route. */
         html, body { background: transparent !important; }
-
-        .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
-        .font-mono-geist { font-family: 'Geist Mono', monospace; }
 
         .fx-particle {
           position: fixed; pointer-events: none; z-index: 500;
@@ -139,13 +214,13 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
           100% { transform: scale(1) rotate(var(--rot)); }
         }
 
-        .fx-lower-third { animation: fx-slide-up 0.45s cubic-bezier(0.22,1,0.36,1) both; }
+        .fx-lower-third, .fx-milestone, .fx-wicket { animation: fx-slide-up 0.45s cubic-bezier(0.22,1,0.36,1) both; }
         @keyframes fx-slide-up {
           0%   { transform: translateY(40px); opacity: 0; }
           100% { transform: translateY(0); opacity: 1; }
         }
 
-        .fx-scoreboard { animation: fx-slide-left 0.4s cubic-bezier(0.22,1,0.36,1) both; }
+        .fx-scoreboard, .fx-panel-in { animation: fx-slide-left 0.4s cubic-bezier(0.22,1,0.36,1) both; }
         @keyframes fx-slide-left {
           0%   { transform: translateX(40px); opacity: 0; }
           100% { transform: translateX(0); opacity: 1; }
@@ -170,27 +245,15 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
         .fx-replay { animation: fx-replay-blink 1s ease-in-out infinite; }
       `}</style>
 
-      {/* Root: fully transparent, fills the OBS canvas, nothing interactive */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none select-none">
 
-        {/* Connection dot — tiny, corner, so you can confirm the bus is live
-            while framing the source in OBS. Remove/hide once confirmed. */}
         <div className="absolute top-3 left-3 flex items-center gap-1.5 opacity-60">
-          <span
-            className="w-1.5 h-1.5 rounded-full"
-            style={{ background: connected ? "#22c55e" : "#ef4444" }}
-          />
-          <span className="font-mono-geist text-[8px] text-white/70 uppercase tracking-widest">
-            fx-bus {connected ? "live" : "off"}
-          </span>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: connected ? "#22c55e" : "#ef4444" }} />
+          <span className="font-mono-geist text-[8px] text-white/70 uppercase tracking-widest">fx-bus {connected ? "live" : "off"}</span>
         </div>
 
-        {/* Flash */}
-        {flashColor && (
-          <div className="absolute inset-0" style={{ background: flashColor }} />
-        )}
+        {flashColor && <div className="absolute inset-0" style={{ background: flashColor }} />}
 
-        {/* Confetti / particles */}
         {particles.map((p) => (
           <span
             key={p.id}
@@ -207,36 +270,25 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
           />
         ))}
 
-        {/* SOLD / UNSOLD stamp */}
         {stamp && (
-          <div
-            key={stamp.key}
-            className="fx-stamp absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
-            style={{ "--rot": stamp.state === "sold" ? "-11deg" : "11deg" } as React.CSSProperties}
-          >
-            <div
-              className="relative px-14 py-6 rounded-md overflow-hidden"
-              style={{
-                border: `4px solid ${stamp.state === "sold" ? "#A87815" : "#718096"}`,
-                background: stamp.state === "sold" ? "rgba(201,151,31,0.10)" : "rgba(74,85,104,0.12)",
-                boxShadow: `0 0 60px ${stamp.state === "sold" ? "rgba(201,151,31,0.35)" : "rgba(113,128,150,0.25)"}`,
-              }}
-            >
-              <span
-                className="font-archivo block text-center italic font-bold uppercase tracking-[0.1em]"
-                style={{
-                  fontSize: stamp.state === "sold" ? 84 : 64,
-                  color: stamp.state === "sold" ? "#E8C468" : "#A0AEC0",
-                  textShadow: stamp.state === "sold" ? "0 0 50px rgba(232,196,104,0.4)" : "none",
-                }}
-              >
+          <div key={stamp.key} className="fx-stamp absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+            style={{ "--rot": stamp.state === "sold" ? "-11deg" : "11deg" } as React.CSSProperties}>
+            <div className="relative px-14 py-6 rounded-md overflow-hidden" style={{
+              border: `4px solid ${stamp.state === "sold" ? "#A87815" : "#718096"}`,
+              background: stamp.state === "sold" ? "rgba(201,151,31,0.10)" : "rgba(74,85,104,0.12)",
+              boxShadow: `0 0 60px ${stamp.state === "sold" ? "rgba(201,151,31,0.35)" : "rgba(113,128,150,0.25)"}`,
+            }}>
+              <span className="font-archivo block text-center italic font-bold uppercase tracking-[0.1em]" style={{
+                fontSize: stamp.state === "sold" ? 84 : 64,
+                color: stamp.state === "sold" ? "#E8C468" : "#A0AEC0",
+                textShadow: stamp.state === "sold" ? "0 0 50px rgba(232,196,104,0.4)" : "none",
+              }}>
                 {stamp.state === "sold" ? "SOLD!" : "UNSOLD"}
               </span>
             </div>
           </div>
         )}
 
-        {/* Replay badge */}
         {replayOn && (
           <div className="fx-replay absolute top-3 right-3 flex items-center gap-2 px-4 py-1.5 rounded-full"
             style={{ background: "rgba(239,68,68,0.16)", border: "1px solid rgba(239,68,68,0.5)" }}>
@@ -245,48 +297,23 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
           </div>
         )}
 
-        {/* Scoreboard — top-right mini panel (shifts down if replay badge showing) */}
         {scoreboard.show && (
           <div className="fx-scoreboard absolute right-3" style={{ top: replayOn ? 52 : 12 }}>
-            <div
-              className="px-6 py-3 rounded-xl min-w-[220px]"
-              style={{ background: "rgba(13,17,23,0.90)", border: "1px solid rgba(201,151,31,0.30)", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}
-            >
-              <div className="font-mono-geist text-[8px] uppercase tracking-[0.22em] text-theme-orange font-bold mb-1">
-                {scoreboard.label ?? "Score"}
-              </div>
-              <div className="font-archivo text-3xl font-bold text-white leading-none">
-                {scoreboard.value ?? "—"}
-              </div>
-              {scoreboard.sub && (
-                <div className="font-mono-geist text-[9px] text-white/50 uppercase tracking-[0.1em] mt-1">
-                  {scoreboard.sub}
-                </div>
-              )}
+            <div className="px-6 py-3 rounded-xl min-w-[220px]" style={{ background: "rgba(13,17,23,0.90)", border: "1px solid rgba(201,151,31,0.30)", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
+              <div className="font-mono-geist text-[8px] uppercase tracking-[0.22em] text-theme-orange font-bold mb-1">{scoreboard.label ?? "Score"}</div>
+              <div className="font-archivo text-3xl font-bold text-white leading-none">{scoreboard.value ?? "—"}</div>
+              {scoreboard.sub && <div className="font-mono-geist text-[9px] text-white/50 uppercase tracking-[0.1em] mt-1">{scoreboard.sub}</div>}
             </div>
           </div>
         )}
 
-        {/* Sold board — running mini scorecard of recent purchases, upper-left below the connection dot */}
         {soldBoard.show && soldBoard.entries.length > 0 && (
           <div className="absolute top-10 left-3 w-[260px]">
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ background: "rgba(13,17,23,0.90)", border: "1px solid rgba(201,151,31,0.30)", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}
-            >
-              <div
-                className="px-4 py-2 font-mono-geist text-[9px] font-bold uppercase tracking-[0.22em]"
-                style={{ background: "linear-gradient(90deg,#A87815,#E8C468)", color: "#1a1304" }}
-              >
-                Recently Sold
-              </div>
+            <div className="rounded-xl overflow-hidden" style={{ background: "rgba(13,17,23,0.90)", border: "1px solid rgba(201,151,31,0.30)", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
+              <div className="px-4 py-2 font-mono-geist text-[9px] font-bold uppercase tracking-[0.22em]" style={{ background: "linear-gradient(90deg,#A87815,#E8C468)", color: "#1a1304" }}>Recently Sold</div>
               <div className="flex flex-col">
                 {soldBoard.entries.map((e, i) => (
-                  <div
-                    key={e.id}
-                    className="fx-sold-row flex items-center justify-between px-4 py-2"
-                    style={{ borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.06)" }}
-                  >
+                  <div key={e.id} className="fx-sold-row flex items-center justify-between px-4 py-2" style={{ borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.06)" }}>
                     <div className="flex flex-col">
                       <span className="font-archivo text-sm font-bold text-white leading-tight">{e.player}</span>
                       <span className="font-mono-geist text-[9px] text-white/50 uppercase tracking-wide">{e.team}</span>
@@ -299,50 +326,62 @@ export default function OverlayPage({ params }: { params: Promise<{ auctionId: s
           </div>
         )}
 
-        {/* Lower third */}
         {lowerThird.show && (
           <div className="fx-lower-third absolute left-8 bottom-16">
-            <div
-              className="flex items-stretch rounded-xl overflow-hidden"
-              style={{ boxShadow: "0 12px 40px rgba(0,0,0,0.55)" }}
-            >
+            <div className="flex items-stretch rounded-xl overflow-hidden" style={{ boxShadow: "0 12px 40px rgba(0,0,0,0.55)" }}>
               <div className="w-1.5" style={{ background: "linear-gradient(180deg,#A87815,#E8C468)" }} />
               <div className="px-6 py-3" style={{ background: "rgba(13,17,23,0.90)" }}>
-                {lowerThird.tag && (
-                  <div className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.28em] text-theme-orange mb-1">
-                    {lowerThird.tag}
-                  </div>
-                )}
-                <div className="font-archivo text-2xl font-bold italic uppercase text-white leading-tight">
-                  {lowerThird.title ?? ""}
-                </div>
-                {lowerThird.subtitle && (
-                  <div className="font-mono-geist text-[10px] text-white/60 uppercase tracking-[0.12em] mt-0.5">
-                    {lowerThird.subtitle}
-                  </div>
-                )}
+                {lowerThird.tag && <div className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.28em] text-theme-orange mb-1">{lowerThird.tag}</div>}
+                <div className="font-archivo text-2xl font-bold italic uppercase text-white leading-tight">{lowerThird.title ?? ""}</div>
+                {lowerThird.subtitle && <div className="font-mono-geist text-[10px] text-white/60 uppercase tracking-[0.12em] mt-0.5">{lowerThird.subtitle}</div>}
               </div>
             </div>
           </div>
         )}
 
-        {/* Ticker strip — bottom edge */}
         {tickerQueue.length > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-9 flex items-center overflow-hidden"
-            style={{ background: "rgba(13,17,23,0.90)", borderTop: "1px solid rgba(201,151,31,0.25)" }}>
+          <div className="absolute bottom-0 left-0 right-0 h-9 flex items-center overflow-hidden" style={{ background: "rgba(13,17,23,0.90)", borderTop: "1px solid rgba(201,151,31,0.25)" }}>
             <div className="px-4 h-full flex items-center shrink-0" style={{ background: "#c9971f" }}>
-              <span className="fx-dot w-1.5 h-1.5 rounded-full bg-background mr-2" style={{ background: "#0d1117" }} />
-              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-widest text-[#0d1117]">
-                Live
-              </span>
+              <span className="fx-dot w-1.5 h-1.5 rounded-full mr-2" style={{ background: "#0d1117" }} />
+              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-widest text-[#0d1117]">Live</span>
             </div>
             <div className="flex-1 flex items-center gap-8 px-4 overflow-hidden">
               {tickerQueue.slice(-3).map((t) => (
-                <span key={t.id} className="fx-ticker-in font-archivo text-sm font-bold uppercase tracking-wide text-white/90 whitespace-nowrap">
-                  {t.message}
-                </span>
+                <span key={t.id} className="fx-ticker-in font-archivo text-sm font-bold uppercase tracking-wide text-white/90 whitespace-nowrap">{t.message}</span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── cricket-match overlays — each only renders when toggled on ──── */}
+        {powerplay.show && <div className="fx-panel-in"><PowerplayBadge label={powerplay.label} /></div>}
+        {pointsTable.show && <div className="fx-panel-in"><PointsTable /></div>}
+        {mainScoreboard.show && (
+          <div className="fx-panel-in">
+            <MainScoreboard
+              team={mainScoreboard.team}
+              score={mainScoreboard.score}
+              overs={mainScoreboard.overs}
+              crr={mainScoreboard.crr}
+              target={mainScoreboard.target}
+              rrr={mainScoreboard.rrr}
+            />
+          </div>
+        )}
+        {battingPanel.show && <div className="fx-panel-in"><BatsmanStatsPanel batsmen={battingPanel.batsmen} /></div>}
+        {bowlingPanel.show && <div className="fx-panel-in"><BowlerStatsPanel /></div>}
+        {partnership.show && <div className="fx-panel-in"><PartnershipTracker runs={partnership.runs} balls={partnership.balls} /></div>}
+        {overSummary.show && <div className="fx-panel-in"><OverSummaryStrip balls={overSummary.balls} /></div>}
+        {playerOfMatch.show && <div className="fx-panel-in"><PlayerOfMatchBanner /></div>}
+
+        {milestone && (
+          <div key={milestone.key} className="fx-milestone">
+            <MilestonePopup player={milestone.player} milestone={milestone.milestone} ballsTaken={milestone.ballsTaken} />
+          </div>
+        )}
+        {wicket && (
+          <div key={wicket.key} className="fx-wicket">
+            <WicketGraphic batsman={wicket.batsman} dismissal={wicket.dismissal} runs={wicket.runs} balls={wicket.balls} />
           </div>
         )}
       </div>

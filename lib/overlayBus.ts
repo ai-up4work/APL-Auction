@@ -77,3 +77,10 @@ export function connectOverlayBus(
     },
   };
 }
+
+export type Batsman = { name: string; runs: number; balls: number; onStrike?: boolean };
+ 
+export type BowlerFigures = { name: string; overs: string; maidens: number; runs: number; wickets: number };
+ 
+export type StandingRow = { team: string; played: number; won: number; nrr: string; pts: number };
+ 
