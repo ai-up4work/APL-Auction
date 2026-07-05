@@ -7,13 +7,15 @@ import LiveScoreBar from "@/components/overlays/LiveScoreBar";
 export default function Page() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2 bg-black">
-      {/* TournamentLogoDisplay docks itself top-right and flips between
-          wordmark and crest on its own timer. */}
+      {/* TournamentLogoDisplay docks itself top-left, logo + name shown
+          together as one symmetric lockup. */}
       <TournamentLogoDisplay />
 
-      {/* WeatherCard docks itself top-right too, offset below the logo
-          display via its own topPx so the two don't collide. */}
-      <WeatherCard topPx={116} />
+      {/* WeatherCard docks itself top-right, top-aligned with the logo
+          display on the opposite corner using its default topPx (24px) —
+          no override needed now that neither block has a label pushing
+          its content down. */}
+      <WeatherCard />
 
       {/* TournamentBoundaries docks itself bottom-right, just above the
           score bar. MatchBoundaries shares the same slot on purpose (see
