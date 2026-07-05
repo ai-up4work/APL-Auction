@@ -23,11 +23,9 @@ const TEAMS = [
   { rank: 6, short: "SRH", name: "SUNRISERS HYDERABAD", image: "/Franchises/SRH.webp", color: "#F26522", colorSoft: "rgba(242,101,34,0.22)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.183 },
   { rank: 7, short: "RR", name: "RAJASTHAN ROYALS", image: "/Franchises/RR.png", color: "#EA1E63", colorSoft: "rgba(234,30,99,0.2)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.298 },
   { rank: 8, short: "DC", name: "DELHI CAPITALS", image: "/Franchises/DLC.jpg", color: "#17479E", colorSoft: "rgba(23,71,158,0.22)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.415 },
-  { rank: 9, short: "LSG", name: "LUCKNOW SUPER GIANTS", image: "/Franchises/LSG.png", color: "#00A5DE", colorSoft: "rgba(0,165,222,0.22)", p: 7, w: 2, l: 5, t: 0, nr: 0, pts: 4, nrr: -0.687 },
-  { rank: 10, short: "PBKS", name: "PUNJAB KINGS", image: "/Franchises/PK.png", color: "#ED1B24", colorSoft: "rgba(237,27,36,0.22)", p: 7, w: 1, l: 6, t: 0, nr: 0, pts: 2, nrr: -1.240 },
 ];
 
-const QUALIFY_CUTOFF = 5; // top N advance — draws the cut line under this rank
+const QUALIFY_CUTOFF = 4; // top N advance — draws the cut line under this rank
 const RESULT_LINE = "TOP 4 ADVANCE TO THE SEMI-FINALS";
 
 const EXIT_DURATION_MS = 400;
