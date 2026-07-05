@@ -1,7 +1,7 @@
 "use client";
 
-import { Trophy, MapPin, Clock3, Swords } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { Trophy } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 // ---- Hardcoded match data ----
@@ -35,21 +35,64 @@ const MATCH_META = {
   time: "19:30 LOCAL",
 };
 
+// Total time the exit choreography needs before we actually unmount.
+// Keep this in sync with the longest exit animation + its delay below.
+const EXIT_DURATION_MS = 420;
+
 export default function CricketMatchIntro() {
-  const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const targetRef = useRef(Date.now() + 2 * 60 * 60 * 1000 + 14 * 60 * 1000); // 2h14m from load
+  const [open, setOpen] = useState(false); // panel is in the DOM
+  const [closing, setClosing] = useState(false); // panel is mid exit-animation
+  const closeTimer = useRef(null);
 
   useEffect(() => {
     setMounted(true);
+    return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
   }, []);
+
+  const openPanel = useCallback(() => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setClosing(false);
+    setOpen(true);
+  }, []);
+
+  const closePanel = useCallback(() => {
+    setClosing((alreadyClosing) => {
+      if (alreadyClosing) return true;
+      closeTimer.current = setTimeout(() => {
+        setOpen(false);
+        setClosing(false);
+      }, EXIT_DURATION_MS);
+      return true;
+    });
+  }, []);
+
+  const toggle = useCallback(() => {
+    if (open && !closing) closePanel();
+    else if (!open) openPanel();
+  }, [open, closing, openPanel, closePanel]);
+
+  // Escape closes it too, since there's no dedicated close button.
+  useEffect(() => {
+    if (!open || closing) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") closePanel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, closing, closePanel]);
 
   return (
     <>
       {/* Trigger Button — also toggles closed, since the panel no longer
           has its own close control */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggle}
         className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
         style={{ color: "var(--color-on-surface-variant)" }}
         onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
@@ -69,19 +112,31 @@ export default function CricketMatchIntro() {
       </button>
 
       {mounted &&
-        isOpen &&
+        open &&
         createPortal(
           <>
             {/* Backdrop — click anywhere outside the card to dismiss */}
             <div
-              className="fixed inset-0 backdrop-blur-sm z-[100] animate-fadeIn"
-              style={{ background: "rgba(0,0,0,0.8)" }}
-              onClick={() => setIsOpen(false)}
+              className="fixed inset-0 backdrop-blur-sm z-[100] mki-backdrop"
+              style={{
+                background: "rgba(0,0,0,0.8)",
+                animation: closing
+                  ? "mkiFadeOut 0.32s ease-in 0.1s both"
+                  : "mkiFadeIn 0.3s ease-out both",
+              }}
+              onClick={closePanel}
             />
 
             {/* Panel container — covers a region of the screen, not the whole viewport */}
             <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <div className="pointer-events-auto w-full max-w-4xl animate-systemAppear relative">
+              <div
+                className="pointer-events-auto w-full max-w-4xl relative mki-card"
+                style={{
+                  animation: closing
+                    ? "mkiCardExit 0.32s cubic-bezier(0.4,0,1,1) 0.06s both"
+                    : "mkiCardEnter 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.03s both",
+                }}
+              >
                 {/* Ambient glow behind the card — gold-led, team colors kept subtle */}
                 <div
                   className="absolute -inset-6 blur-3xl rounded-[40px]"
@@ -117,10 +172,15 @@ export default function CricketMatchIntro() {
 
                     {/* Header — tournament identity centered like a crest banner,
                         flanked by hairlines instead of split into unrelated
-                        left/right chips. No close/broadcast chip clutter. */}
+                        left/right chips. Drops in just after the frame lands. */}
                     <div
-                      className="relative z-10 flex items-center justify-center gap-4 pt-7 pb-5 px-6 sm:px-10"
-                      style={{ borderBottom: "1px solid var(--color-border-overlay)" }}
+                      className="relative z-10 flex items-center justify-center gap-4 pt-7 pb-5 px-6 sm:px-10 mki-header"
+                      style={{
+                        borderBottom: "1px solid var(--color-border-overlay)",
+                        animation: closing
+                          ? "mkiHeaderOut 0.2s ease-in 0.12s both"
+                          : "mkiHeaderIn 0.45s cubic-bezier(0.22,1,0.36,1) 0.15s both",
+                      }}
                     >
                       <div
                         className="hidden sm:block h-px flex-1"
@@ -129,7 +189,7 @@ export default function CricketMatchIntro() {
                             "linear-gradient(90deg, transparent, rgba(201,151,31,0.5))",
                         }}
                       />
-                      <div className="flex items-center gap-3 shrink-0">                       
+                      <div className="flex items-center gap-3 shrink-0">
                         <div className="leading-tight text-center">
                           <p
                             className="font-heading font-black text-sm sm:text-lg tracking-wide"
@@ -158,26 +218,41 @@ export default function CricketMatchIntro() {
                         watermark has room to sit fully inside the rounded card
                         instead of being clipped by it. */}
                     <div className="relative min-h-[300px] sm:min-h-[400px] flex items-center justify-center gap-8 sm:gap-24 px-4 py-6">
-                      {/* Emblem watermark — scoped to this section so object-contain
-                          sizes it against real available space and it never gets
-                          cropped by the card's rounded corners. */}
+                      {/* Emblem watermark — opacity/contrast raised so it actually
+                          reads as a background crest rather than a barely-there
+                          smudge. Blend mode instead of a flat opacity so it sits
+                          into the dark surface as texture, not a washed-out layer. */}
                       <div
                         className="absolute inset-0 sm:-inset-2 flex items-center justify-center pointer-events-none select-none"
                         aria-hidden="true"
+                        style={{
+                          animation: closing
+                            ? "mkiFadeOut 0.22s ease-in both"
+                            : "mkiFadeIn 0.6s ease-out 0.3s both",
+                        }}
                       >
                         <img
                           src={TOURNAMENT.logo}
                           alt=""
                           className="w-full h-full object-contain"
                           style={{
-                            opacity: 0.16,
-                            filter: "grayscale(1) contrast(1.1) brightness(1.3)",
+                            opacity: 0.56,
+                            mixBlendMode: "soft-light",
+                            filter: "grayscale(1) contrast(1.3) brightness(1.6)",
                           }}
                         />
                       </div>
 
-                      {/* Team A */}
-                      <div className="relative z-10 flex flex-col items-center gap-4">
+                      {/* Team A — slides in from off-frame left with a slight
+                          rotation, like it's swinging into place on a hinge. */}
+                      <div
+                        className="relative z-10 flex flex-col items-center gap-4 mki-team-a"
+                        style={{
+                          animation: closing
+                            ? "mkiTeamAOut 0.22s ease-in 0.05s both"
+                            : "mkiTeamAIn 0.5s cubic-bezier(0.22,1,0.36,1) 0.24s both",
+                        }}
+                      >
                         <div className="relative">
                           <div
                             className="absolute -inset-4 rounded-full blur-xl"
@@ -213,7 +288,7 @@ export default function CricketMatchIntro() {
                                 style={{ boxShadow: "inset 0 -6px 10px rgba(0,0,0,0.45)" }}
                               />
                             </div>
-                          </div>                         
+                          </div>
                         </div>
                         <div className="flex flex-col items-center mt-1">
                           <span
@@ -229,34 +304,46 @@ export default function CricketMatchIntro() {
                         </div>
                       </div>
 
-                      {/* VS diamond — gold-led so it reads as the focal point,
-                          instead of navy-on-navy which barely registered */}
-                      <div className="relative z-10 shrink-0">
+                      {/* Divider — simple vertical line replacing the VS crest.
+                          Draws itself top-to-bottom-out-from-center, with a
+                          gold accent dot popping in once the line is drawn. */}
+                      <div
+                        className="relative z-10 shrink-0 self-stretch flex items-center justify-center mki-divider"
+                        style={{
+                          transformOrigin: "center",
+                          animation: closing
+                            ? "mkiDividerOut 0.18s ease-in 0.05s both"
+                            : "mkiDividerIn 0.4s ease-out 0.34s both",
+                        }}
+                      >
                         <div
-                          className="absolute -inset-2 rounded-lg blur-md rotate-45"
-                          style={{ background: "rgba(201,151,31,0.35)" }}
-                        />
-                        <div
-                          className="relative w-10 h-10 sm:w-14 sm:h-14 flex items-center justify-center rounded-lg transform rotate-45"
+                          className="w-px h-full"
                           style={{
                             background:
-                              "linear-gradient(135deg, var(--color-theme-orange) 0%, #8a6d1f 100%)",
-                            border: "2px solid rgba(255,255,255,0.25)",
-                            boxShadow:
-                              "0 0 28px rgba(201,151,31,0.5), inset 0 0 10px rgba(255,255,255,0.15)",
+                              "linear-gradient(180deg, transparent 0%, var(--color-border-overlay) 20%, rgba(201,151,31,0.55) 50%, var(--color-border-overlay) 80%, transparent 100%)",
                           }}
-                        >
-                          <span
-                            className="font-heading text-base sm:text-xl font-black italic -rotate-45 tracking-tighter"
-                            style={{ color: "var(--color-surface-container-lowest)" }}
-                          >
-                            VS
-                          </span>
-                        </div>
+                        />
+                        <span
+                          className="absolute w-2 h-2 rounded-full"
+                          style={{
+                            background: "var(--color-theme-orange)",
+                            boxShadow: "0 0 8px 2px var(--color-bid-glow)",
+                            animation: closing
+                              ? "mkiFadeOut 0.15s ease-in both"
+                              : "mkiFadeIn 0.3s ease-out 0.58s both",
+                          }}
+                        />
                       </div>
 
-                      {/* Team B */}
-                      <div className="relative z-10 flex flex-col items-center gap-4">
+                      {/* Team B — mirrors Team A in from the right */}
+                      <div
+                        className="relative z-10 flex flex-col items-center gap-4 mki-team-b"
+                        style={{
+                          animation: closing
+                            ? "mkiTeamBOut 0.22s ease-in 0.05s both"
+                            : "mkiTeamBIn 0.5s cubic-bezier(0.22,1,0.36,1) 0.24s both",
+                        }}
+                      >
                         <div className="relative">
                           <div
                             className="absolute -inset-4 rounded-full blur-xl"
@@ -288,7 +375,7 @@ export default function CricketMatchIntro() {
                                 style={{ boxShadow: "inset 0 -6px 10px rgba(0,0,0,0.45)" }}
                               />
                             </div>
-                          </div>                        
+                          </div>
                         </div>
                         <div className="flex flex-col items-center mt-1">
                           <span
@@ -304,13 +391,24 @@ export default function CricketMatchIntro() {
                         </div>
                       </div>
                     </div>
-                    {/* Footer — ticket stub. Compartment gets its own faint paper tint so it 
-                        reads as a separate piece of stock, and its print switches to monospace 
-                        (real ticket printers are always dot-matrix/monospace, never a display face). */}
+
+                    {/* Footer — ticket stub. Notches are cut into the card's own
+                        edges (using its overflow-hidden to fake a real perforation),
+                        so the divider is a physical detail of "a match ticket," not a
+                        UI motif. Slides up last, like it's being torn onto the
+                        bottom of the card. */}
                     <div
-                      className="glass-panel relative z-10"
-                      style={{ borderLeft: "none", borderRight: "none", borderBottom: "none" }}
+                      className="glass-panel relative z-10 mki-footer"
+                      style={{
+                        borderLeft: "none",
+                        borderRight: "none",
+                        borderBottom: "none",
+                        animation: closing
+                          ? "mkiFooterOut 0.2s ease-in both"
+                          : "mkiFooterIn 0.45s cubic-bezier(0.22,1,0.36,1) 0.42s both",
+                      }}
                     >
+                      {/* Bite notches at the tear-line */}
                       <div
                         className="absolute -left-[9px] top-0 w-[18px] h-[18px] rounded-full -translate-y-1/2"
                         style={{ background: "rgba(8,8,10,0.94)", boxShadow: "inset -2px 0 4px rgba(0,0,0,0.5)" }}
@@ -319,6 +417,7 @@ export default function CricketMatchIntro() {
                         className="absolute -right-[9px] top-0 w-[18px] h-[18px] rounded-full -translate-y-1/2"
                         style={{ background: "rgba(8,8,10,0.94)", boxShadow: "inset 2px 0 4px rgba(0,0,0,0.5)" }}
                       />
+                      {/* Dashed tear-line between the notches */}
                       <div
                         className="absolute left-3 right-3 top-0 h-px -translate-y-1/2"
                         style={{
@@ -329,6 +428,7 @@ export default function CricketMatchIntro() {
                       />
 
                       <div className="flex flex-col sm:flex-row">
+                        {/* Main stub — venue + kickoff, asymmetric, not four equal tiles */}
                         <div className="flex-1 flex items-center gap-8 px-6 sm:px-10 py-6">
                           <div>
                             <span
@@ -344,7 +444,10 @@ export default function CricketMatchIntro() {
                               {MATCH_META.venue}
                             </p>
                           </div>
-                          <div className="w-px self-stretch my-1" style={{ background: "var(--color-border-overlay)" }} />
+                          <div
+                            className="w-px self-stretch my-1"
+                            style={{ background: "var(--color-border-overlay)" }}
+                          />
                           <div>
                             <span
                               className="block font-bold tracking-[0.25em] uppercase text-[9px]"
@@ -361,8 +464,8 @@ export default function CricketMatchIntro() {
                           </div>
                         </div>
 
-                        {/* Stub compartment — faint warm paper tint distinguishes it as its own 
-                            piece of stock, torn from the main ticket body on the left */}
+                        {/* Stub compartment — faint warm paper tint distinguishes it as its
+                            own piece of stock, torn from the main ticket body on the left */}
                         <div
                           className="relative flex flex-col justify-center gap-2 px-6 sm:px-8 py-4 sm:w-[220px] shrink-0 border-t sm:border-t-0 sm:border-l border-dashed"
                           style={{
@@ -416,29 +519,88 @@ export default function CricketMatchIntro() {
           font-family: "Montserrat", sans-serif;
         }
 
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
+        /* ---- Entrance / exit choreography ----
+           Each region gets its own enter/exit keyframes so the whole panel
+           reads as one orchestrated sequence: frame lands first, header
+           settles, both team badges swing in as the divider draws itself,
+           then the ticket stub slides up last. Exit reverses the order and
+           runs about twice as fast, so it feels like the ticket is being
+           pulled back rather than just cut. */
+
+        @keyframes mkiFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
-        @keyframes systemAppear {
-          from {
-            opacity: 0;
-            transform: scale(0.9) translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-          }
+        @keyframes mkiFadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
         }
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out;
+
+        @keyframes mkiCardEnter {
+          from { opacity: 0; transform: scale(0.86) translateY(-26px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
         }
-        .animate-systemAppear {
-          animation: systemAppear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        @keyframes mkiCardExit {
+          from { opacity: 1; transform: scale(1) translateY(0); }
+          to { opacity: 0; transform: scale(0.92) translateY(12px); }
+        }
+
+        @keyframes mkiHeaderIn {
+          from { opacity: 0; transform: translateY(-16px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes mkiHeaderOut {
+          from { opacity: 1; transform: translateY(0); }
+          to { opacity: 0; transform: translateY(-10px); }
+        }
+
+        @keyframes mkiTeamAIn {
+          from { opacity: 0; transform: translateX(-56px) rotate(-7deg) scale(0.82); }
+          to { opacity: 1; transform: translateX(0) rotate(0deg) scale(1); }
+        }
+        @keyframes mkiTeamAOut {
+          from { opacity: 1; transform: translateX(0) rotate(0deg) scale(1); }
+          to { opacity: 0; transform: translateX(-44px) rotate(-8deg) scale(0.85); }
+        }
+
+        @keyframes mkiTeamBIn {
+          from { opacity: 0; transform: translateX(56px) rotate(7deg) scale(0.82); }
+          to { opacity: 1; transform: translateX(0) rotate(0deg) scale(1); }
+        }
+        @keyframes mkiTeamBOut {
+          from { opacity: 1; transform: translateX(0) rotate(0deg) scale(1); }
+          to { opacity: 0; transform: translateX(44px) rotate(8deg) scale(0.85); }
+        }
+
+        @keyframes mkiDividerIn {
+          from { opacity: 0; transform: scaleY(0); }
+          to { opacity: 1; transform: scaleY(1); }
+        }
+        @keyframes mkiDividerOut {
+          from { opacity: 1; transform: scaleY(1); }
+          to { opacity: 0; transform: scaleY(0); }
+        }
+
+        @keyframes mkiFooterIn {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes mkiFooterOut {
+          from { opacity: 1; transform: translateY(0); }
+          to { opacity: 0; transform: translateY(22px); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .mki-backdrop,
+          .mki-card,
+          .mki-header,
+          .mki-team-a,
+          .mki-team-b,
+          .mki-divider,
+          .mki-footer {
+            animation-duration: 1ms !important;
+            animation-delay: 0ms !important;
+          }
         }
 
         /* Shine ring — rotating conic-gradient arc masked to a thin ring,
@@ -472,12 +634,8 @@ export default function CricketMatchIntro() {
           );
         }
         @keyframes spin {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </>
