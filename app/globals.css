@@ -388,3 +388,34 @@
 .advanced-drawer > summary { list-style: none; cursor: pointer; }
 .advanced-drawer > summary::-webkit-details-marker,
 .advanced-drawer > summary::marker { display: none; content: ""; }
+
+/* Roster chips are now real <button> elements — reset button chrome */
+.squad-chip {
+  font: inherit;
+  text-align: center;
+}
+.squad-chip.is-unselected {
+  opacity: 0.45;
+  border-style: dashed;
+  cursor: pointer;
+}
+.squad-chip.is-unselected:hover {
+  opacity: 0.8;
+  border-color: rgba(255,255,255,0.2);
+}
+.squad-chip.is-selected {
+  cursor: pointer;
+  border-color: rgba(76,175,80,0.5);
+  background: rgba(76,175,80,0.08);
+}
+.squad-check {
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(76,175,80,0.2);
+  border: 1px solid rgba(76,175,80,0.5);
+  color: #4caf50;
+  font-size: 11px;
+  flex-shrink: 0;
+}

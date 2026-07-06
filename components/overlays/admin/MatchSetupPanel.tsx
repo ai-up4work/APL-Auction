@@ -216,6 +216,14 @@ function TeamRosterPicker({
     [team.squadPlayers]
   );
 
+  // Only THIS team's roster rows — not every team's.
+  const teamRosterRows = useMemo(() => {
+    if (roster.status !== "ready" || !team.teamId) return [];
+    return roster.byTeamId.get(team.teamId) ?? [];
+  }, [roster, team.teamId]);
+
+  const manualPlayers = (team.squadPlayers ?? []).filter((p) => p.id.startsWith("manual:"));
+
   function reloadFromBoundTeam() {
     if (!team.teamId) return;
     const players = rosterPlayersForTeamId(roster, team.teamId);
@@ -248,25 +256,22 @@ function TeamRosterPicker({
     onChange({ squadPlayers: [], squad: [] });
   }
 
-  const allRosterRows =
-    roster.status === "ready" ? [...roster.byTeamId.values()].flat() : [];
-
   return (
     <div className="field-col">
       <div className="flex items-center justify-between">
-        <span className="field-label">Squad ({(team.squadPlayers ?? []).length})</span>
+        <span className="field-label">Squad ({selectedIds.size})</span>
         <div className="flex items-center gap-2">
           {team.teamId && roster.status === "ready" && (
             <button
               type="button"
               className="text-link-btn"
               onClick={reloadFromBoundTeam}
-              title="Reload squad from roster for the bound team"
+              title="Reload full squad from roster for the bound team"
             >
               Reload
             </button>
           )}
-          {(team.squadPlayers ?? []).length > 0 && (
+          {selectedIds.size > 0 && (
             <button
               type="button"
               className="text-link-btn"
@@ -287,76 +292,65 @@ function TeamRosterPicker({
           Couldn&apos;t reach the roster table — add players manually below.
         </p>
       )}
-      {roster.status === "empty" && (
+      {roster.status === "ready" && !team.teamId && (
         <p className="font-mono-geist text-[10px] text-white/30">
-          No sold players found for this auction yet — add players manually below.
+          Select a team above to load its roster, or add players manually below.
+        </p>
+      )}
+      {roster.status === "ready" && team.teamId && teamRosterRows.length === 0 && (
+        <p className="font-mono-geist text-[10px] text-white/30">
+          No sold players found for this team yet — add players manually below.
         </p>
       )}
 
-      {/* ── Squad — horizontal carousel. IMPORTANT: this div must carry
-           ONLY the "squad-list" class — no "panel-scroll", no others —
-           or a competing max-height / flex-direction rule can silently
-           force it back to a vertical stack. ─────────────────────── */}
-      {(team.squadPlayers ?? []).length > 0 && (
+      {/* ── Squad — single clickable carousel. Click a card to toggle it
+           in/out of today's squad. IMPORTANT: this div must carry ONLY
+           the "squad-list" class — see the CSS comment for why. ────── */}
+      {(teamRosterRows.length > 0 || manualPlayers.length > 0) && (
         <div className="squad-list">
-          {(team.squadPlayers ?? []).map((p) => {
-            const isManual = p.id.startsWith("manual:");
+          {teamRosterRows.map((r) => {
+            const checked = selectedIds.has(r.id);
             return (
-              <div key={p.id} className="squad-chip">
-                <button
-                  type="button"
-                  className="squad-remove"
-                  onClick={() => (isManual ? removeManual(p.id) : togglePlayer(p))}
-                  title="Remove from today's squad"
-                >
-                  ×
-                </button>
+              <button
+                type="button"
+                key={r.id}
+                className={`squad-chip ${checked ? "is-selected" : "is-unselected"}`}
+                onClick={() =>
+                  togglePlayer({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined })
+                }
+                title={checked ? "Remove from today's squad" : "Add to today's squad"}
+              >
+                {checked && <span className="squad-check">✓</span>}
                 <span className="squad-avatar">
-                  {p.imageUrl ? (
+                  {r.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.imageUrl} alt="" />
+                    <img src={r.image_url} alt="" />
                   ) : (
-                    <span className="squad-avatar-fallback">{initials(p.name) || "?"}</span>
+                    <span className="squad-avatar-fallback">{initials(r.name) || "?"}</span>
                   )}
                 </span>
-                <span className="squad-name">{p.name}</span>
-              </div>
+                <span className="squad-name">{r.name}</span>
+              </button>
             );
           })}
-        </div>
-      )}
 
-      {roster.status === "ready" && (
-        <details className="roster-browser">
-          <summary className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest cursor-pointer">
-            Browse all rostered players ▸
-          </summary>
-          <div className="panel-scroll squad-browse-list mt-2">
-            {allRosterRows.map((r) => {
-              const checked = selectedIds.has(r.id);
-              return (
-                <label key={r.id} className={`squad-pick-row ${checked ? "is-checked" : ""}`}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() =>
-                      togglePlayer({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined })
-                    }
-                  />
-                  <span className="squad-avatar squad-avatar-sm">
-                    {r.image_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.image_url} alt="" />
-                    ) : (
-                      <span className="squad-avatar-fallback">{initials(r.name) || "?"}</span>
-                    )}
-                  </span>
-                  <span className="squad-name">{r.name}</span>
-                </label>
-              );
-            })}
-          </div>
-        </details>
+          {manualPlayers.map((p) => (
+            <div key={p.id} className="squad-chip is-selected">
+              <button
+                type="button"
+                className="squad-remove"
+                onClick={() => removeManual(p.id)}
+                title="Remove from today's squad"
+              >
+                ×
+              </button>
+              <span className="squad-avatar">
+                <span className="squad-avatar-fallback">{initials(p.name) || "?"}</span>
+              </span>
+              <span className="squad-name">{p.name}</span>
+            </div>
+          ))}
+        </div>
       )}
 
       <div className="flex gap-2">
@@ -566,7 +560,7 @@ export default function MatchSetupPanel({
                       <input
                         className="text-input"
                         value={team.name}
-                        onChange={(e) => updateTeam(teamKey, { name: e.target.value, teamId: undefined })}
+                        onChange={(e) => updateTeam(teamKey, { name: e.target.value })}
                         placeholder="Team name"
                       />
                     </div>
@@ -576,7 +570,7 @@ export default function MatchSetupPanel({
                         className="text-input"
                         value={team.shortCode}
                         onChange={(e) =>
-                          updateTeam(teamKey, { shortCode: e.target.value.toUpperCase(), teamId: undefined })
+                          updateTeam(teamKey, { shortCode: e.target.value.toUpperCase() })
                         }
                         placeholder="e.g. CSK"
                         maxLength={4}
