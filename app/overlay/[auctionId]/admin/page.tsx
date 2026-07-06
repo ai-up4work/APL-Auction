@@ -20,7 +20,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchScorecardOn, setMatchScorecardOn] = useState(false);
   const [matchIntroOn, setMatchIntroOn] = useState(false);
   const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
-  const [testBgOn, setTestBgOn] = useState(false); // ← NEW
+  const [testBgOn, setTestBgOn] = useState(false);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -246,13 +246,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
         <div className="panel p-5">
           <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Recent triggers</h3>
-          {log.length === 0 ? (
-            <p className="font-mono-geist text-[11px] text-white/30">Nothing fired yet.</p>
-          ) : (
-            <div className="space-y-1.5 max-h-40 overflow-y-auto">
-              {log.map((l, i) => <div key={i} className="font-mono-geist text-[11px] text-white/50">{l}</div>)}
-            </div>
-          )}
+          {/* Fixed-height container regardless of empty/filled state, so the
+              panel doesn't visibly resize the moment the first trigger fires.
+              .log-scroll (defined in globals.css) gives this a themed,
+              always-reserved scrollbar instead of the browser default. */}
+          <div className="log-scroll space-y-1.5 h-40 pr-1">
+            {log.length === 0 ? (
+              <p className="font-mono-geist text-[11px] text-white/30">Nothing fired yet.</p>
+            ) : (
+              log.map((l, i) => <div key={i} className="font-mono-geist text-[11px] text-white/50">{l}</div>)
+            )}
+          </div>
         </div>
       </main>
     </div>
