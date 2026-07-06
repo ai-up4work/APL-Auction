@@ -5,8 +5,10 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
 // ---- Icon + tint per condition, so the glow and gradient always match
-// what's actually being shown rather than a single fixed accent. ----
-const CONDITIONS = {
+// what's actually being shown rather than a single fixed accent. Exported
+// so a parent can spread extra/override conditions in via the
+// `conditions` prop instead of editing this file. ----
+export const DEFAULT_CONDITIONS = {
   sunny: { icon: Sun, color: "#F2B33D", label: "Sunny" },
   clear: { icon: Sun, color: "#F2B33D", label: "Clear" },
   "partly-cloudy": { icon: CloudSun, color: "#9FC6E8", label: "Partly Cloudy" },
@@ -35,9 +37,9 @@ const CORNER_STYLE = {
  * positioning pattern LiveScoreBar uses. No card chrome — just text and an
  * icon sitting directly over the footage with drop-shadows for contrast.
  *
- * No "Weather" eyebrow label anymore — the icon+temp row now sits flush at
- * `topPx` (default 24px) so it top-aligns with TournamentLogoDisplay on the
- * opposite corner instead of sitting lower under a label + hairline.
+ * All data (venue/temp/unit/condition) and layout (corner + offsets) are
+ * props. `conditions` lets a parent add/override condition entries
+ * without touching this file (merged over DEFAULT_CONDITIONS).
  */
 export default function WeatherCard({
   venue = "INLAND CRICKET GROUND",
@@ -50,11 +52,13 @@ export default function WeatherCard({
   rightPx = 24,
   bottomPx = 108,
   leftPx = 16,
+  conditions = {},
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const cond = CONDITIONS[condition] ?? CONDITIONS.sunny;
+  const mergedConditions = { ...DEFAULT_CONDITIONS, ...conditions };
+  const cond = mergedConditions[condition] ?? mergedConditions.sunny;
   const Icon = cond.icon;
   const align = (CORNER_STYLE[corner] ?? CORNER_STYLE["top-right"])(topPx, rightPx, bottomPx, leftPx);
   const alignText = align.alignItems === "flex-end" ? "items-end text-right" : "items-start text-left";
@@ -111,10 +115,6 @@ export default function WeatherCard({
         .font-heading {
           font-family: "Montserrat", sans-serif;
         }
-
-        /* Entrance — icon leads with a little overshoot spin-in, then
-           temperature/condition/venue cascade down right after. Exit
-           reverses fast via the wrapper's own wipe-out animation. */
 
         .wc-icon {
           animation: wcIconIn 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0s both, wcIconGlow 3.2s ease-in-out 0.6s infinite;

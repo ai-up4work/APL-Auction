@@ -214,9 +214,22 @@ function TeamBlock({ team, opponent, align }) {
   );
 }
 
-export default function LiveScoreBar() {
+/**
+ * LiveScoreBar — remote-controllable, same pattern as PointsTable:
+ *   - `show` (boolean | undefined): when provided, drives the bar
+ *     open/closed externally (e.g. from a bus event). When omitted
+ *     (undefined), the component behaves exactly as before — it opens
+ *     itself on mount and can be dismissed/reopened via its own controls.
+ *   - `hideTrigger`: hides the on-screen "Show Score" reopen pill and the
+ *     in-bar dismiss chevron, for use on the OBS-facing overlay page where
+ *     there's no one to click them and no reason for on-stream controls.
+ */
+export default function LiveScoreBar({ show, hideTrigger = false }) {
   const [mounted, setMounted] = useState(false);
-  const [open, setOpen] = useState(true);
+  // Self-contained default (no `show` prop passed) keeps its old
+  // behavior of appearing immediately; once `show` is provided it takes
+  // over via the effect below.
+  const [open, setOpen] = useState(show ?? true);
   const [closing, setClosing] = useState(false);
   const closeTimer = useRef(null);
 
@@ -252,6 +265,14 @@ export default function LiveScoreBar() {
     else if (!open) openBar();
   }, [open, closing, openBar, closeBar]);
 
+  // External control — only takes effect when `show` is actually passed.
+  useEffect(() => {
+    if (show === undefined) return;
+    if (show) openBar();
+    else closeBar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
   // Pad the current over out to a full 6 balls with hollow placeholders.
   const overChips = [
     ...LIVE.thisOver,
@@ -261,7 +282,7 @@ export default function LiveScoreBar() {
 
   return (
     <>
-      {mounted && !open && !closing && (
+      {!hideTrigger && mounted && !open && !closing && (
         <button
           onClick={toggle}
           className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[101] flex items-center gap-2 px-4 py-2 rounded-full shadow-xl"
@@ -449,17 +470,21 @@ export default function LiveScoreBar() {
                       </div>
                     </div>
 
-                    {/* Dismiss control */}
-                    <button
-                      onClick={toggle}
-                      className="relative z-10 flex items-center justify-center px-2 sm:px-2.5 shrink-0 transition-colors"
-                      style={{ color: "var(--color-outline)" }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-outline)")}
-                      aria-label="Hide score bar"
-                    >
-                      <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </button>
+                    {/* Dismiss control — hidden on the OBS-facing overlay
+                        page (hideTrigger) since there's no one to click it
+                        and it shouldn't render as an on-stream control. */}
+                    {!hideTrigger && (
+                      <button
+                        onClick={toggle}
+                        className="relative z-10 flex items-center justify-center px-2 sm:px-2.5 shrink-0 transition-colors"
+                        style={{ color: "var(--color-outline)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-outline)")}
+                        aria-label="Hide score bar"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </button>
+                    )}
 
                     {/* Fielding team block — identical treatment, mirrored */}
                     <TeamBlock team={LIVE.fieldingTeam} opponent={LIVE.battingTeam} align="right" />

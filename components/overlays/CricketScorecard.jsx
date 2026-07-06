@@ -281,7 +281,17 @@ function TeamInnings({ team, innings, closing, delay }) {
   );
 }
 
-export default function CricketScorecard() {
+/**
+ * CricketScorecard — self-contained trigger button + modal panel, now
+ * remote-controllable, same pattern as PointsTable:
+ *   - `show` (boolean | undefined): when provided, drives the panel
+ *     open/closed externally (e.g. from a bus event). When omitted
+ *     (undefined), the component behaves exactly as before — purely
+ *     driven by its own trigger button.
+ *   - `hideTrigger`: hides the on-screen "Scorecard" trigger button, for
+ *     use on the OBS-facing overlay page where there's no one to click it.
+ */
+export default function CricketScorecard({ show, hideTrigger = false }) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -319,6 +329,14 @@ export default function CricketScorecard() {
     else if (!open) openPanel();
   }, [open, closing, openPanel, closePanel]);
 
+  // External control — only takes effect when `show` is actually passed.
+  useEffect(() => {
+    if (show === undefined) return;
+    if (show) openPanel();
+    else closePanel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
   useEffect(() => {
     if (!open || closing) return;
     const onKey = (e) => {
@@ -330,18 +348,20 @@ export default function CricketScorecard() {
 
   return (
     <>
-      <button
-        onClick={toggle}
-        className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
-        style={{ color: "var(--color-on-surface-variant)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant)")}
-      >
-        <ListOrdered className="w-5 h-5" />
-        <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">
-          Scorecard
-        </span>
-      </button>
+      {!hideTrigger && (
+        <button
+          onClick={toggle}
+          className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
+          style={{ color: "var(--color-on-surface-variant)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant)")}
+        >
+          <ListOrdered className="w-5 h-5" />
+          <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">
+            Scorecard
+          </span>
+        </button>
+      )}
 
       {mounted &&
         open &&

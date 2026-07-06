@@ -9,14 +9,13 @@ import { createPortal } from "react-dom";
 // stat pops its sphere in with a little overshoot, then its number/label
 // settle in right after — a smaller echo of the ball-chip cascade in the
 // "this over" ticker.
-function BoundaryStat({ label, value, delay, closing }) {
+function BoundaryStat({ label, value, delay, closing, sphereGradient, sphereSeamColor }) {
   return (
     <span className="mb-stat relative flex items-center gap-1.5 sm:gap-2 shrink-0">
       <span
         className="mb-sphere relative w-5 h-5 sm:w-6 sm:h-6 rounded-full overflow-hidden shrink-0"
         style={{
-          background:
-            "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange, #C9971F) 68%, #8a5c0d 100%)",
+          background: sphereGradient,
           border: "1px solid rgba(0,0,0,0.35)",
           boxShadow: "inset 0 -2px 3px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.3)",
           animation: closing
@@ -25,8 +24,8 @@ function BoundaryStat({ label, value, delay, closing }) {
         }}
       >
         <svg viewBox="0 0 20 20" className="absolute inset-0 w-full h-full" style={{ opacity: 0.75 }}>
-          <path d="M3,2 Q9,10 3,18" stroke="rgba(58,37,4,0.5)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-          <path d="M17,2 Q11,10 17,18" stroke="rgba(58,37,4,0.5)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+          <path d="M3,2 Q9,10 3,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+          <path d="M17,2 Q11,10 17,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
         </svg>
       </span>
       <span
@@ -54,29 +53,47 @@ function BoundaryStat({ label, value, delay, closing }) {
   );
 }
 
+// Default design tokens — override any of these via props without
+// touching this file. Kept as named exports so a parent (or the
+// TournamentBoundaries sibling) can reuse/extend them.
+export const MATCH_BOUNDARIES_DEFAULTS = {
+  eyebrow: "Match Boundaries",
+  eyebrowColor: "var(--color-theme-orange, #C9971F)",
+  hairlineColor: "rgba(201,151,31,0.5)",
+  bezelGradient:
+    "linear-gradient(135deg, #f1efe9 0%, #b8ad93 14%, #6b6455 28%, #c9971f 42%, #4a453a 56%, #b8ad93 72%, #f1efe9 86%, #8a8272 100%)",
+  sphereGradient:
+    "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange, #C9971F) 68%, #8a5c0d 100%)",
+  sphereSeamColor: "rgba(58,37,4,0.5)",
+  bottom: "152px",
+  right: "5vw",
+};
+
 // How far the left edge leans, in px — same "wedge" idea as LiveScoreBar's
 // TeamBlock diagonal cut, just applied to this card's one open edge
 // instead of a pair of mirrored blocks.
 const SLANT_PX = 30;
 
 /**
- * MatchBoundaries — thin "fours / sixes" readout, always docked bottom
- * right, just above the live score bar.
- *
- * The position is intentionally NOT exposed as a prop: it's baked into
- * this component (fixed, bottom-right, offset to clear the score bar's
- * height) so it can never drift to a different corner. `fours`, `sixes`,
- * and `closing` are the only knobs — everything about *where* this
- * renders is self-contained here.
- *
- * Entrance/exit: the card wipes in from the right on its own diagonal —
- * echoing the slanted left edge rather than a plain slide — while the
- * label, hairline, and each stat's ball cascade in just behind it. A
- * single soft glint sweeps across the bezel once it lands, like light
- * catching brushed metal. Exit reverses fast: stats and label fade first,
- * then the card wipes back out along the same diagonal.
+ * MatchBoundaries — thin "fours / sixes" readout. Position defaults to
+ * bottom-right (clearing the live score bar's own height) but every
+ * design token — label, colors, gradients, and the dock position itself —
+ * is now a prop, so this and TournamentBoundaries can share one component
+ * shape with two different looks, or a fully custom third look.
  */
-export default function MatchBoundaries({ fours = 0, sixes = 0, closing = false }) {
+export default function MatchBoundaries({
+  fours = 0,
+  sixes = 0,
+  closing = false,
+  eyebrow = MATCH_BOUNDARIES_DEFAULTS.eyebrow,
+  eyebrowColor = MATCH_BOUNDARIES_DEFAULTS.eyebrowColor,
+  hairlineColor = MATCH_BOUNDARIES_DEFAULTS.hairlineColor,
+  bezelGradient = MATCH_BOUNDARIES_DEFAULTS.bezelGradient,
+  sphereGradient = MATCH_BOUNDARIES_DEFAULTS.sphereGradient,
+  sphereSeamColor = MATCH_BOUNDARIES_DEFAULTS.sphereSeamColor,
+  bottom = MATCH_BOUNDARIES_DEFAULTS.bottom,
+  right = MATCH_BOUNDARIES_DEFAULTS.right,
+}) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -91,19 +108,12 @@ export default function MatchBoundaries({ fours = 0, sixes = 0, closing = false 
   return createPortal(
     <div
       className={`mb-wrap fixed z-[90] pointer-events-none ${closing ? "mb-closing" : ""}`}
-      // Hard-pinned bottom-right, clearing the live score bar's own
-      // height (main row + ticker row + its bottom page padding) so the
-      // two never overlap. Not configurable on purpose — see doc comment.
-      style={{ bottom: "152px", right: "5vw" }}
+      style={{ bottom, right }}
     >
-      {/* Metallic bezel — same brushed-steel/gold plaque frame as the
-          Scorecard and Points Table cards, shrunk to strip scale, with a
-          steep diagonal cut on the left edge instead of a square corner. */}
       <div
         className="relative p-[2px] sm:p-[2.5px]"
         style={{
-          background:
-            "linear-gradient(135deg, #f1efe9 0%, #b8ad93 14%, #6b6455 28%, #c9971f 42%, #4a453a 56%, #b8ad93 72%, #f1efe9 86%, #8a8272 100%)",
+          background: bezelGradient,
           boxShadow: "0 12px 26px -8px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.35)",
           clipPath: clip,
           WebkitClipPath: clip,
@@ -117,35 +127,32 @@ export default function MatchBoundaries({ fours = 0, sixes = 0, closing = false 
             WebkitClipPath: clipInner,
           }}
         >
-          {/* One-shot glint — a soft diagonal highlight that sweeps across
-              the bezel once, right as the card finishes landing, like
-              light catching brushed metal. Skipped on exit. */}
           {!closing && <span className="mb-glint absolute inset-0 pointer-events-none" />}
 
           <span
             className="mb-eyebrow text-[7.5px] sm:text-[8.5px] font-bold uppercase tracking-[0.2em] whitespace-nowrap shrink-0"
             style={{
-              color: "var(--color-theme-orange, #C9971F)",
+              color: eyebrowColor,
               animation: closing
                 ? "mbFadeOut 0.14s ease-in both"
                 : "mbEyebrowIn 0.4s cubic-bezier(0.22,1,0.36,1) 0.05s both",
             }}
           >
-            Match Boundaries
+            {eyebrow}
           </span>
 
           <span
             className="mb-hairline w-px h-4 sm:h-5 shrink-0"
             style={{
-              background: "linear-gradient(180deg, transparent, rgba(201,151,31,0.5), transparent)",
+              background: `linear-gradient(180deg, transparent, ${hairlineColor}, transparent)`,
               animation: closing
                 ? "mbFadeOut 0.12s ease-in both"
                 : "mbHairlineIn 0.35s cubic-bezier(0.22,1,0.36,1) 0.16s both",
             }}
           />
 
-          <BoundaryStat label="Fours" value={fours} delay={0.24} closing={closing} />
-          <BoundaryStat label="Sixes" value={sixes} delay={0.34} closing={closing} />
+          <BoundaryStat label="Fours" value={fours} delay={0.24} closing={closing} sphereGradient={sphereGradient} sphereSeamColor={sphereSeamColor} />
+          <BoundaryStat label="Sixes" value={sixes} delay={0.34} closing={closing} sphereGradient={sphereGradient} sphereSeamColor={sphereSeamColor} />
         </div>
       </div>
 
@@ -156,10 +163,6 @@ export default function MatchBoundaries({ fours = 0, sixes = 0, closing = false 
           font-family: "Montserrat", sans-serif;
         }
 
-        /* Wrap: wipes in from the right along its own diagonal — a slight
-           rotate + scale settling into place, echoing the slanted left
-           edge rather than a plain straight-line slide. Exit reverses the
-           motion about twice as fast, wiping back out the same way. */
         .mb-wrap {
           transform-origin: right center;
           animation: mbWrapIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -203,8 +206,6 @@ export default function MatchBoundaries({ fours = 0, sixes = 0, closing = false 
           to { opacity: 0; }
         }
 
-        /* Glint — a single diagonal light sweep across the bezel, timed to
-           arrive just as the card finishes settling into place. */
         .mb-glint {
           background: linear-gradient(
             100deg,

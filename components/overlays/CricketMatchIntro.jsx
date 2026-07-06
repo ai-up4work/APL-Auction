@@ -39,7 +39,18 @@ const MATCH_META = {
 // Keep this in sync with the longest exit animation + its delay below.
 const EXIT_DURATION_MS = 420;
 
-export default function CricketMatchIntro() {
+/**
+ * CricketMatchIntro — self-contained trigger button + modal panel, now
+ * remote-controllable, same pattern as PointsTable:
+ *   - `show` (boolean | undefined): when provided, drives the panel
+ *     open/closed externally (e.g. from a bus event). When omitted
+ *     (undefined), the component behaves exactly as before — purely
+ *     driven by its own trigger button.
+ *   - `hideTrigger`: hides the on-screen "Match Center" trigger button,
+ *     for use on the OBS-facing overlay page where there's no one to
+ *     click it.
+ */
+export default function CricketMatchIntro({ show, hideTrigger = false }) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false); // panel is in the DOM
   const [closing, setClosing] = useState(false); // panel is mid exit-animation
@@ -77,6 +88,14 @@ export default function CricketMatchIntro() {
     else if (!open) openPanel();
   }, [open, closing, openPanel, closePanel]);
 
+  // External control — only takes effect when `show` is actually passed.
+  useEffect(() => {
+    if (show === undefined) return;
+    if (show) openPanel();
+    else closePanel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
   // Escape closes it too, since there's no dedicated close button.
   useEffect(() => {
     if (!open || closing) return;
@@ -90,26 +109,29 @@ export default function CricketMatchIntro() {
   return (
     <>
       {/* Trigger Button — also toggles closed, since the panel no longer
-          has its own close control */}
-      <button
-        onClick={toggle}
-        className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
-        style={{ color: "var(--color-on-surface-variant)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant)")}
-      >
-        <Trophy className="w-5 h-5" />
-        <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">
-          Match Center
-        </span>
-        <span
-          className="absolute -top-1 -right-1 h-3 w-3 rounded-full animate-pulse"
-          style={{
-            background: "var(--color-theme-orange)",
-            boxShadow: "0 0 10px 2px var(--color-bid-glow)",
-          }}
-        />
-      </button>
+          has its own close control. Hidden entirely on the OBS-facing
+          overlay page via hideTrigger. */}
+      {!hideTrigger && (
+        <button
+          onClick={toggle}
+          className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
+          style={{ color: "var(--color-on-surface-variant)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant)")}
+        >
+          <Trophy className="w-5 h-5" />
+          <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">
+            Match Center
+          </span>
+          <span
+            className="absolute -top-1 -right-1 h-3 w-3 rounded-full animate-pulse"
+            style={{
+              background: "var(--color-theme-orange)",
+              boxShadow: "0 0 10px 2px var(--color-bid-glow)",
+            }}
+          />
+        </button>
+      )}
 
       {mounted &&
         open &&

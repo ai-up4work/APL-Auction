@@ -4,17 +4,16 @@ import { Award, Star } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
-// ---- Same fictional tournament as the intro / scorecard / live-bar cards ----
-const TOURNAMENT = {
+// ---- Default data — override any of these via props. Kept exported so a
+// parent (e.g. the OBS overlay page) can import and tweak just one field
+// without redefining the whole roster. ----
+export const DEFAULT_TOURNAMENT = {
   name: "MOON KNIGHT CUP",
   edition: "SEASON 7 · WOMEN'S T20",
   logo: "/moon-knight-logo.png",
 };
 
-// Eight -> ten real IPL-style franchises, pointing at the actual crest
-// artwork already sitting in /public/Franchises. Colors are each side's
-// well-known brand color, not derived from the image.
-const TEAMS = [
+export const DEFAULT_TEAMS = [
   { rank: 1, short: "CSK", name: "CHENNAI SUPER KINGS", image: "/Franchises/CSK.png", color: "#FDB913", colorSoft: "rgba(253,185,19,0.22)", p: 7, w: 6, l: 1, t: 0, nr: 0, pts: 12, nrr: 1.512 },
   { rank: 2, short: "GT", name: "GUJARAT TITANS", image: "/Franchises/GT.png", color: "#1C1C84", colorSoft: "rgba(28,28,132,0.24)", p: 7, w: 5, l: 2, t: 0, nr: 0, pts: 10, nrr: 0.876 },
   { rank: 3, short: "MI", name: "MUMBAI INDIANS", image: "/Franchises/MI.png", color: "#004BA0", colorSoft: "rgba(0,75,160,0.22)", p: 7, w: 5, l: 2, t: 0, nr: 0, pts: 10, nrr: 0.421 },
@@ -25,8 +24,8 @@ const TEAMS = [
   { rank: 8, short: "DC", name: "DELHI CAPITALS", image: "/Franchises/DLC.jpg", color: "#17479E", colorSoft: "rgba(23,71,158,0.22)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.415 },
 ];
 
-const QUALIFY_CUTOFF = 4; // top N advance — draws the cut line under this rank
-const RESULT_LINE = "TOP 4 ADVANCE TO THE SEMI-FINALS";
+export const DEFAULT_QUALIFY_CUTOFF = 4; // top N advance — draws the cut line under this rank
+export const DEFAULT_RESULT_LINE = "TOP 4 ADVANCE TO THE SEMI-FINALS";
 
 const EXIT_DURATION_MS = 400;
 
@@ -161,7 +160,27 @@ function TeamRow({ team, closing, delay }) {
   );
 }
 
-export default function PointsTable() {
+/**
+ * PointsTable — self-contained trigger button + modal panel, now
+ * remote-controllable:
+ *   - `show` (boolean | undefined): when provided, drives the panel
+ *     open/closed externally (e.g. from a bus event). When omitted
+ *     (undefined), the component behaves exactly as before — purely
+ *     driven by its own trigger button.
+ *   - `hideTrigger`: hides the on-screen "Standings" trigger button, for
+ *     use on the OBS-facing overlay page where there's no one to click it.
+ *
+ * All data is now props: `tournament`, `teams`, `qualifyCutoff`,
+ * `resultLine` — defaulting to the values this card shipped with.
+ */
+export default function PointsTable({
+  tournament = DEFAULT_TOURNAMENT,
+  teams = DEFAULT_TEAMS,
+  qualifyCutoff = DEFAULT_QUALIFY_CUTOFF,
+  resultLine = DEFAULT_RESULT_LINE,
+  show,
+  hideTrigger = false,
+}) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -199,6 +218,14 @@ export default function PointsTable() {
     else if (!open) openPanel();
   }, [open, closing, openPanel, closePanel]);
 
+  // External control — only takes effect when `show` is actually passed.
+  useEffect(() => {
+    if (show === undefined) return;
+    if (show) openPanel();
+    else closePanel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
   useEffect(() => {
     if (!open || closing) return;
     const onKey = (e) => {
@@ -208,21 +235,23 @@ export default function PointsTable() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, closing, closePanel]);
 
-  const before = TEAMS.filter((t) => t.rank <= QUALIFY_CUTOFF);
-  const after = TEAMS.filter((t) => t.rank > QUALIFY_CUTOFF);
+  const before = teams.filter((t) => t.rank <= qualifyCutoff);
+  const after = teams.filter((t) => t.rank > qualifyCutoff);
 
   return (
     <>
-      <button
-        onClick={toggle}
-        className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
-        style={{ color: "var(--color-on-surface-variant, #b8bdc9)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange, #C9971F)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant, #b8bdc9)")}
-      >
-        <Award className="w-5 h-5" />
-        <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">Standings</span>
-      </button>
+      {!hideTrigger && (
+        <button
+          onClick={toggle}
+          className="relative flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
+          style={{ color: "var(--color-on-surface-variant, #b8bdc9)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange, #C9971F)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-on-surface-variant, #b8bdc9)")}
+        >
+          <Award className="w-5 h-5" />
+          <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">Standings</span>
+        </button>
+      )}
 
       {mounted &&
         open &&
@@ -285,7 +314,7 @@ export default function PointsTable() {
                       style={{ opacity: 0.12, mixBlendMode: "screen" }}
                     >
                       <img
-                        src={TOURNAMENT.logo}
+                        src={tournament.logo}
                         alt=""
                         className="w-2/3 h-2/3 object-contain"
                         style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
@@ -308,15 +337,16 @@ export default function PointsTable() {
                           Points Table
                         </p>
                         <p className="text-[9px] font-bold tracking-[0.3em] uppercase" style={{ color: "var(--color-theme-orange, #C9971F)" }}>
-                          {TOURNAMENT.name} · {TOURNAMENT.edition}
+                          {tournament.name} · {tournament.edition}
                         </p>
                       </div>
                       <div className="hidden sm:block h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(201,151,31,0.5), transparent)" }} />
                     </div>
 
-                    {/* Two-column landscape split: ranks 1-4 on the left,
-                        5-8 on the right, so the whole table sits inside one
-                        wide, short card instead of a tall scrolling list. */}
+                    {/* Two-column landscape split: ranks 1-N (qualifyCutoff)
+                        on the left, the rest on the right, so the whole
+                        table sits inside one wide, short card instead of a
+                        tall scrolling list. */}
                     <div
                       className="relative z-10 flex items-stretch pt-4 pb-3"
                       style={{
@@ -392,7 +422,7 @@ export default function PointsTable() {
 
                       <div className="flex-1 flex items-center justify-center px-6 sm:px-10 py-3 text-center">
                         <p className="font-heading text-xs sm:text-base font-black uppercase tracking-tight" style={{ color: "var(--color-theme-orange, #C9971F)" }}>
-                          {RESULT_LINE}
+                          {resultLine}
                         </p>
                       </div>
                     </div>

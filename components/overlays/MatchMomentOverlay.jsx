@@ -3,7 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
-const MOMENTS = {
+// Default per-moment styling/behavior — exported so a parent can override
+// or extend individual moments (or add brand-new ones) via the `moments`
+// prop without touching this file. Merged shallowly, so passing
+// `{ six: { accent: "#ff0000" } }` replaces just that one moment's config
+// (not a deep merge) — pass the full object for that key if you want to
+// change just one field, spread the default in yourself, e.g.
+// `{ six: { ...DEFAULT_MOMENTS.six, accent: "#ff0000" } }`.
+export const DEFAULT_MOMENTS = {
   four: {
     mode: "ball",
     label: "FOUR",
@@ -82,7 +89,7 @@ const MOMENTS = {
 };
 
 const EXIT_DURATION_MS = 380;
-const CONFETTI_COLORS = ["#ffd873", "#f2b33d", "#ffffff", "#e2685a", "#9ecbf0"];
+export const DEFAULT_CONFETTI_COLORS = ["#ffd873", "#f2b33d", "#ffffff", "#e2685a", "#9ecbf0"];
 
 function seededRand(seed) {
   const x = Math.sin(seed) * 10000;
@@ -181,13 +188,13 @@ function Particles({ cfg, triggerId }) {
   );
 }
 
-function Fireworks({ cfg, triggerId }) {
+function Fireworks({ cfg, triggerId, confettiColors }) {
   const bursts = Array.from({ length: cfg.fireworks }, (_, i) => {
     const base = triggerId * 251 + i * 41;
     const left = 12 + seededRand(base) * 76;
     const top = 8 + seededRand(base + 1) * 38;
     const delay = 0.9 + seededRand(base + 2) * 1.6;
-    const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    const color = confettiColors[i % confettiColors.length];
     const sparks = Array.from({ length: 14 }, (_, j) => {
       const b2 = base + j * 7;
       const angle = (j / 14) * Math.PI * 2 + seededRand(b2) * 0.4;
@@ -221,14 +228,14 @@ function Fireworks({ cfg, triggerId }) {
   );
 }
 
-function Confetti({ triggerId }) {
+function Confetti({ triggerId, confettiColors }) {
   const pieces = Array.from({ length: 26 }, (_, i) => {
     const base = triggerId * 71 + i * 13;
     const left = seededRand(base) * 100;
     const delay = seededRand(base + 1) * 1.4;
     const duration = 2.4 + seededRand(base + 2) * 1.6;
     const size = 6 + seededRand(base + 3) * 6;
-    const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    const color = confettiColors[i % confettiColors.length];
     const drift = (seededRand(base + 4) - 0.5) * 120;
     const spin = 180 + seededRand(base + 5) * 540;
     return { id: i, left, delay, duration, size, color, drift, spin };
@@ -290,12 +297,31 @@ function BigText({ cfg }) {
   );
 }
 
-export default function MatchMomentOverlay() {
+/**
+ * MatchMomentOverlay — full-screen cinematic overlay for FOUR / SIX /
+ * WICKET / FIFTY / CENTURY.
+ *
+ * `moments` overrides/extends DEFAULT_MOMENTS per key (shallow merge per
+ * key — see the note above DEFAULT_MOMENTS). `confettiColors` overrides
+ * the shared confetti/firework palette. `hideDemoButtons` removes the
+ * on-screen test buttons (set this when embedding inside the real OBS
+ * overlay page — leave it false for standalone testing).
+ *
+ * Trigger via:
+ *   window.triggerBoundaryCelebration("four" | "six" | "wicket" | "fifty" | "hundred")
+ */
+export default function MatchMomentOverlay({
+  moments = {},
+  confettiColors = DEFAULT_CONFETTI_COLORS,
+  hideDemoButtons = false,
+}) {
   const [mounted, setMounted] = useState(false);
   const [active, setActive] = useState(null);
   const [closing, setClosing] = useState(false);
   const [triggerId, setTriggerId] = useState(0);
   const timers = useRef([]);
+
+  const mergedMoments = { ...DEFAULT_MOMENTS, ...moments };
 
   useEffect(() => setMounted(true), []);
 
@@ -304,21 +330,25 @@ export default function MatchMomentOverlay() {
     timers.current = [];
   };
 
-  const trigger = useCallback((type) => {
-    if (!MOMENTS[type]) return;
-    clearTimers();
-    setClosing(false);
-    setActive(type);
-    setTriggerId((id) => id + 1);
-    const cfg = MOMENTS[type];
-    timers.current.push(
-      setTimeout(() => setClosing(true), cfg.duration),
-      setTimeout(() => {
-        setActive(null);
-        setClosing(false);
-      }, cfg.duration + EXIT_DURATION_MS)
-    );
-  }, []);
+  const trigger = useCallback(
+    (type) => {
+      if (!mergedMoments[type]) return;
+      clearTimers();
+      setClosing(false);
+      setActive(type);
+      setTriggerId((id) => id + 1);
+      const cfg = mergedMoments[type];
+      timers.current.push(
+        setTimeout(() => setClosing(true), cfg.duration),
+        setTimeout(() => {
+          setActive(null);
+          setClosing(false);
+        }, cfg.duration + EXIT_DURATION_MS)
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(moments)]
+  );
 
   useEffect(() => {
     window.triggerBoundaryCelebration = trigger;
@@ -330,28 +360,30 @@ export default function MatchMomentOverlay() {
 
   if (!mounted) return null;
 
-  const cfg = active ? MOMENTS[active] : null;
+  const cfg = active ? mergedMoments[active] : null;
 
   return (
     <>
-      <div className="fixed bottom-4 left-4 z-[210] flex flex-wrap gap-2 pointer-events-auto max-w-xs">
-        {[
-          { key: "four", label: "Test Four", bg: "rgba(59,139,212,0.85)" },
-          { key: "six", label: "Test Six", bg: "rgba(201,151,31,0.9)" },
-          { key: "wicket", label: "Test Out", bg: "rgba(226,69,58,0.9)" },
-          { key: "fifty", label: "Test Fifty", bg: "rgba(160,170,190,0.9)" },
-          { key: "hundred", label: "Test Century", bg: "rgba(154,110,201,0.9)" },
-        ].map((b) => (
-          <button
-            key={b.key}
-            onClick={() => trigger(b.key)}
-            className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
-            style={{ background: b.bg, border: "1px solid rgba(255,255,255,0.25)" }}
-          >
-            {b.label}
-          </button>
-        ))}
-      </div>
+      {!hideDemoButtons && (
+        <div className="fixed bottom-4 left-4 z-[210] flex flex-wrap gap-2 pointer-events-auto max-w-xs">
+          {[
+            { key: "four", label: "Test Four", bg: "rgba(59,139,212,0.85)" },
+            { key: "six", label: "Test Six", bg: "rgba(201,151,31,0.9)" },
+            { key: "wicket", label: "Test Out", bg: "rgba(226,69,58,0.9)" },
+            { key: "fifty", label: "Test Fifty", bg: "rgba(160,170,190,0.9)" },
+            { key: "hundred", label: "Test Century", bg: "rgba(154,110,201,0.9)" },
+          ].map((b) => (
+            <button
+              key={b.key}
+              onClick={() => trigger(b.key)}
+              className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
+              style={{ background: b.bg, border: "1px solid rgba(255,255,255,0.25)" }}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {mounted &&
         active &&
@@ -392,13 +424,13 @@ export default function MatchMomentOverlay() {
 
             {cfg.fireworks > 0 && (
               <div className="absolute inset-0">
-                <Fireworks cfg={cfg} triggerId={triggerId} />
+                <Fireworks cfg={cfg} triggerId={triggerId} confettiColors={confettiColors} />
               </div>
             )}
 
             {cfg.confetti && (
               <div className="absolute inset-0">
-                <Confetti triggerId={triggerId} />
+                <Confetti triggerId={triggerId} confettiColors={confettiColors} />
               </div>
             )}
 

@@ -3,20 +3,13 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-// Boundary stat — the same stitched-seam gold sphere from LiveScoreBar's
-// "this over" ticker, paired with a number-over-caption stack so it reads
-// as a proper stat, while staying short enough to fit one thin row. Each
-// stat pops its sphere in with a little overshoot, then its number/label
-// settle in right after — a smaller echo of the ball-chip cascade in the
-// "this over" ticker.
-function BoundaryStat({ label, value, delay, closing }) {
+function BoundaryStat({ label, value, delay, closing, sphereGradient, sphereSeamColor }) {
   return (
     <span className="tb-stat relative flex items-center gap-1.5 sm:gap-2 shrink-0">
       <span
         className="tb-sphere relative w-5 h-5 sm:w-6 sm:h-6 rounded-full overflow-hidden shrink-0"
         style={{
-          background:
-            "radial-gradient(circle at 32% 26%, #ffffff 0%, var(--color-tertiary, #dce4ff) 30%, var(--color-tertiary-container, #adc6ff) 68%, var(--color-on-primary-fixed-variant, #3a4156) 100%)",
+          background: sphereGradient,
           border: "1px solid rgba(0,0,0,0.35)",
           boxShadow: "inset 0 -2px 3px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.3)",
           animation: closing
@@ -25,8 +18,8 @@ function BoundaryStat({ label, value, delay, closing }) {
         }}
       >
         <svg viewBox="0 0 20 20" className="absolute inset-0 w-full h-full" style={{ opacity: 0.75 }}>
-          <path d="M3,2 Q9,10 3,18" stroke="rgba(42,52,74,0.55)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-          <path d="M17,2 Q11,10 17,18" stroke="rgba(42,52,74,0.55)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+          <path d="M3,2 Q9,10 3,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
+          <path d="M17,2 Q11,10 17,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
         </svg>
       </span>
       <span
@@ -54,6 +47,22 @@ function BoundaryStat({ label, value, delay, closing }) {
   );
 }
 
+// Default design tokens — cool steel-blue accent, distinct from
+// MatchBoundaries' warm gold, so the two read as different cards even
+// when docked in the same corner slot.
+export const TOURNAMENT_BOUNDARIES_DEFAULTS = {
+  eyebrow: "Tournament",
+  eyebrowColor: "var(--color-tertiary-container, #adc6ff)",
+  hairlineColor: "rgba(173,198,255,0.55)",
+  bezelGradient:
+    "linear-gradient(135deg, #eef1f6 0%, #b9c3d9 14%, #5f6b85 28%, #6f86c9 42%, #333a4d 56%, #b9c3d9 72%, #eef1f6 86%, #7c879e 100%)",
+  sphereGradient:
+    "radial-gradient(circle at 32% 26%, #ffffff 0%, var(--color-tertiary, #dce4ff) 30%, var(--color-tertiary-container, #adc6ff) 68%, var(--color-on-primary-fixed-variant, #3a4156) 100%)",
+  sphereSeamColor: "rgba(42,52,74,0.55)",
+  bottom: "152px",
+  right: "5vw",
+};
+
 // How far the left edge leans, in px — same "wedge" idea as LiveScoreBar's
 // TeamBlock diagonal cut, and identical to MatchBoundaries' own edge so
 // the two read as the same object in two states, not two different cards.
@@ -61,46 +70,46 @@ const SLANT_PX = 30;
 
 /**
  * TournamentBoundaries — the season-long sibling of MatchBoundaries. Same
- * shape, same size, same entrance/exit choreography, same dock point
- * (bottom-right, just above the live score bar) — the eyebrow reads
- * "Tournament" instead of "Match Boundaries", the numbers behind it are
- * the competition-wide totals rather than this match's, and the accent
- * swaps from the match card's warm gold to a cool steel-blue pulled from
- * the theme's existing secondary/tertiary tokens (var(--color-tertiary),
- * var(--color-tertiary-container), var(--color-on-primary-fixed-variant))
- * so the two are distinguishable at a glance even in the same corner.
+ * shape, same size, same entrance/exit choreography, same default dock
+ * point (bottom-right, just above the live score bar) — every design
+ * token (label, colors, gradients, position) is a prop, defaulting to a
+ * cool steel-blue so the two cards are distinguishable at a glance even
+ * in the same corner without any props being passed.
  *
  * These two are meant to occupy the same slot, not sit side by side —
  * swap one out (closing) as the other swaps in when the broadcast wants
  * to flip from match-level to tournament-level context.
  */
-export default function TournamentBoundaries({ fours = 0, sixes = 0, closing = false }) {
+export default function TournamentBoundaries({
+  fours = 0,
+  sixes = 0,
+  closing = false,
+  eyebrow = TOURNAMENT_BOUNDARIES_DEFAULTS.eyebrow,
+  eyebrowColor = TOURNAMENT_BOUNDARIES_DEFAULTS.eyebrowColor,
+  hairlineColor = TOURNAMENT_BOUNDARIES_DEFAULTS.hairlineColor,
+  bezelGradient = TOURNAMENT_BOUNDARIES_DEFAULTS.bezelGradient,
+  sphereGradient = TOURNAMENT_BOUNDARIES_DEFAULTS.sphereGradient,
+  sphereSeamColor = TOURNAMENT_BOUNDARIES_DEFAULTS.sphereSeamColor,
+  bottom = TOURNAMENT_BOUNDARIES_DEFAULTS.bottom,
+  right = TOURNAMENT_BOUNDARIES_DEFAULTS.right,
+}) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   if (!mounted) return null;
 
-  // Left edge cut on a steep diagonal (echoing LiveScoreBar's team-block
-  // wedges); right side keeps the small cut-corner "plaque" treatment
-  // used on the Scorecard/Points Table bezels.
   const clip = `polygon(${SLANT_PX}px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)`;
   const clipInner = `polygon(${SLANT_PX - 2}px 0, calc(100% - 9px) 0, 100% 9px, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%)`;
 
   return createPortal(
     <div
       className={`tb-wrap fixed z-[90] pointer-events-none ${closing ? "tb-closing" : ""}`}
-      // Hard-pinned bottom-right, clearing the live score bar's own
-      // height — identical dock point to MatchBoundaries, on purpose.
-      style={{ bottom: "152px", right: "5vw" }}
+      style={{ bottom, right }}
     >
-      {/* Metallic bezel — same brushed-steel/gold plaque frame as the
-          Scorecard and Points Table cards, shrunk to strip scale, with a
-          steep diagonal cut on the left edge instead of a square corner. */}
       <div
         className="relative p-[2px] sm:p-[2.5px]"
         style={{
-          background:
-            "linear-gradient(135deg, #eef1f6 0%, #b9c3d9 14%, #5f6b85 28%, #6f86c9 42%, #333a4d 56%, #b9c3d9 72%, #eef1f6 86%, #7c879e 100%)",
+          background: bezelGradient,
           boxShadow: "0 12px 26px -8px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.35)",
           clipPath: clip,
           WebkitClipPath: clip,
@@ -114,35 +123,32 @@ export default function TournamentBoundaries({ fours = 0, sixes = 0, closing = f
             WebkitClipPath: clipInner,
           }}
         >
-          {/* One-shot glint — a soft diagonal highlight that sweeps across
-              the bezel once, right as the card finishes landing, like
-              light catching brushed metal. Skipped on exit. */}
           {!closing && <span className="tb-glint absolute inset-0 pointer-events-none" />}
 
           <span
             className="tb-eyebrow text-[7.5px] sm:text-[8.5px] font-bold uppercase tracking-[0.2em] whitespace-nowrap shrink-0"
             style={{
-              color: "var(--color-tertiary-container, #adc6ff)",
+              color: eyebrowColor,
               animation: closing
                 ? "tbFadeOut 0.14s ease-in both"
                 : "tbEyebrowIn 0.4s cubic-bezier(0.22,1,0.36,1) 0.05s both",
             }}
           >
-            Tournament
+            {eyebrow}
           </span>
 
           <span
             className="tb-hairline w-px h-4 sm:h-5 shrink-0"
             style={{
-              background: "linear-gradient(180deg, transparent, rgba(173,198,255,0.55), transparent)",
+              background: `linear-gradient(180deg, transparent, ${hairlineColor}, transparent)`,
               animation: closing
                 ? "tbFadeOut 0.12s ease-in both"
                 : "tbHairlineIn 0.35s cubic-bezier(0.22,1,0.36,1) 0.16s both",
             }}
           />
 
-          <BoundaryStat label="Fours" value={fours} delay={0.24} closing={closing} />
-          <BoundaryStat label="Sixes" value={sixes} delay={0.34} closing={closing} />
+          <BoundaryStat label="Fours" value={fours} delay={0.24} closing={closing} sphereGradient={sphereGradient} sphereSeamColor={sphereSeamColor} />
+          <BoundaryStat label="Sixes" value={sixes} delay={0.34} closing={closing} sphereGradient={sphereGradient} sphereSeamColor={sphereSeamColor} />
         </div>
       </div>
 
@@ -153,10 +159,6 @@ export default function TournamentBoundaries({ fours = 0, sixes = 0, closing = f
           font-family: "Montserrat", sans-serif;
         }
 
-        /* Wrap: wipes in from the right along its own diagonal — a slight
-           rotate + scale settling into place, echoing the slanted left
-           edge rather than a plain straight-line slide. Exit reverses the
-           motion about twice as fast, wiping back out the same way. */
         .tb-wrap {
           transform-origin: right center;
           animation: tbWrapIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -200,8 +202,6 @@ export default function TournamentBoundaries({ fours = 0, sixes = 0, closing = f
           to { opacity: 0; }
         }
 
-        /* Glint — a single diagonal light sweep across the bezel, timed to
-           arrive just as the card finishes settling into place. */
         .tb-glint {
           background: linear-gradient(
             100deg,

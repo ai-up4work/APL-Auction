@@ -3,7 +3,6 @@
 
 import React, { use, useEffect, useRef, useState } from "react";
 import { connectOverlayBus, type OverlayEvent } from "@/lib/overlayBus";
-import { supabase } from "@/lib/supabse";
 
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
@@ -13,32 +12,16 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [log, setLog] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
 
-  const [ltTag, setLtTag] = useState("On The Block");
-  const [ltTitle, setLtTitle] = useState("Player Name");
-  const [ltSubtitle, setLtSubtitle] = useState("Role · Country");
-  const [ltShowing, setLtShowing] = useState(false);
-
-  const [sbLabel, setSbLabel] = useState("Current Bid");
-  const [sbValue, setSbValue] = useState("1,20,000 PTS");
-  const [sbSub, setSbSub] = useState("Leading: RCB");
-  const [sbShowing, setSbShowing] = useState(false);
-
-  const [tickerMsg, setTickerMsg] = useState("Rahul sold to MI for 2,40,000 PTS!");
-
-  const [sbTeam, setSbTeam] = useState("MI");
-  const [sbPlayer, setSbPlayer] = useState("Rahul Sharma");
-  const [sbPrice, setSbPrice] = useState("2,40,000 PTS");
-  const [soldBoardShowing, setSoldBoardShowing] = useState(false);
-
-  // ── cricket-match overlay toggle state — just tracks on/off for the UI ──
-  const [powerplayOn, setPowerplayOn] = useState(false);
+  // ── cricket-match overlay toggle state — tracks on/off for each overlay
+  // so the buttons below can reflect current state and Clear Everything
+  // can reset them all in one shot. ──
+  const [weatherOn, setWeatherOn] = useState(false);
+  const [matchBoundariesOn, setMatchBoundariesOn] = useState(false);
+  const [tournamentBoundariesOn, setTournamentBoundariesOn] = useState(false);
+  const [liveScoreBarOn, setLiveScoreBarOn] = useState(false);
   const [pointsTableOn, setPointsTableOn] = useState(false);
-  const [mainScoreboardOn, setMainScoreboardOn] = useState(false);
-  const [battingOn, setBattingOn] = useState(false);
-  const [bowlingOn, setBowlingOn] = useState(false);
-  const [partnershipOn, setPartnershipOn] = useState(false);
-  const [overSummaryOn, setOverSummaryOn] = useState(false);
-  const [playerOfMatchOn, setPlayerOfMatchOn] = useState(false);
+  const [matchScorecardOn, setMatchScorecardOn] = useState(false);
+  const [matchIntroOn, setMatchIntroOn] = useState(false);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -74,11 +57,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
         .font-mono-geist { font-family: 'Geist Mono', monospace; }
         .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
-        input, textarea {
-          background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
-          border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 13px; width: 100%; outline: none;
-        }
-        input:focus, textarea:focus { border-color: rgba(201,151,31,0.5); }
         .fx-btn {
           font-family: 'Geist Mono', monospace; font-size: 10px; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.14em; padding: 12px 14px;
@@ -100,9 +78,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         </div>
       </header>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-8 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-8 py-8 flex flex-col gap-6">
 
-        <div className="panel p-5 lg:col-span-3 flex items-center justify-between gap-4 flex-wrap">
+        <div className="panel p-5 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <div className="font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/50 mb-1">OBS Browser Source URL</div>
             <code className="font-mono-geist text-xs text-theme-orange break-all">{overlayUrl || "…"}</code>
@@ -113,112 +91,127 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           </div>
         </div>
 
-        <div className="panel p-5 flex flex-col gap-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Quick FX</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => fire({ type: "stamp", state: "sold" }, "Stamp: SOLD")} className="fx-btn" style={{ background: "rgba(201,151,31,0.14)", color: "#E8C468", borderColor: "rgba(201,151,31,0.3)" }}>Sold Stamp</button>
-            <button onClick={() => fire({ type: "stamp", state: "unsold" }, "Stamp: UNSOLD")} className="fx-btn" style={{ background: "rgba(113,128,150,0.14)", color: "#CBD5E0", borderColor: "rgba(113,128,150,0.3)" }}>Unsold Stamp</button>
-            <button onClick={() => fire({ type: "confetti" }, "Confetti burst")} className="fx-btn" style={{ background: "rgba(232,196,104,0.12)", color: "#E8C468" }}>Confetti</button>
-            <button onClick={() => fire({ type: "flash", color: "rgba(201,151,31,0.18)" }, "Flash")} className="fx-btn" style={{ background: "rgba(255,255,255,0.06)", color: "#fff" }}>Flash</button>
-            <button onClick={() => fire({ type: "replayBadge", show: true }, "Replay badge ON")} className="fx-btn" style={{ background: "rgba(239,68,68,0.14)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" }}>Replay On</button>
-            <button onClick={() => fire({ type: "replayBadge", show: false }, "Replay badge OFF")} className="fx-btn" style={{ background: "rgba(255,255,255,0.05)", color: "#a0aec0" }}>Replay Off</button>
-          </div>
-          <button
-            onClick={() => {
-              setSoldBoardShowing(false);
-              setPowerplayOn(false); setPointsTableOn(false); setMainScoreboardOn(false);
-              setBattingOn(false); setBowlingOn(false); setPartnershipOn(false);
-              setOverSummaryOn(false); setPlayerOfMatchOn(false);
-              fire({ type: "clearAll" }, "Cleared all overlays");
-            }}
-            className="fx-btn mt-1"
-            style={{ background: "rgba(239,68,68,0.10)", color: "#f87171", borderColor: "rgba(239,68,68,0.25)" }}
-          >
-            Clear Everything
-          </button>
-        </div>
-
-        <div className="panel p-5 flex flex-col gap-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Lower Third</h3>
-          <input placeholder="Tag (e.g. On The Block)" value={ltTag} onChange={(e) => setLtTag(e.target.value)} />
-          <input placeholder="Title (e.g. player name)" value={ltTitle} onChange={(e) => setLtTitle(e.target.value)} />
-          <input placeholder="Subtitle (e.g. role · country)" value={ltSubtitle} onChange={(e) => setLtSubtitle(e.target.value)} />
-          <div className="grid grid-cols-2 gap-3 mt-1">
-            <button onClick={() => { setLtShowing(true); fire({ type: "lowerThird", show: true, tag: ltTag, title: ltTitle, subtitle: ltSubtitle }, `Lower third: ${ltTitle}`); }} className="fx-btn fx-toggle-on">Show</button>
-            <button onClick={() => { setLtShowing(false); fire({ type: "lowerThird", show: false }, "Lower third hidden"); }} className="fx-btn fx-toggle-off">Hide</button>
-          </div>
-          <span className="font-mono-geist text-[9px] uppercase tracking-widest" style={{ color: ltShowing ? "#22c55e" : "#666" }}>{ltShowing ? "● live on overlay" : "○ hidden"}</span>
-        </div>
-
-        <div className="panel p-5 flex flex-col gap-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Scoreboard / Bid Update</h3>
-          <input placeholder="Label (e.g. Current Bid)" value={sbLabel} onChange={(e) => setSbLabel(e.target.value)} />
-          <input placeholder="Value (e.g. 1,20,000 PTS)" value={sbValue} onChange={(e) => setSbValue(e.target.value)} />
-          <input placeholder="Sub-line (e.g. Leading: RCB)" value={sbSub} onChange={(e) => setSbSub(e.target.value)} />
-          <div className="grid grid-cols-2 gap-3 mt-1">
-            <button onClick={() => { setSbShowing(true); fire({ type: "scoreboard", show: true, label: sbLabel, value: sbValue, sub: sbSub }, `Scoreboard: ${sbValue}`); }} className="fx-btn fx-toggle-on">Show / Update</button>
-            <button onClick={() => { setSbShowing(false); fire({ type: "scoreboard", show: false }, "Scoreboard hidden"); }} className="fx-btn fx-toggle-off">Hide</button>
-          </div>
-          <span className="font-mono-geist text-[9px] uppercase tracking-widest" style={{ color: sbShowing ? "#22c55e" : "#666" }}>{sbShowing ? "● live on overlay" : "○ hidden"}</span>
-        </div>
-
-        <div className="panel p-5 flex flex-col gap-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Sold Board (Scorecard)</h3>
-          <input placeholder="Team (e.g. MI)" value={sbTeam} onChange={(e) => setSbTeam(e.target.value)} />
-          <input placeholder="Player name" value={sbPlayer} onChange={(e) => setSbPlayer(e.target.value)} />
-          <input placeholder="Price (e.g. 2,40,000 PTS)" value={sbPrice} onChange={(e) => setSbPrice(e.target.value)} />
-          <div className="grid grid-cols-2 gap-3 mt-1">
-            <button
-              onClick={async () => {
-                setSoldBoardShowing(true);
-                const { data, error } = await supabase.from("overlay_sold_board").insert({ auction_id: auctionId, team: sbTeam, player: sbPlayer, price: sbPrice }).select("id").single();
-                fire({ type: "soldBoard", show: true, entry: { id: error ? `${Date.now()}` : data.id, team: sbTeam, player: sbPlayer, price: sbPrice } }, `Sold board: ${sbPlayer} → ${sbTeam}${error ? " (not saved — check table)" : ""}`);
-              }}
-              className="fx-btn fx-toggle-on"
-            >
-              Add Entry
-            </button>
-            <button
-              onClick={async () => {
-                setSoldBoardShowing(false);
-                await supabase.from("overlay_sold_board").delete().eq("auction_id", auctionId);
-                fire({ type: "soldBoard", show: false, clear: true }, "Sold board cleared");
-              }}
-              className="fx-btn fx-toggle-off"
-            >
-              Clear / Hide
-            </button>
-          </div>
-          <span className="font-mono-geist text-[9px] uppercase tracking-widest" style={{ color: soldBoardShowing ? "#22c55e" : "#666" }}>{soldBoardShowing ? "● live on overlay" : "○ hidden"}</span>
-        </div>
-
         {/* ── Cricket match overlays — one toggle button per overlay ────── */}
-        <div className="panel p-5 lg:col-span-3 flex flex-col gap-3">
+        <div className="panel p-5 flex flex-col gap-3">
           <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Cricket Match Overlays</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <button
+              onClick={() => {
+                const next = !weatherOn;
+                setWeatherOn(next);
+                fire({ type: "weather", show: next }, `Weather ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${weatherOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Weather
+            </button>
 
-           
+            <button
+              onClick={() => {
+                const next = !matchBoundariesOn;
+                setMatchBoundariesOn(next);
+                if (next) setTournamentBoundariesOn(false);
+                fire({ type: "matchBoundaries", show: next }, `Match boundaries ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${matchBoundariesOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Match Boundaries
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !tournamentBoundariesOn;
+                setTournamentBoundariesOn(next);
+                if (next) setMatchBoundariesOn(false);
+                fire({ type: "tournamentBoundaries", show: next }, `Tournament boundaries ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${tournamentBoundariesOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Tournament Boundaries
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !liveScoreBarOn;
+                setLiveScoreBarOn(next);
+                fire({ type: "liveScoreBar", show: next }, `Live score bar ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${liveScoreBarOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Live Score Bar
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !pointsTableOn;
+                setPointsTableOn(next);
+                fire({ type: "pointsTable", show: next }, `Points table ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${pointsTableOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Points Table
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !matchScorecardOn;
+                setMatchScorecardOn(next);
+                fire({ type: "matchScorecard", show: next }, `Match scorecard ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${matchScorecardOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Match Scorecard
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !matchIntroOn;
+                setMatchIntroOn(next);
+                fire({ type: "matchIntro", show: next }, `Match intro ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${matchIntroOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Match Intro
+            </button>
+
+            <button
+              onClick={() => {
+                setWeatherOn(false);
+                setMatchBoundariesOn(false);
+                setTournamentBoundariesOn(false);
+                setLiveScoreBarOn(false);
+                setPointsTableOn(false);
+                setMatchScorecardOn(false);
+                setMatchIntroOn(false);
+                fire({ type: "clearAll" }, "Cleared all overlays");
+              }}
+              className="fx-btn"
+              style={{ background: "rgba(239,68,68,0.10)", color: "#f87171", borderColor: "rgba(239,68,68,0.25)" }}
+            >
+              Clear Everything
+            </button>
           </div>
+
+          <h4 className="font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/40 font-bold mt-2 mb-1">Moments (auto-hide)</h4>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {(["four", "six", "wicket", "fifty", "hundred"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => fire({ type: "moment", moment: m }, `Moment: ${m.toUpperCase()}`)}
+                className="fx-btn"
+                style={{ background: "rgba(201,151,31,0.14)", color: "#E8C468", borderColor: "rgba(201,151,31,0.3)" }}
+              >
+                {m.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
           <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest mt-1">
             Milestone and wicket graphics auto-hide after a few seconds — no need to turn them off.
           </p>
         </div>
 
-        <div className="panel p-5 flex flex-col gap-3 lg:col-span-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Ticker Message</h3>
-          <div className="flex gap-3">
-            <input
-              className="flex-1"
-              placeholder="e.g. Rahul sold to MI for 2,40,000 PTS!"
-              value={tickerMsg}
-              onChange={(e) => setTickerMsg(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && tickerMsg.trim()) fire({ type: "ticker", message: tickerMsg.trim() }, `Ticker: ${tickerMsg.trim()}`); }}
-            />
-            <button onClick={() => tickerMsg.trim() && fire({ type: "ticker", message: tickerMsg.trim() }, `Ticker: ${tickerMsg.trim()}`)} className="fx-btn fx-toggle-on shrink-0 px-6">Send</button>
-          </div>
-        </div>
-
-        <div className="panel p-5 lg:col-span-3">
+        <div className="panel p-5">
           <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Recent triggers</h3>
           {log.length === 0 ? (
             <p className="font-mono-geist text-[11px] text-white/30">Nothing fired yet.</p>

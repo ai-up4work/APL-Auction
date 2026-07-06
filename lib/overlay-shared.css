@@ -1,0 +1,94 @@
+/* lib/overlay-shared.css
+ *
+ * Import this ONCE in app/globals.css (`@import "../lib/overlay-shared.css";`)
+ * instead of every overlay component re-declaring its own copy of the same
+ * @font-face import, `.font-heading` class, and `.shine-ring` keyframes.
+ * LiveScoreBar, CricketScorecard, and CricketMatchIntro previously each had
+ * a byte-for-byte identical block of this inside their own `<style jsx>`.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Montserrat:wght@800;900&display=swap");
+
+.font-heading {
+  font-family: "Montserrat", sans-serif;
+}
+
+/* Shine ring — rotating conic-gradient arc masked to a thin ring, drawn
+   around every team badge across the whole overlay system. */
+.shine-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: overlaySpin 3.5s linear infinite;
+}
+.shine-ring-blue {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    transparent 78%,
+    rgba(59, 139, 212, 0.9) 92%,
+    #9ecbf0 98%,
+    transparent 100%
+  );
+}
+.shine-ring-green {
+  background: conic-gradient(
+    from 180deg,
+    transparent 0%,
+    transparent 78%,
+    rgba(42, 157, 92, 0.9) 92%,
+    #8fe0b0 98%,
+    transparent 100%
+  );
+}
+@keyframes overlaySpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Ball chips ("this over" ticker row in LiveScoreBar) */
+.ball-chip {
+  animation: ballPopIn 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes ballPopIn {
+  0% { opacity: 0; transform: scale(0.3) rotate(-25deg); }
+  65% { opacity: 1; transform: scale(1.15) rotate(4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.ball-pulse {
+  animation: ballPulse 1.6s ease-out infinite;
+}
+@keyframes ballPulse {
+  0% { opacity: 0.9; transform: scale(0.85); }
+  70% { opacity: 0; transform: scale(1.35); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+.ball-shine::before {
+  content: "";
+  position: absolute;
+  top: -60%;
+  left: -60%;
+  width: 60%;
+  height: 220%;
+  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.75) 45%, transparent 90%);
+  transform: rotate(20deg);
+  animation: ballShineSweep 2.6s ease-in-out infinite;
+}
+@keyframes ballShineSweep {
+  0% { left: -60%; }
+  45% { left: 130%; }
+  100% { left: 130%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ball-chip,
+  .ball-pulse,
+  .ball-shine::before,
+  .shine-ring {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
