@@ -1,7 +1,6 @@
-// lib/overlayBus.ts
 "use client";
 
-import { supabase } from "@/lib/supabse"; // ← fixed from "@/lib/supabse" — double check this matches your actual file
+import { supabase } from "@/lib/supabse"; // double check this matches your actual file (was "@/lib/supabse")
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface WeatherData {
