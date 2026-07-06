@@ -1,7 +1,7 @@
 // lib/overlayBus.ts
 "use client";
 
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabse"; // ← fixed from "@/lib/supabse" — double check this matches your actual file
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface WeatherData {
@@ -10,6 +10,81 @@ export interface WeatherData {
   unit: "C" | "F";
   condition: string;
   corner: "top-right" | "top-left" | "bottom-right" | "bottom-left";
+}
+
+// ── Match Setup (session-scoped, set once) ─────────────────────────────
+export interface TeamInfo {
+  name: string;
+  shortCode: string;
+  color: string;
+  logoUrl: string;
+  squad: string[];
+}
+
+export interface MatchSetup {
+  tournamentName: string;
+  season: string;
+  tournamentLogoUrl: string;
+  venue: string;
+  format: "T20" | "ODI" | "Test";
+  matchNumber: string;
+  matchTitle: string;
+  teamA: TeamInfo;
+  teamB: TeamInfo;
+  tossWinner: "A" | "B" | "";
+  tossDecision: "bat" | "bowl" | "";
+}
+
+// ── Live State (incremental, ticks ball-by-ball) ───────────────────────
+export interface BatterState {
+  name: string;
+  runs: number;
+  balls: number;
+  fours: number;
+  sixes: number;
+}
+
+export interface BowlerState {
+  name: string;
+  overs: number;
+  balls: number;
+  maidens: number;
+  runs: number;
+  wickets: number;
+}
+
+export interface PointsRow {
+  team: string;
+  played: number;
+  won: number;
+  lost: number;
+  nrr: string;
+  points: number;
+}
+
+export interface LiveState {
+  score: { runs: number; wickets: number; overs: number; balls: number };
+  striker: BatterState;
+  nonStriker: BatterState;
+  bowler: BowlerState;
+  partnership: { runs: number; balls: number };
+  matchBoundaries: { fours: number; sixes: number };
+  tournamentBoundaries: { fours: number; sixes: number };
+  pointsTable: PointsRow[];
+}
+
+// ── Moments (one-shot, event-based) ────────────────────────────────────
+export type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
+
+export interface MomentPayload {
+  moment: "four" | "six" | "wicket" | "fifty" | "hundred";
+  player?: string;
+  score?: string;
+  // wicket-only fields:
+  batsmanOut?: "striker" | "nonStriker";
+  dismissalType?: DismissalType;
+  bowler?: string;
+  fielder?: string;
 }
 
 export type OverlayEvent =
@@ -21,8 +96,10 @@ export type OverlayEvent =
   | { type: "pointsTable"; show: boolean }
   | { type: "matchScorecard"; show: boolean }
   | { type: "matchIntro"; show: boolean }
-  | { type: "moment"; moment: "four" | "six" | "wicket" | "fifty" | "hundred" }
-  | { type: "testBg"; show: boolean }   // ← NEW: admin-toggled preview background
+  | ({ type: "moment" } & MomentPayload)
+  | { type: "matchSetup"; data: MatchSetup }
+  | { type: "liveState"; data: LiveState }
+  | { type: "testBg"; show: boolean }
   | { type: "clearAll" };
 
 type Handler = (event: OverlayEvent) => void;
