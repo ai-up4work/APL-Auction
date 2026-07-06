@@ -31,6 +31,7 @@ interface OverlayState {
   matchScorecard: { show: boolean };
   matchIntro: { show: boolean };
   tournamentLogo: { show: boolean };
+  testBg: { show: boolean };
 }
 
 const initialState: OverlayState = {
@@ -42,6 +43,7 @@ const initialState: OverlayState = {
   matchScorecard: { show: false },
   matchIntro: { show: false },
   tournamentLogo: { show: false },
+  testBg: { show: false },
 };
 
 function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
@@ -56,7 +58,6 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
           fours: event.fours ?? state.matchBoundaries.fours,
           sixes: event.sixes ?? state.matchBoundaries.sixes,
         },
-        // Boundaries cards share one slot — showing one hides the other.
         tournamentBoundaries: event.show ? { ...state.tournamentBoundaries, show: false } : state.tournamentBoundaries,
       };
     case "tournamentBoundaries":
@@ -79,15 +80,18 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
       return { ...state, matchIntro: { show: event.show } };
     case "tournamentLogo":
       return { ...state, tournamentLogo: { show: event.show } };
+    case "testBg":
+      return { ...state, testBg: { show: event.show } };
     case "clearAll":
-      return initialState;
+      // Deliberately preserve testBg across clearAll — it's a dev/preview
+      // toggle, not a match overlay, so "clear everything" shouldn't yank
+      // the background out from under whoever's still testing layout.
+      return { ...initialState, testBg: state.testBg };
     default:
-      return state; // auction events (stamp/ticker/etc.) — not rendered here yet
+      return state;
   }
 }
 
-// Mount immediately on `show`; delay unmount by `exitMs` so exit animations
-// (which live inside each component's own CSS) get to finish.
 function useOverlayVisibility(show: boolean, exitMs: number) {
   const [mounted, setMounted] = React.useState(show);
   const [closing, setClosing] = React.useState(false);
@@ -145,6 +149,18 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
 
   return (
     <div className="fixed inset-0" style={{ background: "transparent" }}>
+      {state.testBg.show && (
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="fixed inset-0 w-full h-full object-cover"
+          style={{ zIndex: 0 }}
+          src="/sample-match-footage.mp4"
+        />
+      )}
+
       {weatherVis.mounted && <WeatherCard {...state.weather.data} closing={weatherVis.closing} />}
 
       {matchBoundariesVis.mounted && (
@@ -169,7 +185,6 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       <CricketScorecard show={state.matchScorecard.show} hideTrigger />
       <CricketMatchIntro show={state.matchIntro.show} hideTrigger />
       {state.tournamentLogo.show && <TournamentLogoDisplay />}
-
     </div>
   );
 }

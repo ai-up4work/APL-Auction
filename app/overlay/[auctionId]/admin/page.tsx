@@ -12,9 +12,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [log, setLog] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
 
-  // ── cricket-match overlay toggle state — tracks on/off for each overlay
-  // so the buttons below can reflect current state and Clear Everything
-  // can reset them all in one shot. ──
   const [weatherOn, setWeatherOn] = useState(false);
   const [matchBoundariesOn, setMatchBoundariesOn] = useState(false);
   const [tournamentBoundariesOn, setTournamentBoundariesOn] = useState(false);
@@ -23,6 +20,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchScorecardOn, setMatchScorecardOn] = useState(false);
   const [matchIntroOn, setMatchIntroOn] = useState(false);
   const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
+  const [testBgOn, setTestBgOn] = useState(false); // ← NEW
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -89,6 +87,29 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
             <span className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">1920×1080 · transparent bg on</span>
             <button onClick={copyUrl} className="fx-btn fx-toggle-on">{copied ? "Copied ✓" : "Copy URL"}</button>
           </div>
+        </div>
+
+        {/* ── Dev/preview tools — NOT match overlays, kept visually separate
+            so no one mistakes this for something to leave on during a real
+            broadcast. ────────────────────────────────────────────────── */}
+        <div className="panel p-5 flex items-center justify-between gap-4 flex-wrap" style={{ borderColor: "rgba(96,165,250,0.25)" }}>
+          <div>
+            <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-blue-300 font-bold mb-1">Preview Tools</h3>
+            <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">
+              Sample footage behind overlays — for layout testing only, turn off before going live
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const next = !testBgOn;
+              setTestBgOn(next);
+              fire({ type: "testBg", show: next }, `Test background ${next ? "on" : "off"}`);
+            }}
+            className={`fx-btn ${testBgOn ? "" : "fx-toggle-off"}`}
+            style={testBgOn ? { background: "linear-gradient(135deg,#3b82f6,#93c5fd)", color: "#0b1220", border: "none" } : undefined}
+          >
+            {testBgOn ? "Test BG: ON" : "Test BG: OFF"}
+          </button>
         </div>
 
         {/* ── Cricket match overlays — one toggle button per overlay ────── */}

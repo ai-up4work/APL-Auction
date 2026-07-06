@@ -22,6 +22,7 @@ export type OverlayEvent =
   | { type: "matchScorecard"; show: boolean }
   | { type: "matchIntro"; show: boolean }
   | { type: "moment"; moment: "four" | "six" | "wicket" | "fifty" | "hundred" }
+  | { type: "testBg"; show: boolean }   // ← NEW: admin-toggled preview background
   | { type: "clearAll" };
 
 type Handler = (event: OverlayEvent) => void;
@@ -46,7 +47,6 @@ export function connectOverlayBus(auctionId: string) {
   channel.subscribe((status) => {
     ready = status === "SUBSCRIBED";
     if (ready) {
-      // Flush anything queued before the channel finished joining.
       if (queue.length) {
         queue.splice(0).forEach((event) =>
           channel.send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event })
@@ -61,7 +61,6 @@ export function connectOverlayBus(auctionId: string) {
     get isReady() {
       return ready;
     },
-    /** Fires immediately if already ready, otherwise once on SUBSCRIBED. */
     onReady(fn: () => void) {
       if (ready) fn();
       else readyWaiters.add(fn);
