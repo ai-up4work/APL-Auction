@@ -13,6 +13,149 @@ interface OverlayToggle {
   exclusiveWith?: string;
 }
 
+// ── Match Setup (SESSION) ──────────────────────────────────────────────
+// Filled in once before/at the start of a match. Doesn't change ball to
+// ball — persisted for the whole session and referenced by later events
+// rather than re-sent every time.
+interface TeamInfo {
+  name: string;
+  shortCode: string;
+  color: string;
+  logoUrl: string;
+  squad: string[];
+}
+
+interface MatchSetup {
+  tournamentName: string;
+  season: string;
+  tournamentLogoUrl: string;
+  venue: string;
+  format: "T20" | "ODI" | "Test";
+  matchNumber: string;
+  matchTitle: string;
+  teamA: TeamInfo;
+  teamB: TeamInfo;
+  tossWinner: "A" | "B" | "";
+  tossDecision: "bat" | "bowl" | "";
+}
+
+const emptyTeam = (): TeamInfo => ({ name: "", shortCode: "", color: "#c9971f", logoUrl: "", squad: [] });
+
+const emptyMatchSetup: MatchSetup = {
+  tournamentName: "",
+  season: "",
+  tournamentLogoUrl: "",
+  venue: "",
+  format: "T20",
+  matchNumber: "",
+  matchTitle: "",
+  teamA: emptyTeam(),
+  teamB: emptyTeam(),
+  tossWinner: "",
+  tossDecision: "",
+};
+
+// ── Live State (INCREMENTAL) ───────────────────────────────────────────
+// Ticks continuously through the match — score, current batters, current
+// bowler, boundary tallies, points table. Edited as a running total, not
+// fired as one-shot events.
+interface BatterState {
+  name: string;
+  runs: number;
+  balls: number;
+  fours: number;
+  sixes: number;
+}
+
+interface BowlerState {
+  name: string;
+  overs: number;
+  balls: number;
+  maidens: number;
+  runs: number;
+  wickets: number;
+}
+
+interface PointsRow {
+  team: string;
+  played: number;
+  won: number;
+  lost: number;
+  nrr: string;
+  points: number;
+}
+
+interface LiveState {
+  score: { runs: number; wickets: number; overs: number; balls: number };
+  striker: BatterState;
+  nonStriker: BatterState;
+  bowler: BowlerState;
+  partnership: { runs: number; balls: number };
+  matchBoundaries: { fours: number; sixes: number };
+  tournamentBoundaries: { fours: number; sixes: number };
+  pointsTable: PointsRow[];
+}
+
+const emptyBatter = (): BatterState => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 });
+const emptyBowler = (): BowlerState => ({ name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0 });
+
+const emptyLiveState: LiveState = {
+  score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+  striker: emptyBatter(),
+  nonStriker: emptyBatter(),
+  bowler: emptyBowler(),
+  partnership: { runs: 0, balls: 0 },
+  matchBoundaries: { fours: 0, sixes: 0 },
+  tournamentBoundaries: { fours: 0, sixes: 0 },
+  pointsTable: [],
+};
+
+// ── Moments (EVENT) ─────────────────────────────────────────────────────
+// One-shot triggers. Wicket needs a little extra detail captured at the
+// instant it fires (who's out, how, who fielded) rather than stored state.
+interface WicketDraft {
+  batsmanOut: "striker" | "nonStriker";
+  dismissalType: "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
+  fielder: string;
+}
+
+const emptyWicketDraft: WicketDraft = { batsmanOut: "striker", dismissalType: "bowled", fielder: "" };
+
+// Small shared number-stepper control used across the Live State panel.
+function NumberStepper({
+  label,
+  value,
+  onChange,
+  min = 0,
+  step = 1,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  step?: number;
+}) {
+  return (
+    <div className="field-col">
+      <span className="field-label">{label}</span>
+      <div className="stepper">
+        <button type="button" className="stepper-btn" onClick={() => onChange(Math.max(min, value - step))}>
+          −
+        </button>
+        <input
+          type="number"
+          className="stepper-input"
+          value={value}
+          onChange={(e) => onChange(Math.max(min, Number(e.target.value) || 0))}
+        />
+        <button type="button" className="stepper-btn" onClick={() => onChange(value + step)}>
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
 
@@ -30,6 +173,22 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchIntroOn, setMatchIntroOn] = useState(false);
   const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
   const [testBgOn, setTestBgOn] = useState(false);
+
+  // ── Match Setup state (session) ─────────────────────────────────────
+  const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
+  const [setupPushed, setSetupPushed] = useState(false);
+  const [setupHydrated, setSetupHydrated] = useState(false);
+
+  // ── Live State (incremental) ────────────────────────────────────────
+  const [liveState, setLiveState] = useState<LiveState>(emptyLiveState);
+  const [liveDirty, setLiveDirty] = useState(false);
+  const [livePushed, setLivePushed] = useState(false);
+  const [liveHydrated, setLiveHydrated] = useState(false);
+
+  // ── Moments (event) ─────────────────────────────────────────────────
+  const [wicketDraft, setWicketDraft] = useState<WicketDraft>(emptyWicketDraft);
+  const [showWicketForm, setShowWicketForm] = useState(false);
+  const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
 
   // ── Preview scaling ────────────────────────────────────────────────
   // Measure the actual clipping box (.monitor-screen), not its padded
@@ -71,9 +230,49 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auctionId]);
 
+  // ── Match Setup + Live State persistence ────────────────────────────
+  // Keyed by auctionId so a page refresh mid-match doesn't lose anything.
+  // TODO: once there's a backend row per auction, swap these for a real
+  // save/load call instead of localStorage.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const rawSetup = window.localStorage.getItem(`overlay:${auctionId}:matchSetup`);
+      if (rawSetup) setMatchSetup(JSON.parse(rawSetup));
+    } catch {
+      // ignore malformed cache
+    }
+    try {
+      const rawLive = window.localStorage.getItem(`overlay:${auctionId}:liveState`);
+      if (rawLive) setLiveState(JSON.parse(rawLive));
+    } catch {
+      // ignore malformed cache
+    }
+    setSetupHydrated(true);
+    setLiveHydrated(true);
+  }, [auctionId]);
+
+  useEffect(() => {
+    if (!setupHydrated || typeof window === "undefined") return;
+    window.localStorage.setItem(`overlay:${auctionId}:matchSetup`, JSON.stringify(matchSetup));
+  }, [matchSetup, auctionId, setupHydrated]);
+
+  useEffect(() => {
+    if (!liveHydrated || typeof window === "undefined") return;
+    window.localStorage.setItem(`overlay:${auctionId}:liveState`, JSON.stringify(liveState));
+  }, [liveState, auctionId, liveHydrated]);
+
   function fire(event: OverlayEvent, label: string) {
     busRef.current?.send(event);
     setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 12));
+  }
+
+  // Match Setup / Live State / wicket detail aren't in the OverlayEvent
+  // union yet — lib/overlayBus.ts needs "matchSetup" | "liveState" | "wicket"
+  // added to it. Cast through `any` here so the admin panel can be built
+  // and wired up now; tighten this once that type is extended.
+  function fireLoose(event: Record<string, unknown>, label: string) {
+    fire(event as unknown as OverlayEvent, label);
   }
 
   function copyUrl() {
@@ -99,6 +298,114 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     if (ch.key === "matchBoundaries" && next) setTournamentBoundariesOn(false);
     if (ch.key === "tournamentBoundaries" && next) setMatchBoundariesOn(false);
     fire({ type: ch.event, show: next } as OverlayEvent, `${ch.label} ${next ? "on" : "off"}`);
+  }
+
+  // ── Match Setup helpers ──────────────────────────────────────────────
+  function updateTeam(team: "teamA" | "teamB", patch: Partial<TeamInfo>) {
+    setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
+  }
+
+  function updateSquad(team: "teamA" | "teamB", raw: string) {
+    const squad = raw
+      .split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean);
+    updateTeam(team, { squad });
+  }
+
+  function pushMatchSetup() {
+    fireLoose({ type: "matchSetup", data: matchSetup }, "Match Setup pushed to overlay");
+    setSetupPushed(true);
+    setTimeout(() => setSetupPushed(false), 1500);
+  }
+
+  // ── Live State helpers ───────────────────────────────────────────────
+  function patchLive(patch: Partial<LiveState>) {
+    setLiveState((prev) => ({ ...prev, ...patch }));
+    setLiveDirty(true);
+  }
+
+  function patchBatter(who: "striker" | "nonStriker", patch: Partial<BatterState>) {
+    setLiveState((prev) => ({ ...prev, [who]: { ...prev[who], ...patch } }));
+    setLiveDirty(true);
+  }
+
+  function patchBowler(patch: Partial<BowlerState>) {
+    setLiveState((prev) => ({ ...prev, bowler: { ...prev.bowler, ...patch } }));
+    setLiveDirty(true);
+  }
+
+  function swapStrike() {
+    setLiveState((prev) => ({ ...prev, striker: prev.nonStriker, nonStriker: prev.striker }));
+    setLiveDirty(true);
+  }
+
+  function addPointsRow() {
+    setLiveState((prev) => ({
+      ...prev,
+      pointsTable: [...prev.pointsTable, { team: "", played: 0, won: 0, lost: 0, nrr: "0.00", points: 0 }],
+    }));
+    setLiveDirty(true);
+  }
+
+  function patchPointsRow(index: number, patch: Partial<PointsRow>) {
+    setLiveState((prev) => ({
+      ...prev,
+      pointsTable: prev.pointsTable.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    }));
+    setLiveDirty(true);
+  }
+
+  function removePointsRow(index: number) {
+    setLiveState((prev) => ({ ...prev, pointsTable: prev.pointsTable.filter((_, i) => i !== index) }));
+    setLiveDirty(true);
+  }
+
+  function pushLiveState() {
+    fireLoose({ type: "liveState", data: liveState }, "Live State pushed to overlay");
+    setLiveDirty(false);
+    setLivePushed(true);
+    setTimeout(() => setLivePushed(false), 1500);
+  }
+
+  // ── Moments helpers ──────────────────────────────────────────────────
+  function fireBoundaryMoment(moment: "four" | "six") {
+    const batter = liveState.striker;
+    fireLoose(
+      { type: "moment", moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` },
+      `Moment: ${moment.toUpperCase()} — ${batter.name || "Striker"} ${batter.runs}(${batter.balls})`
+    );
+  }
+
+  function fireMilestoneMoment(moment: "fifty" | "hundred") {
+    const batter = liveState[milestoneBatter];
+    const label = batter.name || (milestoneBatter === "striker" ? "Striker" : "Non-striker");
+    fireLoose(
+      { type: "moment", moment, player: label, score: `${batter.runs}(${batter.balls})` },
+      `Moment: ${moment.toUpperCase()} — ${label} ${batter.runs}(${batter.balls})`
+    );
+  }
+
+  function fireWicketMoment() {
+    const batter = liveState[wicketDraft.batsmanOut];
+    const batterLabel = batter.name || (wicketDraft.batsmanOut === "striker" ? "Striker" : "Non-striker");
+    fireLoose(
+      {
+        type: "moment",
+        moment: "wicket",
+        batsmanOut: wicketDraft.batsmanOut,
+        player: batterLabel,
+        score: `${batter.runs}(${batter.balls})`,
+        dismissalType: wicketDraft.dismissalType,
+        bowler: liveState.bowler.name,
+        fielder: wicketDraft.fielder,
+      },
+      `Moment: WICKET — ${batterLabel} ${wicketDraft.dismissalType}${liveState.bowler.name ? ` b ${liveState.bowler.name}` : ""}${
+        wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""
+      }`
+    );
+    setWicketDraft(emptyWicketDraft);
+    setShowWicketForm(false);
   }
 
   return (
@@ -206,6 +513,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           border: 1px solid rgba(201,151,31,0.25);
         }
         .talk-btn:active { transform: scale(0.96); }
+        .talk-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
         .fx-btn {
           font-family: 'Geist Mono', monospace; font-size: 10px; font-weight: 700;
@@ -270,6 +578,119 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         @keyframes connPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.45; }
+        }
+
+        /* ── Drawer — collapsible rack panel used for Match Setup / Live
+           State, which are dense enough to want to be tucked away once
+           configured. Native <details> keeps it keyboard/aXe-friendly. ── */
+        .drawer > summary {
+          cursor: pointer;
+          list-style: none;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .drawer > summary::-webkit-details-marker,
+        .drawer > summary::marker { display: none; content: ""; }
+        .drawer-chevron {
+          display: inline-block;
+          transition: transform 0.15s ease;
+          color: var(--color-outline, #8c92a3);
+        }
+        .drawer[open] .drawer-chevron { transform: rotate(90deg); }
+        .drawer-body { padding-top: 18px; }
+
+        /* ── Form controls — dark inset fields matching the stepper's look
+           already used in the Live State panel. ───────────────────────── */
+        .text-input, .select-input, .textarea-input {
+          width: 100%;
+          background: rgba(0,0,0,0.25);
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+          border-radius: 8px;
+          padding: 8px 10px;
+          font-family: 'Geist Mono', monospace;
+          font-size: 12px;
+          color: var(--color-on-surface, #e3e6ef);
+        }
+        .text-input::placeholder, .textarea-input::placeholder { color: rgba(255,255,255,0.25); }
+        .text-input:focus, .select-input:focus, .textarea-input:focus {
+          outline: none; border-color: rgba(201,151,31,0.5);
+        }
+        .textarea-input { resize: vertical; min-height: 64px; line-height: 1.5; }
+        .select-input { appearance: none; cursor: pointer; }
+
+        .field-col { display: flex; flex-direction: column; gap: 6px; }
+        .field-label {
+          font-family: 'Geist Mono', monospace;
+          font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+          color: var(--color-outline, #8c92a3);
+        }
+
+        .stepper { display: flex; align-items: center; gap: 6px; }
+        .stepper-btn {
+          width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+          background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+          color: #e3e6ef; font-size: 14px; line-height: 1;
+        }
+        .stepper-btn:active { background: rgba(201,151,31,0.2); }
+        .stepper-input {
+          width: 100%; min-width: 0;
+          background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 6px; padding: 5px 6px; text-align: center;
+          font-family: 'Geist Mono', monospace; font-size: 12px; color: #e3e6ef;
+        }
+        .stepper-input:focus { outline: none; border-color: rgba(201,151,31,0.5); }
+
+        .team-card {
+          border-radius: 10px;
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+          background: rgba(255,255,255,0.015);
+          padding: 14px;
+          border-top: 3px solid var(--team-color, #c9971f);
+          display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .batter-card, .bowler-card {
+          border-radius: 10px;
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+          background: rgba(255,255,255,0.015);
+          padding: 14px;
+          display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .points-row-grid {
+          display: grid;
+          grid-template-columns: 1.6fr 0.7fr 0.7fr 0.7fr 0.9fr 0.8fr 32px;
+          gap: 6px;
+          align-items: center;
+        }
+
+        .icon-btn {
+          width: 26px; height: 26px; border-radius: 6px;
+          display: flex; align-items: center; justify-content: center;
+          background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+          color: #f87171; font-size: 14px; line-height: 1;
+        }
+        .icon-btn:active { transform: scale(0.94); }
+
+        .segment-group { display: flex; gap: 6px; }
+        .segment-btn {
+          flex: 1;
+          font-family: 'Geist Mono', monospace; font-size: 10px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.1em;
+          padding: 8px 10px; border-radius: 8px;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+          color: #a0aec0;
+        }
+        .segment-btn.is-active {
+          background: linear-gradient(135deg,#A87815,#E8C468); color: #1a1304; border: none;
+        }
+
+        .dirty-dot {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: var(--color-status-live, #ffb4ab);
+          box-shadow: 0 0 5px 1px var(--color-status-live, #ffb4ab);
+          display: inline-block;
         }
       `}</style>
 
@@ -343,6 +764,279 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           </div>
         </div>
 
+        {/* ── Match Setup (session) ────────────────────────────────────── */}
+        <details className="rack-panel p-5 drawer">
+          <summary>
+            <div className="flex items-center gap-3">
+              <div className="eyebrow">Match Setup</div>
+              <span className="font-mono-geist text-[9px] text-white/30 normal-case tracking-normal">session · set once</span>
+            </div>
+            <span className="drawer-chevron">▸</span>
+          </summary>
+
+          <div className="drawer-body flex flex-col gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="field-col">
+                <span className="field-label">Tournament</span>
+                <input className="text-input" value={matchSetup.tournamentName}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, tournamentName: e.target.value }))}
+                  placeholder="e.g. Provincial T20 Cup" />
+              </div>
+              <div className="field-col">
+                <span className="field-label">Season</span>
+                <input className="text-input" value={matchSetup.season}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, season: e.target.value }))}
+                  placeholder="e.g. 2026" />
+              </div>
+              <div className="field-col">
+                <span className="field-label">Tournament Logo URL</span>
+                <input className="text-input" value={matchSetup.tournamentLogoUrl}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: e.target.value }))}
+                  placeholder="https://…" />
+              </div>
+              <div className="field-col">
+                <span className="field-label">Venue</span>
+                <input className="text-input" value={matchSetup.venue}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, venue: e.target.value }))}
+                  placeholder="Ground name" />
+              </div>
+              <div className="field-col">
+                <span className="field-label">Format</span>
+                <select className="select-input" value={matchSetup.format}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, format: e.target.value as MatchSetup["format"] }))}>
+                  <option value="T20">T20</option>
+                  <option value="ODI">ODI</option>
+                  <option value="Test">Test</option>
+                </select>
+              </div>
+              <div className="field-col">
+                <span className="field-label">Match Number</span>
+                <input className="text-input" value={matchSetup.matchNumber}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, matchNumber: e.target.value }))}
+                  placeholder="e.g. Match 14" />
+              </div>
+              <div className="field-col" style={{ gridColumn: "span 2" }}>
+                <span className="field-label">Match Title</span>
+                <input className="text-input" value={matchSetup.matchTitle}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, matchTitle: e.target.value }))}
+                  placeholder="e.g. Semi-Final" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(["teamA", "teamB"] as const).map((teamKey) => {
+                const team = matchSetup[teamKey];
+                return (
+                  <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
+                    <div className="eyebrow">{teamKey === "teamA" ? "Team A" : "Team B"}</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="field-col">
+                        <span className="field-label">Name</span>
+                        <input className="text-input" value={team.name}
+                          onChange={(e) => updateTeam(teamKey, { name: e.target.value })} placeholder="Team name" />
+                      </div>
+                      <div className="field-col">
+                        <span className="field-label">Short Code</span>
+                        <input className="text-input" value={team.shortCode}
+                          onChange={(e) => updateTeam(teamKey, { shortCode: e.target.value.toUpperCase() })}
+                          placeholder="e.g. CSK" maxLength={4} />
+                      </div>
+                      <div className="field-col">
+                        <span className="field-label">Color</span>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={team.color}
+                            onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
+                            style={{ width: 34, height: 34, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "none", padding: 0 }} />
+                          <input className="text-input" value={team.color}
+                            onChange={(e) => updateTeam(teamKey, { color: e.target.value })} />
+                        </div>
+                      </div>
+                      <div className="field-col">
+                        <span className="field-label">Logo URL</span>
+                        <input className="text-input" value={team.logoUrl}
+                          onChange={(e) => updateTeam(teamKey, { logoUrl: e.target.value })} placeholder="https://…" />
+                      </div>
+                    </div>
+                    <div className="field-col">
+                      <span className="field-label">Squad ({team.squad.length}) · one name per line</span>
+                      <textarea className="textarea-input" value={team.squad.join("\n")}
+                        onChange={(e) => updateSquad(teamKey, e.target.value)}
+                        placeholder={"Player One\nPlayer Two\nPlayer Three"} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="field-col">
+                <span className="field-label">Toss Winner</span>
+                <select className="select-input" value={matchSetup.tossWinner}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, tossWinner: e.target.value as MatchSetup["tossWinner"] }))}>
+                  <option value="">—</option>
+                  <option value="A">{matchSetup.teamA.shortCode || "Team A"}</option>
+                  <option value="B">{matchSetup.teamB.shortCode || "Team B"}</option>
+                </select>
+              </div>
+              <div className="field-col">
+                <span className="field-label">Toss Decision</span>
+                <select className="select-input" value={matchSetup.tossDecision}
+                  onChange={(e) => setMatchSetup((p) => ({ ...p, tossDecision: e.target.value as MatchSetup["tossDecision"] }))}>
+                  <option value="">—</option>
+                  <option value="bat">Elected to bat</option>
+                  <option value="bowl">Elected to bowl</option>
+                </select>
+              </div>
+              <div className="flex-1" />
+              <button onClick={pushMatchSetup} className="talk-btn" style={{ minWidth: 180 }}>
+                {setupPushed ? "Pushed ✓" : "Push Match Setup"}
+              </button>
+            </div>
+          </div>
+        </details>
+
+        {/* ── Live State (incremental) ─────────────────────────────────── */}
+        <details className="rack-panel p-5 drawer" open>
+          <summary>
+            <div className="flex items-center gap-3">
+              <div className="eyebrow">Live State</div>
+              <span className="font-mono-geist text-[9px] text-white/30 normal-case tracking-normal">updates ball by ball</span>
+              {liveDirty && <span className="dirty-dot" title="Unpushed changes" />}
+            </div>
+            <span className="drawer-chevron">▸</span>
+          </summary>
+
+          <div className="drawer-body flex flex-col gap-6">
+            {/* Score */}
+            <div>
+              <div className="eyebrow mb-2">Score</div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <NumberStepper label="Runs" value={liveState.score.runs}
+                  onChange={(v) => patchLive({ score: { ...liveState.score, runs: v } })} />
+                <NumberStepper label="Wickets" value={liveState.score.wickets} min={0}
+                  onChange={(v) => patchLive({ score: { ...liveState.score, wickets: Math.min(10, v) } })} />
+                <NumberStepper label="Overs" value={liveState.score.overs}
+                  onChange={(v) => patchLive({ score: { ...liveState.score, overs: v } })} />
+                <NumberStepper label="Balls" value={liveState.score.balls}
+                  onChange={(v) => patchLive({ score: { ...liveState.score, balls: Math.min(5, v) } })} />
+              </div>
+            </div>
+
+            {/* Batters */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="eyebrow">Batters at the Crease</div>
+                <button onClick={swapStrike} className="fx-btn fx-toggle-off">Swap Strike</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(["striker", "nonStriker"] as const).map((who) => (
+                  <div key={who} className="batter-card">
+                    <div className="eyebrow" style={{ color: who === "striker" ? "#E8C468" : undefined }}>
+                      {who === "striker" ? "Striker *" : "Non-Striker"}
+                    </div>
+                    <input className="text-input" value={liveState[who].name}
+                      onChange={(e) => patchBatter(who, { name: e.target.value })} placeholder="Batter name" />
+                    <div className="grid grid-cols-4 gap-2">
+                      <NumberStepper label="Runs" value={liveState[who].runs} onChange={(v) => patchBatter(who, { runs: v })} />
+                      <NumberStepper label="Balls" value={liveState[who].balls} onChange={(v) => patchBatter(who, { balls: v })} />
+                      <NumberStepper label="4s" value={liveState[who].fours} onChange={(v) => patchBatter(who, { fours: v })} />
+                      <NumberStepper label="6s" value={liveState[who].sixes} onChange={(v) => patchBatter(who, { sixes: v })} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Bowler + partnership */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bowler-card">
+                <div className="eyebrow">Bowler</div>
+                <input className="text-input" value={liveState.bowler.name}
+                  onChange={(e) => patchBowler({ name: e.target.value })} placeholder="Bowler name" />
+                <div className="grid grid-cols-5 gap-2">
+                  <NumberStepper label="Overs" value={liveState.bowler.overs} onChange={(v) => patchBowler({ overs: v })} />
+                  <NumberStepper label="Balls" value={liveState.bowler.balls} onChange={(v) => patchBowler({ balls: Math.min(5, v) })} />
+                  <NumberStepper label="Maidens" value={liveState.bowler.maidens} onChange={(v) => patchBowler({ maidens: v })} />
+                  <NumberStepper label="Runs" value={liveState.bowler.runs} onChange={(v) => patchBowler({ runs: v })} />
+                  <NumberStepper label="Wkts" value={liveState.bowler.wickets} onChange={(v) => patchBowler({ wickets: v })} />
+                </div>
+              </div>
+              <div className="bowler-card">
+                <div className="eyebrow">Partnership</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberStepper label="Runs" value={liveState.partnership.runs}
+                    onChange={(v) => patchLive({ partnership: { ...liveState.partnership, runs: v } })} />
+                  <NumberStepper label="Balls" value={liveState.partnership.balls}
+                    onChange={(v) => patchLive({ partnership: { ...liveState.partnership, balls: v } })} />
+                </div>
+              </div>
+            </div>
+
+            {/* Boundaries */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bowler-card">
+                <div className="eyebrow">Match Boundaries</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberStepper label="4s" value={liveState.matchBoundaries.fours}
+                    onChange={(v) => patchLive({ matchBoundaries: { ...liveState.matchBoundaries, fours: v } })} />
+                  <NumberStepper label="6s" value={liveState.matchBoundaries.sixes}
+                    onChange={(v) => patchLive({ matchBoundaries: { ...liveState.matchBoundaries, sixes: v } })} />
+                </div>
+              </div>
+              <div className="bowler-card">
+                <div className="eyebrow">Tournament Boundaries</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberStepper label="4s" value={liveState.tournamentBoundaries.fours}
+                    onChange={(v) => patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, fours: v } })} />
+                  <NumberStepper label="6s" value={liveState.tournamentBoundaries.sixes}
+                    onChange={(v) => patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, sixes: v } })} />
+                </div>
+              </div>
+            </div>
+
+            {/* Points table */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="eyebrow">Points Table</div>
+                <button onClick={addPointsRow} className="fx-btn fx-toggle-off">+ Add Row</button>
+              </div>
+              {liveState.pointsTable.length > 0 && (
+                <div className="points-row-grid mb-1.5">
+                  <span className="field-label">Team</span>
+                  <span className="field-label">Pld</span>
+                  <span className="field-label">Won</span>
+                  <span className="field-label">Lost</span>
+                  <span className="field-label">NRR</span>
+                  <span className="field-label">Pts</span>
+                  <span />
+                </div>
+              )}
+              <div className="flex flex-col gap-2">
+                {liveState.pointsTable.map((row, i) => (
+                  <div key={i} className="points-row-grid">
+                    <input className="text-input" value={row.team} onChange={(e) => patchPointsRow(i, { team: e.target.value })} placeholder="Team" />
+                    <input className="text-input" type="number" value={row.played} onChange={(e) => patchPointsRow(i, { played: Number(e.target.value) || 0 })} />
+                    <input className="text-input" type="number" value={row.won} onChange={(e) => patchPointsRow(i, { won: Number(e.target.value) || 0 })} />
+                    <input className="text-input" type="number" value={row.lost} onChange={(e) => patchPointsRow(i, { lost: Number(e.target.value) || 0 })} />
+                    <input className="text-input" value={row.nrr} onChange={(e) => patchPointsRow(i, { nrr: e.target.value })} placeholder="0.00" />
+                    <input className="text-input" type="number" value={row.points} onChange={(e) => patchPointsRow(i, { points: Number(e.target.value) || 0 })} />
+                    <button onClick={() => removePointsRow(i)} className="icon-btn">×</button>
+                  </div>
+                ))}
+                {liveState.pointsTable.length === 0 && (
+                  <p className="font-mono-geist text-[11px] text-white/30">No rows yet — add a team to start the table.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button onClick={pushLiveState} className="talk-btn" style={{ minWidth: 180 }}>
+                {livePushed ? "Pushed ✓" : "Push Live State"}
+              </button>
+            </div>
+          </div>
+        </details>
+
         {/* ── Preview tools ─────────────────────────────────────────────── */}
         <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
           <div>
@@ -400,12 +1094,67 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
           <div className="eyebrow mt-3 mb-1">Moments (auto-hide)</div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {(["four", "six", "wicket", "fifty", "hundred"] as const).map((m) => (
-              <button key={m} onClick={() => fire({ type: "moment", moment: m }, `Moment: ${m.toUpperCase()}`)} className="talk-btn">
-                {m.toUpperCase()}
-              </button>
-            ))}
+            <button onClick={() => fireBoundaryMoment("four")} className="talk-btn">FOUR</button>
+            <button onClick={() => fireBoundaryMoment("six")} className="talk-btn">SIX</button>
+            <button onClick={() => setShowWicketForm((v) => !v)} className="talk-btn" style={showWicketForm ? { background: "rgba(239,68,68,0.15)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" } : undefined}>
+              WICKET
+            </button>
+            <button onClick={() => fireMilestoneMoment("fifty")} className="talk-btn">FIFTY</button>
+            <button onClick={() => fireMilestoneMoment("hundred")} className="talk-btn">HUNDRED</button>
           </div>
+
+          <div className="flex items-center gap-3 mt-1">
+            <span className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">Fifty / Hundred for:</span>
+            <div className="segment-group" style={{ maxWidth: 400 }}>
+              <button className={`segment-btn ${milestoneBatter === "striker" ? "is-active" : ""}`} onClick={() => setMilestoneBatter("striker")}>
+                {liveState.striker.name || "Striker"}
+              </button>
+              <button className={`segment-btn ${milestoneBatter === "nonStriker" ? "is-active" : ""}`} onClick={() => setMilestoneBatter("nonStriker")}>
+                {liveState.nonStriker.name || "Non-Striker"}
+              </button>
+            </div>
+          </div>
+
+          {showWicketForm && (
+            <div className="bowler-card mt-2">
+              <div className="eyebrow" style={{ color: "#f87171" }}>Wicket Detail</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="field-col">
+                  <span className="field-label">Batsman Out</span>
+                  <select className="select-input" value={wicketDraft.batsmanOut}
+                    onChange={(e) => setWicketDraft((p) => ({ ...p, batsmanOut: e.target.value as WicketDraft["batsmanOut"] }))}>
+                    <option value="striker">{liveState.striker.name || "Striker"}</option>
+                    <option value="nonStriker">{liveState.nonStriker.name || "Non-Striker"}</option>
+                  </select>
+                </div>
+                <div className="field-col">
+                  <span className="field-label">Dismissal</span>
+                  <select className="select-input" value={wicketDraft.dismissalType}
+                    onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value as WicketDraft["dismissalType"] }))}>
+                    <option value="bowled">Bowled</option>
+                    <option value="caught">Caught</option>
+                    <option value="lbw">LBW</option>
+                    <option value="runOut">Run Out</option>
+                    <option value="stumped">Stumped</option>
+                    <option value="hitWicket">Hit Wicket</option>
+                  </select>
+                </div>
+                <div className="field-col">
+                  <span className="field-label">Fielder (if any)</span>
+                  <input className="text-input" value={wicketDraft.fielder}
+                    onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))} placeholder="Fielder name" />
+                </div>
+              </div>
+              <p className="font-mono-geist text-[9px] text-white/30">
+                Bowler pulled automatically from Live State: {liveState.bowler.name || "—"}
+              </p>
+              <div className="flex justify-end">
+                <button onClick={fireWicketMoment} className="talk-btn" style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" }}>
+                  Fire Wicket
+                </button>
+              </div>
+            </div>
+          )}
 
           <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest mt-1">
             Milestone and wicket graphics auto-hide after a few seconds — no need to turn them off.
