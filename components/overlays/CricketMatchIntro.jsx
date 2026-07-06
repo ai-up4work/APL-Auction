@@ -3,6 +3,7 @@
 import { Trophy } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { ambientGlow } from "@/lib/overlayTokens";
 
 // ---- Hardcoded match data ----
 // Team art is hardcoded here (icon + colors) rather than generated from
@@ -159,11 +160,14 @@ export default function CricketMatchIntro({ show, hideTrigger = false }) {
                     : "mkiCardEnter 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.03s both",
                 }}
               >
-                {/* Ambient glow behind the card — gold-led, team colors kept subtle */}
+                {/* Ambient glow behind the card — gold-led, team colors kept
+                    subtle. Now sourced from the shared overlayTokens
+                    ambientGlow() helper instead of a locally hand-typed
+                    duplicate of the same gradient. */}
                 <div
                   className="absolute -inset-6 blur-3xl rounded-[40px]"
                   style={{
-                    background: `linear-gradient(90deg, ${TEAM_A.colorSoft}, rgba(201,151,31,0.16), ${TEAM_B.colorSoft})`,
+                    background: ambientGlow(TEAM_A, TEAM_B),
                   }}
                 />
 

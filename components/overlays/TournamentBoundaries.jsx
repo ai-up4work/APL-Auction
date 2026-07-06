@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { STEEL_BEZEL, wedgeClip } from "@/lib/overlayTokens";
 
 function BoundaryStat({ label, value, delay, closing, sphereGradient, sphereSeamColor }) {
   return (
@@ -49,13 +50,14 @@ function BoundaryStat({ label, value, delay, closing, sphereGradient, sphereSeam
 
 // Default design tokens — cool steel-blue accent, distinct from
 // MatchBoundaries' warm gold, so the two read as different cards even
-// when docked in the same corner slot.
+// when docked in the same corner slot. Bezel gradient now sourced from
+// the shared overlayTokens STEEL_BEZEL (was a locally hand-typed
+// duplicate of the exact same gradient string).
 export const TOURNAMENT_BOUNDARIES_DEFAULTS = {
   eyebrow: "Tournament",
   eyebrowColor: "var(--color-tertiary-container, #adc6ff)",
   hairlineColor: "rgba(173,198,255,0.55)",
-  bezelGradient:
-    "linear-gradient(135deg, #eef1f6 0%, #b9c3d9 14%, #5f6b85 28%, #6f86c9 42%, #333a4d 56%, #b9c3d9 72%, #eef1f6 86%, #7c879e 100%)",
+  bezelGradient: STEEL_BEZEL,
   sphereGradient:
     "radial-gradient(circle at 32% 26%, #ffffff 0%, var(--color-tertiary, #dce4ff) 30%, var(--color-tertiary-container, #adc6ff) 68%, var(--color-on-primary-fixed-variant, #3a4156) 100%)",
   sphereSeamColor: "rgba(42,52,74,0.55)",
@@ -98,8 +100,12 @@ export default function TournamentBoundaries({
 
   if (!mounted) return null;
 
-  const clip = `polygon(${SLANT_PX}px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)`;
-  const clipInner = `polygon(${SLANT_PX - 2}px 0, calc(100% - 9px) 0, 100% 9px, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%)`;
+  // Left edge cut on a steep diagonal, right side keeps the small
+  // cut-corner treatment — was two hand-typed polygon() strings that
+  // happened to match wedgeClip()'s formula exactly (same as
+  // MatchBoundaries); now calls the shared helper instead.
+  const clip = wedgeClip(SLANT_PX, 10);
+  const clipInner = wedgeClip(SLANT_PX - 2, 9);
 
   return createPortal(
     <div

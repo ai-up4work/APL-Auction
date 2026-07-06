@@ -3,6 +3,7 @@
 import { Award, Star } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { GOLD_BEZEL, plaqueClip } from "@/lib/overlayTokens";
 
 // ---- Default data — override any of these via props. Kept exported so a
 // parent (e.g. the OBS overlay page) can import and tweak just one field
@@ -30,11 +31,11 @@ export const DEFAULT_RESULT_LINE = "TOP 4 ADVANCE TO THE SEMI-FINALS";
 const EXIT_DURATION_MS = 400;
 
 // Same cut-corner "plaque" clip used on the scorecard — reads as a struck
-// medallion/plate rather than a plain rounded rectangle.
-const PLAQUE_CLIP =
-  "polygon(30px 0, calc(100% - 30px) 0, 100% 30px, 100% calc(100% - 30px), calc(100% - 30px) 100%, 30px 100%, 0 calc(100% - 30px), 0 30px)";
-const PLAQUE_CLIP_INNER =
-  "polygon(27px 0, calc(100% - 27px) 0, 100% 27px, 100% calc(100% - 27px), calc(100% - 27px) 100%, 27px 100%, 0 calc(100% - 27px), 0 27px)";
+// medallion/plate rather than a plain rounded rectangle. Now sourced from
+// the shared overlayTokens helper (was two hand-typed polygon() strings
+// that happened to match plaqueClip()'s formula exactly).
+const PLAQUE_CLIP = plaqueClip(30);
+const PLAQUE_CLIP_INNER = plaqueClip(27);
 
 function formatNrr(value) {
   if (value === 0) return "0.000";
@@ -285,12 +286,13 @@ export default function PointsTable({
                   }}
                 />
 
-                {/* Metallic bezel — same brushed-steel/gold plaque frame */}
+                {/* Metallic bezel — same brushed-steel/gold plaque frame,
+                    now sourced from the shared overlayTokens GOLD_BEZEL
+                    instead of a locally hand-typed duplicate. */}
                 <div
                   className="relative p-[3px] sm:p-[4px]"
                   style={{
-                    background:
-                      "linear-gradient(135deg, #f1efe9 0%, #b8ad93 14%, #6b6455 28%, #c9971f 42%, #4a453a 56%, #b8ad93 72%, #f1efe9 86%, #8a8272 100%)",
+                    background: GOLD_BEZEL,
                     boxShadow:
                       "0 25px 50px -12px rgba(0,0,0,0.65), inset 0 1px 1px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.5)",
                     clipPath: PLAQUE_CLIP,

@@ -2,32 +2,32 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { GOLD_BEZEL, wedgeClip } from "@/lib/overlayTokens";
+import CricketBall from "@/components/overlays/shared/CricketBall";
 
 // Boundary stat — the same stitched-seam gold sphere from LiveScoreBar's
 // "this over" ticker, paired with a number-over-caption stack so it reads
 // as a proper stat, while staying short enough to fit one thin row. Each
 // stat pops its sphere in with a little overshoot, then its number/label
 // settle in right after — a smaller echo of the ball-chip cascade in the
-// "this over" ticker.
+// "this over" ticker. The sphere itself is now the shared CricketBall
+// component — this used to hand-draw its own gradient circle + seam SVG,
+// duplicating what CricketBall already does.
 function BoundaryStat({ label, value, delay, closing, sphereGradient, sphereSeamColor }) {
   return (
     <span className="mb-stat relative flex items-center gap-1.5 sm:gap-2 shrink-0">
-      <span
-        className="mb-sphere relative w-5 h-5 sm:w-6 sm:h-6 rounded-full overflow-hidden shrink-0"
+      <CricketBall
+        size={20}
+        fill={sphereGradient}
+        seamColor={sphereSeamColor}
+        seamWidth={1}
+        className="mb-sphere"
         style={{
-          background: sphereGradient,
-          border: "1px solid rgba(0,0,0,0.35)",
-          boxShadow: "inset 0 -2px 3px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.3)",
           animation: closing
             ? "mbSphereOut 0.16s ease-in both"
             : `mbSphereIn 0.45s cubic-bezier(0.34,1.56,0.64,1) ${delay}s both`,
         }}
-      >
-        <svg viewBox="0 0 20 20" className="absolute inset-0 w-full h-full" style={{ opacity: 0.75 }}>
-          <path d="M3,2 Q9,10 3,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-          <path d="M17,2 Q11,10 17,18" stroke={sphereSeamColor} strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-        </svg>
-      </span>
+      />
       <span
         className="leading-none"
         style={{
@@ -60,8 +60,7 @@ export const MATCH_BOUNDARIES_DEFAULTS = {
   eyebrow: "Match Boundaries",
   eyebrowColor: "var(--color-theme-orange, #C9971F)",
   hairlineColor: "rgba(201,151,31,0.5)",
-  bezelGradient:
-    "linear-gradient(135deg, #f1efe9 0%, #b8ad93 14%, #6b6455 28%, #c9971f 42%, #4a453a 56%, #b8ad93 72%, #f1efe9 86%, #8a8272 100%)",
+  bezelGradient: GOLD_BEZEL,
   sphereGradient:
     "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange, #C9971F) 68%, #8a5c0d 100%)",
   sphereSeamColor: "rgba(58,37,4,0.5)",
@@ -101,9 +100,11 @@ export default function MatchBoundaries({
 
   // Left edge cut on a steep diagonal (echoing LiveScoreBar's team-block
   // wedges); right side keeps the small cut-corner "plaque" treatment
-  // used on the Scorecard/Points Table bezels.
-  const clip = `polygon(${SLANT_PX}px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)`;
-  const clipInner = `polygon(${SLANT_PX - 2}px 0, calc(100% - 9px) 0, 100% 9px, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%)`;
+  // used on the Scorecard/Points Table bezels. Was two hand-typed polygon()
+  // strings that happened to match wedgeClip()'s formula exactly — now
+  // calls the shared helper instead of re-deriving the math here.
+  const clip = wedgeClip(SLANT_PX, 10);
+  const clipInner = wedgeClip(SLANT_PX - 2, 9);
 
   return createPortal(
     <div
