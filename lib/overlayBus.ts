@@ -29,6 +29,8 @@ export interface TeamInfo {
   squad: string[];
   /** Richer version of `squad`, with player id + photo, when sourced from the DB. */
   squadPlayers?: SquadPlayer[];
+  /** id of the `teams` row this side is bound to, if selected from the DB. */
+  teamId?: string;
 }
 
 export interface MatchSetup {

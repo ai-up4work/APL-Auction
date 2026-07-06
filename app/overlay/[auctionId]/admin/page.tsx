@@ -103,7 +103,8 @@ function BatterPickerButton({
 }
 
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
-  const { auctionId } = use(params);
+  // const { auctionId } = use(params);
+  const auctionId = "2c5915d0-6b31-47cb-9597-0bd721afe2a9"
 
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const [connected, setConnected] = useState(false);

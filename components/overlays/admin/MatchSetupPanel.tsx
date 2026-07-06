@@ -6,23 +6,24 @@ import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
 import { ImageUploader } from "./ImageUploader";
 
 // ── Roster source ────────────────────────────────────────────────────
-// Roster = players that were actually SOLD in this auction's lots.
-// auction_lots carries a denormalized snapshot of the player at sale time
-// (player_name, player_img, player_role) plus the winning_team_code.
-// There is no team color/logo on this table — those stay manual per match.
+// Roster = players that were actually SOLD in this auction.
+// Reads straight from the `players` table (see schema) — there is no
+// separate `auction_lots` table. Grouping key is `sold_to_team_id`, the
+// real FK into `teams.id` — this avoids any drift between free-text
+// `owner_team_code` values and the canonical `teams.code`.
 interface RosterRow {
-  id: string;               // player_id
-  name: string;               // player_name
-  image_url: string | null;   // player_img
-  role: string | null;        // player_role
-  team_code: string | null;   // winning_team_code — grouping key
+  id: string;                 // player.id
+  name: string;                // player.name
+  image_url: string | null;    // player.img
+  role: string | null;         // player.role
+  team_id: string | null;      // player.sold_to_team_id — grouping key
 }
 
 type RosterState =
   | { status: "loading" }
   | { status: "error" }
   | { status: "empty" }
-  | { status: "ready"; byTeam: Map<string, RosterRow[]> };
+  | { status: "ready"; byTeamId: Map<string, RosterRow[]> };
 
 function useAuctionRoster(auctionId: string): RosterState {
   const [state, setState] = useState<RosterState>({ status: "loading" });
@@ -32,13 +33,15 @@ function useAuctionRoster(auctionId: string): RosterState {
     setState({ status: "loading" });
 
     supabase
-      .from("auction_lots")
-      .select("id,player_id,player_name,player_img,player_role,winning_team_code,status")
+      .from("players")
+      .select("id,name,img,role,sold_to_team_id,status")
       .eq("auction_id", auctionId)
       .eq("status", "sold")
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
+          // eslint-disable-next-line no-console
+          console.error("[useAuctionRoster] players query failed:", error);
           setState({ status: "error" });
           return;
         }
@@ -46,19 +49,73 @@ function useAuctionRoster(auctionId: string): RosterState {
           setState({ status: "empty" });
           return;
         }
-        const byTeam = new Map<string, RosterRow[]>();
+        const byTeamId = new Map<string, RosterRow[]>();
         for (const row of data as any[]) {
-          const key = row.winning_team_code?.trim() || "Unassigned";
-          if (!byTeam.has(key)) byTeam.set(key, []);
-          byTeam.get(key)!.push({
-            id: row.player_id ?? row.id,
-            name: row.player_name ?? "Unnamed",
-            image_url: row.player_img,
-            role: row.player_role,
-            team_code: row.winning_team_code,
+          const key = row.sold_to_team_id ?? "unassigned";
+          if (!byTeamId.has(key)) byTeamId.set(key, []);
+          byTeamId.get(key)!.push({
+            id: row.id,
+            name: row.name ?? "Unnamed",
+            image_url: row.img || null,
+            role: row.role,
+            team_id: row.sold_to_team_id,
           });
         }
-        setState({ status: "ready", byTeam });
+        setState({ status: "ready", byTeamId });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auctionId]);
+
+  return state;
+}
+
+// ── Teams source ─────────────────────────────────────────────────────
+// Canonical team list for this auction — code, name, color, logo.
+interface DbTeamRow {
+  id: string;
+  code: string;
+  name: string;
+  color: string;
+  logo: string | null;
+  tier: string;
+  owner: string;
+  remaining_purse: number | null;
+}
+
+type TeamsDbState =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "empty" }
+  | { status: "ready"; teams: DbTeamRow[] };
+
+function useAuctionTeams(auctionId: string): TeamsDbState {
+  const [state, setState] = useState<TeamsDbState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ status: "loading" });
+
+    supabase
+      .from("teams")
+      .select("id,code,name,color,logo,tier,owner,remaining_purse")
+      .eq("auction_id", auctionId)
+      .order("code")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          // eslint-disable-next-line no-console
+          console.error("[useAuctionTeams] teams query failed:", error);
+          setState({ status: "error" });
+          return;
+        }
+        if (data.length === 0) {
+          setState({ status: "empty" });
+          return;
+        }
+        setState({ status: "ready", teams: data as DbTeamRow[] });
       });
 
     return () => {
@@ -78,6 +135,77 @@ function initials(name: string) {
     .join("");
 }
 
+function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlayer[] {
+  if (roster.status !== "ready") return [];
+  const rows = roster.byTeamId.get(teamId) ?? [];
+  return rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined }));
+}
+
+// ── DB team picker — fills name/code/color/logo (+ squad if available) ─
+function TeamDbSelect({
+  teamsState,
+  roster,
+  excludeTeamId,
+  onApply,
+}: {
+  teamsState: TeamsDbState;
+  roster: RosterState;
+  excludeTeamId?: string;
+  onApply: (patch: Partial<TeamInfo>) => void;
+}) {
+  if (teamsState.status === "loading") {
+    return <p className="font-mono-geist text-[10px] text-white/30">Loading teams…</p>;
+  }
+  if (teamsState.status === "error") {
+    return (
+      <p className="font-mono-geist text-[10px] text-amber-400/70">
+        Couldn&apos;t reach the teams table — fill in details manually.
+      </p>
+    );
+  }
+  if (teamsState.status === "empty") {
+    return (
+      <p className="font-mono-geist text-[10px] text-white/30">
+        No teams found for this auction — fill in details manually.
+      </p>
+    );
+  }
+
+  const options = teamsState.teams.filter((t) => t.id !== excludeTeamId);
+
+  return (
+    <select
+      className="select-input select-input-compact"
+      defaultValue=""
+      onChange={(e) => {
+        const team = teamsState.teams.find((t) => t.id === e.target.value);
+        if (!team) return;
+        const squadPlayers = rosterPlayersForTeamId(roster, team.id);
+        onApply({
+          teamId: team.id,
+          name: team.name,
+          shortCode: team.code,
+          color: team.color,
+          logoUrl: team.logo ?? "",
+          ...(squadPlayers.length
+            ? { squadPlayers, squad: squadPlayers.map((p) => p.name) }
+            : {}),
+        });
+        e.target.value = "";
+      }}
+    >
+      <option value="" disabled>
+        Load team from database…
+      </option>
+      {options.map((t) => (
+        <option key={t.id} value={t.id}>
+          {t.code} — {t.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 // ── One team's roster picker ─────────────────────────────────────────
 function TeamRosterPicker({
   team,
@@ -94,19 +222,13 @@ function TeamRosterPicker({
     [team.squadPlayers]
   );
 
-  function applyRosterTeam(teamCode: string) {
-    if (roster.status !== "ready") return;
-    const rows = roster.byTeam.get(teamCode) ?? [];
-    const players: SquadPlayer[] = rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      imageUrl: r.image_url ?? undefined,
-    }));
-    onChange({
-      name: team.name || teamCode,
-      squadPlayers: players,
-      squad: players.map((p) => p.name),
-    });
+  // Re-pull the squad for the currently bound team (used by a manual
+  // "reload" affordance if the roster loads in after the team was picked).
+  function reloadFromBoundTeam() {
+    if (!team.teamId) return;
+    const players = rosterPlayersForTeamId(roster, team.teamId);
+    if (!players.length) return;
+    onChange({ squadPlayers: players, squad: players.map((p) => p.name) });
   }
 
   function togglePlayer(player: SquadPlayer) {
@@ -130,30 +252,39 @@ function TeamRosterPicker({
     onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
   }
 
+  function clearSquad() {
+    onChange({ squadPlayers: [], squad: [] });
+  }
+
+  const allRosterRows =
+    roster.status === "ready" ? [...roster.byTeamId.values()].flat() : [];
+
   return (
     <div className="field-col">
       <div className="flex items-center justify-between">
         <span className="field-label">Squad ({(team.squadPlayers ?? []).length})</span>
-        {roster.status === "ready" && (
-          <select
-            className="select-input"
-            style={{ width: "auto", fontSize: 10, padding: "4px 8px" }}
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) applyRosterTeam(e.target.value);
-              e.target.value = "";
-            }}
-          >
-            <option value="" disabled>
-              Load from roster…
-            </option>
-            {[...roster.byTeam.keys()].map((teamCode) => (
-              <option key={teamCode} value={teamCode}>
-                {teamCode} ({roster.byTeam.get(teamCode)!.length})
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          {team.teamId && roster.status === "ready" && (
+            <button
+              type="button"
+              className="text-link-btn"
+              onClick={reloadFromBoundTeam}
+              title="Reload squad from roster for the bound team"
+            >
+              Reload
+            </button>
+          )}
+          {(team.squadPlayers ?? []).length > 0 && (
+            <button
+              type="button"
+              className="text-link-btn"
+              onClick={clearSquad}
+              title="Remove everyone from today's squad"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {roster.status === "loading" && (
@@ -205,7 +336,7 @@ function TeamRosterPicker({
             Browse all rostered players ▸
           </summary>
           <div className="panel-scroll squad-list mt-2">
-            {[...roster.byTeam.values()].flat().map((r) => {
+            {allRosterRows.map((r) => {
               const checked = selectedIds.has(r.id);
               return (
                 <label key={r.id} className={`squad-pick-row ${checked ? "is-checked" : ""}`}>
@@ -225,7 +356,6 @@ function TeamRosterPicker({
                     )}
                   </span>
                   <span className="squad-name">{r.name}</span>
-                  <span className="font-mono-geist text-[9px] text-white/30">{r.team_code}</span>
                 </label>
               );
             })}
@@ -254,6 +384,38 @@ function TeamRosterPicker({
   );
 }
 
+// ── Logo uploader + remove control ───────────────────────────────────
+function LogoField({
+  label,
+  auctionId,
+  value,
+  onChange,
+}: {
+  label: string;
+  auctionId: string;
+  value: string;
+  onChange: (url: string) => void;
+}) {
+  return (
+    <div className="field-col">
+      <span className="field-label">{label}</span>
+      <div className="logo-field-row">
+        <ImageUploader auctionId={auctionId} kind="team" value={value} onChange={onChange} />
+        {value && (
+          <button
+            type="button"
+            className="icon-btn"
+            title="Remove image"
+            onClick={() => onChange("")}
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function MatchSetupPanel({
   auctionId,
   matchSetup,
@@ -270,6 +432,7 @@ export default function MatchSetupPanel({
   completed: boolean;
 }) {
   const roster = useAuctionRoster(auctionId);
+  const teamsState = useAuctionTeams(auctionId);
 
   function updateTeam(team: "teamA" | "teamB", patch: Partial<TeamInfo>) {
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
@@ -308,15 +471,12 @@ export default function MatchSetupPanel({
               placeholder="e.g. 2026"
             />
           </div>
-          <div className="field-col">
-            <span className="field-label">Tournament Logo</span>
-            <ImageUploader
-              auctionId={auctionId}
-              kind="team"
-              value={matchSetup.tournamentLogoUrl}
-              onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
-            />
-          </div>
+          <LogoField
+            label="Tournament Logo"
+            auctionId={auctionId}
+            value={matchSetup.tournamentLogoUrl}
+            onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
+          />
           <div className="field-col">
             <span className="field-label">Venue</span>
             <input
@@ -361,71 +521,88 @@ export default function MatchSetupPanel({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(["teamA", "teamB"] as const).map((teamKey) => {
             const team = matchSetup[teamKey];
+            const otherKey = teamKey === "teamA" ? "teamB" : "teamA";
             return (
               <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
-                <div className="eyebrow">{teamKey === "teamA" ? "Team A" : "Team B"}</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="field-col">
-                    <span className="field-label">Name</span>
-                    <input
-                      className="text-input"
-                      value={team.name}
-                      onChange={(e) => updateTeam(teamKey, { name: e.target.value })}
-                      placeholder="Team name"
-                    />
-                  </div>
-                  <div className="field-col">
-                    <span className="field-label">Short Code</span>
-                    <input
-                      className="text-input"
-                      value={team.shortCode}
-                      onChange={(e) => updateTeam(teamKey, { shortCode: e.target.value.toUpperCase() })}
-                      placeholder="e.g. CSK"
-                      maxLength={4}
-                    />
-                  </div>
-                  <div className="field-col">
-                    <span className="field-label">Color</span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={team.color}
-                        onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 6,
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          background: "none",
-                          padding: 0,
-                        }}
-                      />
+                {team.logoUrl && (
+                  <div
+                    className="team-card-watermark"
+                    style={{ backgroundImage: `url(${team.logoUrl})` }}
+                    aria-hidden="true"
+                  />
+                )}
+                <div className="team-card-content">
+                  <div className="eyebrow">{teamKey === "teamA" ? "Team A" : "Team B"}</div>
+
+                  <TeamDbSelect
+                    teamsState={teamsState}
+                    roster={roster}
+                    excludeTeamId={matchSetup[otherKey].teamId}
+                    onApply={(patch) => updateTeam(teamKey, patch)}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="field-col">
+                      <span className="field-label">Name</span>
                       <input
                         className="text-input"
-                        value={team.color}
-                        onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
+                        value={team.name}
+                        onChange={(e) => updateTeam(teamKey, { name: e.target.value, teamId: undefined })}
+                        placeholder="Team name"
                       />
                     </div>
-                  </div>
-                  <div className="field-col">
-                    <span className="field-label">Logo</span>
-                    <ImageUploader
+                    <div className="field-col">
+                      <span className="field-label">Short Code</span>
+                      <input
+                        className="text-input"
+                        value={team.shortCode}
+                        onChange={(e) =>
+                          updateTeam(teamKey, { shortCode: e.target.value.toUpperCase(), teamId: undefined })
+                        }
+                        placeholder="e.g. CSK"
+                        maxLength={4}
+                      />
+                    </div>
+                    <div className="field-col">
+                      <span className="field-label">Color</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={team.color}
+                          onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 6,
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            background: "none",
+                            padding: 0,
+                          }}
+                        />
+                        <input
+                          className="text-input"
+                          value={team.color}
+                          onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <LogoField
+                      label="Logo"
                       auctionId={auctionId}
-                      kind="team"
                       value={team.logoUrl}
                       onChange={(url) => updateTeam(teamKey, { logoUrl: url })}
                     />
                   </div>
-                </div>
 
-                <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />
+                  <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />
+                </div>
               </div>
             );
           })}
         </div>
 
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="field-col">
+          <div className="field-col toss-field">
             <span className="field-label">Toss Winner</span>
             <select
               className="select-input"
@@ -437,7 +614,7 @@ export default function MatchSetupPanel({
               <option value="B">{matchSetup.teamB.shortCode || "Team B"}</option>
             </select>
           </div>
-          <div className="field-col">
+          <div className="field-col toss-field">
             <span className="field-label">Toss Decision</span>
             <select
               className="select-input"
