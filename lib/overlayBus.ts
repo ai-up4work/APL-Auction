@@ -64,6 +64,7 @@ export interface BowlerState {
   maidens: number;
   runs: number;
   wickets: number;
+  imageUrl?: string; // NEW — carousel photo support
 }
 
 export interface PointsRow {

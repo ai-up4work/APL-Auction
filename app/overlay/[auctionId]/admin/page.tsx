@@ -642,6 +642,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           liveDirty={liveDirty}
           onPush={pushLiveState}
           pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
+          matchSetup={matchSetup}   
         />
 
         {/* ── Preview tools ─────────────────────────────────────────────── */}

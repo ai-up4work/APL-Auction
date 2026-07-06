@@ -6,17 +6,12 @@ import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
 import { ImageUploader } from "./ImageUploader";
 
 // ── Roster source ────────────────────────────────────────────────────
-// Roster = players that were actually SOLD in this auction.
-// Reads straight from the `players` table (see schema) — there is no
-// separate `auction_lots` table. Grouping key is `sold_to_team_id`, the
-// real FK into `teams.id` — this avoids any drift between free-text
-// `owner_team_code` values and the canonical `teams.code`.
 interface RosterRow {
-  id: string;                 // player.id
-  name: string;                // player.name
-  image_url: string | null;    // player.img
-  role: string | null;         // player.role
-  team_id: string | null;      // player.sold_to_team_id — grouping key
+  id: string;
+  name: string;
+  image_url: string | null;
+  role: string | null;
+  team_id: string | null;
 }
 
 type RosterState =
@@ -73,7 +68,6 @@ function useAuctionRoster(auctionId: string): RosterState {
 }
 
 // ── Teams source ─────────────────────────────────────────────────────
-// Canonical team list for this auction — code, name, color, logo.
 interface DbTeamRow {
   id: string;
   code: string;
@@ -141,7 +135,7 @@ function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlaye
   return rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined }));
 }
 
-// ── DB team picker — fills name/code/color/logo (+ squad if available) ─
+// ── DB team picker ────────────────────────────────────────────────────
 function TeamDbSelect({
   teamsState,
   roster,
@@ -222,8 +216,6 @@ function TeamRosterPicker({
     [team.squadPlayers]
   );
 
-  // Re-pull the squad for the currently bound team (used by a manual
-  // "reload" affordance if the roster loads in after the team was picked).
   function reloadFromBoundTeam() {
     if (!team.teamId) return;
     const players = rosterPlayersForTeamId(roster, team.teamId);
@@ -301,12 +293,24 @@ function TeamRosterPicker({
         </p>
       )}
 
+      {/* ── Squad — horizontal carousel. IMPORTANT: this div must carry
+           ONLY the "squad-list" class — no "panel-scroll", no others —
+           or a competing max-height / flex-direction rule can silently
+           force it back to a vertical stack. ─────────────────────── */}
       {(team.squadPlayers ?? []).length > 0 && (
-        <div className="panel-scroll squad-list">
+        <div className="squad-list">
           {(team.squadPlayers ?? []).map((p) => {
             const isManual = p.id.startsWith("manual:");
             return (
               <div key={p.id} className="squad-chip">
+                <button
+                  type="button"
+                  className="squad-remove"
+                  onClick={() => (isManual ? removeManual(p.id) : togglePlayer(p))}
+                  title="Remove from today's squad"
+                >
+                  ×
+                </button>
                 <span className="squad-avatar">
                   {p.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -316,14 +320,6 @@ function TeamRosterPicker({
                   )}
                 </span>
                 <span className="squad-name">{p.name}</span>
-                <button
-                  type="button"
-                  className="squad-remove"
-                  onClick={() => (isManual ? removeManual(p.id) : togglePlayer(p))}
-                  title="Remove from today's squad"
-                >
-                  ×
-                </button>
               </div>
             );
           })}
@@ -335,7 +331,7 @@ function TeamRosterPicker({
           <summary className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest cursor-pointer">
             Browse all rostered players ▸
           </summary>
-          <div className="panel-scroll squad-list mt-2">
+          <div className="panel-scroll squad-browse-list mt-2">
             {allRosterRows.map((r) => {
               const checked = selectedIds.has(r.id);
               return (
@@ -437,6 +433,29 @@ export default function MatchSetupPanel({
   function updateTeam(team: "teamA" | "teamB", patch: Partial<TeamInfo>) {
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   }
+
+  useEffect(() => {
+    if (roster.status !== "ready") return;
+
+    (["teamA", "teamB"] as const).forEach((teamKey) => {
+      const team = matchSetup[teamKey];
+      if (!team.teamId) return;
+      if ((team.squadPlayers ?? []).length > 0) return;
+
+      const players = rosterPlayersForTeamId(roster, team.teamId);
+      if (players.length === 0) return;
+
+      setMatchSetup((prev) => ({
+        ...prev,
+        [teamKey]: {
+          ...prev[teamKey],
+          squadPlayers: players,
+          squad: players.map((p) => p.name),
+        },
+      }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster.status]);
 
   return (
     <details className="rack-panel p-5 drawer" open={!completed}>

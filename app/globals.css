@@ -1,14 +1,12 @@
 @import "tailwindcss";
-@import "../styles/overlay-theme.css"; /* separate, swappable overlay theme — see that file for how to re-skin */
+@import "../styles/overlay-theme.css";
 
 @theme {
-  /* Core brand accent — gold/bronze from the logo banner */
   --color-theme-orange: #c9971f;
   --color-bid-glow: #c9971f;
   --color-secondary-fixed: #f3e3bf;
   --color-on-error-container: #ffdad6;
 
-  /* Surfaces — deep midnight navy from the logo's night sky */
   --color-surface-variant: #ffffff;
   --color-surface: #0d1117;
   --color-surface-container-lowest: #07090d;
@@ -26,7 +24,6 @@
   --color-outline: #8c92a3;
   --color-on-primary-fixed: #161b2b;
 
-  /* Secondary — silver/steel from the helmet */
   --color-secondary: #c8cdd8;
   --color-surface-tint: #b8c0d8;
   --color-on-secondary-fixed-variant: #5a4400;
@@ -43,7 +40,6 @@
   --color-on-error: #690005;
   --color-on-primary: #1f2538;
 
-  /* Primary — navy from the helmet cape */
   --color-primary-container: #2c3447;
   --color-on-primary-container: #c2cae3;
   --color-inverse-on-surface: #262b38;
@@ -54,7 +50,6 @@
   --color-surface-container-high: #1f2433;
   --color-inverse-primary: #4a5168;
 
-  /* Gold accents (on-* tokens) */
   --color-on-tertiary-fixed-variant: #2c4677;
   --color-on-tertiary: #122f5f;
   --color-on-background: #e3e6ef;
@@ -68,7 +63,6 @@
   --color-on-tertiary-container: #385283;
   --color-on-secondary-fixed: #2e2200;
 
-  /* Warning — amber, used for lock banners, PIN warnings, budget alerts */
   --color-warning: #fbbf24;
   --color-warning-container: rgba(251, 191, 36, 0.07);
   --color-warning-outline: rgba(251, 191, 36, 0.25);
@@ -105,17 +99,9 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .ignite-glow {
-    box-shadow: 0 0 20px rgba(201, 151, 31, 0.3);
-  }
-
-  .orange-glow {
-    box-shadow: 0 0 20px rgba(201, 151, 31, 0.3);
-  }
-
-  .pulse-live {
-    animation: pulse-red 2s infinite;
-  }
+  .ignite-glow { box-shadow: 0 0 20px rgba(201, 151, 31, 0.3); }
+  .orange-glow { box-shadow: 0 0 20px rgba(201, 151, 31, 0.3); }
+  .pulse-live { animation: pulse-red 2s infinite; }
 
   .bento-grid {
     display: grid;
@@ -123,59 +109,34 @@
     gap: 16px;
   }
 
-  .pulse-glow {
-    animation: pulse-glow-animation 2s infinite ease-in-out;
-  }
-
-  .active-glow {
-    animation: pulse-active-glow 2s infinite ease-in-out;
-  }
+  .pulse-glow { animation: pulse-glow-animation 2s infinite ease-in-out; }
+  .active-glow { animation: pulse-active-glow 2s infinite ease-in-out; }
 
   .circular-progress {
     background: radial-gradient(closest-side, #0d1117 79%, transparent 80% 100%),
                 conic-gradient(#c9971f 64.8%, #2a2f3d 0);
   }
 
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-  .flow-dots {
-    stroke-dasharray: 6 18;
-    animation: flow-move 1s linear infinite;
-  }
+  .flow-dots { stroke-dasharray: 6 18; animation: flow-move 1s linear infinite; }
   @keyframes flow-move {
     from { stroke-dashoffset: 24; }
     to { stroke-dashoffset: 0; }
   }
 
-  .animate-scan {
-    animation: scan-vertical 1.2s linear infinite;
-  }
+  .animate-scan { animation: scan-vertical 1.2s linear infinite; }
 
-    .log-scroll {
+  .log-scroll {
     scrollbar-width: thin;
     scrollbar-color: var(--color-theme-orange) var(--color-surface-container-high);
     overflow-y: scroll;
   }
-  .log-scroll::-webkit-scrollbar {
-    width: 8px;
-  }
-  .log-scroll::-webkit-scrollbar-track {
-    background: var(--color-surface-container-high);
-    border-radius: 8px;
-  }
-  .log-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--color-theme-orange) 55%, transparent);
-    border-radius: 8px;
-  }
-  .log-scroll::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--color-theme-orange) 75%, transparent);
-  }
+  .log-scroll::-webkit-scrollbar { width: 8px; }
+  .log-scroll::-webkit-scrollbar-track { background: var(--color-surface-container-high); border-radius: 8px; }
+  .log-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-theme-orange) 55%, transparent); border-radius: 8px; }
+  .log-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-theme-orange) 75%, transparent); }
 }
 
 @keyframes scan-vertical {
@@ -183,10 +144,7 @@
   100% { transform: translateY(100%); }
 }
 
-.team-card {
-  position: relative;
-  overflow: hidden; /* clips the watermark to the rounded corners */
-}
+.team-card { position: relative; overflow: hidden; }
 .team-card-watermark {
   position: absolute;
   inset: 0;
@@ -205,27 +163,16 @@
   flex-direction: column;
   gap: 10px;
 }
- 
-/* 2. Logo field + remove (×) button sit side by side */
-.logo-field-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.logo-field-row > *:first-child {
-  flex: 1;
-  min-width: 0;
-}
- 
-/* 3. Dropdowns — replace the old bare `.select-input` rule with this.
-      Dark background + custom chevron so it doesn't fall back to the
-      browser's stock (usually light) native select chrome. */
+
+.logo-field-row { display: flex; align-items: center; gap: 8px; }
+.logo-field-row > *:first-child { flex: 1; min-width: 0; }
+
 .select-input {
   width: 100%;
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  color-scheme: dark; /* nudges Chrome/Edge to render the native popup dark */
+  color-scheme: dark;
   background: rgba(0,0,0,0.25);
   border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
   border-radius: 8px;
@@ -239,16 +186,9 @@
   background-position: right 8px center;
   background-size: 14px;
 }
-.select-input:focus {
-  outline: none;
-  border-color: rgba(201,151,31,0.5);
-}
-.select-input option {
-  background: #12161f;
-  color: #e3e6ef;
-}
- 
-/* Compact variant used for the "Load from roster…" select inside the squad picker */
+.select-input:focus { outline: none; border-color: rgba(201,151,31,0.5); }
+.select-input option { background: #12161f; color: #e3e6ef; }
+
 .select-input-compact {
   width: auto;
   font-size: 10px;
@@ -256,14 +196,9 @@
   background-size: 11px;
   background-position: right 6px center;
 }
- 
-/* Toss Winner / Toss Decision selects were shrinking to fit "—" — give them
-   a real width so they read as proper form controls, not stray text. */
-.toss-field {
-  min-width: 180px;
-}
- 
-/* Small text-only "Clear" action next to the squad label */
+
+.toss-field { min-width: 180px; }
+
 .text-link-btn {
   font-family: 'Geist Mono', monospace;
   font-size: 9px;
@@ -275,6 +210,181 @@
   padding: 0;
   cursor: pointer;
 }
-.text-link-btn:hover {
-  text-decoration: underline;
+.text-link-btn:hover { text-decoration: underline; }
+
+/* ── Squad — horizontal carousel. Layout-critical props are !important
+   so no other rule anywhere (old duplicate, utility class, ordering
+   accident) can silently flip this back into a vertical stack. ────── */
+.squad-list {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: flex-start !important;
+  gap: 10px;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding: 6px 2px 10px;
+  scroll-snap-type: x proximity;
+  max-height: none !important;
+  width: 100%;
 }
+.squad-list::-webkit-scrollbar { height: 6px; }
+.squad-list::-webkit-scrollbar-track { background: var(--color-surface-container-high, #1f2433); border-radius: 8px; }
+.squad-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-theme-orange) 55%, transparent); border-radius: 8px; }
+
+.squad-chip {
+  position: relative;
+  scroll-snap-align: start;
+  flex: 0 0 auto !important;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 82px;
+  padding: 10px 6px 8px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.squad-name {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  text-align: center;
+  line-height: 1.25;
+  color: var(--color-on-surface, #e3e6ef);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.squad-remove {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.3);
+  color: #f87171; font-size: 12px; line-height: 1; flex-shrink: 0;
+  backdrop-filter: blur(2px);
+}
+
+.squad-avatar {
+  width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
+  flex-shrink: 0; background: rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+}
+.squad-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.squad-avatar-sm { width: 18px; height: 18px; }
+.squad-avatar-fallback {
+  font-family: 'Geist Mono', monospace;
+  font-size: 9px; font-weight: 700;
+  color: var(--color-outline, #8c92a3);
+}
+
+.squad-chip .squad-avatar { width: 56px; height: 56px; }
+.squad-chip .squad-avatar-fallback { font-size: 16px; }
+
+/* ── "Browse all rostered players" checklist — vertical, separate class ─ */
+.squad-browse-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Scoreboard strip ─────────────────────────────────────────── */
+.scoreboard-strip {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(201,151,31,0.1), rgba(201,151,31,0.02));
+  border: 1px solid rgba(201,151,31,0.2);
+}
+.scoreboard-main { font-family: 'Archivo Narrow', sans-serif; font-weight: 700; font-style: italic; }
+.scoreboard-runs { font-size: 34px; color: #E8C468; }
+.scoreboard-wkts { font-size: 24px; color: #e3e6ef; }
+.scoreboard-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'Geist Mono', monospace; font-size: 11px;
+  color: #a0aec0; text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+/* ── Crew slots ───────────────────────────────────────────────── */
+.crew-slot {
+  border-radius: 10px;
+  border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+  background: rgba(255,255,255,0.02);
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.crew-slot.is-active {
+  border-color: rgba(201,151,31,0.5);
+  background: linear-gradient(180deg, rgba(201,151,31,0.08), rgba(201,151,31,0.02));
+}
+.crew-slot-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.crew-slot-pick-hint {
+  font-family: 'Geist Mono', monospace; font-size: 9px; color: #E8C468;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.crew-slot-body { display: flex; align-items: center; gap: 10px; }
+.crew-slot-name { font-family: 'Geist Mono', monospace; font-size: 13px; font-weight: 700; color: #e3e6ef; }
+.crew-slot-stat { font-family: 'Geist Mono', monospace; font-size: 10px; color: #8c92a3; }
+
+/* ── Player carousel (striker/non-striker/bowler picker) ─────────── */
+.carousel-row {
+  display: flex; gap: 10px; overflow-x: auto; padding: 8px 2px 4px;
+  scroll-snap-type: x proximity;
+}
+.carousel-row::-webkit-scrollbar { height: 6px; }
+.carousel-row::-webkit-scrollbar-thumb { background: rgba(201,151,31,0.4); border-radius: 8px; }
+.carousel-chip {
+  scroll-snap-align: start;
+  flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 76px; padding: 8px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  cursor: grab;
+}
+.carousel-chip:active { cursor: grabbing; transform: scale(0.97); }
+.carousel-chip.is-selected { border-color: rgba(201,151,31,0.55); background: rgba(201,151,31,0.1); }
+.carousel-chip-name {
+  font-family: 'Geist Mono', monospace; font-size: 9.5px; text-align: center;
+  color: #e3e6ef; line-height: 1.2; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Ball entry pad ───────────────────────────────────────────── */
+.ball-pad {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+.ball-btn {
+  font-family: 'Geist Mono', monospace; font-weight: 700; font-size: 16px;
+  padding: 14px 0;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #e3e6ef;
+  transition: transform 0.1s ease;
+}
+.ball-btn:active { transform: scale(0.94); }
+.ball-btn-boundary { background: rgba(201,151,31,0.14); border-color: rgba(201,151,31,0.35); color: #E8C468; }
+.ball-btn-wicket { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.35); color: #f87171; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .ball-pad { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ── Read-only summary tiles ──────────────────────────────────── */
+.summary-tile {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.015);
+}
+.summary-tile-value { font-family: 'Geist Mono', monospace; font-size: 13px; font-weight: 700; color: #e3e6ef; }
+
+/* ── Advanced drawer ──────────────────────────────────────────── */
+.advanced-drawer > summary { list-style: none; cursor: pointer; }
+.advanced-drawer > summary::-webkit-details-marker,
+.advanced-drawer > summary::marker { display: none; content: ""; }
