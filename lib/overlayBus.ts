@@ -12,12 +12,23 @@ export interface WeatherData {
 }
 
 // ── Match Setup (session-scoped, set once) ─────────────────────────────
+// A squad player as pulled from the (reused) auction database — includes
+// an image so the overlay/admin can render a face, not just a name.
+export interface SquadPlayer {
+  id: string;
+  name: string;
+  imageUrl?: string;
+}
+
 export interface TeamInfo {
   name: string;
   shortCode: string;
   color: string;
   logoUrl: string;
+  /** Plain name list — kept for backward compatibility with existing overlay renderers. */
   squad: string[];
+  /** Richer version of `squad`, with player id + photo, when sourced from the DB. */
+  squadPlayers?: SquadPlayer[];
 }
 
 export interface MatchSetup {
@@ -41,6 +52,7 @@ export interface BatterState {
   balls: number;
   fours: number;
   sixes: number;
+  imageUrl?: string; // NEW — used by the striker/non-striker photo buttons
 }
 
 export interface BowlerState {

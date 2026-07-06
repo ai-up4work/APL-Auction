@@ -1,8 +1,10 @@
-// app/overlay/[auctionId]/admin/page.tsx
 "use client";
 
 import React, { use, useEffect, useRef, useState } from "react";
-import { connectOverlayBus, type OverlayEvent } from "@/lib/overlayBus";
+import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState } from "@/lib/overlayBus";
+import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
+import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
+import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 
 interface OverlayToggle {
   key: string;
@@ -14,32 +16,14 @@ interface OverlayToggle {
 }
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
-// Filled in once before/at the start of a match. Doesn't change ball to
-// ball — persisted for the whole session and referenced by later events
-// rather than re-sent every time.
-interface TeamInfo {
-  name: string;
-  shortCode: string;
-  color: string;
-  logoUrl: string;
-  squad: string[];
-}
-
-interface MatchSetup {
-  tournamentName: string;
-  season: string;
-  tournamentLogoUrl: string;
-  venue: string;
-  format: "T20" | "ODI" | "Test";
-  matchNumber: string;
-  matchTitle: string;
-  teamA: TeamInfo;
-  teamB: TeamInfo;
-  tossWinner: "A" | "B" | "";
-  tossDecision: "bat" | "bowl" | "";
-}
-
-const emptyTeam = (): TeamInfo => ({ name: "", shortCode: "", color: "#c9971f", logoUrl: "", squad: [] });
+const emptyTeam = () => ({
+  name: "",
+  shortCode: "",
+  color: "#c9971f",
+  logoUrl: "",
+  squad: [] as string[],
+  squadPlayers: [] as { id: string; name: string; imageUrl?: string }[],
+});
 
 const emptyMatchSetup: MatchSetup = {
   tournamentName: "",
@@ -56,48 +40,8 @@ const emptyMatchSetup: MatchSetup = {
 };
 
 // ── Live State (INCREMENTAL) ───────────────────────────────────────────
-// Ticks continuously through the match — score, current batters, current
-// bowler, boundary tallies, points table. Edited as a running total, not
-// fired as one-shot events.
-interface BatterState {
-  name: string;
-  runs: number;
-  balls: number;
-  fours: number;
-  sixes: number;
-}
-
-interface BowlerState {
-  name: string;
-  overs: number;
-  balls: number;
-  maidens: number;
-  runs: number;
-  wickets: number;
-}
-
-interface PointsRow {
-  team: string;
-  played: number;
-  won: number;
-  lost: number;
-  nrr: string;
-  points: number;
-}
-
-interface LiveState {
-  score: { runs: number; wickets: number; overs: number; balls: number };
-  striker: BatterState;
-  nonStriker: BatterState;
-  bowler: BowlerState;
-  partnership: { runs: number; balls: number };
-  matchBoundaries: { fours: number; sixes: number };
-  tournamentBoundaries: { fours: number; sixes: number };
-  pointsTable: PointsRow[];
-}
-
-const emptyBatter = (): BatterState => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 });
-const emptyBowler = (): BowlerState => ({ name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0 });
+const emptyBatter = () => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined as string | undefined });
+const emptyBowler = () => ({ name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0 });
 
 const emptyLiveState: LiveState = {
   score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
@@ -111,8 +55,6 @@ const emptyLiveState: LiveState = {
 };
 
 // ── Moments (EVENT) ─────────────────────────────────────────────────────
-// One-shot triggers. Wicket needs a little extra detail captured at the
-// instant it fires (who's out, how, who fielded) rather than stored state.
 interface WicketDraft {
   batsmanOut: "striker" | "nonStriker";
   dismissalType: "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
@@ -121,38 +63,42 @@ interface WicketDraft {
 
 const emptyWicketDraft: WicketDraft = { batsmanOut: "striker", dismissalType: "bowled", fielder: "" };
 
-// Small shared number-stepper control used across the Live State panel.
-function NumberStepper({
+// ── Batter picker button — used in place of native <select> for choosing
+// which batter (striker / non-striker) an action applies to. Shows the
+// full player photo so admins can confirm at a glance mid-match. ────────
+function BatterPickerButton({
+  batter,
   label,
-  value,
-  onChange,
-  min = 0,
-  step = 1,
+  selected,
+  onClick,
 }: {
+  batter: { name: string; imageUrl?: string };
   label: string;
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  step?: number;
+  selected: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="field-col">
-      <span className="field-label">{label}</span>
-      <div className="stepper">
-        <button type="button" className="stepper-btn" onClick={() => onChange(Math.max(min, value - step))}>
-          −
-        </button>
-        <input
-          type="number"
-          className="stepper-input"
-          value={value}
-          onChange={(e) => onChange(Math.max(min, Number(e.target.value) || 0))}
-        />
-        <button type="button" className="stepper-btn" onClick={() => onChange(value + step)}>
-          +
-        </button>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`strip-btn ${selected ? "is-live" : ""}`}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: "8px 12px" }}
+    >
+      <span className="squad-avatar" style={{ width: 40, height: 40 }}>
+        {batter.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={batter.imageUrl} alt="" />
+        ) : (
+          <span className="squad-avatar-fallback" style={{ fontSize: 12 }}>
+            {(batter.name || label).slice(0, 2).toUpperCase()}
+          </span>
+        )}
+      </span>
+      <span className="flex flex-col items-start">
+        <span className="strip-label">{batter.name || label}</span>
+        <span className="strip-state">{label}</span>
+      </span>
+    </button>
   );
 }
 
@@ -162,7 +108,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const [connected, setConnected] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
 
   const [weatherOn, setWeatherOn] = useState(false);
   const [matchBoundariesOn, setMatchBoundariesOn] = useState(false);
@@ -177,6 +122,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   // ── Match Setup state (session) ─────────────────────────────────────
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
   const [setupPushed, setSetupPushed] = useState(false);
+  const [matchSetupCompleted, setMatchSetupCompleted] = useState(false); // true once pushed at least once
   const [setupHydrated, setSetupHydrated] = useState(false);
 
   // ── Live State (incremental) ────────────────────────────────────────
@@ -189,34 +135,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [wicketDraft, setWicketDraft] = useState<WicketDraft>(emptyWicketDraft);
   const [showWicketForm, setShowWicketForm] = useState(false);
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
-
-  // ── Preview scaling ────────────────────────────────────────────────
-  // Measure the actual clipping box (.monitor-screen), not its padded
-  // parent, and fit the 1920x1080 iframe into it on BOTH axes so it can
-  // never overflow the box regardless of the box's real aspect ratio.
-  const monitorScreenRef = useRef<HTMLDivElement>(null);
-  const [previewScale, setPreviewScale] = useState(1);
-
-  useEffect(() => {
-    function updateScale() {
-      const el = monitorScreenRef.current;
-      if (!el) return;
-      const scaleX = el.clientWidth / 1920;
-      const scaleY = el.clientHeight / 1080;
-      setPreviewScale(Math.min(scaleX, scaleY));
-    }
-
-    updateScale();
-
-    const ro = new ResizeObserver(updateScale);
-    if (monitorScreenRef.current) ro.observe(monitorScreenRef.current);
-
-    window.addEventListener("resize", updateScale);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", updateScale);
-    };
-  }, []);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -275,12 +193,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fire(event as unknown as OverlayEvent, label);
   }
 
-  function copyUrl() {
-    navigator.clipboard?.writeText(overlayUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
   const channels: OverlayToggle[] = [
     { key: "weather", label: "Weather", on: weatherOn, set: setWeatherOn, event: "weather" },
     { key: "matchBoundaries", label: "Match Boundaries", on: matchBoundariesOn, set: setMatchBoundariesOn, event: "matchBoundaries" },
@@ -301,66 +213,14 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }
 
   // ── Match Setup helpers ──────────────────────────────────────────────
-  function updateTeam(team: "teamA" | "teamB", patch: Partial<TeamInfo>) {
-    setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
-  }
-
-  function updateSquad(team: "teamA" | "teamB", raw: string) {
-    const squad = raw
-      .split("\n")
-      .map((n) => n.trim())
-      .filter(Boolean);
-    updateTeam(team, { squad });
-  }
-
   function pushMatchSetup() {
     fireLoose({ type: "matchSetup", data: matchSetup }, "Match Setup pushed to overlay");
     setSetupPushed(true);
+    setMatchSetupCompleted(true);
     setTimeout(() => setSetupPushed(false), 1500);
   }
 
   // ── Live State helpers ───────────────────────────────────────────────
-  function patchLive(patch: Partial<LiveState>) {
-    setLiveState((prev) => ({ ...prev, ...patch }));
-    setLiveDirty(true);
-  }
-
-  function patchBatter(who: "striker" | "nonStriker", patch: Partial<BatterState>) {
-    setLiveState((prev) => ({ ...prev, [who]: { ...prev[who], ...patch } }));
-    setLiveDirty(true);
-  }
-
-  function patchBowler(patch: Partial<BowlerState>) {
-    setLiveState((prev) => ({ ...prev, bowler: { ...prev.bowler, ...patch } }));
-    setLiveDirty(true);
-  }
-
-  function swapStrike() {
-    setLiveState((prev) => ({ ...prev, striker: prev.nonStriker, nonStriker: prev.striker }));
-    setLiveDirty(true);
-  }
-
-  function addPointsRow() {
-    setLiveState((prev) => ({
-      ...prev,
-      pointsTable: [...prev.pointsTable, { team: "", played: 0, won: 0, lost: 0, nrr: "0.00", points: 0 }],
-    }));
-    setLiveDirty(true);
-  }
-
-  function patchPointsRow(index: number, patch: Partial<PointsRow>) {
-    setLiveState((prev) => ({
-      ...prev,
-      pointsTable: prev.pointsTable.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    }));
-    setLiveDirty(true);
-  }
-
-  function removePointsRow(index: number) {
-    setLiveState((prev) => ({ ...prev, pointsTable: prev.pointsTable.filter((_, i) => i !== index) }));
-    setLiveDirty(true);
-  }
-
   function pushLiveState() {
     fireLoose({ type: "liveState", data: liveState }, "Live State pushed to overlay");
     setLiveDirty(false);
@@ -419,18 +279,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
         .font-mono-geist { font-family: 'Geist Mono', monospace; }
 
-        /* ── Console frame — faint vignette + hairline grid texture, so the
-           whole page reads as a dim gallery/control-room, not a flat
-           dashboard. Very subtle; restraint over decoration. ─────────── */
         .console-frame {
           background-image:
             radial-gradient(ellipse 120% 60% at 50% -10%, rgba(201,151,31,0.06), transparent 60%),
             var(--color-background, #0d1117);
         }
 
-        /* ── Rack panel — brushed-metal top highlight + four corner rivets,
-           standing in for the screws on a physical rack-mounted unit. This
-           is the page's one recurring skeuomorphic motif. ──────────────── */
         .rack-panel {
           position: relative;
           background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015) 40%, rgba(255,255,255,0.02));
@@ -460,9 +314,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           color: var(--color-outline, #8c92a3);
         }
 
-        /* ── Tally lamp — the signature element. Dim steel when off; glows
-           broadcast-red when live, exactly like a studio gallery's on-air
-           indicator. ──────────────────────────────────────────────────── */
         .tally {
           width: 8px; height: 8px; border-radius: 50%;
           background: radial-gradient(circle at 35% 30%, #4a4f5e, #23262f 70%);
@@ -475,8 +326,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           box-shadow: 0 0 6px 1px var(--color-status-live, #ffb4ab), inset 0 0 0 1px rgba(0,0,0,0.2);
         }
 
-        /* ── Channel strip — replaces the plain toggle button. Tally lamp +
-           label + micro state readout, like a switcher's input strip. ─── */
         .strip-btn {
           position: relative;
           display: flex; flex-direction: column; gap: 8px;
@@ -524,8 +373,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         .fx-toggle-on { background: linear-gradient(135deg,#A87815,#E8C468); color: #1a1304; border: none; }
         .fx-toggle-off { background: rgba(255,255,255,0.05); color: #a0aec0; }
 
-        /* ── Program monitor bezel — corner brackets like a broadcast
-           preview/program monitor, with a rec-tally + PGM plate. ───────── */
         .monitor-frame {
           position: relative;
           padding: 10px;
@@ -539,9 +386,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           overflow: hidden;
           background: #000;
           aspect-ratio: 16 / 9;
-          /* Centers the scaled iframe inside the box so if the box's real
-             aspect ratio ever drifts from 16:9, the content stays centered
-             with letterboxing rather than pinned/clipped to one corner. */
           display: flex;
           align-items: center;
           justify-content: center;
@@ -564,7 +408,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           border: 1px solid rgba(255,255,255,0.1);
         }
 
-        /* ── Themed scrollbar for the event log ─────────────────────────── */
         .log-scroll {
           scrollbar-width: thin;
           scrollbar-color: var(--color-theme-orange) var(--color-surface-container-high);
@@ -580,9 +423,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           50% { opacity: 0.45; }
         }
 
-        /* ── Drawer — collapsible rack panel used for Match Setup / Live
-           State, which are dense enough to want to be tucked away once
-           configured. Native <details> keeps it keyboard/aXe-friendly. ── */
         .drawer > summary {
           cursor: pointer;
           list-style: none;
@@ -600,8 +440,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         .drawer[open] .drawer-chevron { transform: rotate(90deg); }
         .drawer-body { padding-top: 18px; }
 
-        /* ── Form controls — dark inset fields matching the stepper's look
-           already used in the Live State panel. ───────────────────────── */
         .text-input, .select-input, .textarea-input {
           width: 100%;
           background: rgba(0,0,0,0.25);
@@ -692,6 +530,70 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           box-shadow: 0 0 5px 1px var(--color-status-live, #ffb4ab);
           display: inline-block;
         }
+
+        .done-dot {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: var(--color-success-green, #4caf50);
+          box-shadow: 0 0 5px 1px var(--color-success-green, #4caf50);
+          display: inline-block;
+        }
+
+        .panel-scroll {
+          max-height: 220px;
+          overflow-y: auto;
+          scrollbar-width: thin;
+          scrollbar-color: var(--color-theme-orange) var(--color-surface-container-high);
+        }
+        .panel-scroll::-webkit-scrollbar { width: 6px; }
+        .panel-scroll::-webkit-scrollbar-track { background: var(--color-surface-container-high, #1f2433); border-radius: 8px; }
+        .panel-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-theme-orange) 55%, transparent); border-radius: 8px; }
+
+        .squad-list { display: flex; flex-direction: column; gap: 4px; }
+
+        .squad-chip {
+          display: flex; align-items: center; gap: 8px;
+          padding: 6px 8px;
+          border-radius: 8px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+        .squad-name {
+          flex: 1;
+          font-family: 'Geist Mono', monospace;
+          font-size: 11px;
+          color: var(--color-on-surface, #e3e6ef);
+        }
+        .squad-remove {
+          width: 18px; height: 18px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25);
+          color: #f87171; font-size: 12px; line-height: 1; flex-shrink: 0;
+        }
+
+        .squad-avatar {
+          width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
+          flex-shrink: 0; background: rgba(255,255,255,0.06);
+          display: flex; align-items: center; justify-content: center;
+        }
+        .squad-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .squad-avatar-sm { width: 18px; height: 18px; }
+        .squad-avatar-fallback {
+          font-family: 'Geist Mono', monospace;
+          font-size: 9px; font-weight: 700;
+          color: var(--color-outline, #8c92a3);
+        }
+
+        .roster-browser { margin-top: 4px; }
+        .squad-pick-row {
+          display: flex; align-items: center; gap: 8px;
+          padding: 5px 8px; border-radius: 6px;
+          cursor: pointer;
+        }
+        .squad-pick-row:hover { background: rgba(255,255,255,0.03); }
+        .squad-pick-row.is-checked { background: rgba(201,151,31,0.08); }
+        .squad-pick-row input[type="checkbox"] { accent-color: var(--color-theme-orange, #c9971f); }
+
+        .points-scroll { max-height: 260px; overflow-y: auto; }
       `}</style>
 
       <header className="flex items-center justify-between px-8 h-16 border-b border-white/10 shrink-0">
@@ -718,324 +620,28 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-8 py-8 flex flex-col gap-6">
 
-        {/* ── Source plate ─────────────────────────────────────────────── */}
-        <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <div className="eyebrow mb-1.5">OBS Browser Source</div>
-            <code className="font-mono-geist text-xs text-theme-orange break-all">{overlayUrl || "…"}</code>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="eyebrow">1920×1080 · transparent bg</span>
-            <button onClick={copyUrl} className="talk-btn">{copied ? "Copied ✓" : "Copy URL"}</button>
-          </div>
-        </div>
-
-        {/* ── Program monitor ──────────────────────────────────────────── */}
-        <div className="rack-panel p-5 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="eyebrow">Program Monitor</div>
-            <span className="eyebrow">scaled preview</span>
-          </div>
-          <div className="monitor-frame">
-            <div className="monitor-screen" ref={monitorScreenRef}>
-              <div className="monitor-corner tl" />
-              <div className="monitor-corner tr" />
-              <div className="monitor-corner bl" />
-              <div className="monitor-corner br" />
-              {/* <div className="pgm-plate">
-                <span className="tally live" style={{ animation: "connPulse 1.8s ease-in-out infinite" }} />
-                <span className="font-mono-geist text-[9px] font-bold tracking-[0.2em] text-white/80">PGM OUT</span>
-              </div> */}
-              {overlayUrl && (
-                  <iframe
-                    src={overlayUrl}
-                    title="Overlay preview"
-                    style={{
-                      width: "1920px",
-                      height: "1080px",
-                      border: "none",
-                      transform: `scale(${previewScale})`,
-                      transformOrigin: "center center",
-                      flexShrink: 0,
-                    }}
-                  />
-                )}
-            </div>
-          </div>
-        </div>
-
         {/* ── Match Setup (session) ────────────────────────────────────── */}
-        <details className="rack-panel p-5 drawer">
-          <summary>
-            <div className="flex items-center gap-3">
-              <div className="eyebrow">Match Setup</div>
-              <span className="font-mono-geist text-[9px] text-white/30 normal-case tracking-normal">session · set once</span>
-            </div>
-            <span className="drawer-chevron">▸</span>
-          </summary>
+        <MatchSetupPanel
+          auctionId={auctionId}
+          matchSetup={matchSetup}
+          setMatchSetup={setMatchSetup}
+          onPush={pushMatchSetup}
+          pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
+          completed={matchSetupCompleted}
+        />
 
-          <div className="drawer-body flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="field-col">
-                <span className="field-label">Tournament</span>
-                <input className="text-input" value={matchSetup.tournamentName}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, tournamentName: e.target.value }))}
-                  placeholder="e.g. Provincial T20 Cup" />
-              </div>
-              <div className="field-col">
-                <span className="field-label">Season</span>
-                <input className="text-input" value={matchSetup.season}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, season: e.target.value }))}
-                  placeholder="e.g. 2026" />
-              </div>
-              <div className="field-col">
-                <span className="field-label">Tournament Logo URL</span>
-                <input className="text-input" value={matchSetup.tournamentLogoUrl}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: e.target.value }))}
-                  placeholder="https://…" />
-              </div>
-              <div className="field-col">
-                <span className="field-label">Venue</span>
-                <input className="text-input" value={matchSetup.venue}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, venue: e.target.value }))}
-                  placeholder="Ground name" />
-              </div>
-              <div className="field-col">
-                <span className="field-label">Format</span>
-                <select className="select-input" value={matchSetup.format}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, format: e.target.value as MatchSetup["format"] }))}>
-                  <option value="T20">T20</option>
-                  <option value="ODI">ODI</option>
-                  <option value="Test">Test</option>
-                </select>
-              </div>
-              <div className="field-col">
-                <span className="field-label">Match Number</span>
-                <input className="text-input" value={matchSetup.matchNumber}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, matchNumber: e.target.value }))}
-                  placeholder="e.g. Match 14" />
-              </div>
-              <div className="field-col" style={{ gridColumn: "span 2" }}>
-                <span className="field-label">Match Title</span>
-                <input className="text-input" value={matchSetup.matchTitle}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, matchTitle: e.target.value }))}
-                  placeholder="e.g. Semi-Final" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(["teamA", "teamB"] as const).map((teamKey) => {
-                const team = matchSetup[teamKey];
-                return (
-                  <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
-                    <div className="eyebrow">{teamKey === "teamA" ? "Team A" : "Team B"}</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="field-col">
-                        <span className="field-label">Name</span>
-                        <input className="text-input" value={team.name}
-                          onChange={(e) => updateTeam(teamKey, { name: e.target.value })} placeholder="Team name" />
-                      </div>
-                      <div className="field-col">
-                        <span className="field-label">Short Code</span>
-                        <input className="text-input" value={team.shortCode}
-                          onChange={(e) => updateTeam(teamKey, { shortCode: e.target.value.toUpperCase() })}
-                          placeholder="e.g. CSK" maxLength={4} />
-                      </div>
-                      <div className="field-col">
-                        <span className="field-label">Color</span>
-                        <div className="flex items-center gap-2">
-                          <input type="color" value={team.color}
-                            onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
-                            style={{ width: 34, height: 34, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "none", padding: 0 }} />
-                          <input className="text-input" value={team.color}
-                            onChange={(e) => updateTeam(teamKey, { color: e.target.value })} />
-                        </div>
-                      </div>
-                      <div className="field-col">
-                        <span className="field-label">Logo URL</span>
-                        <input className="text-input" value={team.logoUrl}
-                          onChange={(e) => updateTeam(teamKey, { logoUrl: e.target.value })} placeholder="https://…" />
-                      </div>
-                    </div>
-                    <div className="field-col">
-                      <span className="field-label">Squad ({team.squad.length}) · one name per line</span>
-                      <textarea className="textarea-input" value={team.squad.join("\n")}
-                        onChange={(e) => updateSquad(teamKey, e.target.value)}
-                        placeholder={"Player One\nPlayer Two\nPlayer Three"} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="field-col">
-                <span className="field-label">Toss Winner</span>
-                <select className="select-input" value={matchSetup.tossWinner}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, tossWinner: e.target.value as MatchSetup["tossWinner"] }))}>
-                  <option value="">—</option>
-                  <option value="A">{matchSetup.teamA.shortCode || "Team A"}</option>
-                  <option value="B">{matchSetup.teamB.shortCode || "Team B"}</option>
-                </select>
-              </div>
-              <div className="field-col">
-                <span className="field-label">Toss Decision</span>
-                <select className="select-input" value={matchSetup.tossDecision}
-                  onChange={(e) => setMatchSetup((p) => ({ ...p, tossDecision: e.target.value as MatchSetup["tossDecision"] }))}>
-                  <option value="">—</option>
-                  <option value="bat">Elected to bat</option>
-                  <option value="bowl">Elected to bowl</option>
-                </select>
-              </div>
-              <div className="flex-1" />
-              <button onClick={pushMatchSetup} className="talk-btn" style={{ minWidth: 180 }}>
-                {setupPushed ? "Pushed ✓" : "Push Match Setup"}
-              </button>
-            </div>
-          </div>
-        </details>
+        {/* ── OBS source + Program monitor ─────────────────────────────── */}
+        <ProgramMonitor overlayUrl={overlayUrl} />
 
         {/* ── Live State (incremental) ─────────────────────────────────── */}
-        <details className="rack-panel p-5 drawer" open>
-          <summary>
-            <div className="flex items-center gap-3">
-              <div className="eyebrow">Live State</div>
-              <span className="font-mono-geist text-[9px] text-white/30 normal-case tracking-normal">updates ball by ball</span>
-              {liveDirty && <span className="dirty-dot" title="Unpushed changes" />}
-            </div>
-            <span className="drawer-chevron">▸</span>
-          </summary>
-
-          <div className="drawer-body flex flex-col gap-6">
-            {/* Score */}
-            <div>
-              <div className="eyebrow mb-2">Score</div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <NumberStepper label="Runs" value={liveState.score.runs}
-                  onChange={(v) => patchLive({ score: { ...liveState.score, runs: v } })} />
-                <NumberStepper label="Wickets" value={liveState.score.wickets} min={0}
-                  onChange={(v) => patchLive({ score: { ...liveState.score, wickets: Math.min(10, v) } })} />
-                <NumberStepper label="Overs" value={liveState.score.overs}
-                  onChange={(v) => patchLive({ score: { ...liveState.score, overs: v } })} />
-                <NumberStepper label="Balls" value={liveState.score.balls}
-                  onChange={(v) => patchLive({ score: { ...liveState.score, balls: Math.min(5, v) } })} />
-              </div>
-            </div>
-
-            {/* Batters */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="eyebrow">Batters at the Crease</div>
-                <button onClick={swapStrike} className="fx-btn fx-toggle-off">Swap Strike</button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(["striker", "nonStriker"] as const).map((who) => (
-                  <div key={who} className="batter-card">
-                    <div className="eyebrow" style={{ color: who === "striker" ? "#E8C468" : undefined }}>
-                      {who === "striker" ? "Striker *" : "Non-Striker"}
-                    </div>
-                    <input className="text-input" value={liveState[who].name}
-                      onChange={(e) => patchBatter(who, { name: e.target.value })} placeholder="Batter name" />
-                    <div className="grid grid-cols-4 gap-2">
-                      <NumberStepper label="Runs" value={liveState[who].runs} onChange={(v) => patchBatter(who, { runs: v })} />
-                      <NumberStepper label="Balls" value={liveState[who].balls} onChange={(v) => patchBatter(who, { balls: v })} />
-                      <NumberStepper label="4s" value={liveState[who].fours} onChange={(v) => patchBatter(who, { fours: v })} />
-                      <NumberStepper label="6s" value={liveState[who].sixes} onChange={(v) => patchBatter(who, { sixes: v })} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Bowler + partnership */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bowler-card">
-                <div className="eyebrow">Bowler</div>
-                <input className="text-input" value={liveState.bowler.name}
-                  onChange={(e) => patchBowler({ name: e.target.value })} placeholder="Bowler name" />
-                <div className="grid grid-cols-5 gap-2">
-                  <NumberStepper label="Overs" value={liveState.bowler.overs} onChange={(v) => patchBowler({ overs: v })} />
-                  <NumberStepper label="Balls" value={liveState.bowler.balls} onChange={(v) => patchBowler({ balls: Math.min(5, v) })} />
-                  <NumberStepper label="Maidens" value={liveState.bowler.maidens} onChange={(v) => patchBowler({ maidens: v })} />
-                  <NumberStepper label="Runs" value={liveState.bowler.runs} onChange={(v) => patchBowler({ runs: v })} />
-                  <NumberStepper label="Wkts" value={liveState.bowler.wickets} onChange={(v) => patchBowler({ wickets: v })} />
-                </div>
-              </div>
-              <div className="bowler-card">
-                <div className="eyebrow">Partnership</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <NumberStepper label="Runs" value={liveState.partnership.runs}
-                    onChange={(v) => patchLive({ partnership: { ...liveState.partnership, runs: v } })} />
-                  <NumberStepper label="Balls" value={liveState.partnership.balls}
-                    onChange={(v) => patchLive({ partnership: { ...liveState.partnership, balls: v } })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Boundaries */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bowler-card">
-                <div className="eyebrow">Match Boundaries</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <NumberStepper label="4s" value={liveState.matchBoundaries.fours}
-                    onChange={(v) => patchLive({ matchBoundaries: { ...liveState.matchBoundaries, fours: v } })} />
-                  <NumberStepper label="6s" value={liveState.matchBoundaries.sixes}
-                    onChange={(v) => patchLive({ matchBoundaries: { ...liveState.matchBoundaries, sixes: v } })} />
-                </div>
-              </div>
-              <div className="bowler-card">
-                <div className="eyebrow">Tournament Boundaries</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <NumberStepper label="4s" value={liveState.tournamentBoundaries.fours}
-                    onChange={(v) => patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, fours: v } })} />
-                  <NumberStepper label="6s" value={liveState.tournamentBoundaries.sixes}
-                    onChange={(v) => patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, sixes: v } })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Points table */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="eyebrow">Points Table</div>
-                <button onClick={addPointsRow} className="fx-btn fx-toggle-off">+ Add Row</button>
-              </div>
-              {liveState.pointsTable.length > 0 && (
-                <div className="points-row-grid mb-1.5">
-                  <span className="field-label">Team</span>
-                  <span className="field-label">Pld</span>
-                  <span className="field-label">Won</span>
-                  <span className="field-label">Lost</span>
-                  <span className="field-label">NRR</span>
-                  <span className="field-label">Pts</span>
-                  <span />
-                </div>
-              )}
-              <div className="flex flex-col gap-2">
-                {liveState.pointsTable.map((row, i) => (
-                  <div key={i} className="points-row-grid">
-                    <input className="text-input" value={row.team} onChange={(e) => patchPointsRow(i, { team: e.target.value })} placeholder="Team" />
-                    <input className="text-input" type="number" value={row.played} onChange={(e) => patchPointsRow(i, { played: Number(e.target.value) || 0 })} />
-                    <input className="text-input" type="number" value={row.won} onChange={(e) => patchPointsRow(i, { won: Number(e.target.value) || 0 })} />
-                    <input className="text-input" type="number" value={row.lost} onChange={(e) => patchPointsRow(i, { lost: Number(e.target.value) || 0 })} />
-                    <input className="text-input" value={row.nrr} onChange={(e) => patchPointsRow(i, { nrr: e.target.value })} placeholder="0.00" />
-                    <input className="text-input" type="number" value={row.points} onChange={(e) => patchPointsRow(i, { points: Number(e.target.value) || 0 })} />
-                    <button onClick={() => removePointsRow(i)} className="icon-btn">×</button>
-                  </div>
-                ))}
-                {liveState.pointsTable.length === 0 && (
-                  <p className="font-mono-geist text-[11px] text-white/30">No rows yet — add a team to start the table.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button onClick={pushLiveState} className="talk-btn" style={{ minWidth: 180 }}>
-                {livePushed ? "Pushed ✓" : "Push Live State"}
-              </button>
-            </div>
-          </div>
-        </details>
+        <LiveStatePanel
+          liveState={liveState}
+          setLiveState={setLiveState}
+          setLiveDirty={setLiveDirty}
+          liveDirty={liveDirty}
+          onPush={pushLiveState}
+          pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
+        />
 
         {/* ── Preview tools ─────────────────────────────────────────────── */}
         <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
@@ -1105,32 +711,52 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
           <div className="flex items-center gap-3 mt-1">
             <span className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">Fifty / Hundred for:</span>
-            <div className="segment-group" style={{ maxWidth: 400 }}>
-              <button className={`segment-btn ${milestoneBatter === "striker" ? "is-active" : ""}`} onClick={() => setMilestoneBatter("striker")}>
-                {liveState.striker.name || "Striker"}
-              </button>
-              <button className={`segment-btn ${milestoneBatter === "nonStriker" ? "is-active" : ""}`} onClick={() => setMilestoneBatter("nonStriker")}>
-                {liveState.nonStriker.name || "Non-Striker"}
-              </button>
+            <div className="grid grid-cols-2 gap-3" style={{ maxWidth: 560 }}>
+              <BatterPickerButton
+                batter={liveState.striker}
+                label="Striker"
+                selected={milestoneBatter === "striker"}
+                onClick={() => setMilestoneBatter("striker")}
+              />
+              <BatterPickerButton
+                batter={liveState.nonStriker}
+                label="Non-Striker"
+                selected={milestoneBatter === "nonStriker"}
+                onClick={() => setMilestoneBatter("nonStriker")}
+              />
             </div>
           </div>
 
           {showWicketForm && (
             <div className="bowler-card mt-2">
               <div className="eyebrow" style={{ color: "#f87171" }}>Wicket Detail</div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <div className="field-col">
-                  <span className="field-label">Batsman Out</span>
-                  <select className="select-input" value={wicketDraft.batsmanOut}
-                    onChange={(e) => setWicketDraft((p) => ({ ...p, batsmanOut: e.target.value as WicketDraft["batsmanOut"] }))}>
-                    <option value="striker">{liveState.striker.name || "Striker"}</option>
-                    <option value="nonStriker">{liveState.nonStriker.name || "Non-Striker"}</option>
-                  </select>
+
+              <div className="field-col">
+                <span className="field-label">Batsman Out</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <BatterPickerButton
+                    batter={liveState.striker}
+                    label="Striker"
+                    selected={wicketDraft.batsmanOut === "striker"}
+                    onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))}
+                  />
+                  <BatterPickerButton
+                    batter={liveState.nonStriker}
+                    label="Non-Striker"
+                    selected={wicketDraft.batsmanOut === "nonStriker"}
+                    onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))}
+                  />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="field-col">
                   <span className="field-label">Dismissal</span>
-                  <select className="select-input" value={wicketDraft.dismissalType}
-                    onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value as WicketDraft["dismissalType"] }))}>
+                  <select
+                    className="select-input"
+                    value={wicketDraft.dismissalType}
+                    onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value as WicketDraft["dismissalType"] }))}
+                  >
                     <option value="bowled">Bowled</option>
                     <option value="caught">Caught</option>
                     <option value="lbw">LBW</option>
@@ -1141,15 +767,24 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 </div>
                 <div className="field-col">
                   <span className="field-label">Fielder (if any)</span>
-                  <input className="text-input" value={wicketDraft.fielder}
-                    onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))} placeholder="Fielder name" />
+                  <input
+                    className="text-input"
+                    value={wicketDraft.fielder}
+                    onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
+                    placeholder="Fielder name"
+                  />
                 </div>
               </div>
+
               <p className="font-mono-geist text-[9px] text-white/30">
                 Bowler pulled automatically from Live State: {liveState.bowler.name || "—"}
               </p>
               <div className="flex justify-end">
-                <button onClick={fireWicketMoment} className="talk-btn" style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" }}>
+                <button
+                  onClick={fireWicketMoment}
+                  className="talk-btn"
+                  style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" }}
+                >
                   Fire Wicket
                 </button>
               </div>
