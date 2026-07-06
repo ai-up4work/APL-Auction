@@ -4,6 +4,15 @@
 import React, { use, useEffect, useRef, useState } from "react";
 import { connectOverlayBus, type OverlayEvent } from "@/lib/overlayBus";
 
+interface OverlayToggle {
+  key: string;
+  label: string;
+  on: boolean;
+  set: (v: boolean) => void;
+  event: OverlayEvent["type"];
+  exclusiveWith?: string;
+}
+
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
 
@@ -21,6 +30,20 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchIntroOn, setMatchIntroOn] = useState(false);
   const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
   const [testBgOn, setTestBgOn] = useState(false);
+
+  const previewWrapRef = useRef<HTMLDivElement>(null);
+  const [previewScale, setPreviewScale] = useState(1);
+
+  useEffect(() => {
+    function updateScale() {
+      const el = previewWrapRef.current;
+      if (!el) return;
+      setPreviewScale(el.clientWidth / 1920);
+    }
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, []);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -45,16 +68,131 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     setTimeout(() => setCopied(false), 1500);
   }
 
+  const channels: OverlayToggle[] = [
+    { key: "weather", label: "Weather", on: weatherOn, set: setWeatherOn, event: "weather" },
+    { key: "matchBoundaries", label: "Match Boundaries", on: matchBoundariesOn, set: setMatchBoundariesOn, event: "matchBoundaries" },
+    { key: "tournamentBoundaries", label: "Tournament Boundaries", on: tournamentBoundariesOn, set: setTournamentBoundariesOn, event: "tournamentBoundaries" },
+    { key: "liveScoreBar", label: "Live Score Bar", on: liveScoreBarOn, set: setLiveScoreBarOn, event: "liveScoreBar" },
+    { key: "pointsTable", label: "Points Table", on: pointsTableOn, set: setPointsTableOn, event: "pointsTable" },
+    { key: "matchScorecard", label: "Match Scorecard", on: matchScorecardOn, set: setMatchScorecardOn, event: "matchScorecard" },
+    { key: "matchIntro", label: "Match Intro", on: matchIntroOn, set: setMatchIntroOn, event: "matchIntro" },
+    { key: "tournamentLogo", label: "Tournament Logo", on: tournamentLogoOn, set: setTournamentLogoOn, event: "tournamentLogo" },
+  ];
+
+  function toggleChannel(ch: OverlayToggle) {
+    const next = !ch.on;
+    ch.set(next);
+    if (ch.key === "matchBoundaries" && next) setTournamentBoundariesOn(false);
+    if (ch.key === "tournamentBoundaries" && next) setMatchBoundariesOn(false);
+    fire({ type: ch.event, show: next } as OverlayEvent, `${ch.label} ${next ? "on" : "off"}`);
+  }
+
   return (
     <div
-      className="min-h-screen w-full flex flex-col"
+      className="console-frame min-h-screen w-full flex flex-col"
       style={{ background: "var(--color-background, #0d1117)", color: "var(--color-on-background, #fff)", fontFamily: "'Inter', sans-serif" }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
+
         .font-archivo    { font-family: 'Archivo Narrow', sans-serif; }
         .font-mono-geist { font-family: 'Geist Mono', monospace; }
-        .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
+
+        /* ── Console frame — faint vignette + hairline grid texture, so the
+           whole page reads as a dim gallery/control-room, not a flat
+           dashboard. Very subtle; restraint over decoration. ─────────── */
+        .console-frame {
+          background-image:
+            radial-gradient(ellipse 120% 60% at 50% -10%, rgba(201,151,31,0.06), transparent 60%),
+            var(--color-background, #0d1117);
+        }
+
+        /* ── Rack panel — brushed-metal top highlight + four corner rivets,
+           standing in for the screws on a physical rack-mounted unit. This
+           is the page's one recurring skeuomorphic motif. ──────────────── */
+        .rack-panel {
+          position: relative;
+          background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015) 40%, rgba(255,255,255,0.02));
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+          border-radius: 14px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 0 rgba(0,0,0,0.4);
+        }
+        .rack-panel::before, .rack-panel::after,
+        .rack-panel .rivet-l, .rack-panel .rivet-r {
+          content: "";
+          position: absolute;
+          width: 5px; height: 5px;
+          border-radius: 50%;
+          top: 9px;
+          background: radial-gradient(circle at 35% 30%, #9a9fae, #3a3f4d 70%);
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4), 0 1px 1px rgba(255,255,255,0.05);
+        }
+        .rack-panel::before { left: 9px; }
+        .rack-panel::after  { right: 9px; }
+
+        .eyebrow {
+          font-family: 'Geist Mono', monospace;
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          color: var(--color-outline, #8c92a3);
+        }
+
+        /* ── Tally lamp — the signature element. Dim steel when off; glows
+           broadcast-red when live, exactly like a studio gallery's on-air
+           indicator. ──────────────────────────────────────────────────── */
+        .tally {
+          width: 8px; height: 8px; border-radius: 50%;
+          background: radial-gradient(circle at 35% 30%, #4a4f5e, #23262f 70%);
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5);
+          transition: background 0.2s ease, box-shadow 0.2s ease;
+          flex-shrink: 0;
+        }
+        .tally.live {
+          background: radial-gradient(circle at 35% 30%, #ff9d92, var(--color-status-live, #ffb4ab) 60%);
+          box-shadow: 0 0 6px 1px var(--color-status-live, #ffb4ab), inset 0 0 0 1px rgba(0,0,0,0.2);
+        }
+
+        /* ── Channel strip — replaces the plain toggle button. Tally lamp +
+           label + micro state readout, like a switcher's input strip. ─── */
+        .strip-btn {
+          position: relative;
+          display: flex; flex-direction: column; gap: 8px;
+          padding: 12px 14px;
+          border-radius: 10px;
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+          background: rgba(255,255,255,0.02);
+          transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+          text-align: left;
+        }
+        .strip-btn:active { transform: scale(0.98); }
+        .strip-btn.is-live {
+          border-color: rgba(201,151,31,0.45);
+          background: linear-gradient(180deg, rgba(201,151,31,0.1), rgba(201,151,31,0.03));
+        }
+        .strip-label {
+          font-family: 'Geist Mono', monospace;
+          font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--color-on-surface, #e3e6ef);
+        }
+        .strip-state {
+          font-family: 'Geist Mono', monospace;
+          font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase;
+          color: var(--color-outline, #8c92a3);
+        }
+        .strip-btn.is-live .strip-state { color: var(--color-status-live, #ffb4ab); }
+
+        .talk-btn {
+          font-family: 'Geist Mono', monospace; font-size: 10px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.14em; padding: 12px 14px;
+          border-radius: 10px; transition: all 0.15s ease;
+          background: rgba(201,151,31,0.1); color: #E8C468;
+          border: 1px solid rgba(201,151,31,0.25);
+        }
+        .talk-btn:active { transform: scale(0.96); }
+
         .fx-btn {
           font-family: 'Geist Mono', monospace; font-size: 10px; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.14em; padding: 12px 14px;
@@ -63,6 +201,56 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         .fx-btn:active { transform: scale(0.97); }
         .fx-toggle-on { background: linear-gradient(135deg,#A87815,#E8C468); color: #1a1304; border: none; }
         .fx-toggle-off { background: rgba(255,255,255,0.05); color: #a0aec0; }
+
+        /* ── Program monitor bezel — corner brackets like a broadcast
+           preview/program monitor, with a rec-tally + PGM plate. ───────── */
+        .monitor-frame {
+          position: relative;
+          padding: 10px;
+          border-radius: 14px;
+          background: linear-gradient(155deg, var(--color-surface-container-high, #1f2433), var(--color-surface-container-lowest, #07090d));
+          border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.1));
+        }
+        .monitor-screen {
+          position: relative;
+          border-radius: 8px;
+          overflow: hidden;
+          background: #000;
+          aspect-ratio: 16 / 9;
+        }
+        .monitor-corner {
+          position: absolute;
+          width: 18px; height: 18px;
+          border-color: rgba(201,151,31,0.55);
+          z-index: 2; pointer-events: none;
+        }
+        .monitor-corner.tl { top: 6px; left: 6px; border-top: 2px solid; border-left: 2px solid; border-top-left-radius: 4px; }
+        .monitor-corner.tr { top: 6px; right: 6px; border-top: 2px solid; border-right: 2px solid; border-top-right-radius: 4px; }
+        .monitor-corner.bl { bottom: 6px; left: 6px; border-bottom: 2px solid; border-left: 2px solid; border-bottom-left-radius: 4px; }
+        .monitor-corner.br { bottom: 6px; right: 6px; border-bottom: 2px solid; border-right: 2px solid; border-bottom-right-radius: 4px; }
+        .pgm-plate {
+          position: absolute; top: 14px; left: 14px; z-index: 2;
+          display: flex; align-items: center; gap: 6px;
+          padding: 4px 8px; border-radius: 5px;
+          background: rgba(7,9,13,0.75); backdrop-filter: blur(4px);
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* ── Themed scrollbar for the event log ─────────────────────────── */
+        .log-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: var(--color-theme-orange) var(--color-surface-container-high);
+          overflow-y: scroll;
+        }
+        .log-scroll::-webkit-scrollbar { width: 8px; }
+        .log-scroll::-webkit-scrollbar-track { background: var(--color-surface-container-high, #1f2433); border-radius: 8px; }
+        .log-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-theme-orange) 55%, transparent); border-radius: 8px; }
+        .log-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-theme-orange) 75%, transparent); }
+
+        @keyframes connPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.45; }
+        }
       `}</style>
 
       <header className="flex items-center justify-between px-8 h-16 border-b border-white/10 shrink-0">
@@ -71,32 +259,75 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           <h1 className="font-archivo text-xl font-bold italic uppercase tracking-tight text-theme-orange">Overlay Control Room</h1>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: connected ? "#22c55e" : "#eab308" }} />
-          <span className="font-mono-geist text-[10px] uppercase tracking-widest text-white/60">{connected ? "Bus connected" : "Connecting…"}</span>
+          <span
+            className="tally"
+            style={{
+              background: connected
+                ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
+                : undefined,
+              boxShadow: connected ? "0 0 6px 1px var(--color-success-green, #4caf50)" : undefined,
+              animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
+            }}
+          />
+          <span className="font-mono-geist text-[10px] uppercase tracking-widest text-white/60">
+            {connected ? "Bus connected" : "Connecting…"}
+          </span>
         </div>
       </header>
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-8 py-8 flex flex-col gap-6">
 
-        <div className="panel p-5 flex items-center justify-between gap-4 flex-wrap">
+        {/* ── Source plate ─────────────────────────────────────────────── */}
+        <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <div className="font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/50 mb-1">OBS Browser Source URL</div>
+            <div className="eyebrow mb-1.5">OBS Browser Source</div>
             <code className="font-mono-geist text-xs text-theme-orange break-all">{overlayUrl || "…"}</code>
           </div>
           <div className="flex items-center gap-3">
-            <span className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">1920×1080 · transparent bg on</span>
-            <button onClick={copyUrl} className="fx-btn fx-toggle-on">{copied ? "Copied ✓" : "Copy URL"}</button>
+            <span className="eyebrow">1920×1080 · transparent bg</span>
+            <button onClick={copyUrl} className="talk-btn">{copied ? "Copied ✓" : "Copy URL"}</button>
           </div>
         </div>
 
-        {/* ── Dev/preview tools — NOT match overlays, kept visually separate
-            so no one mistakes this for something to leave on during a real
-            broadcast. ────────────────────────────────────────────────── */}
-        <div className="panel p-5 flex items-center justify-between gap-4 flex-wrap" style={{ borderColor: "rgba(96,165,250,0.25)" }}>
+        {/* ── Program monitor ──────────────────────────────────────────── */}
+        <div className="rack-panel p-5 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="eyebrow">Program Monitor</div>
+            <span className="eyebrow">scaled preview</span>
+          </div>
+          <div ref={previewWrapRef} className="monitor-frame">
+            <div className="monitor-screen">
+              <div className="monitor-corner tl" />
+              <div className="monitor-corner tr" />
+              <div className="monitor-corner bl" />
+              <div className="monitor-corner br" />
+              {/* <div className="pgm-plate">
+                <span className="tally live" style={{ animation: "connPulse 1.8s ease-in-out infinite" }} />
+                <span className="font-mono-geist text-[9px] font-bold tracking-[0.2em] text-white/80">PGM OUT</span>
+              </div> */}
+              {overlayUrl && (
+                  <iframe
+                    src={overlayUrl}
+                    title="Overlay preview"
+                    style={{
+                      width: "1920px",
+                      height: "1080px",
+                      border: "none",
+                      transform: `scale(${previewScale})`,
+                      transformOrigin: "top left",
+                    }}
+                  />
+                )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Preview tools ─────────────────────────────────────────────── */}
+        <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-blue-300 font-bold mb-1">Preview Tools</h3>
+            <div className="eyebrow mb-1.5" style={{ color: "var(--color-secondary, #c8cdd8)" }}>Preview Tools</div>
             <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">
-              Sample footage behind overlays — for layout testing only, turn off before going live
+              Sample footage behind overlays — layout testing only, off before going live
             </p>
           </div>
           <button
@@ -105,135 +336,51 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               setTestBgOn(next);
               fire({ type: "testBg", show: next }, `Test background ${next ? "on" : "off"}`);
             }}
-            className={`fx-btn ${testBgOn ? "" : "fx-toggle-off"}`}
-            style={testBgOn ? { background: "linear-gradient(135deg,#3b82f6,#93c5fd)", color: "#0b1220", border: "none" } : undefined}
+            className="strip-btn"
+            style={{ minWidth: 140 }}
           >
-            {testBgOn ? "Test BG: ON" : "Test BG: OFF"}
+            <span className="flex items-center gap-2">
+              <span className={`tally ${testBgOn ? "live" : ""}`} style={testBgOn ? { background: "radial-gradient(circle at 35% 30%, #93c5fd, #3b82f6 60%)", boxShadow: "0 0 6px 1px #3b82f6" } : undefined} />
+              <span className="strip-label">Test Background</span>
+            </span>
+            <span className="strip-state" style={testBgOn ? { color: "#93c5fd" } : undefined}>{testBgOn ? "Live" : "Off"}</span>
           </button>
         </div>
 
-        {/* ── Cricket match overlays — one toggle button per overlay ────── */}
-        <div className="panel p-5 flex flex-col gap-3">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-1">Cricket Match Overlays</h3>
+        {/* ── Channel strips ───────────────────────────────────────────── */}
+        <div className="rack-panel p-5 flex flex-col gap-3">
+          <div className="eyebrow mb-1">Cricket Match Overlays</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button
-              onClick={() => {
-                const next = !weatherOn;
-                setWeatherOn(next);
-                fire({ type: "weather", show: next }, `Weather ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${weatherOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Weather
-            </button>
+            {channels.map((ch) => (
+              <button key={ch.key} onClick={() => toggleChannel(ch)} className={`strip-btn ${ch.on ? "is-live" : ""}`}>
+                <span className="flex items-center gap-2">
+                  <span className={`tally ${ch.on ? "live" : ""}`} />
+                  <span className="strip-label">{ch.label}</span>
+                </span>
+                <span className="strip-state">{ch.on ? "On Air" : "Standby"}</span>
+              </button>
+            ))}
 
             <button
               onClick={() => {
-                const next = !matchBoundariesOn;
-                setMatchBoundariesOn(next);
-                if (next) setTournamentBoundariesOn(false);
-                fire({ type: "matchBoundaries", show: next }, `Match boundaries ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${matchBoundariesOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Match Boundaries
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !tournamentBoundariesOn;
-                setTournamentBoundariesOn(next);
-                if (next) setMatchBoundariesOn(false);
-                fire({ type: "tournamentBoundaries", show: next }, `Tournament boundaries ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${tournamentBoundariesOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Tournament Boundaries
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !liveScoreBarOn;
-                setLiveScoreBarOn(next);
-                fire({ type: "liveScoreBar", show: next }, `Live score bar ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${liveScoreBarOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Live Score Bar
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !pointsTableOn;
-                setPointsTableOn(next);
-                fire({ type: "pointsTable", show: next }, `Points table ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${pointsTableOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Points Table
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !matchScorecardOn;
-                setMatchScorecardOn(next);
-                fire({ type: "matchScorecard", show: next }, `Match scorecard ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${matchScorecardOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Match Scorecard
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !matchIntroOn;
-                setMatchIntroOn(next);
-                fire({ type: "matchIntro", show: next }, `Match intro ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${matchIntroOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Match Intro
-            </button>
-
-            <button
-              onClick={() => {
-                const next = !tournamentLogoOn;
-                setTournamentLogoOn(next);
-                fire({ type: "tournamentLogo", show: next }, `Tournament logo ${next ? "on" : "off"}`);
-              }}
-              className={`fx-btn ${tournamentLogoOn ? "fx-toggle-on" : "fx-toggle-off"}`}
-            >
-              Tournament Logo
-            </button>
-
-            <button
-              onClick={() => {
-                setWeatherOn(false);
-                setMatchBoundariesOn(false);
-                setTournamentBoundariesOn(false);
-                setLiveScoreBarOn(false);
-                setPointsTableOn(false);
-                setMatchScorecardOn(false);
-                setMatchIntroOn(false);
-                setTournamentLogoOn(false);
+                channels.forEach((ch) => ch.set(false));
                 fire({ type: "clearAll" }, "Cleared all overlays");
               }}
-              className="fx-btn"
-              style={{ background: "rgba(239,68,68,0.10)", color: "#f87171", borderColor: "rgba(239,68,68,0.25)" }}
+              className="strip-btn"
+              style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.06)" }}
             >
-              Clear Everything
+              <span className="flex items-center gap-2">
+                <span className="tally" style={{ background: "radial-gradient(circle at 35% 30%, #ff9d9d, #ef4444 60%)" }} />
+                <span className="strip-label" style={{ color: "#f87171" }}>Clear Everything</span>
+              </span>
+              <span className="strip-state" style={{ color: "#f87171" }}>Reset all</span>
             </button>
           </div>
 
-          <h4 className="font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/40 font-bold mt-2 mb-1">Moments (auto-hide)</h4>
+          <div className="eyebrow mt-3 mb-1">Moments (auto-hide)</div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {(["four", "six", "wicket", "fifty", "hundred"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => fire({ type: "moment", moment: m }, `Moment: ${m.toUpperCase()}`)}
-                className="fx-btn"
-                style={{ background: "rgba(201,151,31,0.14)", color: "#E8C468", borderColor: "rgba(201,151,31,0.3)" }}
-              >
+              <button key={m} onClick={() => fire({ type: "moment", moment: m }, `Moment: ${m.toUpperCase()}`)} className="talk-btn">
                 {m.toUpperCase()}
               </button>
             ))}
@@ -244,12 +391,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           </p>
         </div>
 
-        <div className="panel p-5">
-          <h3 className="font-mono-geist text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Recent triggers</h3>
-          {/* Fixed-height container regardless of empty/filled state, so the
-              panel doesn't visibly resize the moment the first trigger fires.
-              .log-scroll (defined in globals.css) gives this a themed,
-              always-reserved scrollbar instead of the browser default. */}
+        {/* ── Event log ─────────────────────────────────────────────────── */}
+        <div className="rack-panel p-5">
+          <div className="eyebrow mb-3">Event Log</div>
           <div className="log-scroll space-y-1.5 h-40 pr-1">
             {log.length === 0 ? (
               <p className="font-mono-geist text-[11px] text-white/30">Nothing fired yet.</p>
