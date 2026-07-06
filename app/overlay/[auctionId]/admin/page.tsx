@@ -29,9 +29,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   useEffect(() => {
     const bus = connectOverlayBus(auctionId);
     busRef.current = bus;
-    const t = setTimeout(() => setConnected(bus.isReady), 600);
+    bus.onReady(() => setConnected(true));
     return () => {
-      clearTimeout(t);
       bus.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

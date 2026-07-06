@@ -31,6 +31,8 @@ const BROADCAST_EVENT_NAME = "overlay-event";
 export function connectOverlayBus(auctionId: string) {
   let ready = false;
   const handlers = new Set<Handler>();
+  const readyWaiters = new Set<() => void>();
+  const queue: OverlayEvent[] = [];
 
   const channel: RealtimeChannel = supabase.channel(`overlay:${auctionId}`, {
     config: { broadcast: { self: false } },
@@ -43,13 +45,32 @@ export function connectOverlayBus(auctionId: string) {
 
   channel.subscribe((status) => {
     ready = status === "SUBSCRIBED";
+    if (ready) {
+      // Flush anything queued before the channel finished joining.
+      if (queue.length) {
+        queue.splice(0).forEach((event) =>
+          channel.send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event })
+        );
+      }
+      readyWaiters.forEach((fn) => fn());
+      readyWaiters.clear();
+    }
   });
 
   return {
     get isReady() {
       return ready;
     },
+    /** Fires immediately if already ready, otherwise once on SUBSCRIBED. */
+    onReady(fn: () => void) {
+      if (ready) fn();
+      else readyWaiters.add(fn);
+    },
     send(event: OverlayEvent) {
+      if (!ready) {
+        queue.push(event);
+        return;
+      }
       channel.send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event });
     },
     on(handler: Handler) {
@@ -58,6 +79,7 @@ export function connectOverlayBus(auctionId: string) {
     },
     disconnect() {
       handlers.clear();
+      readyWaiters.clear();
       supabase.removeChannel(channel);
     },
   };
