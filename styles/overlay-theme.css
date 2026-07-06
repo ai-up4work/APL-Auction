@@ -1,0 +1,122 @@
+/**
+ * overlay-theme.css
+ *
+ * Single source of truth for every color/gradient token the overlay
+ * system references as `var(--color-*)` or `var(--overlay-*)`, plus the
+ * global `.shine-ring` keyframe classes that TeamBadge depends on (it
+ * intentionally has no local <style> block of its own — every caller of
+ * TeamBadge assumes this stylesheet is already loaded, same as before).
+ *
+ * Import this once, at the app root (e.g. app/layout.tsx / _app.tsx).
+ * Nothing below should ever be a component-local duplicate — if the
+ * broadcast look needs to change, it changes here only.
+ */
+
+:root {
+  /* ---- Material-ish surface scale (dark broadcast background) ---- */
+  --color-surface: #0e1420;
+  --color-surface-container-lowest: #080b12;
+  --color-surface-container-high: #232a3a;
+  --color-on-surface: #eef0f4;
+  --color-outline: #7a8194;
+
+  /* ---- Tertiary (steel-blue) scale — used by TournamentBoundaries ---- */
+  --color-tertiary: #dce4ff;
+  --color-tertiary-container: #adc6ff;
+  --color-on-primary-fixed-variant: #3a4156;
+
+  /* ---- Brand accent used for pins / small details ---- */
+  --color-theme-orange: #c9971f;
+
+  /* ---- Gold "broadcast bezel" family — MatchBoundaries, scorecards, ---- */
+  /* ---- match intro, and anything with the ticket-gold trim.       ---- */
+  --overlay-gradient-bezel: linear-gradient(
+    135deg,
+    #fff6df 0%,
+    #e9cf8e 14%,
+    #a9791f 28%,
+    #f2d98a 42%,
+    #6b4c14 56%,
+    #e9cf8e 72%,
+    #fff6df 86%,
+    #b98a2c 100%
+  );
+  --overlay-gradient-bezel-thin: linear-gradient(
+    135deg,
+    #fff6df 0%,
+    #e9cf8e 30%,
+    #b98a2c 65%,
+    #fff6df 100%
+  );
+  --overlay-gradient-gold-sphere: radial-gradient(
+    circle at 32% 26%,
+    #fff9ec 0%,
+    #f2d98a 30%,
+    #c9971f 68%,
+    #5c430f 100%
+  );
+  --overlay-gradient-gold-flight: radial-gradient(
+    circle at 30% 25%,
+    #fffbea 0%,
+    #f7dd93 35%,
+    #c9971f 72%,
+    #4a3509 100%
+  );
+  --overlay-gradient-six-text: linear-gradient(180deg, #fff2c4 0%, #f2b33d 45%, #c9971f 100%);
+
+  --overlay-color-accent: #c9971f;
+  --overlay-color-accent-soft: rgba(201, 151, 31, 0.22);
+  --overlay-color-accent-soft-2: rgba(201, 151, 31, 0.12);
+  --overlay-color-seam: rgba(42, 32, 8, 0.55);
+  --overlay-shine-accent: rgba(255, 230, 170, 0.85);
+  --overlay-glow-six: 0 0 26px rgba(242, 179, 61, 0.65);
+}
+
+/* =========================================================================
+   Shine-ring — the slow-spinning conic highlight ring behind TeamBadge.
+   Two color variants: blue for the "A"/left side, green for "B"/right,
+   picked via TeamBadge's `variant` prop rather than which team it is.
+   ========================================================================= */
+.shine-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: shineSpin 5.5s linear infinite;
+  opacity: 0.9;
+}
+
+.shine-ring-blue {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    rgba(59, 139, 212, 0.85) 12%,
+    transparent 28%,
+    transparent 100%
+  );
+}
+
+.shine-ring-green {
+  background: conic-gradient(
+    from 180deg,
+    transparent 0%,
+    rgba(42, 157, 92, 0.85) 12%,
+    transparent 28%,
+    transparent 100%
+  );
+}
+
+@keyframes shineSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shine-ring {
+    animation-duration: 1ms !important;
+  }
+}

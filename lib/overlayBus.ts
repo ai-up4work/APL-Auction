@@ -13,6 +13,7 @@ export interface WeatherData {
 }
 
 export type OverlayEvent =
+  | { type: "tournamentLogo"; show: boolean }
   | { type: "weather"; show: boolean; data?: Partial<WeatherData> }
   | { type: "matchBoundaries"; show: boolean; fours?: number; sixes?: number }
   | { type: "tournamentBoundaries"; show: boolean; fours?: number; sixes?: number }

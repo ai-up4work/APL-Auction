@@ -22,6 +22,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [pointsTableOn, setPointsTableOn] = useState(false);
   const [matchScorecardOn, setMatchScorecardOn] = useState(false);
   const [matchIntroOn, setMatchIntroOn] = useState(false);
+  const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
@@ -176,6 +177,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
             <button
               onClick={() => {
+                const next = !tournamentLogoOn;
+                setTournamentLogoOn(next);
+                fire({ type: "tournamentLogo", show: next }, `Tournament logo ${next ? "on" : "off"}`);
+              }}
+              className={`fx-btn ${tournamentLogoOn ? "fx-toggle-on" : "fx-toggle-off"}`}
+            >
+              Tournament Logo
+            </button>
+
+            <button
+              onClick={() => {
                 setWeatherOn(false);
                 setMatchBoundariesOn(false);
                 setTournamentBoundariesOn(false);
@@ -183,6 +195,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 setPointsTableOn(false);
                 setMatchScorecardOn(false);
                 setMatchIntroOn(false);
+                setTournamentLogoOn(false);
                 fire({ type: "clearAll" }, "Cleared all overlays");
               }}
               className="fx-btn"

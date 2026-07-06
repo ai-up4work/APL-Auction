@@ -4,7 +4,7 @@ import { ChevronRight, ChevronDown, ChevronUp, Radio } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { useOverlayPanel } from "@/hooks/useOverlayPanel";
-import { teamBlockClip, ambientGlow } from "@/lib/overlayTokens";
+import { teamBlockClip, ambientGlow, GOLD_BEZEL, GOLD_SPHERE, OVERLAY_ACCENT } from "@/lib/overlayTokens";
 import { LIVE, VENUE, BALLS_PER_OVER, TOURNAMENT } from "@/lib/matchData";
 import TeamBadge from "@/components/overlays/shared/TeamBadge";
 import CricketBall from "@/components/overlays/shared/CricketBall";
@@ -22,6 +22,11 @@ const SLANT_PX = 22; // how far the TeamBlock's inner edge leans, in px
 // - The most recently bowled ball gets a soft "live" pulse ring so the eye
 //   knows where to look.
 // - Boundaries get a slow diagonal shine sweep across the sphere.
+//
+// Wicket / extra fills are deliberately NOT part of the overlay theme —
+// they're semantic status colors (red = out, grey = extra), not brand
+// colors, so they stay literal here. Only the boundary (four/six) fill
+// comes from the shared theme, since that IS the gold brand accent.
 function BallChip({ value, index = 0, isLatest = false }) {
   const isEmpty = value == null;
   const isWicket = value === "W";
@@ -32,7 +37,7 @@ function BallChip({ value, index = 0, isLatest = false }) {
   const sphereFill = isWicket
     ? "radial-gradient(circle at 32% 26%, #f0a091 0%, #cf4a37 42%, #7c1d13 88%, #5c130c 100%)"
     : isBoundary
-    ? "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange) 68%, #8a5c0d 100%)"
+    ? GOLD_SPHERE
     : isExtra
     ? "radial-gradient(circle at 32% 26%, #f3f3f3 0%, #cfcfd2 45%, #8f8f95 85%, #6b6b70 100%)"
     : undefined; // use CricketBall's default "leather" fill
@@ -49,7 +54,7 @@ function BallChip({ value, index = 0, isLatest = false }) {
       {isLatest && !isEmpty && (
         <span
           className="absolute -inset-[3px] rounded-full pointer-events-none ball-pulse"
-          style={{ border: `1.5px solid ${isWicket ? "#e2685a" : isBoundary ? "var(--color-theme-orange)" : "rgba(255,255,255,0.55)"}` }}
+          style={{ border: `1.5px solid ${isWicket ? "#e2685a" : isBoundary ? OVERLAY_ACCENT : "rgba(255,255,255,0.55)"}` }}
         />
       )}
 
@@ -76,6 +81,10 @@ function BallChip({ value, index = 0, isLatest = false }) {
 // Clipped into a one-sided rhombus/parallelogram: the outer edge (against
 // the bar's rounded corner) stays vertical, the inner edge (facing the
 // score/center) is cut on a diagonal.
+//
+// Team colors (team.color / team.colorSoft) are match data, not overlay
+// theme — they legitimately change per match, so they stay as props from
+// lib/matchData rather than being pulled into the theme file.
 function TeamBlock({ team, opponent, align, variant }) {
   const isRight = align === "right";
 
@@ -109,6 +118,9 @@ function TeamBlock({ team, opponent, align, variant }) {
  *   - `hideTrigger`: hides the on-screen "Show Score" reopen pill and the
  *     in-bar dismiss chevron, for use on the OBS-facing overlay page where
  *     there's no one to click them and no reason for on-stream controls.
+ *
+ * All gold/silver bezel + gold sphere styling comes from the shared
+ * overlay theme (lib/overlayTokens.ts → styles/overlay-theme.css).
  */
 export default function LiveScoreBar({ show, hideTrigger = false }) {
   const { mounted, open, closing, toggle } = useOverlayPanel(show, EXIT_MS, { defaultOpen: true });
@@ -132,7 +144,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
             color: "var(--color-on-surface-variant)",
           }}
         >
-          <Radio className="w-4 h-4" style={{ color: "var(--color-theme-orange)" }} />
+          <Radio className="w-4 h-4" style={{ color: OVERLAY_ACCENT }} />
           <span className="text-xs font-bold uppercase tracking-wider">Show Score</span>
           <ChevronUp className="w-4 h-4" />
         </button>
@@ -163,7 +175,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                   style={{
                     padding: "12%",
                     background: "rgba(12,16,26,0.85)",
-                    border: "1px solid rgba(201,151,31,0.5)",
+                    border: "1px solid var(--overlay-color-accent-soft-2, rgba(201,151,31,0.5))",
                     boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
                     animation: closing
                       ? `lsbLogOut ${EXIT_MS}ms cubic-bezier(0.4,0,0.8,1) both`
@@ -187,8 +199,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
               <div
                 className="relative p-[2px] sm:p-[3px] rounded-2xl sm:rounded-[22px]"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #f1efe9 0%, #b8ad93 14%, #6b6455 28%, #c9971f 42%, #4a453a 56%, #b8ad93 72%, #f1efe9 86%, #8a8272 100%)",
+                  background: GOLD_BEZEL,
                   boxShadow:
                     "0 25px 50px -12px rgba(0,0,0,0.65), inset 0 1px 1px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.5)",
                 }}
@@ -238,11 +249,11 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
 
                     <div className="relative z-10 flex-1 flex items-center justify-center sm:justify-between gap-2 sm:gap-3 px-2 sm:px-5 min-w-0">
                       <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-                        <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" style={{ color: "var(--color-theme-orange)" }} />
+                        <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" style={{ color: OVERLAY_ACCENT }} />
                         <span className="text-[11px] sm:text-base font-bold uppercase truncate" style={{ color: "var(--color-on-surface)" }}>
                           {LIVE.striker.name}
                         </span>
-                        <span className="text-[11px] sm:text-base font-black tabular-nums shrink-0" style={{ color: "var(--color-theme-orange)" }}>
+                        <span className="text-[11px] sm:text-base font-black tabular-nums shrink-0" style={{ color: OVERLAY_ACCENT }}>
                           {LIVE.striker.runs}
                           <span className="text-[9px] sm:text-sm font-semibold" style={{ color: "var(--color-outline)" }}>
                             ({LIVE.striker.balls})
@@ -269,7 +280,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                         onClick={toggle}
                         className="relative z-10 flex items-center justify-center px-2 sm:px-2.5 shrink-0 transition-colors"
                         style={{ color: "var(--color-outline)" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-theme-orange)")}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = OVERLAY_ACCENT)}
                         onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-outline)")}
                         aria-label="Hide score bar"
                       >
@@ -318,7 +329,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                     <div className="flex-1 min-w-0 text-center hidden sm:block">
                       <span className="text-[9px] font-bold tracking-[0.2em] uppercase truncate" style={{ color: "var(--color-on-surface-variant)" }}>
                         Live from{" "}
-                        <span className="font-bold" style={{ color: "var(--color-theme-orange)" }}>
+                        <span className="font-bold" style={{ color: OVERLAY_ACCENT }}>
                           {VENUE}
                         </span>
                       </span>
@@ -328,7 +339,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                       <span className="text-[10px] sm:text-xs font-bold uppercase truncate" style={{ color: "var(--color-on-surface)" }}>
                         {LIVE.bowler.name}
                       </span>
-                      <span className="text-[10px] sm:text-xs font-black tabular-nums shrink-0" style={{ color: "var(--color-theme-orange)" }}>
+                      <span className="text-[10px] sm:text-xs font-black tabular-nums shrink-0" style={{ color: OVERLAY_ACCENT }}>
                         {LIVE.bowler.wickets}-{LIVE.bowler.runsConceded}
                         <span className="text-[9px] sm:text-[11px] font-semibold" style={{ color: "var(--color-outline)" }}>
                           {" "}

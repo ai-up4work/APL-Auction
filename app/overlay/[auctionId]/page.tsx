@@ -12,6 +12,7 @@ import PointsTable from "@/components/overlays/PointsTable";
 import CricketScorecard from "@/components/overlays/CricketScorecard";
 import CricketMatchIntro from "@/components/overlays/CricketMatchIntro";
 import MatchMomentOverlay from "@/components/overlays/MatchMomentOverlay";
+import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 
 const DEFAULT_WEATHER: WeatherData = {
   venue: "INLAND CRICKET GROUND",
@@ -29,6 +30,7 @@ interface OverlayState {
   pointsTable: { show: boolean };
   matchScorecard: { show: boolean };
   matchIntro: { show: boolean };
+  tournamentLogo: { show: boolean };
 }
 
 const initialState: OverlayState = {
@@ -39,6 +41,7 @@ const initialState: OverlayState = {
   pointsTable: { show: false },
   matchScorecard: { show: false },
   matchIntro: { show: false },
+  tournamentLogo: { show: false },
 };
 
 function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
@@ -74,6 +77,8 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
       return { ...state, matchScorecard: { show: event.show } };
     case "matchIntro":
       return { ...state, matchIntro: { show: event.show } };
+    case "tournamentLogo":
+      return { ...state, tournamentLogo: { show: event.show } };
     case "clearAll":
       return initialState;
     default:
@@ -163,6 +168,7 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       <PointsTable show={state.pointsTable.show} hideTrigger />
       <CricketScorecard show={state.matchScorecard.show} hideTrigger />
       <CricketMatchIntro show={state.matchIntro.show} hideTrigger />
+      {state.tournamentLogo.show && <TournamentLogoDisplay />}
 
     </div>
   );
