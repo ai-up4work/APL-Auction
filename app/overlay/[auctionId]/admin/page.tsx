@@ -31,18 +31,32 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
   const [testBgOn, setTestBgOn] = useState(false);
 
-  const previewWrapRef = useRef<HTMLDivElement>(null);
+  // ── Preview scaling ────────────────────────────────────────────────
+  // Measure the actual clipping box (.monitor-screen), not its padded
+  // parent, and fit the 1920x1080 iframe into it on BOTH axes so it can
+  // never overflow the box regardless of the box's real aspect ratio.
+  const monitorScreenRef = useRef<HTMLDivElement>(null);
   const [previewScale, setPreviewScale] = useState(1);
 
   useEffect(() => {
     function updateScale() {
-      const el = previewWrapRef.current;
+      const el = monitorScreenRef.current;
       if (!el) return;
-      setPreviewScale(el.clientWidth / 1920);
+      const scaleX = el.clientWidth / 1920;
+      const scaleY = el.clientHeight / 1080;
+      setPreviewScale(Math.min(scaleX, scaleY));
     }
+
     updateScale();
+
+    const ro = new ResizeObserver(updateScale);
+    if (monitorScreenRef.current) ro.observe(monitorScreenRef.current);
+
     window.addEventListener("resize", updateScale);
-    return () => window.removeEventListener("resize", updateScale);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateScale);
+    };
   }, []);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
@@ -217,6 +231,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           overflow: hidden;
           background: #000;
           aspect-ratio: 16 / 9;
+          /* Centers the scaled iframe inside the box so if the box's real
+             aspect ratio ever drifts from 16:9, the content stays centered
+             with letterboxing rather than pinned/clipped to one corner. */
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .monitor-corner {
           position: absolute;
@@ -295,8 +315,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
             <div className="eyebrow">Program Monitor</div>
             <span className="eyebrow">scaled preview</span>
           </div>
-          <div ref={previewWrapRef} className="monitor-frame">
-            <div className="monitor-screen">
+          <div className="monitor-frame">
+            <div className="monitor-screen" ref={monitorScreenRef}>
               <div className="monitor-corner tl" />
               <div className="monitor-corner tr" />
               <div className="monitor-corner bl" />
@@ -314,7 +334,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                       height: "1080px",
                       border: "none",
                       transform: `scale(${previewScale})`,
-                      transformOrigin: "top left",
+                      transformOrigin: "center center",
+                      flexShrink: 0,
                     }}
                   />
                 )}
