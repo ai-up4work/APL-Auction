@@ -148,9 +148,9 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
         createPortal(
           <>
             <div
-              className="fixed inset-0 backdrop-blur-sm z-[100]"
+              className="fixed inset-0 backdrop-blur-md z-[100]"
               style={{
-                background: "rgba(0,0,0,0.8)",
+                background: "rgba(0,0,0,0.88)",
                 animation: closing ? "mscFadeOut 0.32s ease-in 0.09s both" : "mscFadeIn 0.3s ease-out both",
               }}
               onClick={closePanel}
