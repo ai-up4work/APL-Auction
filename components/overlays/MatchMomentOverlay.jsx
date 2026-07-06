@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import CricketBall from "./shared/CricketBall";
 
 // Default per-moment styling/behavior — exported so a parent can override
 // or extend individual moments (or add brand-new ones) via the `moments`
@@ -10,6 +11,15 @@ import { createPortal } from "react-dom";
 // (not a deep merge) — pass the full object for that key if you want to
 // change just one field, spread the default in yourself, e.g.
 // `{ six: { ...DEFAULT_MOMENTS.six, accent: "#ff0000" } }`.
+//
+// NOTE: this component is the single source of truth for boundary/wicket/
+// milestone celebrations. There used to be a second, near-identical
+// `BoundaryCelebration` component that only covered four/six — it
+// duplicated all of the particle/firework/confetti code below AND
+// registered the same `window.triggerBoundaryCelebration` global, so
+// mounting both anywhere in the tree meant whichever one mounted last
+// silently won. That component has been deleted; everything (including
+// plain fours and sixes) goes through here now.
 export const DEFAULT_MOMENTS = {
   four: {
     mode: "ball",
@@ -99,27 +109,15 @@ function px(v) {
   return Math.round(v);
 }
 
-function BallSphere({ size, accent, style }) {
-  return (
-    <span
-      className="absolute rounded-full overflow-hidden"
-      style={{
-        width: size,
-        height: size,
-        background: `radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 26%, ${accent} 62%, #3a2504 100%)`,
-        border: "1px solid rgba(0,0,0,0.4)",
-        boxShadow: "inset 0 -4px 6px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.3)",
-        ...style,
-      }}
-    >
-      <svg viewBox="0 0 20 20" className="absolute inset-0 w-full h-full" style={{ opacity: 0.75 }}>
-        <path d="M3,2 Q9,10 3,18" stroke="rgba(58,37,4,0.55)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-        <path d="M17,2 Q11,10 17,18" stroke="rgba(58,37,4,0.55)" strokeWidth="1" strokeDasharray="1.1 1.3" fill="none" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
+// Flying cricket-ball gradient — a warmer "leather in flight" fill than
+// CricketBall's default, keyed off each moment's accent color. Same
+// helper BoundaryCelebration used to have locally.
+function flightFill(accent) {
+  return `radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 26%, ${accent} 62%, #3a2504 100%)`;
 }
 
+// Broken stumps + flying bails — unique to the wicket moment, so this
+// stays local rather than moving into share/ (nothing else uses it).
 function StumpsShatter() {
   const pieces = [
     { id: "s1", w: 9, h: 64, x: -16, y: 10, rot: -35, tx: -50, ty: 110, delay: 0.02 },
@@ -299,13 +297,15 @@ function BigText({ cfg }) {
 
 /**
  * MatchMomentOverlay — full-screen cinematic overlay for FOUR / SIX /
- * WICKET / FIFTY / CENTURY.
+ * WICKET / FIFTY / CENTURY. This is the one and only moment-celebration
+ * component; mount it once anywhere in the tree and it renders nothing
+ * until triggered.
  *
  * `moments` overrides/extends DEFAULT_MOMENTS per key (shallow merge per
  * key — see the note above DEFAULT_MOMENTS). `confettiColors` overrides
  * the shared confetti/firework palette. `hideDemoButtons` removes the
- * on-screen test buttons (set this when embedding inside the real OBS
- * overlay page — leave it false for standalone testing).
+ * on-screen test buttons (set this on the real OBS overlay page — leave
+ * it false for standalone testing).
  *
  * Trigger via:
  *   window.triggerBoundaryCelebration("four" | "six" | "wicket" | "fifty" | "hundred")
@@ -412,8 +412,18 @@ export default function MatchMomentOverlay({
               />
             ))}
 
+            {/* Flying cricket ball (four/six/fifty/hundred) uses the
+                shared sphere component with a warmer "in flight" gradient;
+                a wicket shows broken stumps instead. */}
             {cfg.mode === "ball" ? (
-              <BallSphere size={64} accent={cfg.accent} style={{ animation: "bcBallFly 0.9s cubic-bezier(0.3,0.1,0.3,1) both" }} />
+              <CricketBall
+                size={64}
+                fill={flightFill(cfg.accent)}
+                seamColor="rgba(58,37,4,0.55)"
+                seamWidth={1}
+                className="absolute"
+                style={{ animation: "bcBallFly 0.9s cubic-bezier(0.3,0.1,0.3,1) both" }}
+              />
             ) : (
               <StumpsShatter />
             )}
@@ -439,13 +449,9 @@ export default function MatchMomentOverlay({
           document.body
         )}
 
+      {/* Component-specific animations only — the font import + .font-heading
+          live in lib/overlay-shared.css, imported once from app/globals.css. */}
       <style jsx global>{`
-        @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@800;900&display=swap");
-
-        .font-heading {
-          font-family: "Montserrat", sans-serif;
-        }
-
         .bc-wrap {
           animation: bcShake 0.4s ease-out 0.5s both;
         }
