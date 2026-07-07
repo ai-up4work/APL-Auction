@@ -26,11 +26,11 @@ type AmbientKey = (typeof AMBIENT_CHANNELS)[number]["key"];
 type BoundaryKey = (typeof BOUNDARY_CHANNELS)[number]["key"];
 type FullscreenKey = (typeof FULLSCREEN_CHANNELS)[number]["key"];
 
-// CHANGED — testBg is now a tracked channel key alongside everything else,
-// not a standalone useState. It's not Ambient/Boundary/Fullscreen — it's
-// its own category: never suppressed, never part of the mutex groups, but
-// still part of `on` so it flows through computeVisible()/getVisibleSnapshot()
-// and therefore through syncSnapshot on reconnect.
+// testBg is a tracked channel key alongside everything else, not a
+// standalone useState. It's not Ambient/Boundary/Fullscreen — it's its own
+// category: never suppressed, never part of the mutex groups, but still
+// part of `on` so it flows through computeVisible()/getVisibleSnapshot()
+// and therefore through syncSnapshot on reconnect, and through clearAll.
 type TestBgKey = "testBg";
 type ChannelKey = AmbientKey | BoundaryKey | FullscreenKey | TestBgKey;
 
@@ -44,6 +44,7 @@ const ALL_CHANNELS = [
   ...FULLSCREEN_CHANNELS,
   { key: "testBg" as const, label: "Test Background" },
 ];
+const ALL_CHANNEL_KEYS: ChannelKey[] = ALL_CHANNELS.map((c) => c.key);
 const SUPPRESSIBLE_KEYS: SuppressibleKey[] = [...AMBIENT_CHANNELS.map((c) => c.key), ...BOUNDARY_CHANNELS.map((c) => c.key)];
 
 function initialOn(): Record<ChannelKey, boolean> {
@@ -58,6 +59,19 @@ function initialOn(): Record<ChannelKey, boolean> {
     matchIntro: false,
     testBg: false,
   };
+}
+
+// NEW — everything false, used by clearAll(). Kept distinct from
+// initialOn() because initialOn() represents the *starting* state of a
+// fresh session (Ambient defaults to on), whereas clearAll() means
+// "actually turn everything off right now," including Ambient and testBg.
+// Reusing initialOn() here was the bug — it made Ambient channels flip
+// back to true instead of showing as cleared.
+function allOff(): Record<ChannelKey, boolean> {
+  return ALL_CHANNEL_KEYS.reduce((acc, key) => {
+    acc[key] = false;
+    return acc;
+  }, {} as Record<ChannelKey, boolean>);
 }
 
 function initialSuppressed(): Record<SuppressibleKey, boolean> {
@@ -154,10 +168,6 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
       });
     }
 
-    // CHANGED — testBg toggle now just flips `on.testBg` through the same
-    // setOn path as everything else, instead of a separate setTestBgOn +
-    // manual fire() call. The broadcast-on-change effect above now fires
-    // the testBg event automatically, same as any other channel.
     function toggleTestBg() {
       setOn((prev) => ({ ...prev, testBg: !prev.testBg }));
     }
@@ -171,15 +181,16 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
       },
     }));
 
+    // CHANGED — clearAll() now resets to allOff() instead of initialOn().
+    // Previously it preserved testBg and reset Ambient channels to their
+    // "always on" default (true), which is why Weather/Live Score Bar/
+    // Tournament Logo appeared to snap back on in the panel, and the demo
+    // video kept playing, even though the overlay page's own clearAll
+    // reducer case correctly went fully dark. Now every channel — Ambient,
+    // Boundary, Fullscreen, and testBg — actually goes to false, so the
+    // panel and the overlay agree, and the demo video actually stops.
     function clearAll() {
-      // CHANGED — preserve testBg across clearAll, same rationale as
-      // before: it's a dev/preview toggle, not a match overlay, so
-      // "clear everything" shouldn't yank the background out from under
-      // whoever's still testing layout. Previously this lived as a
-      // separate `testBg: state.testBg` merge in the overlay page's
-      // reducer; now that testBg lives in `on`, it has to be preserved
-      // here at the source instead.
-      setOn((prev) => ({ ...initialOn(), testBg: prev.testBg }));
+      setOn(allOff());
       fire({ type: "clearAll" } as OverlayEvent, "Cleared all overlays");
     }
 
@@ -246,8 +257,6 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
 
           <div className="h-px my-1" style={{ background: "var(--color-outline-variant)" }} />
 
-          {/* CHANGED — reads/writes `on.testBg` now instead of a separate
-              testBgOn useState. */}
           <ChannelRow label="Test Background" on={on.testBg} tone="blue" onToggle={toggleTestBg} />
           <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
             Sample footage for layout testing — off before going live.
