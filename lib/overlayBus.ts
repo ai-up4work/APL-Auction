@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabse"; // FIXED — was "@/lib/supabse" (typo). Verify this matches your actual file.
+import { supabase } from "@/lib/supabse"; 
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface WeatherData {

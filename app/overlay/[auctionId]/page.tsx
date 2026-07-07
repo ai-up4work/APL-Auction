@@ -14,6 +14,18 @@ import CricketMatchIntro from "@/components/overlays/CricketMatchIntro";
 import MatchMomentOverlay from "@/components/overlays/MatchMomentOverlay";
 import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 
+// export const DEFAULT_CONDITIONS = {
+//   sunny: { icon: Sun, color: "#F2B33D", label: "Sunny" },
+//   clear: { icon: Sun, color: "#F2B33D", label: "Clear" },
+//   "partly-cloudy": { icon: CloudSun, color: "#9FC6E8", label: "Partly Cloudy" },
+//   cloudy: { icon: Cloud, color: "#8A93A6", label: "Cloudy" },
+//   overcast: { icon: Cloud, color: "#6B7280", label: "Overcast" },
+//   rain: { icon: CloudRain, color: "#4C8BD9", label: "Rain" },
+//   storm: { icon: CloudLightning, color: "#C9971F", label: "Stormy" },
+//   snow: { icon: CloudSnow, color: "#CFE6F2", label: "Snow" },
+//   fog: { icon: CloudFog, color: "#9AA3B0", label: "Foggy" },
+// };
+
 const DEFAULT_WEATHER: WeatherData = {
   venue: "INLAND CRICKET GROUND",
   temp: 28,

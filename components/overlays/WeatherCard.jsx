@@ -41,6 +41,20 @@ const CORNER_STYLE = {
  * props. `conditions` lets a parent add/override condition entries
  * without touching this file (merged over DEFAULT_CONDITIONS).
  */
+
+
+// export const DEFAULT_CONDITIONS = {
+//   sunny: { icon: Sun, color: "#F2B33D", label: "Sunny" },
+//   clear: { icon: Sun, color: "#F2B33D", label: "Clear" },
+//   "partly-cloudy": { icon: CloudSun, color: "#9FC6E8", label: "Partly Cloudy" },
+//   cloudy: { icon: Cloud, color: "#8A93A6", label: "Cloudy" },
+//   overcast: { icon: Cloud, color: "#6B7280", label: "Overcast" },
+//   rain: { icon: CloudRain, color: "#4C8BD9", label: "Rain" },
+//   storm: { icon: CloudLightning, color: "#C9971F", label: "Stormy" },
+//   snow: { icon: CloudSnow, color: "#CFE6F2", label: "Snow" },
+//   fog: { icon: CloudFog, color: "#9AA3B0", label: "Foggy" },
+// };
+
 export default function WeatherCard({
   venue = "INLAND CRICKET GROUND",
   temp = 28,

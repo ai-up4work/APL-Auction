@@ -65,7 +65,7 @@ interface WicketMomentPayload {
   bowlerName: string;
 }
 
-// NEW — shared shape for the auto-completion callback coming out of the
+// shared shape for the auto-completion callback coming out of the
 // scoring hook (via LiveStatePanel), used to fire the "match won" moment.
 interface MatchCompletePayload {
   winningTeamName: string;
@@ -152,6 +152,19 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
   const [showMoments, setShowMoments] = useState(false);
 
+  // NEW — manual "Match Won" draft. Match Won used to only be fireable
+  // once liveState.matchResult existed (i.e. after auto-detection or
+  // "End Match"), which meant nothing fired if that hadn't happened yet.
+  // This lets you pick the winner / margin / method by hand and fire
+  // regardless of whether a result has been computed.
+  const [showMatchWonForm, setShowMatchWonForm] = useState(false);
+  const [matchWonDraft, setMatchWonDraft] = useState<{
+    winner: "teamA" | "teamB" | "custom";
+    customName: string;
+    margin: string;
+    method: "batting" | "bowling" | "tie";
+  }>({ winner: "teamA", customName: "", margin: "", method: "batting" });
+
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
   const matchSetupRef = useRef(matchSetup);
@@ -233,9 +246,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       // ignore malformed cache
     }
     try {
-      // FIX — matchSetupCompleted wasn't persisted before, so a refresh
-      // mid-match hid the whole Scorer panel even though matchSetup and
-      // liveState both survived intact.
+      // matchSetupCompleted is persisted alongside matchSetup/liveState so a
+      // refresh mid-match doesn't hide the whole Scorer panel.
       const rawCompleted = window.localStorage.getItem(`overlay:${auctionId}:matchSetupCompleted`);
       if (rawCompleted) setMatchSetupCompleted(JSON.parse(rawCompleted));
     } catch {
@@ -250,7 +262,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     window.localStorage.setItem(`overlay:${auctionId}:matchSetup`, JSON.stringify(matchSetup));
   }, [matchSetup, auctionId, setupHydrated]);
 
-  // NEW — persist matchSetupCompleted alongside matchSetup.
   useEffect(() => {
     if (!setupHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(`overlay:${auctionId}:matchSetupCompleted`, JSON.stringify(matchSetupCompleted));
@@ -335,17 +346,32 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // NEW — look up a team's brand color/logo by name, so the "match won"
-  // overlay can theme itself to whichever side actually won.
+  // NEW — manual "Maiden" button in the Moments panel. Fires using
+  // whichever bowler is currently set in Live State, rather than only
+  // ever firing automatically after the 6th ball of a maiden over.
+  function fireMaidenMomentFromPanel() {
+    if (!liveState.bowler.name) {
+      setLog((prev) => [
+        `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Maiden — set a bowler in Live State first`,
+        ...prev,
+      ].slice(0, 12));
+      return;
+    }
+    fireMaidenMoment({ bowlerName: liveState.bowler.name, maidens: liveState.bowler.maidens });
+  }
+
+  // look up a team's brand color/logo by name, so the "match won" overlay
+  // can theme itself to whichever side actually won.
   function teamVisualsByName(name: string): { color?: string; logoUrl?: string } {
     if (matchSetup.teamA.name === name) return { color: matchSetup.teamA.color, logoUrl: matchSetup.teamA.logoUrl };
     if (matchSetup.teamB.name === name) return { color: matchSetup.teamB.color, logoUrl: matchSetup.teamB.logoUrl };
     return {};
   }
 
-  // NEW — fires the celebratory "match won" graphic. Called automatically
-  // by the auto-completion logic in the scoring hook (via LiveStatePanel's
-  // onMatchComplete), and also by the manual End Match button.
+  // fires the celebratory "match won" graphic. Called automatically by
+  // the auto-completion logic in the scoring hook (via LiveStatePanel's
+  // onMatchComplete), and also manually — see fireMatchWonMomentFromPanel
+  // below and the manual End Match button.
   function fireMatchWonMoment(payload: MatchCompletePayload) {
     const visuals = teamVisualsByName(payload.winningTeamName);
     fireLoose(
@@ -363,6 +389,46 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
+  // NEW — opens the manual Match Won form. If a result already exists
+  // (match ended normally) the form is pre-filled from it so you can just
+  // hit Fire; if not, it starts blank so you can pick the winner, type a
+  // margin, and fire without waiting for auto-detection or "End Match".
+  function openMatchWonForm() {
+    if (liveState.matchResult) {
+      const { winningTeamName, margin, method } = liveState.matchResult;
+      const winner: "teamA" | "teamB" | "custom" =
+        winningTeamName === matchSetup.teamA.name
+          ? "teamA"
+          : winningTeamName === matchSetup.teamB.name
+          ? "teamB"
+          : "custom";
+      setMatchWonDraft({
+        winner,
+        customName: winner === "custom" ? winningTeamName : "",
+        margin,
+        method: method === "tie" ? "tie" : method === "runs" ? "bowling" : "batting",
+      });
+    }
+    setShowMatchWonForm((v) => !v);
+  }
+
+  // NEW — fires Match Won from whatever is currently in the manual draft.
+  // Works whether or not liveState.matchResult has been computed yet, so
+  // this is the button to use if the auto-detector hasn't fired (e.g. you
+  // want to fire it early, or the match ended in an unusual way it didn't
+  // catch).
+  function fireMatchWonMomentFromForm() {
+    const winningTeamName =
+      matchWonDraft.winner === "teamA"
+        ? matchSetup.teamA.name || "Team A"
+        : matchWonDraft.winner === "teamB"
+        ? matchSetup.teamB.name || "Team B"
+        : matchWonDraft.customName.trim() || "Winner";
+    const margin = matchWonDraft.margin.trim() || "Match Won";
+    fireMatchWonMoment({ winningTeamName, margin, method: matchWonDraft.method });
+    setShowMatchWonForm(false);
+  }
+
   function logInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
     setLog((prev) => [
       `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Innings ended — target set to ${payload.target}`,
@@ -374,8 +440,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireMilestoneMoment(moment);
   }
 
-  // CHANGED — restartMatch now also clears the previous matchResult so a
-  // stale "Team X won by 12 runs" banner can't linger into a fresh match.
+  // restartMatch also clears the previous matchResult so a stale
+  // "Team X won by 12 runs" banner can't linger into a fresh match.
   function restartMatch() {
     setLiveState((prev) => ({
       score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
@@ -477,27 +543,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           <div
             className="w-10 h-[3px] rounded-full"
             style={{ background: "linear-gradient(90deg, transparent, var(--color-theme-orange), transparent)" }}
-          />
-
-          <div className="flex items-center gap-3 flex-wrap justify-center">
-            {scoreIsLive && (
-              <div
-                className="flex items-baseline gap-2.5 px-4 py-2 rounded-xl"
-                style={{ background: "rgba(201,151,31,0.06)", border: "1px solid rgba(201,151,31,0.2)" }}
-              >
-                <span style={{ fontFamily: "var(--font-label-mono)", fontWeight: 700, fontSize: "18px", color: "var(--color-theme-orange)" }}>
-                  {liveState.score.runs}
-                  <span style={{ opacity: 0.6, fontSize: "14px" }}>/{liveState.score.wickets}</span>
-                </span>
-                <span
-                  className="text-[10px] uppercase tracking-wide whitespace-nowrap"
-                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}
-                >
-                  {liveState.score.overs}.{liveState.score.balls} ov · RR {runRate}
-                </span>
-              </div>
-            )}
-          </div>
+          /> 
         </div>
 
         {/* ── Desk — scoring flow left, monitor + fast-fire right ────── */}
@@ -597,8 +643,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                       >
                         Four, Six, Fifty and Hundred now also fire automatically from the
                         ball pad in the Scorer panel — these buttons are still here for
-                        manual/backup firing. Maiden overs fire automatically too; Match Won
-                        fires automatically when a match completes (or via manual End Match).
+                        manual/backup firing. Maiden overs fire automatically too, and the
+                        Maiden button re-fires using whoever's set as bowler right now. Match
+                        Won can fire automatically when a match completes, or opens a form
+                        below for firing it manually at any time.
                       </p>
 
                       <div className="grid grid-cols-2 gap-2.5">
@@ -622,6 +670,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                         <ActionButton
                           label="Fifty"
                           onClick={() => fireMilestoneMomentFromPanel("fifty")}
+                        />
+
+                        <ActionButton
+                          label="Maiden"
+                          onClick={fireMaidenMomentFromPanel}
+                        />
+
+                        <ActionButton
+                          label="Match Won"
+                          active={showMatchWonForm}
+                          onClick={openMatchWonForm}
                         />
                       </div>
 
@@ -802,6 +861,178 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                         </div>
                       )}
 
+                      {showMatchWonForm && (
+                        <div
+                          className="flex flex-col gap-3 p-4 rounded-lg mt-1"
+                          style={{
+                            background: "rgba(201,151,31,0.08)",
+                            border: "1px solid rgba(201,151,31,0.3)",
+                          }}
+                        >
+                          <span
+                            className="text-[10px] font-black uppercase tracking-widest"
+                            style={{
+                              fontFamily: "var(--font-label-mono)",
+                              color: "var(--color-theme-orange)",
+                            }}
+                          >
+                            Match Won Detail
+                          </span>
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Winning Team
+                            </span>
+
+                            <div className="grid grid-cols-3 gap-2">
+                              {(
+                                [
+                                  { key: "teamA" as const, label: matchSetup.teamA.name || "Team A" },
+                                  { key: "teamB" as const, label: matchSetup.teamB.name || "Team B" },
+                                  { key: "custom" as const, label: "Other" },
+                                ]
+                              ).map((opt) => (
+                                <button
+                                  key={opt.key}
+                                  type="button"
+                                  onClick={() => setMatchWonDraft((p) => ({ ...p, winner: opt.key }))}
+                                  className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all"
+                                  style={{
+                                    background:
+                                      matchWonDraft.winner === opt.key
+                                        ? "rgba(201,151,31,0.16)"
+                                        : "var(--color-surface-container-low)",
+                                    border: `1px solid ${
+                                      matchWonDraft.winner === opt.key
+                                        ? "rgba(201,151,31,0.5)"
+                                        : "var(--color-border-overlay)"
+                                    }`,
+                                  }}
+                                >
+                                  <span
+                                    className="text-[11px] font-bold truncate max-w-full"
+                                    style={{
+                                      fontFamily: "var(--font-label-mono)",
+                                      color:
+                                        matchWonDraft.winner === opt.key
+                                          ? "var(--color-theme-orange)"
+                                          : "var(--color-on-surface)",
+                                    }}
+                                  >
+                                    {opt.label}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {matchWonDraft.winner === "custom" && (
+                            <div className="flex flex-col gap-1.5">
+                              <span
+                                className="text-[9px] font-bold uppercase tracking-widest"
+                                style={{
+                                  fontFamily: "var(--font-label-mono)",
+                                  color: "var(--color-on-surface-variant)",
+                                }}
+                              >
+                                Team Name
+                              </span>
+                              <input
+                                value={matchWonDraft.customName}
+                                onChange={(e) =>
+                                  setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))
+                                }
+                                placeholder="Winning team name"
+                                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                                style={{
+                                  background: "var(--color-surface-container-low)",
+                                  border: "1px solid var(--color-border-overlay)",
+                                  color: "var(--color-on-surface)",
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Margin / Result Text
+                            </span>
+                            <input
+                              value={matchWonDraft.margin}
+                              onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
+                              placeholder="e.g. won by 4 wickets"
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                              style={{
+                                background: "var(--color-surface-container-low)",
+                                border: "1px solid var(--color-border-overlay)",
+                                color: "var(--color-on-surface)",
+                              }}
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Method
+                            </span>
+                            <select
+                              value={matchWonDraft.method}
+                              onChange={(e) =>
+                                setMatchWonDraft((p) => ({
+                                  ...p,
+                                  method: e.target.value as "batting" | "bowling" | "tie",
+                                }))
+                              }
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                              style={{
+                                background: "var(--color-surface-container-low)",
+                                border: "1px solid var(--color-border-overlay)",
+                                color: "var(--color-on-surface)",
+                              }}
+                            >
+                              <option value="batting">Chasing side won (by wickets)</option>
+                              <option value="bowling">Defending side won (by runs)</option>
+                              <option value="tie">Tie</option>
+                            </select>
+                          </div>
+
+                          <p className="text-[10px]" style={{ color: "var(--color-outline)" }}>
+                            {liveState.matchResult
+                              ? "Pre-filled from the last computed result — edit anything before firing."
+                              : "No result on record yet — fill this in by hand to fire early."}
+                          </p>
+
+                          <button
+                            onClick={fireMatchWonMomentFromForm}
+                            className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+                            style={{
+                              fontFamily: "var(--font-label-mono)",
+                              background: "var(--color-theme-orange)",
+                              color: "var(--color-on-primary)",
+                            }}
+                          >
+                            Fire Match Won
+                          </button>
+                        </div>
+                      )}
+
                       <p
                         className="text-[10px] pt-1"
                         style={{
@@ -810,7 +1041,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                         }}
                       >
                         Milestone and wicket graphics auto-hide after a few seconds — no need
-                        to turn them off.
+                        to turn them off. Maiden pulls the bowler currently set in Live
+                        State. Match Won opens a small form — pick the winning team, type the
+                        margin, and fire whenever you like, whether or not a result has been
+                        computed automatically yet.
                       </p>
                     </>
                   )}
