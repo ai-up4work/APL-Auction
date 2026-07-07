@@ -35,6 +35,39 @@ import CricketBall from "./shared/CricketBall";
    the card on entry, the card border pulses gently in the event
    color, the logo has a soft glow pulse, and the card itself
    blurs/scales in rather than just fading.
+
+   ------------------------------------------------------------
+   REDESIGN NOTES (v3)
+   ------------------------------------------------------------
+   - Match-won trophy ring now snugly frames the team logo
+     (double-ring treatment: soft accent-colored outer ring +
+     crisp white inner ring hugging the logo) instead of leaving
+     a big empty gap.
+   - Team name headline is noticeably larger for multi-word
+     names (the common case for match-won team names) so it
+     reads clearly on a broadcast.
+   - The background logo watermark inside the card is bigger
+     across every moment, especially the trophy moment.
+   - Every moment stays on screen 2x as long as before so
+     viewers have time to actually read it.
+
+   ------------------------------------------------------------
+   REDESIGN NOTES (v4)
+   ------------------------------------------------------------
+   - Watermark is bigger again for four / six / maiden (ball +
+     shield moments) so it reads as a real presence, not a
+     shadow of its former self.
+   - Watermark no longer rotates — it only breathes via
+     opacity/scale, so it stays dead-center under everything
+     else instead of drifting off-axis.
+   - Headline words now wrap naturally in a centered row instead
+     of being forced one-per-line, with tighter tracking and a
+     crisper two-layer shadow + thin stroke so team names read
+     clean instead of blocky.
+   - Trophy ring pulse (the "border" around the team crest) is
+     now anchored with the same center point as the logo itself,
+     including through its scale animation, so it can no longer
+     drift off-center while pulsing.
    ============================================================ */
 
 export const DEFAULT_MOMENTS = {
@@ -51,7 +84,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 0,
     confetti: false,
     dropText: false,
-    duration: 1900,
+    duration: 3800,
   },
   six: {
     mode: "ball",
@@ -66,7 +99,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 4,
     confetti: true,
     dropText: false,
-    duration: 2600,
+    duration: 5200,
   },
   wicket: {
     mode: "stumps",
@@ -81,7 +114,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 0,
     confetti: false,
     dropText: true,
-    duration: 2100,
+    duration: 4200,
   },
   fifty: {
     mode: "milestone",
@@ -96,7 +129,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 0,
     confetti: false,
     dropText: false,
-    duration: 2100,
+    duration: 4200,
   },
   hundred: {
     mode: "milestone",
@@ -111,7 +144,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 6,
     confetti: true,
     dropText: false,
-    duration: 3000,
+    duration: 6000,
   },
   maiden: {
     mode: "shield",
@@ -126,7 +159,7 @@ export const DEFAULT_MOMENTS = {
     fireworks: 0,
     confetti: false,
     dropText: false,
-    duration: 2100,
+    duration: 4200,
   },
   // base template for match-won; label/subtitle/accent/gradient get
   // overridden per-fire with the winning team's name, margin and color.
@@ -143,13 +176,24 @@ export const DEFAULT_MOMENTS = {
     fireworks: 7,
     confetti: true,
     dropText: false,
-    duration: 4200,
+    duration: 8400,
   },
 };
 
 const EXIT_DURATION_MS = 260;
 export const DEFAULT_CONFETTI_COLORS = ["#D4AF37", "#EAF1FB", "#C7CFDE", "#8FA6C9", "#ffffff"];
 const LOGO_SRC = "/moon-knight-logo.png";
+
+// Watermark size per moment mode. Ball (four/six) and shield (maiden)
+// are bumped up noticeably from the old flat 300px so they actually
+// read as a presence behind the content.
+const WATERMARK_SIZE_BY_MODE = {
+  trophy: 380,
+  ball: 400,
+  shield: 400,
+  stumps: 340,
+  milestone: 340,
+};
 
 function seededRand(seed) {
   const x = Math.sin(seed) * 10000;
@@ -169,10 +213,11 @@ function soloGradient(color) {
 
 /* ------------------------------------------------------------
    LogoWatermark — large, faint, slowly breathing brand mark
-   sitting behind the content inside the card. This is the
-   "watermark" use of the logo.
+   sitting behind the content inside the card. Sized per-moment
+   via WATERMARK_SIZE_BY_MODE. It only breathes via opacity/scale
+   (no rotation) so its center never drifts.
    ------------------------------------------------------------ */
-function LogoWatermark({ size = 260 }) {
+function LogoWatermark({ size = 320 }) {
   return (
     <img
       src={LOGO_SRC}
@@ -251,22 +296,33 @@ function StumpsShatter() {
   );
 }
 
-// trophy pop-in. Just the trophy/logo and a simple pulsing ring —
-// no ray burst, no crescent arc behind it.
+// Trophy pop-in. A double ring (soft accent-colored outer glow ring +
+// crisp white inner ring) sized to snugly hug the team logo. Both
+// rings are anchored to the exact same center point as the logo via
+// top:50%/left:50% + transform, and that centering transform is baked
+// into the pulse keyframes too, so the ring can never drift off-axis
+// while it animates.
 function TrophyRise({ cfg, logoUrl }) {
   return (
-    <div className="mk-trophy-wrap relative flex flex-col items-center">
-      <span className="mk-trophy-ring" style={{ borderColor: "#ffffff", boxShadow: `0 0 26px ${cfg.glow}` }} />
+    <div className="mk-trophy-wrap relative flex items-center justify-center" style={{ width: 210, height: 210 }}>
+      <span
+        className="mk-trophy-ring mk-trophy-ring-outer absolute"
+        style={{ top: "50%", left: "50%", borderColor: cfg.accent, boxShadow: `0 0 34px ${cfg.glow}` }}
+      />
+      <span
+        className="mk-trophy-ring mk-trophy-ring-inner absolute"
+        style={{ top: "50%", left: "50%", borderColor: "#ffffff" }}
+      />
       {logoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={logoUrl}
           alt=""
           className="rounded-full object-cover relative z-10"
-          style={{ width: 132, height: 132, border: "3px solid #ffffff", boxShadow: `0 0 24px ${cfg.glow}` }}
+          style={{ width: 178, height: 178, border: "4px solid #ffffff", boxShadow: `0 0 28px ${cfg.glow}` }}
         />
       ) : (
-        <span className="relative z-10" style={{ fontSize: 108 }}>
+        <span className="relative z-10" style={{ fontSize: 140 }}>
           🏆
         </span>
       )}
@@ -436,34 +492,44 @@ function computeHeadlineFontSize(label) {
     if (longest <= 13) return "clamp(1.5rem, 5.2vw, 3.4rem)";
     return "clamp(1.1rem, 4vw, 2.4rem)";
   }
-  if (longest <= 6) return "clamp(1.7rem, 5.6vw, 3.6rem)";
-  if (longest <= 9) return "clamp(1.4rem, 4.4vw, 2.8rem)";
-  if (longest <= 13) return "clamp(1.05rem, 3.4vw, 2.1rem)";
-  return "clamp(0.85rem, 2.6vw, 1.6rem)";
+  // Multi-word labels (team names on the match-won screen are almost
+  // always this case) get noticeably bigger clamps so they read
+  // clearly instead of shrinking away.
+  if (longest <= 6) return "clamp(2.4rem, 7.6vw, 4.8rem)";
+  if (longest <= 9) return "clamp(2rem, 6.4vw, 4rem)";
+  if (longest <= 13) return "clamp(1.6rem, 5.4vw, 3.2rem)";
+  return "clamp(1.3rem, 4.2vw, 2.4rem)";
 }
 
-// Flat, clean broadcast-style headline: one word per line, a single
-// crisp drop shadow for legibility against the card, whole-word
-// slide/scale-in instead of letter-by-letter theatrics.
+// Flat, clean broadcast-style headline. Words now wrap naturally in a
+// centered row (instead of being forced one-word-per-line), with
+// tighter tracking, a thin dark stroke, and a two-layer drop shadow
+// for depth — this is what fixes the blocky/"ugly" stacked look on
+// long multi-word team names.
 function BigText({ cfg, footer }) {
   const words = cfg.label.split(" ").filter(Boolean);
   const wordClass = cfg.dropText ? "mk-word-drop" : "mk-word";
   const fontSize = computeHeadlineFontSize(cfg.label);
   return (
     <div className="mk-text-wrap relative z-10 flex flex-col items-center" style={{ width: "100%", boxSizing: "border-box" }}>
-      <div className="flex flex-col items-center" style={{ width: "100%", minWidth: 0, rowGap: "0.03em" }}>
+      <div
+        className="flex flex-wrap items-center justify-center"
+        style={{ width: "100%", minWidth: 0, rowGap: "0.08em", columnGap: "0.32em" }}
+      >
         {words.map((word, wi) => (
           <span
             key={wi}
             className={`${wordClass} font-heading font-black uppercase`}
             style={{
               fontSize,
-              lineHeight: 0.95,
+              lineHeight: 1,
+              letterSpacing: "-0.01em",
               backgroundImage: cfg.gradient,
               WebkitBackgroundClip: "text",
               backgroundClip: "text",
               color: "transparent",
-              filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.5))",
+              WebkitTextStroke: "1.5px rgba(5,7,12,0.35)",
+              filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.5)) drop-shadow(0 10px 20px rgba(0,0,0,0.4))",
               animationDelay: `${0.22 + wi * 0.06}s`,
             }}
           >
@@ -491,7 +557,7 @@ function BigText({ cfg, footer }) {
 const ICON_SLOT_HEIGHT = {
   ball: 96,
   stumps: 120,
-  trophy: 160,
+  trophy: 220,
   milestone: 150,
   shield: 130,
 };
@@ -662,7 +728,7 @@ export default function MatchMomentOverlay({
               }}
             >
               <span className="mk-panel-sheen" aria-hidden="true" />
-              <LogoWatermark size={cfg.mode === "trophy" ? 300 : 240} />
+              <LogoWatermark size={WATERMARK_SIZE_BY_MODE[cfg.mode] ?? 320} />
 
               <div className="mk-content relative z-10 flex flex-col items-center justify-center" style={{ gap: 6 }}>
                 <IconSlot minHeight={ICON_SLOT_HEIGHT[cfg.mode]}>{icon}</IconSlot>
@@ -764,20 +830,23 @@ export default function MatchMomentOverlay({
           100% { transform: translateX(130%) rotate(8deg); }
         }
 
-        /* ---------------- logo watermark ---------------- */
+        /* ---------------- logo watermark ----------------
+           Center-anchored only via translate(-50%,-50%); the
+           breathing animation only touches opacity/scale so the
+           watermark can never drift off its center point. */
         .mk-watermark {
-          opacity: 0.13;
+          opacity: 0.15;
           filter: grayscale(0.15) brightness(1.5);
-          transform: translate(-50%, -50%) scale(0.9) rotate(-4deg);
+          transform: translate(-50%, -50%) scale(0.9);
           animation: mkWatermarkIn 0.6s ease-out 0.05s both, mkWatermarkFloat 6s ease-in-out 0.6s infinite;
         }
         @keyframes mkWatermarkIn {
-          from { opacity: 0; transform: translate(-50%, -50%) scale(0.75) rotate(-4deg); }
-          to { opacity: 0.13; transform: translate(-50%, -50%) scale(0.9) rotate(-4deg); }
+          from { opacity: 0; transform: translate(-50%, -50%) scale(0.75); }
+          to { opacity: 0.15; transform: translate(-50%, -50%) scale(0.9); }
         }
         @keyframes mkWatermarkFloat {
-          0%, 100% { transform: translate(-50%, -50%) scale(0.9) rotate(-4deg); opacity: 0.11; }
-          50% { transform: translate(-50%, -50%) scale(0.96) rotate(2deg); opacity: 0.18; }
+          0%, 100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.13; }
+          50% { transform: translate(-50%, -50%) scale(0.96); opacity: 0.2; }
         }
 
         /* ---------------- logo badge ---------------- */
@@ -834,18 +903,34 @@ export default function MatchMomentOverlay({
           70% { opacity: 1; transform: translateY(-3px) scale(1.05); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
+        /* Both rings are anchored to the exact same center point as
+           the team logo (top:50%/left:50% + this base translate).
+           The pulse keyframes below re-declare that same translate
+           alongside the scale, so the ring can scale up/down without
+           ever drifting off the logo's center. */
         .mk-trophy-ring {
-          position: absolute;
-          width: 158px;
-          height: 158px;
           border-radius: 999px;
-          border: 2px solid;
-          opacity: 0.55;
+          border-style: solid;
+          box-sizing: border-box;
+          transform: translate(-50%, -50%);
+        }
+        .mk-trophy-ring-outer {
+          width: 210px;
+          height: 210px;
+          border-width: 2px;
+          opacity: 0.5;
           animation: mkTrophyRingPulse 1.8s ease-in-out infinite;
         }
+        .mk-trophy-ring-inner {
+          width: 190px;
+          height: 190px;
+          border-width: 2px;
+          opacity: 0.9;
+          animation: mkTrophyRingPulse 1.8s ease-in-out 0.2s infinite;
+        }
         @keyframes mkTrophyRingPulse {
-          0%, 100% { transform: scale(1); opacity: 0.4; }
-          50% { transform: scale(1.06); opacity: 0.7; }
+          0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
+          50% { transform: translate(-50%, -50%) scale(1.045); opacity: 0.75; }
         }
         .mk-milestone-wrap {
           opacity: 0;
@@ -894,12 +979,13 @@ export default function MatchMomentOverlay({
         }
         .mk-pill {
           display: inline-block;
-          padding: 0.42em 1.4em;
+          padding: 0.48em 1.6em;
           border-radius: 999px;
           background: rgba(5, 7, 12, 0.4);
           border: 1px solid rgba(255, 255, 255, 0.5);
           color: #ffffff;
-          font-size: clamp(0.66rem, 1.3vw, 0.88rem);
+          font-size: clamp(0.74rem, 1.5vw, 1rem);
+          letter-spacing: 0.28em;
         }
         .mk-footer-line {
           opacity: 0;
@@ -933,7 +1019,7 @@ export default function MatchMomentOverlay({
           100% { opacity: 0.9; transform: translate(var(--drift), 110vh) rotate(var(--spin)); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .mk-wrap, .mk-panel, .mk-panel-sheen, .mk-watermark, .mk-word, .mk-word-drop, .mk-pill-slot, .mk-footer-line, .mk-particle, .mk-firework-spark, .mk-confetti, .mk-stump, .mk-trophy-wrap, .mk-trophy-ring, .mk-milestone-wrap, .mk-shield-wrap, .mk-logo-slot, .mk-logo-badge {
+          .mk-wrap, .mk-panel, .mk-panel-sheen, .mk-watermark, .mk-word, .mk-word-drop, .mk-pill-slot, .mk-footer-line, .mk-particle, .mk-firework-spark, .mk-confetti, .mk-stump, .mk-trophy-wrap, .mk-trophy-ring, .mk-trophy-ring-outer, .mk-trophy-ring-inner, .mk-milestone-wrap, .mk-shield-wrap, .mk-logo-slot, .mk-logo-badge {
             animation-duration: 1ms !important;
             animation-delay: 0ms !important;
           }
