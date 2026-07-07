@@ -7,6 +7,7 @@ import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
+import { ChevronDown } from "lucide-react";
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
 const emptyTeam = () => ({
@@ -513,129 +514,264 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
             <ProgramMonitor overlayUrl={overlayUrl} />
 
-            <Section title="Moments" description="Fire the graphic the instant it happens on the ball.">
-              <div className="flex flex-col gap-3">
-                <p className="text-[10px] leading-snug" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-                  Four, Six, Fifty and Hundred now also fire automatically from the ball pad in the Scorer panel — these buttons are
-                  still here for manual/backup firing.
-                </p>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <ActionButton label="Four" onClick={() => fireBoundaryMomentFromPanel("four")} />
-                  <ActionButton label="Six" onClick={() => fireBoundaryMomentFromPanel("six")} />
-                  <ActionButton
-                    label="Wicket"
-                    danger
-                    active={showWicketForm}
-                    onClick={() => setShowWicketForm((v) => !v)}
-                  />
-                  <ActionButton label="Fifty" onClick={() => fireMilestoneMomentFromPanel("fifty")} />
-                </div>
-                <ActionButton full label="Hundred" onClick={() => fireMilestoneMomentFromPanel("hundred")} />
-
-                <div className="flex flex-col gap-2 pt-1">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
-                    Fifty / Hundred for
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <BatterPickerButton
-                      batter={liveState.striker}
-                      label="Striker"
-                      selected={milestoneBatter === "striker"}
-                      onClick={() => setMilestoneBatter("striker")}
-                    />
-                    <BatterPickerButton
-                      batter={liveState.nonStriker}
-                      label="Non-Striker"
-                      selected={milestoneBatter === "nonStriker"}
-                      onClick={() => setMilestoneBatter("nonStriker")}
-                    />
-                  </div>
-                </div>
-
-                {showWicketForm && (
-                  <div
-                    className="flex flex-col gap-3 p-4 rounded-lg mt-1"
-                    style={{ background: "var(--color-error-container)", border: "1px solid rgba(255,180,171,0.25)" }}
+              <Section
+                title="Moments"
+                description="Fire the graphic the instant it happens on the ball."
+              >
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowMoments((v) => !v)}
+                    className="flex items-center justify-between w-full rounded-lg px-3 py-2 transition-colors"
+                    style={{
+                      background: "var(--color-surface-container-low)",
+                      border: "1px solid var(--color-border-overlay)",
+                    }}
                   >
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
-                      Wicket Detail
+                    <span
+                      className="text-[11px] font-black uppercase tracking-widest"
+                      style={{ fontFamily: "var(--font-label-mono)" }}
+                    >
+                      Show Moments Controls
                     </span>
 
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
-                        Batsman Out
-                      </span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <BatterPickerButton
-                          batter={liveState.striker}
-                          label="Striker"
-                          selected={wicketDraft.batsmanOut === "striker"}
-                          onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))}
+                    <ChevronDown
+                      size={18}
+                      className={`transition-transform duration-200 ${
+                        showMoments ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+
+                  {showMoments && (
+                    <>
+                      <p
+                        className="text-[10px] leading-snug"
+                        style={{
+                          color: "var(--color-outline)",
+                          fontFamily: "var(--font-body-md)",
+                        }}
+                      >
+                        Four, Six, Fifty and Hundred now also fire automatically from the
+                        ball pad in the Scorer panel — these buttons are still here for
+                        manual/backup firing.
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <ActionButton
+                          label="Four"
+                          onClick={() => fireBoundaryMomentFromPanel("four")}
                         />
-                        <BatterPickerButton
-                          batter={liveState.nonStriker}
-                          label="Non-Striker"
-                          selected={wicketDraft.batsmanOut === "nonStriker"}
-                          onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))}
+
+                        <ActionButton
+                          label="Six"
+                          onClick={() => fireBoundaryMomentFromPanel("six")}
+                        />
+
+                        <ActionButton
+                          label="Wicket"
+                          danger
+                          active={showWicketForm}
+                          onClick={() => setShowWicketForm((v) => !v)}
+                        />
+
+                        <ActionButton
+                          label="Fifty"
+                          onClick={() => fireMilestoneMomentFromPanel("fifty")}
                         />
                       </div>
-                    </div>
 
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
-                        Dismissal
-                      </span>
-                      <select
-                        value={wicketDraft.dismissalType}
-                        onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value as WicketDraft["dismissalType"] }))}
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                        style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)" }}
-                      >
-                        <option value="bowled">Bowled</option>
-                        <option value="caught">Caught</option>
-                        <option value="lbw">LBW</option>
-                        <option value="runOut">Run Out</option>
-                        <option value="stumped">Stumped</option>
-                        <option value="hitWicket">Hit Wicket</option>
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
-                        Fielder (if any)
-                      </span>
-                      <input
-                        value={wicketDraft.fielder}
-                        onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
-                        placeholder="Fielder name"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                        style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)" }}
+                      <ActionButton
+                        full
+                        label="Hundred"
+                        onClick={() => fireMilestoneMomentFromPanel("hundred")}
                       />
-                    </div>
 
-                    <p className="text-[10px]" style={{ color: "var(--color-outline)" }}>
-                      Bowler pulled automatically from Live State: {liveState.bowler.name || "—"}
-                    </p>
+                      <div className="flex flex-col gap-2 pt-1">
+                        <span
+                          className="text-[9px] font-bold uppercase tracking-widest"
+                          style={{
+                            fontFamily: "var(--font-label-mono)",
+                            color: "var(--color-outline)",
+                          }}
+                        >
+                          Fifty / Hundred for
+                        </span>
 
-                    <button
-                      onClick={fireWicketMoment}
-                      className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
-                      style={{
-                        fontFamily: "var(--font-label-mono)",
-                        background: "var(--color-error)",
-                        color: "var(--color-on-primary)",
-                      }}
-                    >
-                      Fire Wicket
-                    </button>
-                  </div>
-                )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <BatterPickerButton
+                            batter={liveState.striker}
+                            label="Striker"
+                            selected={milestoneBatter === "striker"}
+                            onClick={() => setMilestoneBatter("striker")}
+                          />
 
-                <p className="text-[10px] pt-1" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-                  Milestone and wicket graphics auto-hide after a few seconds — no need to turn them off.
-                </p>
-              </div>
-            </Section>
+                          <BatterPickerButton
+                            batter={liveState.nonStriker}
+                            label="Non-Striker"
+                            selected={milestoneBatter === "nonStriker"}
+                            onClick={() => setMilestoneBatter("nonStriker")}
+                          />
+                        </div>
+                      </div>
+
+                      {showWicketForm && (
+                        <div
+                          className="flex flex-col gap-3 p-4 rounded-lg mt-1"
+                          style={{
+                            background: "var(--color-error-container)",
+                            border: "1px solid rgba(255,180,171,0.25)",
+                          }}
+                        >
+                          <span
+                            className="text-[10px] font-black uppercase tracking-widest"
+                            style={{
+                              fontFamily: "var(--font-label-mono)",
+                              color: "var(--color-error)",
+                            }}
+                          >
+                            Wicket Detail
+                          </span>
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Batsman Out
+                            </span>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <BatterPickerButton
+                                batter={liveState.striker}
+                                label="Striker"
+                                selected={wicketDraft.batsmanOut === "striker"}
+                                onClick={() =>
+                                  setWicketDraft((p) => ({
+                                    ...p,
+                                    batsmanOut: "striker",
+                                  }))
+                                }
+                              />
+
+                              <BatterPickerButton
+                                batter={liveState.nonStriker}
+                                label="Non-Striker"
+                                selected={wicketDraft.batsmanOut === "nonStriker"}
+                                onClick={() =>
+                                  setWicketDraft((p) => ({
+                                    ...p,
+                                    batsmanOut: "nonStriker",
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Dismissal
+                            </span>
+
+                            <select
+                              value={wicketDraft.dismissalType}
+                              onChange={(e) =>
+                                setWicketDraft((p) => ({
+                                  ...p,
+                                  dismissalType:
+                                    e.target.value as WicketDraft["dismissalType"],
+                                }))
+                              }
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                              style={{
+                                background: "var(--color-surface-container-low)",
+                                border: "1px solid var(--color-border-overlay)",
+                                color: "var(--color-on-surface)",
+                              }}
+                            >
+                              <option value="bowled">Bowled</option>
+                              <option value="caught">Caught</option>
+                              <option value="lbw">LBW</option>
+                              <option value="runOut">Run Out</option>
+                              <option value="stumped">Stumped</option>
+                              <option value="hitWicket">Hit Wicket</option>
+                            </select>
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest"
+                              style={{
+                                fontFamily: "var(--font-label-mono)",
+                                color: "var(--color-on-surface-variant)",
+                              }}
+                            >
+                              Fielder (if any)
+                            </span>
+
+                            <input
+                              value={wicketDraft.fielder}
+                              onChange={(e) =>
+                                setWicketDraft((p) => ({
+                                  ...p,
+                                  fielder: e.target.value,
+                                }))
+                              }
+                              placeholder="Fielder name"
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                              style={{
+                                background: "var(--color-surface-container-low)",
+                                border: "1px solid var(--color-border-overlay)",
+                                color: "var(--color-on-surface)",
+                              }}
+                            />
+                          </div>
+
+                          <p
+                            className="text-[10px]"
+                            style={{ color: "var(--color-outline)" }}
+                          >
+                            Bowler pulled automatically from Live State:{" "}
+                            {liveState.bowler.name || "—"}
+                          </p>
+
+                          <button
+                            onClick={fireWicketMoment}
+                            className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+                            style={{
+                              fontFamily: "var(--font-label-mono)",
+                              background: "var(--color-error)",
+                              color: "var(--color-on-primary)",
+                            }}
+                          >
+                            Fire Wicket
+                          </button>
+                        </div>
+                      )}
+
+                      <p
+                        className="text-[10px] pt-1"
+                        style={{
+                          color: "var(--color-outline)",
+                          fontFamily: "var(--font-body-md)",
+                        }}
+                      >
+                        Milestone and wicket graphics auto-hide after a few seconds — no need
+                        to turn them off.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </Section>
 
             <OnAirChannels ref={onAirRef} fire={fire} />
 
