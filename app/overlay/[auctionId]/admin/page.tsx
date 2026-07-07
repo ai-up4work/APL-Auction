@@ -143,6 +143,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [wicketDraft, setWicketDraft] = useState<WicketDraft>(emptyWicketDraft);
   const [showWicketForm, setShowWicketForm] = useState(false);
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
+  const [showMoments, setShowMoments] = useState(false);
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 

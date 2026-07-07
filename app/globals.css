@@ -445,3 +445,108 @@
   pointer-events: none;
   z-index: 0;
 }
+
+.ball-controls-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.ball-controls-extras {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ball-controls-label {
+  font-family: var(--font-label-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-outline);
+}
+
+.free-hit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-overlay);
+  background: var(--color-surface-container-low);
+  transition: all 160ms ease;
+  flex-shrink: 0;
+}
+
+.free-hit-toggle-track {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-surface-container-high);
+  transition: background 160ms ease;
+  flex-shrink: 0;
+}
+
+.free-hit-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-outline);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.free-hit-toggle-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+
+.free-hit-toggle-title {
+  font-family: var(--font-label-mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+}
+
+.free-hit-toggle-state {
+  font-family: var(--font-label-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-outline);
+}
+
+.free-hit-toggle.is-active {
+  background: rgba(96, 165, 250, 0.14);
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.free-hit-toggle.is-active .free-hit-toggle-track {
+  background: rgba(96, 165, 250, 0.35);
+}
+
+.free-hit-toggle.is-active .free-hit-toggle-thumb {
+  transform: translateX(12px);
+  background: #60a5fa;
+  box-shadow: 0 0 6px rgba(96, 165, 250, 0.7);
+  animation: freeHitPulse 1.6s ease-in-out infinite;
+}
+
+.free-hit-toggle.is-active .free-hit-toggle-title {
+  color: #60a5fa;
+}
+
+.free-hit-toggle.is-active .free-hit-toggle-state {
+  color: #60a5fa;
+}
