@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState } from "@/lib/overlayBus";
+import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot } from "@/lib/overlayBus";
 import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
 import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
@@ -135,11 +135,92 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
+  // refs mirroring the latest matchSetup/matchSetupCompleted/liveState.
+  // The bus-connection effect below only runs once per auctionId, so its
+  // closures would otherwise see stale values from the first render. These
+  // refs are how sendFullSnapshot() always reads the CURRENT state, however
+  // long the admin page has been open.
+  const matchSetupRef = useRef(matchSetup);
+  const matchSetupCompletedRef = useRef(matchSetupCompleted);
+  const liveStateRef = useRef(liveState);
+
+  useEffect(() => {
+    matchSetupRef.current = matchSetup;
+  }, [matchSetup]);
+
+  useEffect(() => {
+    matchSetupCompletedRef.current = matchSetupCompleted;
+  }, [matchSetupCompleted]);
+
+  useEffect(() => {
+    liveStateRef.current = liveState;
+  }, [liveState]);
+
+  // NEW — if a requestSync arrives before OnAirChannels has mounted (ref
+  // is still null), sendFullSnapshot() used to just `return` and silently
+  // drop it — no reply, no retry, no memory that anything was asked for.
+  // This is what caused "sometimes tournamentLogo/liveScoreBar/etc. just
+  // don't show up" even with the overlay-side retry loop in place: if
+  // every single retry attempt happened to land in the window before this
+  // ref existed, none of them ever got answered.
+  //
+  // Now we remember that a request came in while unready, and flush it the
+  // moment OnAirChannels actually mounts.
+  const pendingSyncRequestRef = useRef(false);
+
+  function fire(event: OverlayEvent, label: string) {
+    busRef.current?.send(event);
+    setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 12));
+  }
+
+  // replies to a receiver's "requestSync" with everything it needs to
+  // render the current picture in one shot: channel visibility, match setup
+  // (if pushed), and the live scoreboard state.
+  function sendFullSnapshot() {
+    const channels = onAirRef.current?.getVisibleSnapshot();
+    if (!channels) {
+      // CHANGED — remember instead of dropping. OnAirChannels isn't
+      // mounted yet; we'll answer as soon as it is (see the effect below).
+      pendingSyncRequestRef.current = true;
+      return;
+    }
+    const snapshot: SyncSnapshot = {
+      channels,
+      matchSetup: matchSetupRef.current,
+      matchSetupCompleted: matchSetupCompletedRef.current,
+      liveState: liveStateRef.current,
+    };
+    fire({ type: "syncSnapshot", data: snapshot }, "Sent full sync snapshot");
+  }
+
+  // NEW — flush any requestSync that arrived too early and got queued in
+  // pendingSyncRequestRef, the moment OnAirChannels becomes available.
+  // Cheap no-dep check on every render; only actually does anything on the
+  // render right after onAirRef.current first becomes non-null while a
+  // request is pending.
+  useEffect(() => {
+    if (onAirRef.current && pendingSyncRequestRef.current) {
+      pendingSyncRequestRef.current = false;
+      sendFullSnapshot();
+    }
+  });
+
   useEffect(() => {
     const bus = connectOverlayBus(auctionId);
     busRef.current = bus;
     bus.onReady(() => setConnected(true));
+
+    // a receiver (overlay page / Program Monitor iframe) asks for a
+    // snapshot the moment it connects or reconnects. This is the fix for
+    // "black screen after refresh" — respond immediately with everything.
+    const unsubscribe = bus.on((event) => {
+      if (event.type === "requestSync") {
+        sendFullSnapshot();
+      }
+    });
+
     return () => {
+      unsubscribe();
       bus.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,11 +255,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     window.localStorage.setItem(`overlay:${auctionId}:liveState`, JSON.stringify(liveState));
   }, [liveState, auctionId, liveHydrated]);
 
-  function fire(event: OverlayEvent, label: string) {
-    busRef.current?.send(event);
-    setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 12));
-  }
-
   // Match Setup / Live State / wicket detail aren't in the OverlayEvent
   // union yet — lib/overlayBus.ts needs "matchSetup" | "liveState" | "wicket"
   // added to it. Cast through `any` here so the admin panel can be built
@@ -204,10 +280,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }
 
   // ── Moments helpers ──────────────────────────────────────────────────
-  // Every moment also tells OnAirChannels to drop Points Table / Scorecard /
-  // Intro — those full-screen graphics shouldn't be up while a Four/Six/
-  // Wicket/Fifty/Hundred graphic fires over them. Stays off until the
-  // operator manually re-enables it (per the agreed rule).
   function fireBoundaryMoment(moment: "four" | "six") {
     const batter = liveState.striker;
     fireLoose(
@@ -259,7 +331,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
   return (
     <div className="min-h-screen w-full" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
-      {/* Background wash — consistent with the rest of the admin shell */}
       <div
         className="fixed inset-0 pointer-events-none"
         style={{
@@ -394,8 +465,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
           <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
             <ProgramMonitor overlayUrl={overlayUrl} />
 
-            {/* ── Moments — the buttons an operator reaches for the
-                 instant a ball happens, docked next to the picture ── */}
             <Section title="Moments" description="Fire the graphic the instant it happens on the ball.">
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-2.5">
@@ -516,12 +585,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               </div>
             </Section>
 
-            {/* ── On Air — now a self-contained component that owns its
-                 own suppression / mutex rules. Just feed it `fire` and a
-                 ref so Moments can tell it to drop the full-screen group. */}
             <OnAirChannels ref={onAirRef} fire={fire} />
 
-            {/* ── Event Log ──────────────────────────────────────────── */}
             <Section title="Event Log">
               <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
                 {log.length === 0 ? (

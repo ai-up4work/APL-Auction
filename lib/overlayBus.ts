@@ -12,8 +12,6 @@ export interface WeatherData {
 }
 
 // ── Match Setup (session-scoped, set once) ─────────────────────────────
-// A squad player as pulled from the (reused) auction database — includes
-// an image so the overlay/admin can render a face, not just a name.
 export interface SquadPlayer {
   id: string;
   name: string;
@@ -25,11 +23,8 @@ export interface TeamInfo {
   shortCode: string;
   color: string;
   logoUrl: string;
-  /** Plain name list — kept for backward compatibility with existing overlay renderers. */
   squad: string[];
-  /** Richer version of `squad`, with player id + photo, when sourced from the DB. */
   squadPlayers?: SquadPlayer[];
-  /** id of the `teams` row this side is bound to, if selected from the DB. */
   teamId?: string;
 }
 
@@ -54,7 +49,7 @@ export interface BatterState {
   balls: number;
   fours: number;
   sixes: number;
-  imageUrl?: string; // NEW — used by the striker/non-striker photo buttons
+  imageUrl?: string;
 }
 
 export interface BowlerState {
@@ -64,7 +59,7 @@ export interface BowlerState {
   maidens: number;
   runs: number;
   wickets: number;
-  imageUrl?: string; // NEW — carousel photo support
+  imageUrl?: string;
 }
 
 export interface PointsRow {
@@ -94,11 +89,40 @@ export interface MomentPayload {
   moment: "four" | "six" | "wicket" | "fifty" | "hundred";
   player?: string;
   score?: string;
-  // wicket-only fields:
   batsmanOut?: "striker" | "nonStriker";
   dismissalType?: DismissalType;
   bowler?: string;
   fielder?: string;
+}
+
+// ── On Air channel visibility snapshot ──────────────────────────────────
+// Mirrors the channel keys OnAirChannels.tsx owns. Kept here (not just in
+// that component) so both the admin page and any receiver can share one
+// canonical shape for "everything that's currently on".
+//
+// CHANGED — added `testBg`. It used to live entirely outside this type
+// (a lone useState in OnAirChannels, broadcast only as a one-off `testBg`
+// event), which meant it had no place to land in a syncSnapshot and could
+// never be restored on reconnect/refresh. It's now a first-class channel
+// here so it rides along with everything else.
+export interface ChannelVisibility {
+  weather: boolean;
+  liveScoreBar: boolean;
+  tournamentLogo: boolean;
+  pointsTable: boolean;
+  matchScorecard: boolean;
+  matchIntro: boolean;
+  matchBoundaries: boolean;
+  tournamentBoundaries: boolean;
+  testBg: boolean;
+}
+
+// ── Full state snapshot, sent in reply to a requestSync ───────────────
+export interface SyncSnapshot {
+  channels: ChannelVisibility;
+  matchSetup: MatchSetup;
+  matchSetupCompleted: boolean;
+  liveState: LiveState;
 }
 
 export type OverlayEvent =
@@ -114,7 +138,14 @@ export type OverlayEvent =
   | { type: "matchSetup"; data: MatchSetup }
   | { type: "liveState"; data: LiveState }
   | { type: "testBg"; show: boolean }
-  | { type: "clearAll" };
+  | { type: "clearAll" }
+  // a receiver (overlay page / Program Monitor iframe) broadcasts this the
+  // instant its channel becomes SUBSCRIBED, so it isn't stuck showing
+  // nothing after a fresh mount or reconnect.
+  | { type: "requestSync" }
+  // the admin page replies to requestSync with everything currently
+  // visible/live, in one shot, so a late joiner catches up immediately.
+  | { type: "syncSnapshot"; data: SyncSnapshot };
 
 type Handler = (event: OverlayEvent) => void;
 

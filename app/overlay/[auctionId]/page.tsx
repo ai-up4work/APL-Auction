@@ -2,7 +2,7 @@
 "use client";
 
 import React, { use, useEffect, useReducer, useRef } from "react";
-import { connectOverlayBus, type OverlayEvent, type WeatherData } from "@/lib/overlayBus";
+import { connectOverlayBus, type OverlayEvent, type WeatherData, type MatchSetup, type LiveState } from "@/lib/overlayBus";
 
 import WeatherCard from "@/components/overlays/WeatherCard";
 import MatchBoundaries from "@/components/overlays/MatchBoundaries";
@@ -22,6 +22,20 @@ const DEFAULT_WEATHER: WeatherData = {
   corner: "top-right",
 };
 
+// NEW — grace period after the channel reports SUBSCRIBED before we send
+// the first requestSync. Supabase Realtime broadcasts sent immediately on
+// "SUBSCRIBED" can get dropped because the subscription hasn't fully
+// propagated server-side yet — this gives both ends (this overlay AND the
+// admin tab, if it's also just reconnecting) a moment to actually settle
+// before anything gets fired.
+const INITIAL_SYNC_DELAY_MS = 600;
+
+// Retry tuning for requestSync (after the initial delay above). Keeps
+// retrying until an actual syncSnapshot comes back, up to MAX_SYNC_ATTEMPTS,
+// which also covers the admin's reply itself dropping.
+const SYNC_RETRY_MS = 800;
+const MAX_SYNC_ATTEMPTS = 6;
+
 interface OverlayState {
   weather: { show: boolean; data: WeatherData };
   matchBoundaries: { show: boolean; fours: number; sixes: number };
@@ -32,6 +46,9 @@ interface OverlayState {
   matchIntro: { show: boolean };
   tournamentLogo: { show: boolean };
   testBg: { show: boolean };
+  matchSetup: MatchSetup | null;
+  matchSetupCompleted: boolean;
+  liveState: LiveState | null;
 }
 
 const initialState: OverlayState = {
@@ -44,6 +61,9 @@ const initialState: OverlayState = {
   matchIntro: { show: false },
   tournamentLogo: { show: false },
   testBg: { show: false },
+  matchSetup: null,
+  matchSetupCompleted: false,
+  liveState: null,
 };
 
 function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
@@ -82,10 +102,29 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
       return { ...state, tournamentLogo: { show: event.show } };
     case "testBg":
       return { ...state, testBg: { show: event.show } };
+    case "matchSetup":
+      return { ...state, matchSetup: event.data, matchSetupCompleted: true };
+    case "liveState":
+      return { ...state, liveState: event.data };
+    case "syncSnapshot": {
+      const c = event.data.channels;
+      return {
+        ...state,
+        weather: { ...state.weather, show: c.weather },
+        matchBoundaries: { ...state.matchBoundaries, show: c.matchBoundaries },
+        tournamentBoundaries: { ...state.tournamentBoundaries, show: c.tournamentBoundaries },
+        liveScoreBar: { show: c.liveScoreBar },
+        tournamentLogo: { show: c.tournamentLogo },
+        pointsTable: { show: c.pointsTable },
+        matchScorecard: { show: c.matchScorecard },
+        matchIntro: { show: c.matchIntro },
+        testBg: { show: c.testBg },
+        matchSetup: event.data.matchSetupCompleted ? event.data.matchSetup : state.matchSetup,
+        matchSetupCompleted: event.data.matchSetupCompleted,
+        liveState: event.data.liveState,
+      };
+    }
     case "clearAll":
-      // Deliberately preserve testBg across clearAll — it's a dev/preview
-      // toggle, not a match overlay, so "clear everything" shouldn't yank
-      // the background out from under whoever's still testing layout.
       return { ...initialState, testBg: state.testBg };
     default:
       return state;
@@ -128,7 +167,50 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
     const bus = connectOverlayBus(auctionId);
     busRef.current = bus;
 
+    let synced = false;
+    let attempts = 0;
+    let startupTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setInterval> | null = null;
+
+    function stopRetrying() {
+      if (startupTimer) {
+        clearTimeout(startupTimer);
+        startupTimer = null;
+      }
+      if (retryTimer) {
+        clearInterval(retryTimer);
+        retryTimer = null;
+      }
+    }
+
+    function attemptSync() {
+      if (synced || attempts >= MAX_SYNC_ATTEMPTS) {
+        stopRetrying();
+        return;
+      }
+      attempts += 1;
+      bus.send({ type: "requestSync" });
+    }
+
+    bus.onReady(() => {
+      // CHANGED — instead of firing the first requestSync the instant
+      // "ready" flips true, wait INITIAL_SYNC_DELAY_MS first. This is the
+      // actual fix for the Supabase "broadcast right after SUBSCRIBED can
+      // get silently dropped" race, rather than just relying on retries to
+      // eventually land. The retry loop still starts after this delay, as
+      // a safety net for anything that drops afterward (e.g. the admin's
+      // reply, or the admin tab itself still connecting).
+      startupTimer = setTimeout(() => {
+        attemptSync();
+        retryTimer = setInterval(attemptSync, SYNC_RETRY_MS);
+      }, INITIAL_SYNC_DELAY_MS);
+    });
+
     const off = bus.on((event) => {
+      if (event.type === "syncSnapshot") {
+        synced = true;
+        stopRetrying();
+      }
       if (event.type === "moment") {
         (window as any).triggerBoundaryCelebration?.(event.moment);
         return;
@@ -138,6 +220,7 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
 
     return () => {
       off();
+      stopRetrying();
       bus.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

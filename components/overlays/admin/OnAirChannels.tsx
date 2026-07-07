@@ -2,17 +2,18 @@
 "use client";
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { OverlayEvent } from "@/lib/overlayBus";
+import type { ChannelVisibility, OverlayEvent } from "@/lib/overlayBus";
 import { Section, ChannelRow } from "./ui";
 
-// ── Channel groups — this is the single source of truth for the rules ──
-// Ambient: always want visible, default ON, individually toggleable.
-// Fullscreen: mutually exclusive, one at a time, suppresses Ambient while active.
-// Boundary: existing independent mutex pair, untouched by the new rules.
 const AMBIENT_CHANNELS = [
   { key: "weather", label: "Weather" },
   { key: "liveScoreBar", label: "Live Score Bar" },
   { key: "tournamentLogo", label: "Tournament Logo" },
+] as const;
+
+const BOUNDARY_CHANNELS = [
+  { key: "matchBoundaries", label: "Match Boundaries" },
+  { key: "tournamentBoundaries", label: "Tournament Boundaries" },
 ] as const;
 
 const FULLSCREEN_CHANNELS = [
@@ -21,56 +22,87 @@ const FULLSCREEN_CHANNELS = [
   { key: "matchIntro", label: "Match Intro" },
 ] as const;
 
-const BOUNDARY_CHANNELS = [
-  { key: "matchBoundaries", label: "Match Boundaries" },
-  { key: "tournamentBoundaries", label: "Tournament Boundaries" },
-] as const;
-
 type AmbientKey = (typeof AMBIENT_CHANNELS)[number]["key"];
-type FullscreenKey = (typeof FULLSCREEN_CHANNELS)[number]["key"];
 type BoundaryKey = (typeof BOUNDARY_CHANNELS)[number]["key"];
-type ChannelKey = AmbientKey | FullscreenKey | BoundaryKey;
+type FullscreenKey = (typeof FULLSCREEN_CHANNELS)[number]["key"];
 
-const ALL_CHANNELS = [...AMBIENT_CHANNELS, ...FULLSCREEN_CHANNELS, ...BOUNDARY_CHANNELS];
+// CHANGED — testBg is now a tracked channel key alongside everything else,
+// not a standalone useState. It's not Ambient/Boundary/Fullscreen — it's
+// its own category: never suppressed, never part of the mutex groups, but
+// still part of `on` so it flows through computeVisible()/getVisibleSnapshot()
+// and therefore through syncSnapshot on reconnect.
+type TestBgKey = "testBg";
+type ChannelKey = AmbientKey | BoundaryKey | FullscreenKey | TestBgKey;
+
+// the union of everything that can be suppressed by Fullscreen. Ambient and
+// Boundary are both suppressible; Fullscreen and testBg are not.
+type SuppressibleKey = AmbientKey | BoundaryKey;
+
+const ALL_CHANNELS = [
+  ...AMBIENT_CHANNELS,
+  ...BOUNDARY_CHANNELS,
+  ...FULLSCREEN_CHANNELS,
+  { key: "testBg" as const, label: "Test Background" },
+];
+const SUPPRESSIBLE_KEYS: SuppressibleKey[] = [...AMBIENT_CHANNELS.map((c) => c.key), ...BOUNDARY_CHANNELS.map((c) => c.key)];
 
 function initialOn(): Record<ChannelKey, boolean> {
   return {
     weather: true,
     liveScoreBar: true,
     tournamentLogo: true,
+    matchBoundaries: false,
+    tournamentBoundaries: false,
     pointsTable: false,
     matchScorecard: false,
     matchIntro: false,
+    testBg: false,
+  };
+}
+
+function initialSuppressed(): Record<SuppressibleKey, boolean> {
+  return {
+    weather: false,
+    liveScoreBar: false,
+    tournamentLogo: false,
     matchBoundaries: false,
     tournamentBoundaries: false,
   };
 }
 
-function computeVisible(on: Record<ChannelKey, boolean>, suppressed: Record<AmbientKey, boolean>) {
+// zeroes out Ambient and Boundary keys when suppressed. testBg is
+// deliberately excluded from SUPPRESSIBLE_KEYS, so it's untouched here —
+// a Fullscreen graphic going up shouldn't yank the practice footage out
+// from under a layout test.
+function computeVisible(on: Record<ChannelKey, boolean>, suppressed: Record<SuppressibleKey, boolean>) {
   const visible = { ...on };
-  (["weather", "liveScoreBar", "tournamentLogo"] as AmbientKey[]).forEach((k) => {
+  SUPPRESSIBLE_KEYS.forEach((k) => {
     if (suppressed[k]) visible[k] = false;
   });
   return visible;
 }
 
 export type OnAirChannelsHandle = {
-  /** Call this the instant a Moment (Four/Six/Wicket/Fifty/Hundred) fires. */
   notifyMomentFired: () => void;
+  getVisibleSnapshot: () => ChannelVisibility;
 };
 
 const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEvent, label: string) => void }>(
   function OnAirChannels({ fire }, ref) {
     const [on, setOn] = useState<Record<ChannelKey, boolean>>(initialOn);
-    const [suppressed, setSuppressed] = useState<Record<AmbientKey, boolean>>({
+    const [suppressed, setSuppressed] = useState<Record<SuppressibleKey, boolean>>(initialSuppressed);
+
+    const prevVisibleRef = useRef<Record<ChannelKey, boolean>>({
       weather: false,
       liveScoreBar: false,
       tournamentLogo: false,
+      matchBoundaries: false,
+      tournamentBoundaries: false,
+      pointsTable: false,
+      matchScorecard: false,
+      matchIntro: false,
+      testBg: false,
     });
-    const [testBgOn, setTestBgOn] = useState(false);
-
-    // ── Emit bus events only when *effective visible* state actually changes ──
-    const prevVisibleRef = useRef(computeVisible(initialOn(), { weather: false, liveScoreBar: false, tournamentLogo: false }));
 
     useEffect(() => {
       const visible = computeVisible(on, suppressed);
@@ -85,23 +117,32 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [on, suppressed]);
 
-    // ── Rule: any Fullscreen channel ON ⇒ suppress Ambient. All OFF ⇒ restore. ──
     useEffect(() => {
       const anyFullscreenOn = FULLSCREEN_CHANNELS.some((c) => on[c.key]);
       setSuppressed({
         weather: anyFullscreenOn,
         liveScoreBar: anyFullscreenOn,
         tournamentLogo: anyFullscreenOn,
+        matchBoundaries: anyFullscreenOn,
+        tournamentBoundaries: anyFullscreenOn,
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [on.pointsTable, on.matchScorecard, on.matchIntro]);
 
     function toggleAmbient(key: AmbientKey) {
-      if (suppressed[key]) return; // button is disabled in this state, but guard anyway
+      if (suppressed[key]) return;
       setOn((prev) => ({ ...prev, [key]: !prev[key] }));
     }
 
-    // ── Rule: Fullscreen channels are mutually exclusive ──
+    function toggleBoundary(key: BoundaryKey) {
+      if (suppressed[key]) return;
+      setOn((prev) => {
+        const turningOn = !prev[key];
+        const other: BoundaryKey = key === "matchBoundaries" ? "tournamentBoundaries" : "matchBoundaries";
+        return { ...prev, [key]: turningOn, [other]: turningOn ? false : prev[other] };
+      });
+    }
+
     function toggleFullscreen(key: FullscreenKey) {
       setOn((prev) => {
         const turningOn = !prev[key];
@@ -113,30 +154,33 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
       });
     }
 
-    function toggleBoundary(key: BoundaryKey) {
-      setOn((prev) => {
-        const turningOn = !prev[key];
-        const other: BoundaryKey = key === "matchBoundaries" ? "tournamentBoundaries" : "matchBoundaries";
-        return { ...prev, [key]: turningOn, [other]: turningOn ? false : prev[other] };
-      });
+    // CHANGED — testBg toggle now just flips `on.testBg` through the same
+    // setOn path as everything else, instead of a separate setTestBgOn +
+    // manual fire() call. The broadcast-on-change effect above now fires
+    // the testBg event automatically, same as any other channel.
+    function toggleTestBg() {
+      setOn((prev) => ({ ...prev, testBg: !prev.testBg }));
     }
 
-    // ── Rule: Moment fired ⇒ force Fullscreen group off, stays off until manual re-enable ──
     useImperativeHandle(ref, () => ({
       notifyMomentFired() {
         setOn((prev) => ({ ...prev, pointsTable: false, matchScorecard: false, matchIntro: false }));
       },
+      getVisibleSnapshot() {
+        return computeVisible(on, suppressed) as ChannelVisibility;
+      },
     }));
 
     function clearAll() {
-      setOn(initialOn());
+      // CHANGED — preserve testBg across clearAll, same rationale as
+      // before: it's a dev/preview toggle, not a match overlay, so
+      // "clear everything" shouldn't yank the background out from under
+      // whoever's still testing layout. Previously this lived as a
+      // separate `testBg: state.testBg` merge in the overlay page's
+      // reducer; now that testBg lives in `on`, it has to be preserved
+      // here at the source instead.
+      setOn((prev) => ({ ...initialOn(), testBg: prev.testBg }));
       fire({ type: "clearAll" } as OverlayEvent, "Cleared all overlays");
-    }
-
-    function toggleTestBg() {
-      const next = !testBgOn;
-      setTestBgOn(next);
-      fire({ type: "testBg", show: next } as OverlayEvent, `Test background ${next ? "on" : "off"}`);
     }
 
     const labelStyle: React.CSSProperties = {
@@ -170,9 +214,17 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mt-1">
+          <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={labelStyle}>
+            Boundaries · manual, one at a time
+          </span>
+          <div className="grid grid-cols-2 gap-2">
             {BOUNDARY_CHANNELS.map((c) => (
-              <ChannelRow key={c.key} label={c.label} on={on[c.key]} onToggle={() => toggleBoundary(c.key)} />
+              <ChannelRow
+                key={c.key}
+                label={c.label}
+                on={on[c.key] && !suppressed[c.key]}
+                onToggle={() => toggleBoundary(c.key)}
+              />
             ))}
           </div>
 
@@ -194,7 +246,9 @@ const OnAirChannels = forwardRef<OnAirChannelsHandle, { fire: (event: OverlayEve
 
           <div className="h-px my-1" style={{ background: "var(--color-outline-variant)" }} />
 
-          <ChannelRow label="Test Background" on={testBgOn} tone="blue" onToggle={toggleTestBg} />
+          {/* CHANGED — reads/writes `on.testBg` now instead of a separate
+              testBgOn useState. */}
+          <ChannelRow label="Test Background" on={on.testBg} tone="blue" onToggle={toggleTestBg} />
           <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
             Sample footage for layout testing — off before going live.
           </p>
