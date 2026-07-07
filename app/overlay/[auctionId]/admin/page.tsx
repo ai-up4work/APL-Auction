@@ -472,26 +472,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
             className="w-10 h-[3px] rounded-full"
             style={{ background: "linear-gradient(90deg, transparent, var(--color-theme-orange), transparent)" }}
           />
-
-          <div className="flex items-center gap-3 flex-wrap justify-center">
-            {scoreIsLive && (
-              <div
-                className="flex items-baseline gap-2.5 px-4 py-2 rounded-xl"
-                style={{ background: "rgba(201,151,31,0.06)", border: "1px solid rgba(201,151,31,0.2)" }}
-              >
-                <span style={{ fontFamily: "var(--font-label-mono)", fontWeight: 700, fontSize: "18px", color: "var(--color-theme-orange)" }}>
-                  {liveState.score.runs}
-                  <span style={{ opacity: 0.6, fontSize: "14px" }}>/{liveState.score.wickets}</span>
-                </span>
-                <span
-                  className="text-[10px] uppercase tracking-wide whitespace-nowrap"
-                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}
-                >
-                  {liveState.score.overs}.{liveState.score.balls} ov · RR {runRate}
-                </span>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* ── Desk — scoring flow left, monitor + fast-fire right ────── */}
