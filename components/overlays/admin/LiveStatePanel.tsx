@@ -746,7 +746,7 @@ export default function LiveStatePanel({
             )}
             {onRestartMatch && (
               <SmallButton onClick={() => setShowRestartConfirm(true)} style={{ color: "var(--color-theme-orange)" }}>
-                🔁 Restart Match (Same Teams)
+                ⇋ Restart Match (Same Teams)
               </SmallButton>
             )}
           </div>
