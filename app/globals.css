@@ -419,3 +419,29 @@
   font-size: 11px;
   flex-shrink: 0;
 }
+
+.tally {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-outline); /* default/disconnected state */
+  flex-shrink: 0;
+}
+
+@keyframes connPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.team-card-watermark {
+  position: absolute;
+  inset: 0;
+  background-size: contain;
+  background-position: center right -10px;
+  background-repeat: no-repeat;
+  opacity: 0.18;              /* was 0.07 */
+  filter: grayscale(15%);
+  pointer-events: none;
+  z-index: 0;
+}

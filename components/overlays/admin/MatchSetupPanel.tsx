@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabse";
 import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
 import { ImageUploader } from "./ImageUploader";
+import { DrawerSection, Eyebrow, FieldLabel, Input, TextField, SelectField, ColorField, LinkBtn, SmallButton, PrimaryButton, StatusPill } from "./ui";
 
 // ── Roster source ────────────────────────────────────────────────────
 interface RosterRow {
@@ -135,6 +136,17 @@ function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlaye
   return rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined }));
 }
 
+function MutedNote({ tone = "neutral", children }: { tone?: "neutral" | "warning"; children: React.ReactNode }) {
+  return (
+    <p
+      className="text-[10px]"
+      style={{ fontFamily: "var(--font-label-mono)", color: tone === "warning" ? "var(--color-warning)" : "var(--color-outline)" }}
+    >
+      {children}
+    </p>
+  );
+}
+
 // ── DB team picker ────────────────────────────────────────────────────
 function TeamDbSelect({
   teamsState,
@@ -148,21 +160,13 @@ function TeamDbSelect({
   onApply: (patch: Partial<TeamInfo>) => void;
 }) {
   if (teamsState.status === "loading") {
-    return <p className="font-mono-geist text-[10px] text-white/30">Loading teams…</p>;
+    return <MutedNote>Loading teams…</MutedNote>;
   }
   if (teamsState.status === "error") {
-    return (
-      <p className="font-mono-geist text-[10px] text-amber-400/70">
-        Couldn&apos;t reach the teams table — fill in details manually.
-      </p>
-    );
+    return <MutedNote tone="warning">Couldn&apos;t reach the teams table — fill in details manually.</MutedNote>;
   }
   if (teamsState.status === "empty") {
-    return (
-      <p className="font-mono-geist text-[10px] text-white/30">
-        No teams found for this auction — fill in details manually.
-      </p>
-    );
+    return <MutedNote>No teams found for this auction — fill in details manually.</MutedNote>;
   }
 
   const options = teamsState.teams.filter((t) => t.id !== excludeTeamId);
@@ -181,9 +185,7 @@ function TeamDbSelect({
           shortCode: team.code,
           color: team.color,
           logoUrl: team.logo ?? "",
-          ...(squadPlayers.length
-            ? { squadPlayers, squad: squadPlayers.map((p) => p.name) }
-            : {}),
+          ...(squadPlayers.length ? { squadPlayers, squad: squadPlayers.map((p) => p.name) } : {}),
         });
         e.target.value = "";
       }}
@@ -211,10 +213,7 @@ function TeamRosterPicker({
   roster: RosterState;
 }) {
   const [manualName, setManualName] = useState("");
-  const selectedIds = useMemo(
-    () => new Set((team.squadPlayers ?? []).map((p) => p.id)),
-    [team.squadPlayers]
-  );
+  const selectedIds = useMemo(() => new Set((team.squadPlayers ?? []).map((p) => p.id)), [team.squadPlayers]);
 
   // Only THIS team's roster rows — not every team's.
   const teamRosterRows = useMemo(() => {
@@ -257,55 +256,35 @@ function TeamRosterPicker({
   }
 
   return (
-    <div className="field-col">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="field-label">Squad ({selectedIds.size})</span>
-        <div className="flex items-center gap-2">
+        <FieldLabel>Squad ({selectedIds.size})</FieldLabel>
+        <div className="flex items-center gap-3">
           {team.teamId && roster.status === "ready" && (
-            <button
-              type="button"
-              className="text-link-btn"
-              onClick={reloadFromBoundTeam}
-              title="Reload full squad from roster for the bound team"
-            >
+            <LinkBtn onClick={reloadFromBoundTeam} title="Reload full squad from roster for the bound team">
               Reload
-            </button>
+            </LinkBtn>
           )}
           {selectedIds.size > 0 && (
-            <button
-              type="button"
-              className="text-link-btn"
-              onClick={clearSquad}
-              title="Remove everyone from today's squad"
-            >
+            <LinkBtn danger onClick={clearSquad} title="Remove everyone from today's squad">
               Clear
-            </button>
+            </LinkBtn>
           )}
         </div>
       </div>
 
-      {roster.status === "loading" && (
-        <p className="font-mono-geist text-[10px] text-white/30">Loading roster…</p>
-      )}
-      {roster.status === "error" && (
-        <p className="font-mono-geist text-[10px] text-amber-400/70">
-          Couldn&apos;t reach the roster table — add players manually below.
-        </p>
-      )}
+      {roster.status === "loading" && <MutedNote>Loading roster…</MutedNote>}
+      {roster.status === "error" && <MutedNote tone="warning">Couldn&apos;t reach the roster table — add players manually below.</MutedNote>}
       {roster.status === "ready" && !team.teamId && (
-        <p className="font-mono-geist text-[10px] text-white/30">
-          Select a team above to load its roster, or add players manually below.
-        </p>
+        <MutedNote>Select a team above to load its roster, or add players manually below.</MutedNote>
       )}
       {roster.status === "ready" && team.teamId && teamRosterRows.length === 0 && (
-        <p className="font-mono-geist text-[10px] text-white/30">
-          No sold players found for this team yet — add players manually below.
-        </p>
+        <MutedNote>No sold players found for this team yet — add players manually below.</MutedNote>
       )}
 
       {/* ── Squad — single clickable carousel. Click a card to toggle it
            in/out of today's squad. IMPORTANT: this div must carry ONLY
-           the "squad-list" class — see the CSS comment for why. ────── */}
+           the "squad-list" class — see the globals.css comment for why. ── */}
       {(teamRosterRows.length > 0 || manualPlayers.length > 0) && (
         <div className="squad-list">
           {teamRosterRows.map((r) => {
@@ -315,9 +294,7 @@ function TeamRosterPicker({
                 type="button"
                 key={r.id}
                 className={`squad-chip ${checked ? "is-selected" : "is-unselected"}`}
-                onClick={() =>
-                  togglePlayer({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined })
-                }
+                onClick={() => togglePlayer({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined })}
                 title={checked ? "Remove from today's squad" : "Add to today's squad"}
               >
                 {checked && <span className="squad-check">✓</span>}
@@ -336,12 +313,7 @@ function TeamRosterPicker({
 
           {manualPlayers.map((p) => (
             <div key={p.id} className="squad-chip is-selected">
-              <button
-                type="button"
-                className="squad-remove"
-                onClick={() => removeManual(p.id)}
-                title="Remove from today's squad"
-              >
+              <button type="button" className="squad-remove" onClick={() => removeManual(p.id)} title="Remove from today's squad">
                 ×
               </button>
               <span className="squad-avatar">
@@ -354,10 +326,9 @@ function TeamRosterPicker({
       )}
 
       <div className="flex gap-2">
-        <input
-          className="text-input"
+        <Input
           value={manualName}
-          onChange={(e) => setManualName(e.target.value)}
+          onChange={setManualName}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -366,42 +337,59 @@ function TeamRosterPicker({
           }}
           placeholder="Add a player by name…"
         />
-        <button type="button" className="fx-btn fx-toggle-off" style={{ flexShrink: 0 }} onClick={addManual}>
-          Add
-        </button>
+        <SmallButton onClick={addManual}>Add</SmallButton>
       </div>
     </div>
   );
 }
 
-// ── Logo uploader + remove control ───────────────────────────────────
-function LogoField({
-  label,
-  auctionId,
-  value,
-  onChange,
+// ── Locked summary strip — replaces the full form once pushed ────────
+// This is what "only the panels below matter now" looks like: one slim
+// line of context (teams, toss, venue) instead of the whole editor.
+function LockedSummaryBar({
+  matchSetup,
+  onEdit,
 }: {
-  label: string;
-  auctionId: string;
-  value: string;
-  onChange: (url: string) => void;
+  matchSetup: MatchSetup;
+  onEdit: () => void;
 }) {
+  const tossLine =
+    matchSetup.tossWinner && matchSetup.tossDecision
+      ? `${matchSetup.tossWinner === "A" ? matchSetup.teamA.shortCode || "Team A" : matchSetup.teamB.shortCode || "Team B"} won the toss, elected to ${
+          matchSetup.tossDecision === "bat" ? "bat" : "bowl"
+        }`
+      : null;
+
   return (
-    <div className="field-col">
-      <span className="field-label">{label}</span>
-      <div className="logo-field-row">
-        <ImageUploader auctionId={auctionId} kind="team" value={value} onChange={onChange} />
-        {value && (
-          <button
-            type="button"
-            className="icon-btn"
-            title="Remove image"
-            onClick={() => onChange("")}
-          >
-            ×
-          </button>
+    <div
+      className="rounded-xl px-5 py-3.5 flex items-center justify-between gap-4"
+      style={{
+        background: "var(--color-surface-glass)",
+        backdropFilter: "blur(24px)",
+        border: "1px solid var(--color-border-overlay)",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+      }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <StatusPill label="Match Setup · Locked" tone="orange" />
+        <span
+          className="text-[12px] font-bold truncate"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
+        >
+          {matchSetup.teamA.shortCode || matchSetup.teamA.name || "Team A"} vs {matchSetup.teamB.shortCode || matchSetup.teamB.name || "Team B"}
+        </span>
+        {matchSetup.venue && (
+          <span className="text-[11px] truncate hidden md:inline" style={{ color: "var(--color-on-surface-variant)" }}>
+            · {matchSetup.venue}
+          </span>
+        )}
+        {tossLine && (
+          <span className="text-[11px] truncate hidden lg:inline" style={{ color: "var(--color-outline)" }}>
+            · {tossLine}
+          </span>
         )}
       </div>
+      <SmallButton onClick={onEdit}>Edit</SmallButton>
     </div>
   );
 }
@@ -424,12 +412,34 @@ export default function MatchSetupPanel({
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);
 
+  // Once pushed, the whole panel collapses down to LockedSummaryBar so the
+  // Scorer / Live State panel below becomes the focus of the screen. `locked`
+  // starts in sync with `completed` (covers page refresh, where
+  // matchSetupCompleted is already true from persisted state).
+  const [locked, setLocked] = useState(completed);
+  useEffect(() => {
+    if (completed) setLocked(true);
+  }, [completed]);
+
+  const [drawerOpen, setDrawerOpen] = useState(true);
+
+  function handlePush() {
+    onPush();
+    setLocked(true);
+  }
+
+  function handleEdit() {
+    setLocked(false);
+    setDrawerOpen(true);
+  }
+
   function updateTeam(team: "teamA" | "teamB", patch: Partial<TeamInfo>) {
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   }
 
   useEffect(() => {
     if (roster.status !== "ready") return;
+    if (locked) return; // don't churn squad data on a panel the admin can't see/edit
 
     (["teamA", "teamB"] as const).forEach((teamKey) => {
       const team = matchSetup[teamKey];
@@ -449,207 +459,138 @@ export default function MatchSetupPanel({
       }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster.status]);
+  }, [roster.status, locked]);
+
+  // ── Locked → collapse to a slim summary bar, nothing else rendered ──
+  if (locked) {
+    return <LockedSummaryBar matchSetup={matchSetup} onEdit={handleEdit} />;
+  }
 
   return (
-    <details className="rack-panel p-5 drawer" open={!completed}>
-      <summary>
-        <div className="flex items-center gap-3">
-          <div className="eyebrow">1 · Match Setup</div>
-          <span className="font-mono-geist text-[9px] text-white/30 normal-case tracking-normal">
-            teams &amp; session · set once, then push
-          </span>
-          {completed && <span className="done-dot" title="Pushed" />}
-        </div>
-        <span className="drawer-chevron">▸</span>
-      </summary>
-
-      <div className="drawer-body flex flex-col gap-5">
+      <DrawerSection
+        step="1" title="Match Setup" description="Teams & session — set once, then push"
+        done={completed} open={drawerOpen} onOpenChange={setDrawerOpen} >
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="field-col">
-            <span className="field-label">Tournament</span>
-            <input
-              className="text-input"
-              value={matchSetup.tournamentName}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, tournamentName: e.target.value }))}
-              placeholder="e.g. Provincial T20 Cup"
-            />
-          </div>
-          <div className="field-col">
-            <span className="field-label">Season</span>
-            <input
-              className="text-input"
-              value={matchSetup.season}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, season: e.target.value }))}
-              placeholder="e.g. 2026"
-            />
-          </div>
-          <LogoField
-            label="Tournament Logo"
-            auctionId={auctionId}
-            value={matchSetup.tournamentLogoUrl}
-            onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
-          />
-          <div className="field-col">
-            <span className="field-label">Venue</span>
-            <input
-              className="text-input"
-              value={matchSetup.venue}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, venue: e.target.value }))}
-              placeholder="Ground name"
-            />
-          </div>
-          <div className="field-col">
-            <span className="field-label">Format</span>
-            <select
-              className="select-input"
-              value={matchSetup.format}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, format: e.target.value as MatchSetup["format"] }))}
-            >
-              <option value="T20">T20</option>
-              <option value="ODI">ODI</option>
-              <option value="Test">Test</option>
-            </select>
-          </div>
-          <div className="field-col">
-            <span className="field-label">Match Number</span>
-            <input
-              className="text-input"
-              value={matchSetup.matchNumber}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, matchNumber: e.target.value }))}
-              placeholder="e.g. Match 14"
-            />
-          </div>
-          <div className="field-col" style={{ gridColumn: "span 2" }}>
-            <span className="field-label">Match Title</span>
-            <input
-              className="text-input"
-              value={matchSetup.matchTitle}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, matchTitle: e.target.value }))}
-              placeholder="e.g. Semi-Final"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {(["teamA", "teamB"] as const).map((teamKey) => {
-            const team = matchSetup[teamKey];
-            const otherKey = teamKey === "teamA" ? "teamB" : "teamA";
-            return (
-              <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
-                {team.logoUrl && (
-                  <div
-                    className="team-card-watermark"
-                    style={{ backgroundImage: `url(${team.logoUrl})` }}
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="team-card-content">
-                  <div className="eyebrow">{teamKey === "teamA" ? "Team A" : "Team B"}</div>
-
-                  <TeamDbSelect
-                    teamsState={teamsState}
-                    roster={roster}
-                    excludeTeamId={matchSetup[otherKey].teamId}
-                    onApply={(patch) => updateTeam(teamKey, patch)}
-                  />
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="field-col">
-                      <span className="field-label">Name</span>
-                      <input
-                        className="text-input"
-                        value={team.name}
-                        onChange={(e) => updateTeam(teamKey, { name: e.target.value })}
-                        placeholder="Team name"
-                      />
-                    </div>
-                    <div className="field-col">
-                      <span className="field-label">Short Code</span>
-                      <input
-                        className="text-input"
-                        value={team.shortCode}
-                        onChange={(e) =>
-                          updateTeam(teamKey, { shortCode: e.target.value.toUpperCase() })
-                        }
-                        placeholder="e.g. CSK"
-                        maxLength={4}
-                      />
-                    </div>
-                    <div className="field-col">
-                      <span className="field-label">Color</span>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={team.color}
-                          onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
-                          style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: 6,
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            background: "none",
-                            padding: 0,
-                          }}
-                        />
-                        <input
-                          className="text-input"
-                          value={team.color}
-                          onChange={(e) => updateTeam(teamKey, { color: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                    <LogoField
-                      label="Logo"
-                      auctionId={auctionId}
-                      value={team.logoUrl}
-                      onChange={(url) => updateTeam(teamKey, { logoUrl: url })}
-                    />
-                  </div>
-
-                  <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="field-col toss-field">
-            <span className="field-label">Toss Winner</span>
-            <select
-              className="select-input"
-              value={matchSetup.tossWinner}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, tossWinner: e.target.value as MatchSetup["tossWinner"] }))}
-            >
-              <option value="">—</option>
-              <option value="A">{matchSetup.teamA.shortCode || "Team A"}</option>
-              <option value="B">{matchSetup.teamB.shortCode || "Team B"}</option>
-            </select>
-          </div>
-          <div className="field-col toss-field">
-            <span className="field-label">Toss Decision</span>
-            <select
-              className="select-input"
-              value={matchSetup.tossDecision}
-              onChange={(e) => setMatchSetup((p) => ({ ...p, tossDecision: e.target.value as MatchSetup["tossDecision"] }))}
-            >
-              <option value="">—</option>
-              <option value="bat">Elected to bat</option>
-              <option value="bowl">Elected to bowl</option>
-            </select>
-          </div>
-          <div className="flex-1" />
-          <button onClick={onPush} className="talk-btn" style={{ minWidth: 200 }}>
-            {pushLabel}
-          </button>
-        </div>
-        {!completed && (
-          <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">
-            Push once to unlock the preview link and live scoring below.
-          </p>
-        )}
+        <TextField
+          label="Tournament"
+          value={matchSetup.tournamentName}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, tournamentName: v }))}
+          placeholder="e.g. Provincial T20 Cup"
+        />
+        <TextField
+          label="Season"
+          value={matchSetup.season}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, season: v }))}
+          placeholder="e.g. 2026"
+        />
+        <ImageUploader
+          auctionId={auctionId}
+          kind="team"
+          value={matchSetup.tournamentLogoUrl}
+          onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
+          label="Tournament Logo"
+        />
+        <TextField
+          label="Venue"
+          value={matchSetup.venue}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
+          placeholder="Ground name"
+        />
+        <SelectField label="Format" value={matchSetup.format} onChange={(v) => setMatchSetup((p) => ({ ...p, format: v as MatchSetup["format"] }))}>
+          <option value="T20">T20</option>
+          <option value="ODI">ODI</option>
+          <option value="Test">Test</option>
+        </SelectField>
+        <TextField
+          label="Match Number"
+          value={matchSetup.matchNumber}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, matchNumber: v }))}
+          placeholder="e.g. Match 14"
+        />
+        <TextField
+          label="Match Title"
+          span={2}
+          value={matchSetup.matchTitle}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, matchTitle: v }))}
+          placeholder="e.g. Semi-Final"
+        />
       </div>
-    </details>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {(["teamA", "teamB"] as const).map((teamKey) => {
+          const team = matchSetup[teamKey];
+          const otherKey = teamKey === "teamA" ? "teamB" : "teamA";
+          return (
+            <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
+              {team.logoUrl && (
+                <div className="team-card-watermark" style={{ backgroundImage: `url(${team.logoUrl})` }} aria-hidden="true" />
+              )}
+              <div
+                className="team-card-content rounded-xl p-4"
+                style={{
+                  background: "var(--color-surface-container-low)",
+                  border: "1px solid var(--color-border-overlay)",
+                  WebkitMaskImage: "linear-gradient(to right, black 55%, transparent 100%)",
+                  maskImage: "linear-gradient(to right, black 55%, transparent 100%)",
+                }}
+              >
+                <Eyebrow color="var(--color-theme-orange)">{teamKey === "teamA" ? "Team A" : "Team B"}</Eyebrow>
+
+                <TeamDbSelect teamsState={teamsState} roster={roster} excludeTeamId={matchSetup[otherKey].teamId} onApply={(patch) => updateTeam(teamKey, patch)} />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <TextField label="Name" value={team.name} onChange={(v) => updateTeam(teamKey, { name: v })} placeholder="Team name" />
+                  <TextField
+                    label="Short Code"
+                    mono
+                    maxLength={4}
+                    value={team.shortCode}
+                    onChange={(v) => updateTeam(teamKey, { shortCode: v.toUpperCase() })}
+                    placeholder="e.g. CSK"
+                  />
+                  <ColorField label="Color" value={team.color} onChange={(v) => updateTeam(teamKey, { color: v })} />
+                  <ImageUploader auctionId={auctionId} kind="team" value={team.logoUrl} onChange={(url) => updateTeam(teamKey, { logoUrl: url })} label="Logo" />
+                </div>
+
+                <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-4 flex-wrap">
+        <SelectField
+          label="Toss Winner"
+          wrapperClassName="toss-field"
+          value={matchSetup.tossWinner}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, tossWinner: v as MatchSetup["tossWinner"] }))}
+        >
+          <option value="">—</option>
+          <option value="A">{matchSetup.teamA.shortCode || "Team A"}</option>
+          <option value="B">{matchSetup.teamB.shortCode || "Team B"}</option>
+        </SelectField>
+        <SelectField
+          label="Toss Decision"
+          wrapperClassName="toss-field"
+          value={matchSetup.tossDecision}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, tossDecision: v as MatchSetup["tossDecision"] }))}
+        >
+          <option value="">—</option>
+          <option value="bat">Elected to bat</option>
+          <option value="bowl">Elected to bowl</option>
+        </SelectField>
+        <div className="flex-1" />
+        <PrimaryButton onClick={handlePush} minWidth={200}>
+          {pushLabel}
+        </PrimaryButton>
+      </div>
+
+      {!completed && (
+        <p className="text-[9px] uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+          Push once to unlock the preview link and live scoring below.
+        </p>
+      )}
+    </DrawerSection>
   );
 }

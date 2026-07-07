@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { Section } from "./ui";
 
 export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
   const [copied, setCopied] = useState(false);
@@ -16,12 +17,9 @@ export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
       const scaleY = el.clientHeight / 1080;
       setPreviewScale(Math.min(scaleX, scaleY));
     }
-
     updateScale();
-
     const ro = new ResizeObserver(updateScale);
     if (monitorScreenRef.current) ro.observe(monitorScreenRef.current);
-
     window.addEventListener("resize", updateScale);
     return () => {
       ro.disconnect();
@@ -36,34 +34,14 @@ export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
   }
 
   return (
-    <>
-      {/* ── Source plate ─────────────────────────────────────────────── */}
-      <div className="rack-panel p-5 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <div className="eyebrow mb-1.5">2 · OBS Browser Source</div>
-          <code className="font-mono-geist text-xs text-theme-orange break-all">{overlayUrl || "…"}</code>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="eyebrow">1920×1080 · transparent bg</span>
-          <button onClick={copyUrl} className="talk-btn">
-            {copied ? "Copied ✓" : "Copy URL"}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Program monitor ──────────────────────────────────────────── */}
-      <div className="rack-panel p-5 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="eyebrow">Program Monitor</div>
-          <span className="eyebrow">scaled preview</span>
-        </div>
-        <div className="monitor-frame">
-          <div className="monitor-screen" ref={monitorScreenRef}>
-            <div className="monitor-corner tl" />
-            <div className="monitor-corner tr" />
-            <div className="monitor-corner bl" />
-            <div className="monitor-corner br" />
-            {overlayUrl && (
+    <Section title="Program Monitor" description="OBS browser source · 1920×1080 · transparent background">
+      <div className="flex flex-col gap-3">
+        <div
+          className="relative rounded-lg overflow-hidden"
+          style={{ background: "#000", aspectRatio: "16 / 9", border: "1px solid var(--color-border-overlay)" }}
+        >
+          <div ref={monitorScreenRef} className="w-full h-full flex items-center justify-center">
+            {overlayUrl ? (
               <iframe
                 src={overlayUrl}
                 title="Overlay preview"
@@ -76,10 +54,44 @@ export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
                   flexShrink: 0,
                 }}
               />
+            ) : (
+              <div className="flex flex-col items-center gap-2" style={{ color: "var(--color-outline)" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 28 }}>
+                  desktop_windows
+                </span>
+                <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)" }}>
+                  No preview yet
+                </span>
+              </div>
             )}
           </div>
         </div>
+
+        <div
+          className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg"
+          style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}
+        >
+          <code
+            className="text-[10px] truncate"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+            title={overlayUrl}
+          >
+            {overlayUrl || "…"}
+          </code>
+          <button
+            onClick={copyUrl}
+            className="flex-shrink-0 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              background: "rgba(201,151,31,0.1)",
+              border: "1px solid rgba(201,151,31,0.3)",
+              color: copied ? "var(--color-success)" : "var(--color-theme-orange)",
+            }}
+          >
+            {copied ? "Copied ✓" : "Copy URL"}
+          </button>
+        </div>
       </div>
-    </>
+    </Section>
   );
 }
