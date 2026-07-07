@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import type { LiveState, BowlerState, PointsRow, MatchSetup, SquadPlayer } from "@/lib/overlayBus";
-import { DrawerSection, Eyebrow, FieldLabel, Input, Stepper, SmallButton, PrimaryButton, SegmentedControl, SubCard } from "./ui";
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import type { LiveState, MatchSetup, SquadPlayer } from "@/lib/overlayBus";
+import { DrawerSection, Eyebrow, FieldLabel, SmallButton, PrimaryButton, SegmentedControl } from "./ui";
 import {
   useLiveScoringEngine,
   EXTRA_OPTIONS,
@@ -13,6 +14,8 @@ import {
   type PendingWicket,
   type Toast,
 } from "@/hooks/useLiveScoringEngine";
+import ManualCorrectionPanel from "./ManualCorrectionPanel";
+import { X } from "lucide-react";
 
 function initials(name: string) {
   return (
@@ -27,21 +30,32 @@ function squadFor(matchSetup: MatchSetup | undefined, key: "teamA" | "teamB"): S
   return (team.squad ?? []).map((name) => ({ id: `name:${name}`, name }));
 }
 
-const pointsGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1.4fr 0.55fr 0.55fr 0.55fr 0.65fr 0.55fr 28px",
-  gap: 8,
-  alignItems: "center",
-};
+// NEW — renders children into document.body instead of wherever this
+// component happens to sit in the tree. This is the fix for dialogs /
+// toasts centering inside a card instead of the real viewport: any
+// ancestor with a transform, filter, or backdrop-filter (common on the
+// glass panels used throughout this page) creates its own containing
+// block for `position: fixed` descendants, so "fixed" silently becomes
+// "fixed to that ancestor" instead of "fixed to the screen". Mounting
+// through a body-level portal sidesteps that entirely, regardless of
+// what CSS the surrounding page ends up using.
+function ViewportPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
 
 function PlayerCarousel({
   players,
   onSelect,
   emptyLabel,
+  dismissedNames,
 }: {
   players: SquadPlayer[];
   onSelect: (p: SquadPlayer) => void;
   emptyLabel?: string;
+  dismissedNames?: Set<string>;
 }) {
   if (players.length === 0) {
     return (
@@ -52,29 +66,40 @@ function PlayerCarousel({
   }
   return (
     <div className="carousel-row">
-      {players.map((p) => (
-        <button
-          key={p.id}
-          type="button"
-          draggable
-          onDragStart={(e) => e.dataTransfer.setData("text/player-id", p.id)}
-          onClick={() => onSelect(p)}
-          className="carousel-chip"
-          title={p.name}
-        >
-          <span className="squad-avatar" style={{ width: 44, height: 44 }}>
-            {p.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.imageUrl} alt="" />
-            ) : (
-              <span className="squad-avatar-fallback" style={{ fontSize: 13 }}>
-                {initials(p.name)}
-              </span>
-            )}
-          </span>
-          <span className="carousel-chip-name">{p.name}</span>
-        </button>
-      ))}
+      {players.map((p) => {
+        const isOut = !!dismissedNames?.has(p.name);
+        return (
+          <button
+            key={p.id}
+            type="button"
+            draggable={!isOut}
+            disabled={isOut}
+            onDragStart={(e) => {
+              if (isOut) {
+                e.preventDefault();
+                return;
+              }
+              e.dataTransfer.setData("text/player-id", p.id);
+            }}
+            onClick={() => !isOut && onSelect(p)}
+            className="carousel-chip"
+            title={isOut ? `${p.name} — already out this innings` : p.name}
+            style={isOut ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}
+          >
+            <span className="squad-avatar" style={{ width: 44, height: 44 }}>
+              {p.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.imageUrl} alt="" />
+              ) : (
+                <span className="squad-avatar-fallback" style={{ fontSize: 13 }}>
+                  {initials(p.name)}
+                </span>
+              )}
+            </span>
+            <span className="carousel-chip-name">{p.name}{isOut ? " · OUT" : ""}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -92,6 +117,7 @@ function CrewSlot({
   onClear,
   placeholder,
   locked,
+  dismissedNames,
 }: {
   title: string;
   accentColor?: string;
@@ -105,6 +131,7 @@ function CrewSlot({
   onClear?: () => void;
   placeholder: string;
   locked?: boolean;
+  dismissedNames?: Set<string>;
 }) {
   // CHANGED — no more separate banner text for "player not set". The card
   // itself carries the warning now: an amber dashed border + a small ⚠
@@ -123,7 +150,7 @@ function CrewSlot({
         if (locked) return;
         const id = e.dataTransfer.getData("text/player-id");
         const player = allPlayers.find((p) => p.id === id);
-        if (player) onAssign(player);
+        if (player && !dismissedNames?.has(player.name)) onAssign(player);
       }}
       style={{
         opacity: locked ? 0.6 : 1,
@@ -150,7 +177,7 @@ function CrewSlot({
               aria-label={`Clear ${title}`}
               className="crew-slot-clear-btn"
             >
-              ×
+              <X size={14} strokeWidth={2.5} />
             </button>
           )}
         </div>
@@ -175,6 +202,9 @@ function CrewSlot({
   );
 }
 
+// CHANGED — fixed to the bottom-right of the actual viewport (rendered
+// through ViewportPortal below) instead of sticking to the top of
+// whatever card happened to contain it.
 function ToastStack({ toasts }: { toasts: Toast[] }) {
   if (toasts.length === 0) return null;
   return (
@@ -274,8 +304,6 @@ function WicketDetailDialog({
           </div>
         )}
 
-        {/* NEW — wide-ball rule: bowled/caught/lbw are impossible off a
-            wide, only run out / stumped / hit wicket are valid. */}
         {!lockedToRunOutOnly && pending.extraType === "wide" && (
           <div
             className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide"
@@ -358,12 +386,6 @@ function WicketDetailDialog({
   );
 }
 
-// NEW — real confirmation dialog for ending an innings. Previously
-// "Swap Innings" silently flipped a display-only local variable with no
-// confirmation and no actual state reset. This dialog is the gate in
-// front of engine.endInnings(), which does the real reset (target,
-// score, striker/non-striker/bowler, partnership) but was never wired
-// to any button before.
 function EndInningsDialog({
   currentRuns,
   isSecondInnings,
@@ -385,13 +407,15 @@ function EndInningsDialog({
         </div>
         {isSecondInnings ? (
           <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
-            This is the 2nd innings — ending it marks the match complete and locks scoring. This can&apos;t be undone.
+            This is the 2nd innings — ending it marks the match complete and locks scoring. You can
+            still undo this afterwards with the &quot;Undo&quot; button if it was a mistake.
           </p>
         ) : (
           <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
             This will set the target to <strong>{currentRuns + 1}</strong>, and reset the score, overs, striker,
-            non-striker, and bowler for Innings 2. Match &amp; tournament boundary totals carry over. This can&apos;t
-            be undone.
+            non-striker, and bowler for Innings 2 — you&apos;ll need to pick 3 new players before you can
+            keep scoring. Match &amp; tournament boundary totals carry over. You can undo this
+            afterwards if it was a mistake.
           </p>
         )}
         <div className="flex gap-2">
@@ -422,6 +446,57 @@ function EndInningsDialog({
   );
 }
 
+// NEW — lets the operator start a brand new match without re-entering
+// teams/squads/tournament info. Only offered once matchComplete is true.
+// Keeps matchSetup untouched (parent doesn't touch it either); resets
+// score/players/target/innings so the ball pad is ready to go again,
+// same as a fresh match would be.
+function RestartMatchDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="scorer-dialog-backdrop" onClick={onCancel}>
+      <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <span
+            className="text-[11px] font-black uppercase tracking-widest"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+          >
+            Restart Match?
+          </span>
+        </div>
+        <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
+          This starts a fresh match with the <strong>same teams and squads</strong> from Match Setup.
+          Score, overs, striker, non-striker, bowler, and target all reset to zero. The points table and
+          tournament boundary totals are kept, since those track the whole tournament, not just one
+          match. This can&apos;t be undone.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              background: "var(--color-surface-container-low)",
+              border: "1px solid var(--color-border-overlay)",
+              color: "var(--color-on-surface)",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+            style={{ fontFamily: "var(--font-label-mono)", background: "var(--color-theme-orange)", color: "var(--color-on-primary)" }}
+          >
+            Restart Match
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LiveStatePanel({
   liveState,
   setLiveState,
@@ -435,6 +510,7 @@ export default function LiveStatePanel({
   onWicketConfirm,
   onMaiden,
   onInningsEnd,
+  onRestartMatch,
 }: {
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
@@ -454,7 +530,9 @@ export default function LiveStatePanel({
   }) => void;
   onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
+  onRestartMatch?: () => void;
 }) {
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const engine = useLiveScoringEngine({
     liveState,
     setLiveState,
@@ -466,16 +544,6 @@ export default function LiveStatePanel({
     onInningsEnd,
   });
 
-  // CHANGED — battingTeamKey is now DERIVED from toss info + the actual
-  // liveState.inningsNumber, instead of being a separate local toggle.
-  // Before, this was a plain useState that only ever got flipped by a
-  // button click and had zero connection to what engine.endInnings()
-  // does — so it was possible (in fact guaranteed, since the old "Swap
-  // Innings" button never called endInnings() at all) for this label to
-  // say "Team B batting" while the score/striker/bowler underneath were
-  // still 100% Team A's numbers. Deriving it means there is exactly one
-  // source of truth: once endInnings() bumps inningsNumber to 2, this
-  // recomputes automatically on the next render — it cannot drift.
   const battingTeamKey: "teamA" | "teamB" = useMemo(() => {
     const firstInningsTeamIsA = (() => {
       if (matchSetup?.tossWinner && matchSetup.tossDecision) {
@@ -497,15 +565,8 @@ export default function LiveStatePanel({
   const battingTeamLabel = matchSetup?.[battingTeamKey]?.shortCode || (battingTeamKey === "teamA" ? "Team A" : "Team B");
   const bowlingTeamLabel = matchSetup?.[bowlingTeamKey]?.shortCode || (bowlingTeamKey === "teamA" ? "Team A" : "Team B");
 
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  // NEW — gate in front of engine.endInnings(). See EndInningsDialog above.
   const [showEndInningsConfirm, setShowEndInningsConfirm] = useState(false);
 
-  // NEW — target / required-run-rate bookkeeping for the innings-2 header.
-  // maxOversByFormat is a soft cap only used to estimate balls remaining
-  // for the RRR display; Test matches have no over cap so RRR is simply
-  // omitted for that format (ballsRemaining stays undefined).
   const maxOversByFormat: Record<string, number | undefined> = { T20: 20, ODI: 50, Test: undefined };
   const maxOvers = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
   const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
@@ -516,34 +577,12 @@ export default function LiveStatePanel({
   const requiredRunRate =
     runsNeeded !== undefined && ballsRemaining ? ((runsNeeded / ballsRemaining) * 6).toFixed(2) : undefined;
 
-  // NEW — single source of truth for "can scoring happen right now". Used
-  // to visually + functionally lock the ball pad, extras selector, free
-  // hit toggle, swap-strike, and new-partnership controls until striker,
-  // non-striker, AND bowler are all set. engine.recordBall/recordWicket
-  // already refuse silently-ish via a toast if this is bypassed somehow,
-  // but the UI shouldn't invite the tap in the first place.
+  // Single source of truth for "can scoring happen right now". Used to
+  // visually + functionally lock the ball pad, extras selector, free hit
+  // toggle, swap-strike, and new-partnership controls until striker,
+  // non-striker, AND bowler are all set — and now also surfaced as a
+  // clear banner (below) instead of only a toast that fires on tap.
   const controlsLocked = engine.assignmentsMissing();
-
-  function patchBatter(who: "striker" | "nonStriker", patch: Partial<LiveState["striker"]>) {
-    setLiveState((prev) => ({ ...prev, [who]: { ...prev[who], ...patch } }));
-    setLiveDirty(true);
-  }
-  function patchBowler(patch: Partial<BowlerState>) {
-    setLiveState((prev) => ({ ...prev, bowler: { ...prev.bowler, ...patch } }));
-    setLiveDirty(true);
-  }
-  function addPointsRow() {
-    setLiveState((prev) => ({ ...prev, pointsTable: [...prev.pointsTable, { team: "", played: 0, won: 0, lost: 0, nrr: "0.00", points: 0 }] }));
-    setLiveDirty(true);
-  }
-  function patchPointsRow(index: number, patch: Partial<PointsRow>) {
-    setLiveState((prev) => ({ ...prev, pointsTable: prev.pointsTable.map((row, i) => (i === index ? { ...row, ...patch } : row)) }));
-    setLiveDirty(true);
-  }
-  function removePointsRow(index: number) {
-    setLiveState((prev) => ({ ...prev, pointsTable: prev.pointsTable.filter((_, i) => i !== index) }));
-    setLiveDirty(true);
-  }
 
   const runRate =
     liveState.score.overs + liveState.score.balls / 6 > 0
@@ -557,10 +596,17 @@ export default function LiveStatePanel({
         @keyframes scorerDialogIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
         @keyframes scorerBackdropIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes freeHitPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(96,165,250,0.45); } 50% { box-shadow: 0 0 0 5px rgba(96,165,250,0); } }
-        .scorer-toast-stack { position: sticky; top: 4px; z-index: 5; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; pointer-events: none; margin-bottom: -4px; }
-        .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; }
-        .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; animation: scorerBackdropIn 140ms ease-out; }
-        .scorer-dialog { width: 340px; max-width: calc(100vw - 32px); background: var(--color-surface-container-low); border: 1px solid var(--color-border-overlay); border-radius: 14px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+        /* CHANGED — fixed to the real viewport (bottom-right corner),
+           rendered through a body-level portal so no ancestor transform
+           can hijack the positioning context. */
+        .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; }
+        .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+        /* CHANGED — backdrop now always covers the full real viewport
+           (portal-rendered) with a blur behind the dialog, and the
+           dialog is centered within THAT full-screen backdrop, not
+           within whatever card used to contain it. */
+        .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 9000; animation: scorerBackdropIn 140ms ease-out; padding: 16px; }
+        .scorer-dialog { width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--color-surface-container-low); border: 1px solid var(--color-border-overlay); border-radius: 14px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
         .ball-controls-row { margin-bottom: 12px; }
         .ball-controls-extras { display: flex; flex-direction: column; gap: 4px; }
         .ball-controls-label { font-family: var(--font-label-mono); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-outline); }
@@ -624,20 +670,98 @@ export default function LiveStatePanel({
           border-color: rgba(217,83,79,0.5);
           background: rgba(217,83,79,0.1);
         }
+        .assignment-needed-banner {
+          font-family: var(--font-label-mono);
+          font-size: 11px;
+          font-weight: 700;
+          padding: 10px 14px;
+          border-radius: 10px;
+          background: rgba(217,83,79,0.08);
+          border: 1px dashed rgba(217,83,79,0.4);
+          color: var(--color-error);
+          margin-bottom: 12px;
+        }
+        .match-complete-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          font-family: var(--font-label-mono);
+          font-size: 11px;
+          font-weight: 700;
+          padding: 12px 16px;
+          border-radius: 10px;
+          background: rgba(217,83,79,0.08);
+          border: 1px solid rgba(217,83,79,0.35);
+          color: var(--color-error);
+          margin-bottom: 12px;
+        }
       `}</style>
 
-      <ToastStack toasts={engine.toasts} />
-      {engine.pendingWicket && <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} />}
+      <ViewportPortal>
+        <ToastStack toasts={engine.toasts} />
+      </ViewportPortal>
+      {engine.pendingWicket && (
+        <ViewportPortal>
+          <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} />
+        </ViewportPortal>
+      )}
       {showEndInningsConfirm && (
-        <EndInningsDialog
-          currentRuns={liveState.score.runs}
-          isSecondInnings={isSecondInnings}
-          onCancel={() => setShowEndInningsConfirm(false)}
-          onConfirm={() => {
-            engine.endInnings();
-            setShowEndInningsConfirm(false);
-          }}
-        />
+        <ViewportPortal>
+          <EndInningsDialog
+            currentRuns={liveState.score.runs}
+            isSecondInnings={isSecondInnings}
+            onCancel={() => setShowEndInningsConfirm(false)}
+            onConfirm={() => {
+              engine.endInnings();
+              setShowEndInningsConfirm(false);
+            }}
+          />
+        </ViewportPortal>
+      )}
+      {showRestartConfirm && (
+        <ViewportPortal>
+          <RestartMatchDialog
+            onCancel={() => setShowRestartConfirm(false)}
+            onConfirm={() => {
+              onRestartMatch?.();
+              setShowRestartConfirm(false);
+            }}
+          />
+        </ViewportPortal>
+      )}
+
+      {/* NEW — impossible to miss now: if the match is marked complete,
+          say so plainly and put the way back (Undo) right here, instead
+          of it only being a small "Undo Last Ball" button up in "This
+          Ball" that's easy to overlook once the ball pad has gone grey. */}
+      {liveState.matchComplete && (
+        <div className="match-complete-banner">
+          <span>🏁 Match marked complete — scoring is locked.</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {engine.canUndo && (
+              <SmallButton onClick={engine.undo} style={{ color: "var(--color-error)" }}>
+                ↶ Undo &amp; keep scoring
+              </SmallButton>
+            )}
+            {onRestartMatch && (
+              <SmallButton onClick={() => setShowRestartConfirm(true)} style={{ color: "var(--color-theme-orange)" }}>
+                🔁 Restart Match (Same Teams)
+              </SmallButton>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* NEW — visible explanation instead of a silent lock. This fires
+          any time a striker, non-striker, or bowler is missing — most
+          commonly right after "End Innings", when all three are reset
+          on purpose so the operator has to pick the new team's players. */}
+      {!liveState.matchComplete && controlsLocked && (
+        <div className="assignment-needed-banner">
+          ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
+          after starting a new innings.
+        </div>
       )}
 
       <div className="scoreboard-strip">
@@ -651,8 +775,6 @@ export default function LiveStatePanel({
           <span>RR {runRate}</span>
           <span>·</span>
           <span>{battingTeamLabel} batting</span>
-          {/* NEW — target / need / required-run-rate, only meaningful once
-              engine.endInnings() has actually run and set liveState.target. */}
           {isSecondInnings && liveState.target !== undefined && (
             <>
               <span>·</span>
@@ -675,11 +797,6 @@ export default function LiveStatePanel({
             </>
           )}
         </div>
-        {/* CHANGED — this used to be a "Swap Innings" button that only
-            flipped a local display variable and reset nothing. It now
-            opens a real confirmation dialog gating the actual reset
-            logic in engine.endInnings(). Hidden once the match is marked
-            complete, since there's nothing further to end. */}
         {!liveState.matchComplete && (
           <SmallButton
             onClick={() => setShowEndInningsConfirm(true)}
@@ -688,25 +805,10 @@ export default function LiveStatePanel({
             {isSecondInnings ? "End Match" : "End Innings"}
           </SmallButton>
         )}
-        {liveState.matchComplete && (
-          <span
-            className="text-[10px] font-black uppercase tracking-widest ml-auto"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}
-          >
-            Match Complete
-          </span>
-        )}
       </div>
 
       <div>
         <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
-        {/* CHANGED — Swap Strike now lives as a double-arrow button
-            physically between the two batter cards instead of as a
-            separate labeled button in the row below. Placing it right
-            where the two names sit makes "this swaps these two" obvious
-            at a glance, and it still fires the same engine.swapStrike().
-            Stacks vertically on mobile (arrow rotates to point up/down),
-            sits side-by-side on md+ (arrow points left/right). */}
         <div className="flex flex-col md:flex-row items-stretch gap-3">
           <div className="flex-1 min-w-0">
             <CrewSlot
@@ -721,6 +823,7 @@ export default function LiveStatePanel({
               onAssign={(p) => engine.assignPlayer("striker", p)}
               onClear={() => engine.clearSlot("striker")}
               placeholder="Select striker"
+              dismissedNames={engine.dismissedPlayers}
             />
           </div>
 
@@ -744,7 +847,9 @@ export default function LiveStatePanel({
               statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
               allPlayers={battingSquad}
               onAssign={(p) => engine.assignPlayer("nonStriker", p)}
+              onClear={() => engine.clearSlot("nonStriker")}
               placeholder="Select non-striker"
+              dismissedNames={engine.dismissedPlayers}
             />
           </div>
         </div>
@@ -768,7 +873,8 @@ export default function LiveStatePanel({
           <PlayerCarousel
             players={engine.activeSlot === "bowler" ? bowlingSquad : battingSquad}
             onSelect={(p) => engine.assignPlayer(engine.activeSlot, p)}
-            emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in Advanced below."
+            emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in the Fix a Mistake section below."
+            dismissedNames={engine.activeSlot === "bowler" ? undefined : engine.dismissedPlayers}
           />
         </div>
 
@@ -778,10 +884,6 @@ export default function LiveStatePanel({
       </div>
 
       <div>
-        {/* CHANGED — Undo Last Ball and the Free Hit toggle now share this
-            single header row (right-aligned together) instead of Undo
-            living up here alone and Free Hit sitting in its own row below
-            next to the extras selector. */}
         <div className="flex items-center justify-between mb-2">
           <Eyebrow>This Ball</Eyebrow>
           <div className="flex items-center gap-2">
@@ -814,9 +916,6 @@ export default function LiveStatePanel({
           </div>
         </div>
 
-        {/* CHANGED — ball pad visually + functionally locks once the match
-            is marked complete, instead of silently continuing to accept
-            taps that would score onto a match that's already finished. */}
         <div className="ball-pad" style={liveState.matchComplete ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
           {[0, 1, 2, 3, 4, 6].map((r) => (
             <button
@@ -859,108 +958,16 @@ export default function LiveStatePanel({
         </div>
       </div>
 
-      <details className="advanced-drawer" open={advancedOpen} onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}>
-        <summary className="cursor-pointer" style={{ fontFamily: "var(--font-label-mono)", fontSize: "9px", textTransform: "uppercase", letterSpacing: "0.15em", color: "var(--color-outline)" }}>
-          Advanced / Manual Correction ▸
-        </summary>
-        <div className="flex flex-col gap-5 pt-4">
-          <div>
-            <Eyebrow className="block mb-2">Score (manual override)</Eyebrow>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Stepper label="Runs" value={liveState.score.runs} onChange={(v) => engine.patchLive({ score: { ...liveState.score, runs: v } })} />
-              <Stepper label="Wickets" value={liveState.score.wickets} onChange={(v) => engine.patchLive({ score: { ...liveState.score, wickets: Math.min(10, v) } })} />
-              <Stepper label="Overs" value={liveState.score.overs} onChange={(v) => engine.patchLive({ score: { ...liveState.score, overs: v } })} />
-              <Stepper label="Balls" value={liveState.score.balls} onChange={(v) => engine.patchLive({ score: { ...liveState.score, balls: Math.min(5, v) } })} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(["striker", "nonStriker"] as const).map((who) => (
-              <SubCard key={who} title={who === "striker" ? "Striker *" : "Non-Striker"} accent={who === "striker" ? "#E8C468" : undefined}>
-                <Input value={liveState[who].name} onChange={(v) => patchBatter(who, { name: v })} placeholder="Batter name" />
-                <div className="grid grid-cols-4 gap-2">
-                  <Stepper label="Runs" value={liveState[who].runs} onChange={(v) => patchBatter(who, { runs: v })} />
-                  <Stepper label="Balls" value={liveState[who].balls} onChange={(v) => patchBatter(who, { balls: v })} />
-                  <Stepper label="4s" value={liveState[who].fours} onChange={(v) => patchBatter(who, { fours: v })} />
-                  <Stepper label="6s" value={liveState[who].sixes} onChange={(v) => patchBatter(who, { sixes: v })} />
-                </div>
-              </SubCard>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <SubCard title="Bowler">
-              <Input value={liveState.bowler.name} onChange={(v) => patchBowler({ name: v })} placeholder="Bowler name" />
-              <div className="grid grid-cols-5 gap-2">
-                <Stepper label="Overs" value={liveState.bowler.overs} onChange={(v) => patchBowler({ overs: v })} />
-                <Stepper label="Balls" value={liveState.bowler.balls} onChange={(v) => patchBowler({ balls: Math.min(5, v) })} />
-                <Stepper label="Maidens" value={liveState.bowler.maidens} onChange={(v) => patchBowler({ maidens: v })} />
-                <Stepper label="Runs" value={liveState.bowler.runs} onChange={(v) => patchBowler({ runs: v })} />
-                <Stepper label="Wkts" value={liveState.bowler.wickets} onChange={(v) => patchBowler({ wickets: v })} />
-              </div>
-            </SubCard>
-            <SubCard title="Partnership">
-              <div className="grid grid-cols-2 gap-2">
-                <Stepper label="Runs" value={liveState.partnership.runs} onChange={(v) => engine.patchLive({ partnership: { ...liveState.partnership, runs: v } })} />
-                <Stepper label="Balls" value={liveState.partnership.balls} onChange={(v) => engine.patchLive({ partnership: { ...liveState.partnership, balls: v } })} />
-              </div>
-            </SubCard>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <SubCard title="Match Boundaries">
-              <div className="grid grid-cols-2 gap-2">
-                <Stepper label="4s" value={liveState.matchBoundaries.fours} onChange={(v) => engine.patchLive({ matchBoundaries: { ...liveState.matchBoundaries, fours: v } })} />
-                <Stepper label="6s" value={liveState.matchBoundaries.sixes} onChange={(v) => engine.patchLive({ matchBoundaries: { ...liveState.matchBoundaries, sixes: v } })} />
-              </div>
-            </SubCard>
-            <SubCard title="Tournament Boundaries">
-              <div className="grid grid-cols-2 gap-2">
-                <Stepper label="4s" value={liveState.tournamentBoundaries.fours} onChange={(v) => engine.patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, fours: v } })} />
-                <Stepper label="6s" value={liveState.tournamentBoundaries.sixes} onChange={(v) => engine.patchLive({ tournamentBoundaries: { ...liveState.tournamentBoundaries, sixes: v } })} />
-              </div>
-            </SubCard>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Eyebrow>Points Table</Eyebrow>
-              <SmallButton onClick={addPointsRow}>+ Add Row</SmallButton>
-            </div>
-            {liveState.pointsTable.length > 0 && (
-              <div style={pointsGridStyle} className="mb-1.5">
-                <FieldLabel>Team</FieldLabel>
-                <FieldLabel>Pld</FieldLabel>
-                <FieldLabel>Won</FieldLabel>
-                <FieldLabel>Lost</FieldLabel>
-                <FieldLabel>NRR</FieldLabel>
-                <FieldLabel>Pts</FieldLabel>
-                <span />
-              </div>
-            )}
-            <div className="log-scroll flex flex-col gap-2" style={{ maxHeight: 240, paddingRight: 4 }}>
-              {liveState.pointsTable.map((row, i) => (
-                <div key={i} style={pointsGridStyle}>
-                  <Input value={row.team} onChange={(v) => patchPointsRow(i, { team: v })} placeholder="Team" />
-                  <Input type="number" value={row.played} onChange={(v) => patchPointsRow(i, { played: Number(v) || 0 })} />
-                  <Input type="number" value={row.won} onChange={(v) => patchPointsRow(i, { won: Number(v) || 0 })} />
-                  <Input type="number" value={row.lost} onChange={(v) => patchPointsRow(i, { lost: Number(v) || 0 })} />
-                  <Input value={row.nrr} onChange={(v) => patchPointsRow(i, { nrr: v })} placeholder="0.00" mono />
-                  <Input type="number" value={row.points} onChange={(v) => patchPointsRow(i, { points: Number(v) || 0 })} />
-                  <button onClick={() => removePointsRow(i)} className="w-7 h-9 rounded-lg flex items-center justify-center" style={{ color: "var(--color-outline)", border: "1px solid var(--color-border-overlay)" }}>
-                    ×
-                  </button>
-                </div>
-              ))}
-              {liveState.pointsTable.length === 0 && (
-                <p className="text-[11px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
-                  No rows yet — add a team to start the table.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </details>
+      {/* CHANGED — the whole manual-correction / advanced drawer now
+          lives in its own component, written in plain language so
+          someone who's never scored a match before can safely use it to
+          fix a typo or type in a player by hand. */}
+      <ManualCorrectionPanel
+        liveState={liveState}
+        setLiveState={setLiveState}
+        setLiveDirty={setLiveDirty}
+        patchLive={engine.patchLive}
+      />
 
       <div className="flex justify-end">
         <PrimaryButton onClick={onPush} minWidth={180}>

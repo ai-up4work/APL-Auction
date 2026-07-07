@@ -368,6 +368,24 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireMilestoneMoment(moment);
   }
 
+  // add this function in page.tsx, near pushLiveState/pushMatchSetup
+  function restartMatch() {
+    setLiveState((prev) => ({
+      score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+      striker: emptyBatter(),
+      nonStriker: emptyBatter(),
+      bowler: emptyBowler(),
+      partnership: { runs: 0, balls: 0 },
+      matchBoundaries: { fours: 0, sixes: 0 },
+      tournamentBoundaries: prev.tournamentBoundaries,
+      pointsTable: prev.pointsTable,
+      target: undefined,
+      inningsNumber: undefined,
+      matchComplete: false,
+    }));
+    setLiveDirty(true);
+  }
+
   // manual Moments-panel wicket form — unchanged behavior, now just
   // delegates to the shared helper above.
   function fireWicketMoment() {
@@ -502,6 +520,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onWicketConfirm={fireWicketMomentFrom}
                 onMaiden={fireMaidenMoment}
                 onInningsEnd={logInningsEnd}
+                onRestartMatch={restartMatch}   // ← this line is what's missing
               />
             ) : (
               <div

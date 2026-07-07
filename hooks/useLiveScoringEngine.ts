@@ -138,6 +138,15 @@ export function useLiveScoringEngine({
   const toastIdRef = useRef(0);
   const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(null);
 
+  // NEW — names of batters who have already been dismissed THIS innings.
+  // Used to grey out / block re-selecting them in the squad carousel and
+  // via drag-and-drop, so a dismissed player can't accidentally be sent
+  // back out to bat. Cleared whenever a new innings starts (endInnings)
+  // and restored on undo (single-level, same limitation as the rest of
+  // undo — see dismissedPlayersUndoRef below).
+  const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set());
+  const dismissedPlayersUndoRef = useRef<Set<string> | null>(null);
+
   // Runs conceded by the CURRENT bowler in the over currently in progress.
   // Reset to 0 whenever that over completes, or a different bowler is
   // assigned into the slot (a fresh spell can't inherit a partial over's
@@ -157,6 +166,7 @@ export function useLiveScoringEngine({
 
   function snapshotForUndo() {
     undoRef.current = liveState;
+    dismissedPlayersUndoRef.current = new Set(dismissedPlayers);
     setCanUndo(true);
   }
 
@@ -164,7 +174,9 @@ export function useLiveScoringEngine({
     if (!undoRef.current) return;
     setLiveState(undoRef.current);
     setLiveDirty(true);
+    setDismissedPlayers(dismissedPlayersUndoRef.current ?? new Set());
     undoRef.current = null;
+    dismissedPlayersUndoRef.current = null;
     setCanUndo(false);
     setPendingWicket(null);
     // Best-effort only — we can't recover exactly how many runs the
@@ -181,6 +193,14 @@ export function useLiveScoringEngine({
   }
 
   function assignPlayer(slot: "striker" | "nonStriker" | "bowler", player: { name: string; imageUrl?: string }) {
+    // Guard: a dismissed batter can't be assigned back into a batting
+    // slot. (Bowlers are never in dismissedPlayers, so this is a no-op
+    // for the bowler slot.)
+    if (slot !== "bowler" && dismissedPlayers.has(player.name)) {
+      pushToast(`⚠️ ${player.name} is already out this innings`, "warning");
+      return;
+    }
+
     if (slot === "bowler") {
       const isNewBowler = liveState.bowler.name !== player.name;
       if (isNewBowler) overRunsConcededRef.current = 0;
@@ -478,6 +498,21 @@ export function useLiveScoringEngine({
     });
     setLiveDirty(true);
 
+    // NEW — mark this batter as out for the rest of the innings, whether
+    // or not we also broadcast the graphic (`fire`). The dismissal is a
+    // real game event either way; `fire` only controls whether the
+    // overlay shows it. Cleared automatically at the next endInnings().
+    {
+      const dismissedName = batsmanOut === "striker" ? strikerBefore.name : nonStrikerBefore.name;
+      if (dismissedName) {
+        setDismissedPlayers((prev) => {
+          const next = new Set(prev);
+          next.add(dismissedName);
+          return next;
+        });
+      }
+    }
+
     if (fire) {
       const dismissedBatter =
         batsmanOut === "striker"
@@ -510,6 +545,9 @@ export function useLiveScoringEngine({
   function endInnings() {
     snapshotForUndo();
     overRunsConcededRef.current = 0;
+    // NEW — a fresh innings means nobody has batted yet in it, so the
+    // dismissed-players list from the previous innings no longer applies.
+    setDismissedPlayers(new Set());
 
     const currentInningsNumber = (liveState.inningsNumber ?? 1) as 1 | 2;
 
@@ -553,6 +591,7 @@ export function useLiveScoringEngine({
     undo,
     toasts,
     pendingWicket,
+    dismissedPlayers,
     assignmentsMissing,
     patchLive,
     assignPlayer,
