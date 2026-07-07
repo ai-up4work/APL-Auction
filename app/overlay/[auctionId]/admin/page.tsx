@@ -56,6 +56,17 @@ interface WicketDraft {
 
 const emptyWicketDraft: WicketDraft = { batsmanOut: "striker", dismissalType: "bowled", fielder: "" };
 
+// Shared shape for anything that wants to trigger a wicket moment —
+// used by both the manual Moments-panel form AND the auto-fire dialog
+// that now lives inside the Scorer (LiveStatePanel).
+interface WicketMomentPayload {
+  batsmanOut: "striker" | "nonStriker";
+  batter: { name: string; runs: number; balls: number };
+  dismissalType: WicketDraft["dismissalType"];
+  fielder: string;
+  bowlerName: string;
+}
+
 // ── Batter picker — shows the player photo so admins confirm at a glance ─
 function BatterPickerButton({
   batter,
@@ -280,8 +291,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }
 
   // ── Moments helpers ──────────────────────────────────────────────────
-  function fireBoundaryMoment(moment: "four" | "six") {
-    const batter = liveState.striker;
+  // CHANGED — now accepts an optional override so the Scorer (ball pad)
+  // can drive this directly with the exact batter/runs/balls at the
+  // instant the boundary was scored, instead of only ever reading
+  // whatever liveState.striker happens to be when a button is clicked.
+  function fireBoundaryMoment(moment: "four" | "six", override?: { name: string; runs: number; balls: number }) {
+    const batter = override ?? liveState.striker;
     fireLoose(
       { type: "moment", moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` },
       `Moment: ${moment.toUpperCase()} — ${batter.name || "Striker"} ${batter.runs}(${batter.balls})`
@@ -289,9 +304,14 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  function fireMilestoneMoment(moment: "fifty" | "hundred") {
-    const batter = liveState[milestoneBatter];
-    const label = batter.name || (milestoneBatter === "striker" ? "Striker" : "Non-striker");
+  // CHANGED — same idea: optional override lets the Scorer auto-fire a
+  // fifty/hundred the instant the crossing ball is recorded.
+  function fireMilestoneMoment(
+    moment: "fifty" | "hundred",
+    override?: { name: string; runs: number; balls: number; label?: string }
+  ) {
+    const batter = override ?? liveState[milestoneBatter];
+    const label = override?.label ?? batter.name ?? (milestoneBatter === "striker" ? "Striker" : "Non-striker");
     fireLoose(
       { type: "moment", moment, player: label, score: `${batter.runs}(${batter.balls})` },
       `Moment: ${moment.toUpperCase()} — ${label} ${batter.runs}(${batter.balls})`
@@ -299,25 +319,49 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  function fireWicketMoment() {
-    const batter = liveState[wicketDraft.batsmanOut];
-    const batterLabel = batter.name || (wicketDraft.batsmanOut === "striker" ? "Striker" : "Non-striker");
+  // NEW — single shared implementation for firing a wicket moment, used by
+  // both the manual Moments-panel form (fireWicketMoment, below) and the
+  // Scorer's own quick wicket-detail dialog (onWicketConfirm passed to
+  // LiveStatePanel). Keeping one implementation means the overlay event
+  // shape can't drift between the two entry points.
+  function fireWicketMomentFrom(payload: WicketMomentPayload) {
+    const { batsmanOut, batter, dismissalType, fielder, bowlerName } = payload;
+    const batterLabel = batter.name || (batsmanOut === "striker" ? "Striker" : "Non-striker");
     fireLoose(
       {
         type: "moment",
         moment: "wicket",
-        batsmanOut: wicketDraft.batsmanOut,
+        batsmanOut,
         player: batterLabel,
         score: `${batter.runs}(${batter.balls})`,
-        dismissalType: wicketDraft.dismissalType,
-        bowler: liveState.bowler.name,
-        fielder: wicketDraft.fielder,
+        dismissalType,
+        bowler: bowlerName,
+        fielder,
       },
-      `Moment: WICKET — ${batterLabel} ${wicketDraft.dismissalType}${liveState.bowler.name ? ` b ${liveState.bowler.name}` : ""}${
-        wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""
-      }`
+      `Moment: WICKET — ${batterLabel} ${dismissalType}${bowlerName ? ` b ${bowlerName}` : ""}${fielder ? ` c ${fielder}` : ""}`
     );
     onAirRef.current?.notifyMomentFired();
+  }
+
+  function fireBoundaryMomentFromPanel(moment: "four" | "six") {
+    fireBoundaryMoment(moment);
+  }
+
+  function fireMilestoneMomentFromPanel(moment: "fifty" | "hundred") {
+    fireMilestoneMoment(moment);
+  }
+
+  // manual Moments-panel wicket form — unchanged behavior, now just
+  // delegates to the shared helper above.
+  function fireWicketMoment() {
+    const batter = liveState[wicketDraft.batsmanOut];
+    fireWicketMomentFrom({
+      batsmanOut: wicketDraft.batsmanOut,
+      batter: { name: batter.name, runs: batter.runs, balls: batter.balls },
+      dismissalType: wicketDraft.dismissalType,
+      fielder: wicketDraft.fielder,
+      bowlerName: liveState.bowler.name,
+    });
     setWicketDraft(emptyWicketDraft);
     setShowWicketForm(false);
   }
@@ -436,6 +480,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onPush={pushLiveState}
                 pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
                 matchSetup={matchSetup}
+                onBoundary={fireBoundaryMoment}
+                onMilestone={fireMilestoneMoment}
+                onWicketConfirm={fireWicketMomentFrom}
               />
             ) : (
               <div
@@ -467,18 +514,22 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
             <Section title="Moments" description="Fire the graphic the instant it happens on the ball.">
               <div className="flex flex-col gap-3">
+                <p className="text-[10px] leading-snug" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
+                  Four, Six, Fifty and Hundred now also fire automatically from the ball pad in the Scorer panel — these buttons are
+                  still here for manual/backup firing.
+                </p>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <ActionButton label="Four" onClick={() => fireBoundaryMoment("four")} />
-                  <ActionButton label="Six" onClick={() => fireBoundaryMoment("six")} />
+                  <ActionButton label="Four" onClick={() => fireBoundaryMomentFromPanel("four")} />
+                  <ActionButton label="Six" onClick={() => fireBoundaryMomentFromPanel("six")} />
                   <ActionButton
                     label="Wicket"
                     danger
                     active={showWicketForm}
                     onClick={() => setShowWicketForm((v) => !v)}
                   />
-                  <ActionButton label="Fifty" onClick={() => fireMilestoneMoment("fifty")} />
+                  <ActionButton label="Fifty" onClick={() => fireMilestoneMomentFromPanel("fifty")} />
                 </div>
-                <ActionButton full label="Hundred" onClick={() => fireMilestoneMoment("hundred")} />
+                <ActionButton full label="Hundred" onClick={() => fireMilestoneMomentFromPanel("hundred")} />
 
                 <div className="flex flex-col gap-2 pt-1">
                   <span className="text-[9px] font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>

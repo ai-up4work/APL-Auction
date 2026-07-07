@@ -30,6 +30,11 @@ const pointsGridStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
+// empty batter slot shape used when clearing a dismissed batter
+function emptyBatterSlot(): BatterState {
+  return { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined };
+}
+
 // ── Player carousel — tap OR drag a player onto a crew slot ──────────
 function PlayerCarousel({
   players,
@@ -148,6 +153,214 @@ const EXTRA_OPTIONS: { key: ExtraType; label: string }[] = [
   { key: "legBye", label: "Leg Bye" },
 ];
 
+// dismissal type used by the auto-fire Wicket Detail dialog.
+type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
+
+const DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
+  { value: "bowled", label: "Bowled" },
+  { value: "caught", label: "Caught" },
+  { value: "lbw", label: "LBW" },
+  { value: "runOut", label: "Run Out" },
+  { value: "stumped", label: "Stumped" },
+  { value: "hitWicket", label: "Hit Wicket" },
+];
+
+// snapshot of both batters taken the instant OUT was tapped, before we
+// know which of them actually got out — the dialog decides that next.
+interface PendingWicket {
+  strikerBefore: { name: string; runs: number; balls: number };
+  nonStrikerBefore: { name: string; runs: number; balls: number };
+  bowlerName: string;
+  overComplete: boolean;
+}
+
+// works out the two batter slots once the admin has confirmed which end
+// was dismissed. Mirrors the normal end-swap-on-over-completion logic
+// from recordBall, just applied to whichever batter survived.
+function resolveBatterSlots(
+  batsmanOut: "striker" | "nonStriker",
+  strikerBefore: BatterState,
+  nonStrikerBefore: BatterState,
+  overComplete: boolean
+): { striker: BatterState; nonStriker: BatterState } {
+  let striker: BatterState = batsmanOut === "striker" ? emptyBatterSlot() : strikerBefore;
+  let nonStriker: BatterState = batsmanOut === "nonStriker" ? emptyBatterSlot() : nonStrikerBefore;
+  if (overComplete) {
+    const tmp = striker;
+    striker = nonStriker;
+    nonStriker = tmp;
+  }
+  return { striker, nonStriker };
+}
+
+// NEW — small confirmation toast so the admin gets visual feedback when a
+// moment auto-fires from the ball pad (no need to glance at the Event Log
+// on the right to know it actually went out).
+type Toast = { id: number; text: string; tone: "boundary" | "milestone" | "wicket" };
+
+function ToastStack({ toasts }: { toasts: Toast[] }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="scorer-toast-stack">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="scorer-toast"
+          style={{
+            background:
+              t.tone === "wicket"
+                ? "var(--color-error-container)"
+                : t.tone === "milestone"
+                ? "rgba(201,151,31,0.16)"
+                : "rgba(201,151,31,0.1)",
+            border: `1px solid ${t.tone === "wicket" ? "rgba(255,180,171,0.35)" : "rgba(201,151,31,0.35)"}`,
+            color: t.tone === "wicket" ? "var(--color-error)" : "var(--color-theme-orange)",
+          }}
+        >
+          {t.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── small batsman-out picker used inside the Wicket Detail dialog ────
+function BatsmanOutOption({
+  label,
+  name,
+  runs,
+  balls,
+  selected,
+  onClick,
+}: {
+  label: string;
+  name: string;
+  runs: number;
+  balls: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg text-left transition-all flex-1"
+      style={{
+        background: selected ? "rgba(217,83,79,0.14)" : "var(--color-surface-container-low)",
+        border: `1px solid ${selected ? "rgba(217,83,79,0.5)" : "var(--color-border-overlay)"}`,
+      }}
+    >
+      <span className="text-[9px] uppercase tracking-wide" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+        {label}
+      </span>
+      <span
+        className="text-[12px] font-bold"
+        style={{ fontFamily: "var(--font-label-mono)", color: selected ? "var(--color-error)" : "var(--color-on-surface)" }}
+      >
+        {name || label}
+      </span>
+      <span className="text-[10px]" style={{ color: "var(--color-outline)" }}>
+        {runs}({balls})
+      </span>
+    </button>
+  );
+}
+
+// ── quick dialog shown the instant OUT is tapped. Score/wicket count has
+// already been recorded by then; this decides WHICH batter is actually out
+// (striker or non-striker — important for run-outs) and what dismissal
+// detail rides along on the wicket overlay graphic.
+function WicketDetailDialog({
+  pending,
+  onResolve,
+}: {
+  pending: PendingWicket;
+  onResolve: (batsmanOut: "striker" | "nonStriker", fire: boolean, dismissalType: DismissalType, fielder: string) => void;
+}) {
+  const [batsmanOut, setBatsmanOut] = useState<"striker" | "nonStriker">("striker");
+  const [dismissalType, setDismissalType] = useState<DismissalType>("bowled");
+  const [fielder, setFielder] = useState("");
+
+  return (
+    <div className="scorer-dialog-backdrop" onClick={() => onResolve(batsmanOut, false, dismissalType, fielder)}>
+      <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
+            Wicket Detail
+          </span>
+          <button
+            type="button"
+            onClick={() => onResolve(batsmanOut, false, dismissalType, fielder)}
+            className="text-[11px]"
+            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+            title="Skip firing a wicket graphic (batter is still recorded as out)"
+          >
+            Skip ✕
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1.5 mb-3">
+          <FieldLabel>Batsman Out</FieldLabel>
+          <div className="flex gap-2">
+            <BatsmanOutOption
+              label="Striker"
+              name={pending.strikerBefore.name}
+              runs={pending.strikerBefore.runs}
+              balls={pending.strikerBefore.balls}
+              selected={batsmanOut === "striker"}
+              onClick={() => setBatsmanOut("striker")}
+            />
+            <BatsmanOutOption
+              label="Non-Striker"
+              name={pending.nonStrikerBefore.name}
+              runs={pending.nonStrikerBefore.runs}
+              balls={pending.nonStrikerBefore.balls}
+              selected={batsmanOut === "nonStriker"}
+              onClick={() => setBatsmanOut("nonStriker")}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5 mb-3">
+          <FieldLabel>Dismissal</FieldLabel>
+          <select
+            value={dismissalType}
+            onChange={(e) => setDismissalType(e.target.value as DismissalType)}
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)" }}
+          >
+            {DISMISSAL_OPTIONS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5 mb-4">
+          <FieldLabel>Fielder (if any)</FieldLabel>
+          <input
+            value={fielder}
+            onChange={(e) => setFielder(e.target.value)}
+            placeholder="Fielder name"
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)" }}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onResolve(batsmanOut, true, dismissalType, fielder)}
+          className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+          style={{ fontFamily: "var(--font-label-mono)", background: "var(--color-error)", color: "var(--color-on-primary)" }}
+        >
+          Fire Wicket Graphic
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function LiveStatePanel({
   liveState,
   setLiveState,
@@ -156,6 +369,9 @@ export default function LiveStatePanel({
   onPush,
   pushLabel,
   matchSetup,
+  onBoundary,
+  onMilestone,
+  onWicketConfirm,
 }: {
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
@@ -164,6 +380,18 @@ export default function LiveStatePanel({
   onPush: () => void;
   pushLabel: string;
   matchSetup?: MatchSetup;
+  // optional so this component still works standalone if a parent doesn't
+  // wire these up. When provided, the ball pad drives the Moments overlay
+  // automatically instead of requiring a separate manual click.
+  onBoundary?: (moment: "four" | "six", batter: { name: string; runs: number; balls: number }) => void;
+  onMilestone?: (moment: "fifty" | "hundred", batter: { name: string; runs: number; balls: number; label?: string }) => void;
+  onWicketConfirm?: (payload: {
+    batsmanOut: "striker" | "nonStriker";
+    batter: { name: string; runs: number; balls: number };
+    dismissalType: DismissalType;
+    fielder: string;
+    bowlerName: string;
+  }) => void;
 }) {
   // Which team is currently batting drives which squad the carousels show.
   const [battingTeamKey, setBattingTeamKey] = useState<"teamA" | "teamB">(() => {
@@ -189,6 +417,19 @@ export default function LiveStatePanel({
   const undoRef = useRef<LiveState | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // auto-fire plumbing: toast queue + pending wicket dialog state.
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastIdRef = useRef(0);
+  const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(null);
+
+  function pushToast(text: string, tone: Toast["tone"]) {
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t, { id, text, tone }]);
+    window.setTimeout(() => {
+      setToasts((t) => t.filter((x) => x.id !== id));
+    }, 1600);
+  }
 
   function snapshotForUndo() {
     undoRef.current = liveState;
@@ -241,13 +482,24 @@ export default function LiveStatePanel({
   function recordBall(runs: number) {
     snapshotForUndo();
 
+    const isIllegal = extraType === "wide" || extraType === "noBall";
+    const batterGetsRuns = extraType === "none" || extraType === "noBall";
+
+    // capture the striker's pre-update identity/numbers so any auto-fired
+    // moment below reflects the score at the instant this run actually
+    // happened, not whatever liveState settles to after render.
+    const strikerBefore = liveState.striker;
+    const runsBefore = strikerBefore.runs;
+    const newRuns = batterGetsRuns ? runsBefore + runs : runsBefore;
+    const newBalls = !isIllegal ? strikerBefore.balls + 1 : strikerBefore.balls;
+
     setLiveState((prev) => {
-      const isIllegal = extraType === "wide" || extraType === "noBall";
+      const isIllegalInner = extraType === "wide" || extraType === "noBall";
       const isByeType = extraType === "bye" || extraType === "legBye";
-      const countsAsLegalBall = !isIllegal;
-      const batterGetsRuns = extraType === "none" || extraType === "noBall";
+      const countsAsLegalBall = !isIllegalInner;
+      const batterGetsRunsInner = extraType === "none" || extraType === "noBall";
       const bowlerConcedes = !isByeType; // byes/leg-byes don't count against the bowler
-      const totalTeamRuns = runs + (isIllegal ? 1 : 0);
+      const totalTeamRuns = runs + (isIllegalInner ? 1 : 0);
 
       // score / over progression
       let { overs, balls } = prev.score;
@@ -263,7 +515,7 @@ export default function LiveStatePanel({
 
       // striker
       const striker: BatterState = { ...prev.striker };
-      if (batterGetsRuns) {
+      if (batterGetsRunsInner) {
         striker.runs += runs;
         if (runs === 4) striker.fours += 1;
         if (runs === 6) striker.sixes += 1;
@@ -290,11 +542,11 @@ export default function LiveStatePanel({
       // boundaries trackers only credit genuine batted fours/sixes
       const matchBoundaries = { ...prev.matchBoundaries };
       const tournamentBoundaries = { ...prev.tournamentBoundaries };
-      if (batterGetsRuns && runs === 4) {
+      if (batterGetsRunsInner && runs === 4) {
         matchBoundaries.fours += 1;
         tournamentBoundaries.fours += 1;
       }
-      if (batterGetsRuns && runs === 6) {
+      if (batterGetsRunsInner && runs === 6) {
         matchBoundaries.sixes += 1;
         tournamentBoundaries.sixes += 1;
       }
@@ -326,38 +578,92 @@ export default function LiveStatePanel({
 
     setLiveDirty(true);
     setExtraType("none");
+
+    // ── Auto-sync to Moments (four / six / fifty / hundred) ──────────
+    if (batterGetsRuns && (runs === 4 || runs === 6)) {
+      const moment = runs === 4 ? "four" : "six";
+      onBoundary?.(moment, { name: strikerBefore.name, runs: newRuns, balls: newBalls });
+      pushToast(`🔥 ${moment.toUpperCase()} fired — ${strikerBefore.name || "Striker"} ${newRuns}(${newBalls})`, "boundary");
+    }
+    if (batterGetsRuns && runsBefore < 50 && newRuns >= 50) {
+      onMilestone?.("fifty", { name: strikerBefore.name, runs: newRuns, balls: newBalls, label: strikerBefore.name || "Striker" });
+      pushToast(`🏏 FIFTY fired — ${strikerBefore.name || "Striker"}`, "milestone");
+    }
+    if (batterGetsRuns && runsBefore < 100 && newRuns >= 100) {
+      onMilestone?.("hundred", { name: strikerBefore.name, runs: newRuns, balls: newBalls, label: strikerBefore.name || "Striker" });
+      pushToast(`💯 HUNDRED fired — ${strikerBefore.name || "Striker"}`, "milestone");
+    }
   }
 
+  // CHANGED — no longer assumes the striker is the one out. The score,
+  // over/ball progression, and bowler's wicket tally are recorded
+  // immediately (those don't depend on which end was dismissed), but
+  // clearing a batter slot is deferred until the Wicket Detail dialog
+  // tells us whether it was the striker or non-striker.
   function recordWicket() {
     snapshotForUndo();
+
+    const strikerBefore = { ...liveState.striker };
+    const nonStrikerBefore = { ...liveState.nonStriker };
+    const bowlerName = liveState.bowler.name;
+    const overComplete = liveState.score.balls + 1 >= 6;
+
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
       balls += 1;
-      let overComplete = false;
       if (balls >= 6) {
         overs += 1;
         balls = 0;
-        overComplete = true;
       }
       const bowler = { ...prev.bowler, wickets: prev.bowler.wickets + 1, balls: prev.bowler.balls + 1 };
       if (bowler.balls >= 6) {
         bowler.overs += 1;
         bowler.balls = 0;
       }
-      let nonStriker = prev.nonStriker;
-      if (overComplete) nonStriker = prev.striker; // outgoing slot is empty either way
       return {
         ...prev,
         score: { ...prev.score, wickets: Math.min(10, prev.score.wickets + 1), overs, balls },
-        striker: { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined },
-        nonStriker,
         bowler,
         partnership: { runs: 0, balls: 0 },
+        // striker/nonStriker deliberately left untouched here — resolved
+        // once the dialog confirms who's actually out (see below).
       };
     });
     setLiveDirty(true);
     setExtraType("none");
-    setActiveSlot("striker"); // prompt admin straight to pick the new batter
+
+    // ask which end was dismissed before touching either batter slot
+    setPendingWicket({ strikerBefore, nonStrikerBefore, bowlerName, overComplete });
+  }
+
+  function handleWicketResolve(
+    batsmanOut: "striker" | "nonStriker",
+    fire: boolean,
+    dismissalType: DismissalType,
+    fielder: string
+  ) {
+    if (!pendingWicket) return;
+    const { strikerBefore, nonStrikerBefore, bowlerName, overComplete } = pendingWicket;
+
+    const resolved = resolveBatterSlots(batsmanOut, strikerBefore as BatterState, nonStrikerBefore as BatterState, overComplete);
+    setLiveState((prev) => ({ ...prev, striker: resolved.striker, nonStriker: resolved.nonStriker }));
+    setLiveDirty(true);
+    // whichever slot is now empty needs a new batter picked next
+    setActiveSlot(resolved.striker.name === "" ? "striker" : "nonStriker");
+
+    if (fire) {
+      const dismissedBatter = batsmanOut === "striker" ? strikerBefore : nonStrikerBefore;
+      onWicketConfirm?.({
+        batsmanOut,
+        batter: dismissedBatter,
+        dismissalType,
+        fielder,
+        bowlerName,
+      });
+      pushToast(`🎯 WICKET fired — ${dismissedBatter.name || (batsmanOut === "striker" ? "Striker" : "Non-striker")} ${dismissalType}`, "wicket");
+    }
+
+    setPendingWicket(null);
   }
 
   // ── Advanced (manual) helpers — unchanged behavior, tucked away ────
@@ -395,6 +701,67 @@ export default function LiveStatePanel({
 
   return (
     <DrawerSection step="3" title="Scorer" description="Tap the ball, we do the maths" dirty={liveDirty} defaultOpen>
+      {/* small inline stylesheet for the toast + dialog entrance animations.
+          Scoped to this component only; no global CSS touched. */}
+      <style>{`
+        @keyframes scorerToastIn {
+          from { opacity: 0; transform: translateY(6px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes scorerDialogIn {
+          from { opacity: 0; transform: scale(0.94); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes scorerBackdropIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .scorer-toast-stack {
+          position: sticky;
+          top: 4px;
+          z-index: 5;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          align-items: flex-end;
+          pointer-events: none;
+          margin-bottom: -4px;
+        }
+        .scorer-toast {
+          font-family: var(--font-label-mono);
+          font-size: 11px;
+          font-weight: 700;
+          padding: 6px 12px;
+          border-radius: 8px;
+          animation: scorerToastIn 160ms ease-out;
+          white-space: nowrap;
+        }
+        .scorer-dialog-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.55);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 50;
+          animation: scorerBackdropIn 140ms ease-out;
+        }
+        .scorer-dialog {
+          width: 340px;
+          max-width: calc(100vw - 32px);
+          background: var(--color-surface-container-low);
+          border: 1px solid var(--color-border-overlay);
+          border-radius: 14px;
+          padding: 18px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+          animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+        }
+      `}</style>
+
+      <ToastStack toasts={toasts} />
+
+      {pendingWicket && <WicketDetailDialog pending={pendingWicket} onResolve={handleWicketResolve} />}
+
       {/* ── Big scoreboard readout ──────────────────────────────────── */}
       <div className="scoreboard-strip">
         <div className="scoreboard-main">
@@ -504,9 +871,9 @@ export default function LiveStatePanel({
           </button>
         </div>
         <p className="text-[9px] mt-2" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
-          Pick an extra type above first if this ball is a wide / no ball / bye / leg bye, then tap the run scored. Tap OUT to record a
-          wicket — you&apos;ll be prompted to pick the new batter above. For the animated wicket graphic with dismissal type and fielder,
-          use the WICKET button in Moments.
+          Pick an extra type above first if this ball is a wide / no ball / bye / leg bye, then tap the run scored. Fours, sixes, and
+          fifty/hundred milestones fire their overlay graphic automatically. Tap OUT to record a wicket — you&apos;ll be asked whether
+          the striker or non-striker was dismissed, plus dismissal detail, before the wicket graphic fires.
         </p>
       </div>
 
