@@ -6,8 +6,8 @@ import { DrawerSection, Eyebrow, FieldLabel, Input, Stepper, SmallButton, Primar
 import {
   useLiveScoringEngine,
   EXTRA_OPTIONS,
-  DISMISSAL_OPTIONS,
-  FREE_HIT_DISMISSAL_OPTIONS,
+  getValidDismissalOptions,
+  isDismissalLockedToRunOutOnly,
   type ExtraType,
   type DismissalType,
   type PendingWicket,
@@ -205,8 +205,9 @@ function WicketDetailDialog({
   onResolve: (batsmanOut: "striker" | "nonStriker", fire: boolean, dismissalType: DismissalType, fielder: string, runsCompleted: number) => void;
 }) {
   const [batsmanOut, setBatsmanOut] = useState<"striker" | "nonStriker">("striker");
-  const options = pending.wasFreeHit ? FREE_HIT_DISMISSAL_OPTIONS : DISMISSAL_OPTIONS;
-  const [dismissalType, setDismissalType] = useState<DismissalType>(pending.wasFreeHit ? "runOut" : "bowled");
+  const options = getValidDismissalOptions(pending.extraType, pending.isFreeHitActive);
+  const lockedToRunOutOnly = isDismissalLockedToRunOutOnly(pending.extraType, pending.isFreeHitActive);
+  const [dismissalType, setDismissalType] = useState<DismissalType>(options[0].value);
   const [fielder, setFielder] = useState("");
   const [runsCompleted, setRunsCompleted] = useState(0);
 
@@ -227,12 +228,23 @@ function WicketDetailDialog({
           </button>
         </div>
 
-        {pending.wasFreeHit && (
+        {lockedToRunOutOnly && (
           <div
             className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide"
             style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#60A5FA", fontFamily: "var(--font-label-mono)" }}
           >
             🔓 {pending.extraType === "noBall" ? "No Ball" : "Free Hit"} — only Run Out is a valid dismissal
+          </div>
+        )}
+
+        {/* NEW — wide-ball rule: bowled/caught/lbw are impossible off a
+            wide, only run out / stumped / hit wicket are valid. */}
+        {!lockedToRunOutOnly && pending.extraType === "wide" && (
+          <div
+            className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide"
+            style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#60A5FA", fontFamily: "var(--font-label-mono)" }}
+          >
+            🔵 Wide — Bowled, Caught, and LBW aren&apos;t valid here
           </div>
         )}
 
@@ -248,10 +260,10 @@ function WicketDetailDialog({
           <FieldLabel>Dismissal</FieldLabel>
           <select
             value={dismissalType}
-            disabled={pending.wasFreeHit}
+            disabled={options.length === 1}
             onChange={(e) => setDismissalType(e.target.value as DismissalType)}
             className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)", opacity: pending.wasFreeHit ? 0.75 : 1 }}
+            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)", opacity: options.length === 1 ? 0.75 : 1 }}
           >
             {options.map((d) => (
               <option key={d.value} value={d.value}>

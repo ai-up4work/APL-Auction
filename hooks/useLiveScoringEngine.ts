@@ -22,11 +22,30 @@ export const DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
   { value: "hitWicket", label: "Hit Wicket" },
 ];
 
-// FIX #2 — this now also applies when the wicket ball ITSELF is a no-ball,
-// not just the free-hit ball that follows it.
+// Free hit / no-ball wicket: only a run out is legal.
 export const FREE_HIT_DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
   { value: "runOut", label: "Run Out" },
 ];
+
+// NEW — a wide restricts dismissals differently: bowled/caught/lbw are
+// impossible (the ball was never bowled within reach), but run out,
+// stumped, and hit wicket are all still valid off a wide.
+export const WIDE_DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
+  { value: "runOut", label: "Run Out" },
+  { value: "stumped", label: "Stumped" },
+  { value: "hitWicket", label: "Hit Wicket" },
+];
+
+// single source of truth for which dismissals are legal on a given ball.
+export function getValidDismissalOptions(extraType: ExtraType, isFreeHitActive: boolean) {
+  if (isFreeHitActive || extraType === "noBall") return FREE_HIT_DISMISSAL_OPTIONS;
+  if (extraType === "wide") return WIDE_DISMISSAL_OPTIONS;
+  return DISMISSAL_OPTIONS;
+}
+
+export function isDismissalLockedToRunOutOnly(extraType: ExtraType, isFreeHitActive: boolean) {
+  return isFreeHitActive || extraType === "noBall";
+}
 
 export function emptyBatterSlot(): BatterState {
   return { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined };
@@ -37,15 +56,15 @@ export interface PendingWicket {
   nonStrikerBefore: { name: string; runs: number; balls: number };
   bowlerName: string;
   overComplete: boolean;
-  // FIX #1 — carried through so resolveWicket() knows exactly what kind
-  // of ball this was, instead of always assuming a normal legal delivery.
   extraType: ExtraType;
-  wasFreeHit: boolean;
+  // was Free Hit armed for THIS ball (independent of extraType — a wide
+  // can carry a free hit over, a no-ball forces the SAME restriction via
+  // extraType alone, handled separately in getValidDismissalOptions).
+  isFreeHitActive: boolean;
 }
 
 export type Toast = { id: number; text: string; tone: "boundary" | "milestone" | "wicket" };
 
-// ── single source of truth for what an extra type means for scoring ──
 function ballLegality(extraType: ExtraType) {
   const isWide = extraType === "wide";
   const isNoBall = extraType === "noBall";
@@ -56,13 +75,9 @@ function ballLegality(extraType: ExtraType) {
     isNoBall,
     isBye,
     isLegBye,
-    // wides/no-balls don't count toward the 6-ball over
     countsAsLegalBall: !isWide && !isNoBall,
-    // wides/no-balls always add one automatic penalty run
     extraPenaltyRun: isWide || isNoBall ? 1 : 0,
-    // byes/leg-byes/wides are never credited as the batter's own runs
     batterCanScoreOffBat: extraType === "none" || isNoBall,
-    // byes/leg-byes never count against the bowler's figures
     bowlerConcedesRuns: !isBye && !isLegBye,
   };
 }
@@ -132,9 +147,6 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
     undoRef.current = null;
     setCanUndo(false);
-    // FIX #5 — an in-flight wicket dialog no longer matches the state
-    // we just rolled back to, so drop it rather than resolve it later
-    // against stale data.
     setPendingWicket(null);
   }
 
@@ -165,7 +177,6 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
   }
 
-  // ── normal deliveries ────────────────────────────────────────────
   function recordBall(runs: number) {
     snapshotForUndo();
     const legality = ballLegality(extraType);
@@ -275,13 +286,9 @@ export function useLiveScoringEngine({
     }
   }
 
-  // ── wicket: step 1 — snapshot what happened, defer the numbers ─────
-  // FIX #1/#2 — we now record which extra type this ball was, and defer
-  // ALL score/over/bowler updates to resolveWicket(), because we can't
-  // correctly apply them until we know the dismissal type and (for a
-  // run out) how many runs were completed. Trying to apply them here,
-  // before knowing that, is exactly what caused wides/no-balls to wrongly
-  // advance the over on a wicket ball before.
+  // step 1 — snapshot, don't touch score/wickets yet; resolveWicket does
+  // all of that once we know the dismissal type and (for a run out) how
+  // many runs were completed.
   function recordWicket() {
     snapshotForUndo();
 
@@ -291,9 +298,15 @@ export function useLiveScoringEngine({
     const currentExtraType = extraType;
     const legality = ballLegality(currentExtraType);
     const overComplete = legality.countsAsLegalBall && liveState.score.balls + 1 >= 6;
-    const wasFreeHit = isFreeHit || currentExtraType === "noBall";
 
-    setPendingWicket({ strikerBefore, nonStrikerBefore, bowlerName, overComplete, extraType: currentExtraType, wasFreeHit });
+    setPendingWicket({
+      strikerBefore,
+      nonStrikerBefore,
+      bowlerName,
+      overComplete,
+      extraType: currentExtraType,
+      isFreeHitActive: isFreeHit,
+    });
 
     if (currentExtraType === "noBall") setIsFreeHit(true);
     else if (currentExtraType === "wide") {
@@ -302,9 +315,7 @@ export function useLiveScoringEngine({
     setExtraType("none");
   }
 
-  // ── wicket: step 2 — dialog has resolved who/how/runs completed ────
-  // FIX #3/#4 — runsCompleted lets a run-out mid-run be scored correctly,
-  // and the wide/no-ball penalty run is applied here via ballLegality().
+  // step 2 — dialog has resolved who/how/runs completed.
   function resolveWicket(
     batsmanOut: "striker" | "nonStriker",
     fire: boolean,
@@ -316,10 +327,19 @@ export function useLiveScoringEngine({
     const { strikerBefore, nonStrikerBefore, bowlerName, extraType: ballExtraType, overComplete } = pendingWicket;
     const legality = ballLegality(ballExtraType);
 
-    // completed runs only ever apply on a run out — every other
-    // dismissal means the ball died the instant it happened.
     const completedRuns = dismissalType === "runOut" ? Math.max(0, runsCompleted) : 0;
     const totalTeamRuns = completedRuns + legality.extraPenaltyRun;
+
+    // FIX — a run out is a fielding dismissal; it must NOT count toward
+    // the bowler's personal wicket tally, only the team's total.
+    const creditsBowler = dismissalType !== "runOut";
+
+    // FIX — the striker is always the one who faced the ball, so they
+    // get credit for any completed runs + the ball faced regardless of
+    // which end is actually given out. This is the score the fired
+    // wicket graphic/toast must show.
+    const strikerFinalRuns = legality.batterCanScoreOffBat ? strikerBefore.runs + completedRuns : strikerBefore.runs;
+    const strikerFinalBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -331,7 +351,7 @@ export function useLiveScoringEngine({
         }
       }
 
-      const bowler = { ...prev.bowler, wickets: prev.bowler.wickets + 1 };
+      const bowler = { ...prev.bowler, wickets: creditsBowler ? prev.bowler.wickets + 1 : prev.bowler.wickets };
       if (legality.bowlerConcedesRuns) bowler.runs += totalTeamRuns;
       if (legality.countsAsLegalBall) {
         bowler.balls += 1;
@@ -341,12 +361,7 @@ export function useLiveScoringEngine({
         }
       }
 
-      // whoever was facing the ball gets credit for runs off the bat and
-      // a ball faced, regardless of which end actually got run out.
-      const strikerFacing: BatterState = { ...prev.striker };
-      if (legality.batterCanScoreOffBat) strikerFacing.runs += completedRuns;
-      if (legality.countsAsLegalBall) strikerFacing.balls += 1;
-
+      const strikerFacing: BatterState = { ...prev.striker, runs: strikerFinalRuns, balls: strikerFinalBalls };
       const resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
 
       return {
@@ -367,15 +382,19 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
 
     if (fire) {
-      const dismissedBatter = batsmanOut === "striker" ? strikerBefore : nonStrikerBefore;
+      const dismissedBatter =
+        batsmanOut === "striker"
+          ? { name: strikerBefore.name, runs: strikerFinalRuns, balls: strikerFinalBalls }
+          : nonStrikerBefore;
       onWicketConfirm?.({ batsmanOut, batter: dismissedBatter, dismissalType, fielder, bowlerName });
+      const lockedToRunOutOnly = isDismissalLockedToRunOutOnly(pendingWicket.extraType, pendingWicket.isFreeHitActive);
       pushToast(
-        `${pendingWicket.wasFreeHit ? "🔓 " : "🎯 "}WICKET fired — ${dismissedBatter.name || (batsmanOut === "striker" ? "Striker" : "Non-striker")} ${dismissalType}`,
+        `${lockedToRunOutOnly ? "🔓 " : "🎯 "}WICKET fired — ${dismissedBatter.name || (batsmanOut === "striker" ? "Striker" : "Non-striker")} ${dismissalType}`,
         "wicket"
       );
     }
 
-    setActiveSlot(batsmanOut); // the slot that just emptied needs a new player
+    setActiveSlot(batsmanOut);
     setPendingWicket(null);
   }
 
