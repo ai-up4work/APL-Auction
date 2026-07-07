@@ -5,15 +5,8 @@ import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState }
 import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
 import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
-import { Section, StatusPill, ActionButton, ChannelRow } from "@/components/overlays/admin/ui";
-
-interface OverlayToggle {
-  key: string;
-  label: string;
-  on: boolean;
-  set: (v: boolean) => void;
-  event: OverlayEvent["type"];
-}
+import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
+import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
 const emptyTeam = () => ({
@@ -119,18 +112,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const auctionId = "2c5915d0-6b31-47cb-9597-0bd721afe2a9";
 
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
+  const onAirRef = useRef<OnAirChannelsHandle>(null);
   const [connected, setConnected] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-
-  const [weatherOn, setWeatherOn] = useState(false);
-  const [matchBoundariesOn, setMatchBoundariesOn] = useState(false);
-  const [tournamentBoundariesOn, setTournamentBoundariesOn] = useState(false);
-  const [liveScoreBarOn, setLiveScoreBarOn] = useState(false);
-  const [pointsTableOn, setPointsTableOn] = useState(false);
-  const [matchScorecardOn, setMatchScorecardOn] = useState(false);
-  const [matchIntroOn, setMatchIntroOn] = useState(false);
-  const [tournamentLogoOn, setTournamentLogoOn] = useState(false);
-  const [testBgOn, setTestBgOn] = useState(false);
 
   // ── Match Setup state (session) ─────────────────────────────────────
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
@@ -162,9 +146,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }, [auctionId]);
 
   // ── Match Setup + Live State persistence ────────────────────────────
-  // Keyed by auctionId so a page refresh mid-match doesn't lose anything.
-  // TODO: once there's a backend row per auction, swap these for a real
-  // save/load call instead of localStorage.
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -206,25 +187,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fire(event as unknown as OverlayEvent, label);
   }
 
-  const channels: OverlayToggle[] = [
-    { key: "weather", label: "Weather", on: weatherOn, set: setWeatherOn, event: "weather" },
-    { key: "matchBoundaries", label: "Match Boundaries", on: matchBoundariesOn, set: setMatchBoundariesOn, event: "matchBoundaries" },
-    { key: "tournamentBoundaries", label: "Tournament Boundaries", on: tournamentBoundariesOn, set: setTournamentBoundariesOn, event: "tournamentBoundaries" },
-    { key: "liveScoreBar", label: "Live Score Bar", on: liveScoreBarOn, set: setLiveScoreBarOn, event: "liveScoreBar" },
-    { key: "pointsTable", label: "Points Table", on: pointsTableOn, set: setPointsTableOn, event: "pointsTable" },
-    { key: "matchScorecard", label: "Match Scorecard", on: matchScorecardOn, set: setMatchScorecardOn, event: "matchScorecard" },
-    { key: "matchIntro", label: "Match Intro", on: matchIntroOn, set: setMatchIntroOn, event: "matchIntro" },
-    { key: "tournamentLogo", label: "Tournament Logo", on: tournamentLogoOn, set: setTournamentLogoOn, event: "tournamentLogo" },
-  ];
-
-  function toggleChannel(ch: OverlayToggle) {
-    const next = !ch.on;
-    ch.set(next);
-    if (ch.key === "matchBoundaries" && next) setTournamentBoundariesOn(false);
-    if (ch.key === "tournamentBoundaries" && next) setMatchBoundariesOn(false);
-    fire({ type: ch.event, show: next } as OverlayEvent, `${ch.label} ${next ? "on" : "off"}`);
-  }
-
   // ── Match Setup helpers ──────────────────────────────────────────────
   function pushMatchSetup() {
     fireLoose({ type: "matchSetup", data: matchSetup }, "Match Setup pushed to overlay");
@@ -242,12 +204,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }
 
   // ── Moments helpers ──────────────────────────────────────────────────
+  // Every moment also tells OnAirChannels to drop Points Table / Scorecard /
+  // Intro — those full-screen graphics shouldn't be up while a Four/Six/
+  // Wicket/Fifty/Hundred graphic fires over them. Stays off until the
+  // operator manually re-enables it (per the agreed rule).
   function fireBoundaryMoment(moment: "four" | "six") {
     const batter = liveState.striker;
     fireLoose(
       { type: "moment", moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` },
       `Moment: ${moment.toUpperCase()} — ${batter.name || "Striker"} ${batter.runs}(${batter.balls})`
     );
+    onAirRef.current?.notifyMomentFired();
   }
 
   function fireMilestoneMoment(moment: "fifty" | "hundred") {
@@ -257,6 +224,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       { type: "moment", moment, player: label, score: `${batter.runs}(${batter.balls})` },
       `Moment: ${moment.toUpperCase()} — ${label} ${batter.runs}(${batter.balls})`
     );
+    onAirRef.current?.notifyMomentFired();
   }
 
   function fireWicketMoment() {
@@ -277,6 +245,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""
       }`
     );
+    onAirRef.current?.notifyMomentFired();
     setWicketDraft(emptyWicketDraft);
     setShowWicketForm(false);
   }
@@ -304,33 +273,57 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
       <div className="relative z-10 max-w-[1600px] mx-auto px-6 lg:px-10 py-8">
         {/* ── Header ─────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap justify-between items-end gap-4 mb-8">
-          <div>
+        <div className="flex flex-col items-center text-center gap-5 mb-10 pb-8" style={{ borderBottom: "1px solid var(--color-border-overlay)" }}>
+          <span
+            className="flex items-center gap-2.5 text-[10px] font-black uppercase tracking-[0.3em]"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+          >
             <span
-              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] mb-2"
-              style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>stream</span>
-              Broadcast Control
-            </span>
-            <h2
+              className="tally"
               style={{
-                fontFamily: "var(--font-headline-lg)",
-                fontSize: "32px",
-                lineHeight: "40px",
-                fontWeight: 700,
-                letterSpacing: "0.01em",
-                color: "var(--color-on-surface)",
+                background: connected
+                  ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
+                  : "radial-gradient(circle at 35% 30%, #ff9d94, var(--color-error, #d9534f) 65%)",
+                boxShadow: connected
+                  ? "0 0 6px 1px var(--color-success-green, #4caf50)"
+                  : "0 0 6px 1px rgba(217,83,79,0.55)",
+                animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
               }}
-            >
-              Overlay Control Room
-            </h2>
-            <p className="mt-1.5 max-w-xl" style={{ fontFamily: "var(--font-body-md)", fontSize: "14px", lineHeight: "22px", color: "var(--color-on-surface-variant)" }}>
-              Set the match once, then run the scoreboard ball by ball — the program monitor and quick-fire graphics stay docked alongside you.
-            </p>
-          </div>
+            />
+            On Air Control
+            <span
+              className="tally"
+              style={{
+                background: connected
+                  ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
+                  : "radial-gradient(circle at 35% 30%, #ff9d94, var(--color-error, #d9534f) 65%)",
+                boxShadow: connected
+                  ? "0 0 6px 1px var(--color-success-green, #4caf50)"
+                  : "0 0 6px 1px rgba(217,83,79,0.55)",
+                animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
+              }}
+            />
+          </span>
 
-          <div className="flex items-center gap-3">
+          <h2
+            style={{
+              fontFamily: "var(--font-headline-lg)",
+              fontSize: "38px",
+              lineHeight: "44px",
+              fontWeight: 700,
+              letterSpacing: "0.01em",
+              color: "var(--color-on-surface)",
+            }}
+          >
+            Overlay Control Room
+          </h2>
+
+          <div
+            className="w-10 h-[3px] rounded-full"
+            style={{ background: "linear-gradient(90deg, transparent, var(--color-theme-orange), transparent)" }}
+          />
+
+          <div className="flex items-center gap-3 flex-wrap justify-center">
             {scoreIsLive && (
               <div
                 className="flex items-baseline gap-2.5 px-4 py-2 rounded-xl"
@@ -348,19 +341,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 </span>
               </div>
             )}
-            <div className="flex items-center gap-0.5">
-              <span
-                className="tally"
-                style={{
-                  background: connected
-                    ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
-                    : undefined,
-                  boxShadow: connected ? "0 0 6px 1px var(--color-success-green, #4caf50)" : undefined,
-                  animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
-                }}
-              />
-              <StatusPill label={connected ? "Bus Connected" : "Connecting…"} tone={connected ? "success" : "warning"} pulse={!connected} />
-            </div>
           </div>
         </div>
 
@@ -376,9 +356,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               completed={matchSetupCompleted}
             />
 
-            {/* Scorer / Live State only appears once Match Setup has been
-                pushed and locked — before that, this slot shows a nudge
-                instead so the page doesn't imply live scoring is ready. */}
             {matchSetupCompleted ? (
               <LiveStatePanel
                 liveState={liveState}
@@ -414,7 +391,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
             )}
           </div>
 
-          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">            <ProgramMonitor overlayUrl={overlayUrl} />
+          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
+            <ProgramMonitor overlayUrl={overlayUrl} />
 
             {/* ── Moments — the buttons an operator reaches for the
                  instant a ball happens, docked next to the picture ── */}
@@ -538,44 +516,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               </div>
             </Section>
 
-            {/* ── On Air — overlay channel toggles ──────────────────── */}
-            <Section title="On Air" description="Toggle overlay channels live on the broadcast.">
-              <div className="flex flex-col gap-2.5">
-                <div className="grid grid-cols-2 gap-2">
-                  {channels.map((ch) => (
-                    <ChannelRow key={ch.key} label={ch.label} on={ch.on} onToggle={() => toggleChannel(ch)} />
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => {
-                    channels.forEach((ch) => ch.set(false));
-                    fire({ type: "clearAll" }, "Cleared all overlays");
-                  }}
-                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide mt-1"
-                  style={{
-                    fontFamily: "var(--font-label-mono)",
-                    background: "var(--color-error-container)",
-                    border: "1px solid rgba(255,180,171,0.25)",
-                    color: "var(--color-error)",
-                  }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>restart_alt</span>
-                  Clear Everything
-                </button>
-
-                <div className="h-px my-1" style={{ background: "var(--color-outline-variant)" }} />
-
-                <ChannelRow label="Test Background" on={testBgOn} tone="blue" onToggle={() => {
-                  const next = !testBgOn;
-                  setTestBgOn(next);
-                  fire({ type: "testBg", show: next }, `Test background ${next ? "on" : "off"}`);
-                }} />
-                <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-                  Sample footage for layout testing — off before going live.
-                </p>
-              </div>
-            </Section>
+            {/* ── On Air — now a self-contained component that owns its
+                 own suppression / mutex rules. Just feed it `fire` and a
+                 ref so Moments can tell it to drop the full-screen group. */}
+            <OnAirChannels ref={onAirRef} fire={fire} />
 
             {/* ── Event Log ──────────────────────────────────────────── */}
             <Section title="Event Log">
