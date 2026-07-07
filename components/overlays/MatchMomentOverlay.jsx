@@ -4,22 +4,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import CricketBall from "./shared/CricketBall";
 
-// Default per-moment styling/behavior — exported so a parent can override
-// or extend individual moments (or add brand-new ones) via the `moments`
-// prop without touching this file. Merged shallowly, so passing
-// `{ six: { accent: "#ff0000" } }` replaces just that one moment's config
-// (not a deep merge) — pass the full object for that key if you want to
-// change just one field, spread the default in yourself, e.g.
-// `{ six: { ...DEFAULT_MOMENTS.six, accent: "#ff0000" } }`.
-//
-// NOTE: this component is the single source of truth for boundary/wicket/
-// milestone celebrations. There used to be a second, near-identical
-// `BoundaryCelebration` component that only covered four/six — it
-// duplicated all of the particle/firework/confetti code below AND
-// registered the same `window.triggerBoundaryCelebration` global, so
-// mounting both anywhere in the tree meant whichever one mounted last
-// silently won. That component has been deleted; everything (including
-// plain fours and sixes) goes through here now.
 export const DEFAULT_MOMENTS = {
   four: {
     mode: "ball",
@@ -96,6 +80,41 @@ export const DEFAULT_MOMENTS = {
     dropText: false,
     duration: 3600,
   },
+  // NEW — was being fired via onMaiden -> "moment" event, but had no entry
+  // here, so trigger() silently no-op'd every single time. Fixed.
+  maiden: {
+    mode: "ball",
+    label: "MAIDEN",
+    subtitle: "OVER",
+    accent: "#60A5FA",
+    accentSoft: "rgba(96,165,250,0.4)",
+    gradient: "linear-gradient(180deg, #eaf4ff 0%, #a8c8f0 38%, #4a7bc9 74%, #1f3f75 100%)",
+    glow: "rgba(96,165,250,0.7)",
+    particleCount: 20,
+    particleDist: [90, 200],
+    fireworks: 0,
+    confetti: false,
+    dropText: false,
+    duration: 2400,
+  },
+  // NEW — base template for the match-won celebration. label/subtitle/
+  // accent/gradient get overridden per-fire with the actual winning team's
+  // name, margin, and brand color (see trigger() below).
+  matchWon: {
+    mode: "trophy",
+    label: "WINNER",
+    subtitle: "MATCH WON",
+    accent: "#C9971F",
+    accentSoft: "rgba(201,151,31,0.45)",
+    gradient: "linear-gradient(180deg, #fff6d8 0%, #ffd873 30%, #f2b33d 60%, #c9971f 85%, #8a5c0d 100%)",
+    glow: "rgba(255,200,120,0.85)",
+    particleCount: 46,
+    particleDist: [160, 340],
+    fireworks: 10,
+    confetti: true,
+    dropText: false,
+    duration: 5200,
+  },
 };
 
 const EXIT_DURATION_MS = 380;
@@ -109,15 +128,16 @@ function px(v) {
   return Math.round(v);
 }
 
-// Flying cricket-ball gradient — a warmer "leather in flight" fill than
-// CricketBall's default, keyed off each moment's accent color. Same
-// helper BoundaryCelebration used to have locally.
 function flightFill(accent) {
   return `radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 26%, ${accent} 62%, #3a2504 100%)`;
 }
 
-// Broken stumps + flying bails — unique to the wicket moment, so this
-// stays local rather than moving into share/ (nothing else uses it).
+// NEW — a one-color gradient built from the winning team's brand color,
+// so "matchWon" doesn't always look gold regardless of who won.
+function soloGradient(color) {
+  return `linear-gradient(180deg, #ffffff 0%, ${color} 45%, ${color} 78%, #1a1a1a 120%)`;
+}
+
 function StumpsShatter() {
   const pieces = [
     { id: "s1", w: 9, h: 64, x: -16, y: 10, rot: -35, tx: -50, ty: 110, delay: 0.02 },
@@ -149,6 +169,26 @@ function StumpsShatter() {
         />
       ))}
     </>
+  );
+}
+
+// NEW — trophy rise-in for the "matchWon" moment. Shows the winning
+// team's logo if provided, otherwise a trophy glyph in the team's color.
+function TrophyRise({ cfg, logoUrl }) {
+  return (
+    <div className="bc-trophy-wrap absolute flex flex-col items-center">
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          className="rounded-full object-cover"
+          style={{ width: 88, height: 88, border: `3px solid ${cfg.accent}`, boxShadow: `0 0 26px ${cfg.glow}` }}
+        />
+      ) : (
+        <span style={{ fontSize: 88, filter: `drop-shadow(0 0 26px ${cfg.glow})` }}>🏆</span>
+      )}
+    </div>
   );
 }
 
@@ -260,7 +300,7 @@ function Confetti({ triggerId, confettiColors }) {
   );
 }
 
-function BigText({ cfg }) {
+function BigText({ cfg, footer }) {
   const letters = cfg.label.split("");
   const letterClass = cfg.dropText ? "bc-letter-drop" : "bc-letter";
   return (
@@ -291,25 +331,20 @@ function BigText({ cfg }) {
       >
         {cfg.subtitle}
       </p>
+      {/* NEW — optional third line, used for the bowler's name on a
+          maiden-over graphic. */}
+      {footer && (
+        <p
+          className="bc-subtitle mt-1 font-heading font-bold uppercase tracking-[0.2em] text-xs sm:text-sm opacity-80"
+          style={{ color: "#ffffff", filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.85))" }}
+        >
+          {footer}
+        </p>
+      )}
     </div>
   );
 }
 
-/**
- * MatchMomentOverlay — full-screen cinematic overlay for FOUR / SIX /
- * WICKET / FIFTY / CENTURY. This is the one and only moment-celebration
- * component; mount it once anywhere in the tree and it renders nothing
- * until triggered.
- *
- * `moments` overrides/extends DEFAULT_MOMENTS per key (shallow merge per
- * key — see the note above DEFAULT_MOMENTS). `confettiColors` overrides
- * the shared confetti/firework palette. `hideDemoButtons` removes the
- * on-screen test buttons (set this on the real OBS overlay page — leave
- * it false for standalone testing).
- *
- * Trigger via:
- *   window.triggerBoundaryCelebration("four" | "six" | "wicket" | "fifty" | "hundred")
- */
 export default function MatchMomentOverlay({
   moments = {},
   confettiColors = DEFAULT_CONFETTI_COLORS,
@@ -317,6 +352,8 @@ export default function MatchMomentOverlay({
 }) {
   const [mounted, setMounted] = useState(false);
   const [active, setActive] = useState(null);
+  const [activeCfg, setActiveCfg] = useState(null); // NEW — resolved cfg (may differ from mergedMoments[active] for matchWon/maiden)
+  const [payload, setPayload] = useState(null); // NEW — raw event data (player/bowler/teamLogoUrl/etc.)
   const [closing, setClosing] = useState(false);
   const [triggerId, setTriggerId] = useState(0);
   const timers = useRef([]);
@@ -330,18 +367,44 @@ export default function MatchMomentOverlay({
     timers.current = [];
   };
 
+  // CHANGED — trigger now accepts an optional payload (the full moment
+  // event) so matchWon/maiden can carry dynamic text instead of always
+  // showing static copy.
   const trigger = useCallback(
-    (type) => {
+    (type, evt) => {
       if (!mergedMoments[type]) return;
       clearTimers();
       setClosing(false);
       setActive(type);
+      setPayload(evt || null);
+
+      const baseCfg = mergedMoments[type];
+      let cfg = baseCfg;
+
+      if (type === "matchWon") {
+        const teamName = (evt?.player || "WINNER").toUpperCase();
+        const margin = evt?.score || "MATCH WON";
+        const accent = evt?.teamColor || baseCfg.accent;
+        cfg = {
+          ...baseCfg,
+          label: teamName,
+          subtitle: margin,
+          accent,
+          glow: evt?.teamColor ? `${evt.teamColor}CC` : baseCfg.glow,
+          gradient: evt?.teamColor ? soloGradient(evt.teamColor) : baseCfg.gradient,
+        };
+      } else if (type === "maiden" && evt?.bowler) {
+        cfg = { ...baseCfg };
+      }
+
+      setActiveCfg(cfg);
       setTriggerId((id) => id + 1);
-      const cfg = mergedMoments[type];
       timers.current.push(
         setTimeout(() => setClosing(true), cfg.duration),
         setTimeout(() => {
           setActive(null);
+          setActiveCfg(null);
+          setPayload(null);
           setClosing(false);
         }, cfg.duration + EXIT_DURATION_MS)
       );
@@ -360,7 +423,8 @@ export default function MatchMomentOverlay({
 
   if (!mounted) return null;
 
-  const cfg = active ? mergedMoments[active] : null;
+  const cfg = activeCfg;
+  const footer = active === "maiden" && payload?.bowler ? payload.bowler.toUpperCase() : null;
 
   return (
     <>
@@ -372,10 +436,17 @@ export default function MatchMomentOverlay({
             { key: "wicket", label: "Test Out", bg: "rgba(226,69,58,0.9)" },
             { key: "fifty", label: "Test Fifty", bg: "rgba(160,170,190,0.9)" },
             { key: "hundred", label: "Test Century", bg: "rgba(154,110,201,0.9)" },
+            { key: "maiden", label: "Test Maiden", bg: "rgba(96,165,250,0.9)", payload: { bowler: "Sample Bowler" } },
+            {
+              key: "matchWon",
+              label: "Test Match Won",
+              bg: "rgba(201,151,31,0.9)",
+              payload: { player: "Sample XI", score: "won by 24 runs", teamColor: "#3B8BD4" },
+            },
           ].map((b) => (
             <button
               key={b.key}
-              onClick={() => trigger(b.key)}
+              onClick={() => trigger(b.key, b.payload)}
               className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
               style={{ background: b.bg, border: "1px solid rgba(255,255,255,0.25)" }}
             >
@@ -387,6 +458,7 @@ export default function MatchMomentOverlay({
 
       {mounted &&
         active &&
+        cfg &&
         createPortal(
           <div
             className={`bc-wrap fixed inset-0 z-[200] flex items-center justify-center overflow-hidden pointer-events-none ${closing ? "bc-closing" : ""}`}
@@ -412,9 +484,6 @@ export default function MatchMomentOverlay({
               />
             ))}
 
-            {/* Flying cricket ball (four/six/fifty/hundred) uses the
-                shared sphere component with a warmer "in flight" gradient;
-                a wicket shows broken stumps instead. */}
             {cfg.mode === "ball" ? (
               <CricketBall
                 size={64}
@@ -424,9 +493,11 @@ export default function MatchMomentOverlay({
                 className="absolute"
                 style={{ animation: "bcBallFly 0.9s cubic-bezier(0.3,0.1,0.3,1) both" }}
               />
-            ) : (
+            ) : cfg.mode === "stumps" ? (
               <StumpsShatter />
-            )}
+            ) : cfg.mode === "trophy" ? (
+              <TrophyRise cfg={cfg} logoUrl={payload?.teamLogoUrl} />
+            ) : null}
 
             <div className="absolute inset-0 flex items-center justify-center">
               <Particles cfg={cfg} triggerId={triggerId} />
@@ -444,13 +515,11 @@ export default function MatchMomentOverlay({
               </div>
             )}
 
-            <BigText cfg={cfg} />
+            <BigText cfg={cfg} footer={footer} />
           </div>,
           document.body
         )}
 
-      {/* Component-specific animations only — the font import + .font-heading
-          live in lib/overlay-shared.css, imported once from app/globals.css. */}
       <style jsx global>{`
         .bc-wrap {
           animation: bcShake 0.4s ease-out 0.5s both;
@@ -469,18 +538,15 @@ export default function MatchMomentOverlay({
           60% { transform: translate(-4px, -2px); }
           80% { transform: translate(3px, 3px); }
         }
-
         @keyframes bcFlash {
           0% { opacity: 0; }
           25% { opacity: 1; }
           100% { opacity: 0; }
         }
-
         @keyframes bcRing {
           0% { opacity: 0.9; transform: scale(1); }
           100% { opacity: 0; transform: scale(14); }
         }
-
         @keyframes bcBallFly {
           0% { opacity: 0; transform: translate(-58vw, 32vh) scale(0.55) rotate(0deg); }
           14% { opacity: 1; }
@@ -488,7 +554,6 @@ export default function MatchMomentOverlay({
           70% { opacity: 1; transform: translate(0, 0) scale(1.35) rotate(620deg); }
           100% { opacity: 0; transform: translate(0, 0) scale(0.15) rotate(660deg); }
         }
-
         .bc-stump {
           opacity: 0;
           animation: bcStumpFly 1s cubic-bezier(0.25, 0.6, 0.3, 1) 0.5s both;
@@ -498,7 +563,16 @@ export default function MatchMomentOverlay({
           8% { opacity: 1; }
           100% { opacity: 0; transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); }
         }
-
+        /* NEW — trophy rise-in */
+        .bc-trophy-wrap {
+          opacity: 0;
+          animation: bcTrophyRise 1s cubic-bezier(0.2, 0.8, 0.3, 1) 0.3s both;
+        }
+        @keyframes bcTrophyRise {
+          0% { opacity: 0; transform: translateY(80px) scale(0.6) rotate(-8deg); }
+          60% { opacity: 1; transform: translateY(-12px) scale(1.1) rotate(3deg); }
+          100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+        }
         .bc-letter {
           animation: bcLetterIn 0.65s cubic-bezier(0.2, 1.6, 0.4, 1) both;
         }
@@ -507,7 +581,6 @@ export default function MatchMomentOverlay({
           60% { opacity: 1; transform: translateY(-8px) rotateX(-8deg) scale(1.08); }
           100% { opacity: 1; transform: translateY(0) rotateX(0deg) scale(1); }
         }
-
         .bc-letter-drop {
           animation: bcLetterDrop 0.6s cubic-bezier(0.36, 0, 0.66, 1.4) both;
         }
@@ -517,7 +590,6 @@ export default function MatchMomentOverlay({
           80% { transform: translateY(-4px) scale(0.99) rotate(-1deg); }
           100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
         }
-
         .bc-subtitle {
           opacity: 0;
           animation: bcSubtitleIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) 1.05s both;
@@ -526,7 +598,6 @@ export default function MatchMomentOverlay({
           from { opacity: 0; transform: translateY(10px); }
           to { opacity: 1; transform: translateY(0); }
         }
-
         .bc-particle {
           opacity: 0;
           animation: bcParticleOut 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -535,7 +606,6 @@ export default function MatchMomentOverlay({
           0% { opacity: 1; transform: translate(0, 0) scale(1); }
           100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.3); }
         }
-
         .bc-firework-spark {
           opacity: 0;
           animation: bcSparkOut 0.8s ease-out both;
@@ -544,7 +614,6 @@ export default function MatchMomentOverlay({
           0% { opacity: 1; transform: translate(0, 0) scale(1); }
           100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.2); }
         }
-
         .bc-confetti {
           opacity: 0;
           animation-name: bcConfettiFall;
@@ -556,9 +625,8 @@ export default function MatchMomentOverlay({
           10% { opacity: 1; }
           100% { opacity: 0.9; transform: translate(var(--drift), 110vh) rotate(var(--spin)); }
         }
-
         @media (prefers-reduced-motion: reduce) {
-          .bc-wrap, .bc-letter, .bc-letter-drop, .bc-subtitle, .bc-particle, .bc-firework-spark, .bc-confetti, .bc-stump {
+          .bc-wrap, .bc-letter, .bc-letter-drop, .bc-subtitle, .bc-particle, .bc-firework-spark, .bc-confetti, .bc-stump, .bc-trophy-wrap {
             animation-duration: 1ms !important;
             animation-delay: 0ms !important;
           }

@@ -22,21 +22,16 @@ export const DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
   { value: "hitWicket", label: "Hit Wicket" },
 ];
 
-// Free hit / no-ball wicket: only a run out is legal.
 export const FREE_HIT_DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
   { value: "runOut", label: "Run Out" },
 ];
 
-// A wide restricts dismissals differently: bowled/caught/lbw are
-// impossible (the ball was never bowled within reach), but run out,
-// stumped, and hit wicket are all still valid off a wide.
 export const WIDE_DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
   { value: "runOut", label: "Run Out" },
   { value: "stumped", label: "Stumped" },
   { value: "hitWicket", label: "Hit Wicket" },
 ];
 
-// single source of truth for which dismissals are legal on a given ball.
 export function getValidDismissalOptions(extraType: ExtraType, isFreeHitActive: boolean) {
   if (isFreeHitActive || extraType === "noBall") return FREE_HIT_DISMISSAL_OPTIONS;
   if (extraType === "wide") return WIDE_DISMISSAL_OPTIONS;
@@ -67,6 +62,15 @@ export interface PendingWicket {
 export type ToastTone = "boundary" | "milestone" | "wicket" | "maiden" | "warning" | "info";
 export type Toast = { id: number; text: string; tone: ToastTone };
 
+// NEW — result of a completed match, as computed by the auto-detection
+// logic (or by the manual End Match button, which now uses the same
+// computation instead of just flipping matchComplete with no data).
+export interface AutoMatchResult {
+  winningTeamName: string;
+  margin: string;
+  method: "batting" | "bowling" | "tie";
+}
+
 function ballLegality(extraType: ExtraType) {
   const isWide = extraType === "wide";
   const isNoBall = extraType === "noBall";
@@ -80,8 +84,6 @@ function ballLegality(extraType: ExtraType) {
     countsAsLegalBall: !isWide && !isNoBall,
     extraPenaltyRun: isWide || isNoBall ? 1 : 0,
     batterCanScoreOffBat: extraType === "none" || isNoBall,
-    // Byes/leg-byes are never charged to the bowler — this is also exactly
-    // why they don't break a maiden over even though the team total moves.
     bowlerConcedesRuns: !isBye && !isLegBye,
   };
 }
@@ -102,19 +104,48 @@ function resolveBatterSlots(
   return { striker, nonStriker };
 }
 
+// NEW — shared math for deciding who won innings 2, given a final score
+// state and the target. Used by both the automatic detector and the
+// manual "End Match" button, so the two can never disagree.
+function computeInnings2Result(
+  finalRuns: number,
+  finalWickets: number,
+  target: number
+): { winningSide: "batting" | "bowling" | "tie"; margin: string } {
+  if (finalRuns >= target) {
+    const wicketsInHand = Math.max(0, 10 - finalWickets);
+    return { winningSide: "batting", margin: `won by ${wicketsInHand} wicket${wicketsInHand === 1 ? "" : "s"}` };
+  }
+  const marginRuns = target - 1 - finalRuns;
+  if (marginRuns <= 0) return { winningSide: "tie", margin: "Match Tied" };
+  return { winningSide: "bowling", margin: `won by ${marginRuns} run${marginRuns === 1 ? "" : "s"}` };
+}
+
 export function useLiveScoringEngine({
   liveState,
   setLiveState,
   setLiveDirty,
+  maxOvers,
+  battingTeamName,
+  bowlingTeamName,
   onBoundary,
   onMilestone,
   onWicketConfirm,
   onMaiden,
   onInningsEnd,
+  onMatchComplete,
 }: {
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
+  // NEW — undefined means no overs limit (Test cricket): only all-out ends
+  // an innings automatically.
+  maxOvers?: number;
+  // NEW — names of the CURRENT batting/bowling side, for building match
+  // result text. LiveStatePanel recomputes these each render based on
+  // toss + inningsNumber, so they're always correct for "right now".
+  battingTeamName: string;
+  bowlingTeamName: string;
   onBoundary?: (moment: "four" | "six", batter: { name: string; runs: number; balls: number }) => void;
   onMilestone?: (moment: "fifty" | "hundred", batter: { name: string; runs: number; balls: number; label?: string }) => void;
   onWicketConfirm?: (payload: {
@@ -126,6 +157,9 @@ export function useLiveScoringEngine({
   }) => void;
   onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
+  // NEW — fired the moment a match auto-completes (or completes via the
+  // manual End Match button with a determinable result).
+  onMatchComplete?: (result: AutoMatchResult) => void;
 }) {
   const [extraType, setExtraType] = useState<ExtraType>("none");
   const [isFreeHit, setIsFreeHit] = useState(false);
@@ -138,20 +172,9 @@ export function useLiveScoringEngine({
   const toastIdRef = useRef(0);
   const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(null);
 
-  // NEW — names of batters who have already been dismissed THIS innings.
-  // Used to grey out / block re-selecting them in the squad carousel and
-  // via drag-and-drop, so a dismissed player can't accidentally be sent
-  // back out to bat. Cleared whenever a new innings starts (endInnings)
-  // and restored on undo (single-level, same limitation as the rest of
-  // undo — see dismissedPlayersUndoRef below).
   const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set());
   const dismissedPlayersUndoRef = useRef<Set<string> | null>(null);
 
-  // Runs conceded by the CURRENT bowler in the over currently in progress.
-  // Reset to 0 whenever that over completes, or a different bowler is
-  // assigned into the slot (a fresh spell can't inherit a partial over's
-  // concession count). This is what lets us detect a maiden the instant
-  // the 6th legal ball of the over lands.
   const overRunsConcededRef = useRef(0);
 
   function pushToast(text: string, tone: ToastTone) {
@@ -179,11 +202,6 @@ export function useLiveScoringEngine({
     dismissedPlayersUndoRef.current = null;
     setCanUndo(false);
     setPendingWicket(null);
-    // Best-effort only — we can't recover exactly how many runs the
-    // current-bowler-over-in-progress had conceded before the undone
-    // ball, so we just zero it. Worst case: one over's maiden detection
-    // is slightly off immediately after an undo. Flagged as a known
-    // limitation, same as undo being single-level.
     overRunsConcededRef.current = 0;
   }
 
@@ -192,10 +210,76 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
   }
 
+  // ── Auto match/innings completion ────────────────────────────────────
+  // NEW — flips innings 1 -> 2 with a target, exactly like the manual End
+  // Innings button, but driven by a freshly-computed run total rather than
+  // whatever's in `liveState` (which hasn't re-rendered yet this tick).
+  function applyInningsOneComplete(finalRuns: number) {
+    const target = finalRuns + 1;
+    setLiveState((prev) => ({
+      ...prev,
+      target,
+      inningsNumber: 2,
+      score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+      striker: emptyBatterSlot(),
+      nonStriker: emptyBatterSlot(),
+      bowler: emptyBowlerSlot(),
+      partnership: { runs: 0, balls: 0 },
+    }));
+    setLiveDirty(true);
+    setDismissedPlayers(new Set());
+    overRunsConcededRef.current = 0;
+    onInningsEnd?.({ target, previousInningsRuns: finalRuns, inningsNumber: 2 });
+    pushToast(`🔁 Innings complete — target set to ${target}`, "info");
+  }
+
+  // NEW — marks the match complete with a real result (winner + margin),
+  // and notifies the parent so it can fire the "match won" overlay moment.
+  function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie"; margin: string }) {
+    const winningTeamName =
+      opts.winningSide === "batting" ? battingTeamName : opts.winningSide === "bowling" ? bowlingTeamName : "Tie";
+    const method: "runs" | "wickets" | "tie" =
+      opts.winningSide === "bowling" ? "runs" : opts.winningSide === "batting" ? "wickets" : "tie";
+
+    setLiveState((prev) => ({
+      ...prev,
+      matchComplete: true,
+      matchResult: { winningTeamName, margin: opts.margin, method },
+    }));
+    setLiveDirty(true);
+    pushToast(`🏁 ${winningTeamName} ${opts.margin}`, "info");
+    onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
+  }
+
+  // NEW — call after every ball/wicket with the FRESHLY COMPUTED next
+  // score, not `liveState` (which is stale until next render). Decides
+  // whether the innings or the whole match should auto-complete.
+  function checkAutoEndConditions(next: { runs: number; wickets: number; overs: number; balls: number }) {
+    if (liveState.matchComplete) return;
+
+    const inningsNum = (liveState.inningsNumber ?? 1) as 1 | 2;
+    const ballsBowled = next.overs * 6 + next.balls;
+    const oversDone = maxOvers !== undefined && ballsBowled >= maxOvers * 6;
+    const allOut = next.wickets >= 10;
+
+    if (inningsNum === 1) {
+      if (allOut || oversDone) applyInningsOneComplete(next.runs);
+      return;
+    }
+
+    const target = liveState.target;
+    if (target === undefined) return; // shouldn't happen in innings 2, but stay safe
+
+    if (next.runs >= target) {
+      applyMatchComplete(computeInnings2Result(next.runs, next.wickets, target));
+      return;
+    }
+    if (allOut || oversDone) {
+      applyMatchComplete(computeInnings2Result(next.runs, next.wickets, target));
+    }
+  }
+
   function assignPlayer(slot: "striker" | "nonStriker" | "bowler", player: { name: string; imageUrl?: string }) {
-    // Guard: a dismissed batter can't be assigned back into a batting
-    // slot. (Bowlers are never in dismissedPlayers, so this is a no-op
-    // for the bowler slot.)
     if (slot !== "bowler" && dismissedPlayers.has(player.name)) {
       pushToast(`⚠️ ${player.name} is already out this innings`, "warning");
       return;
@@ -211,15 +295,6 @@ export function useLiveScoringEngine({
           : { ...prev.bowler, name: player.name, imageUrl: player.imageUrl },
       }));
     } else {
-      // FIX — assigning a genuinely different batter into this slot must
-      // start that batter's runs/balls/4s/6s at 0. Previously ONLY the
-      // bowler slot had this "new person -> reset stats" guard; a batter
-      // slot just spread {...prev[slot], name, imageUrl}, which meant
-      // swapping in a different batter (e.g. correcting a wrong pick, or
-      // after using the new "clear slot" button below) silently handed
-      // the new batter whatever runs/balls the OUTGOING batter already
-      // had in that slot. Re-assigning the SAME name (e.g. re-picking
-      // after a misfire) still preserves their figures, same as before.
       const isNewBatter = liveState[slot].name !== player.name;
       setLiveState((prev) => ({
         ...prev,
@@ -233,10 +308,6 @@ export function useLiveScoringEngine({
     else if (slot === "nonStriker") setActiveSlot("bowler");
   }
 
-  // NEW — clears a slot back to fully empty (name, image, and all stats)
-  // instead of only ever being overwritable by assigning a different
-  // player on top of it. Use case: wrong player picked and you want to
-  // undo the assignment outright, not just swap in a replacement.
   function clearSlot(slot: "striker" | "nonStriker" | "bowler") {
     snapshotForUndo();
     if (slot === "bowler") {
@@ -281,9 +352,6 @@ export function useLiveScoringEngine({
     const newRuns = legality.batterCanScoreOffBat ? runsBefore + runs : runsBefore;
     const newBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
 
-    // Maiden bookkeeping — computed against the CURRENT bowler state
-    // (before this ball), so it's deterministic regardless of what the
-    // state updater below does.
     const totalTeamRuns = runs + legality.extraPenaltyRun;
     const concededThisBall = legality.bowlerConcedesRuns ? totalTeamRuns : 0;
     const bowlerOverCompletesThisBall = legality.countsAsLegalBall && liveState.bowler.balls + 1 >= 6;
@@ -292,6 +360,19 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = bowlerOverCompletesThisBall ? 0 : overRunsAfterThisBall;
 
     const bowlerNameForMoment = liveState.bowler.name;
+
+    // NEW — compute what the TEAM score will be after this ball, so we
+    // can check auto-completion conditions right after committing state.
+    let nextOvers = liveState.score.overs;
+    let nextBalls = liveState.score.balls;
+    if (legality.countsAsLegalBall) {
+      nextBalls += 1;
+      if (nextBalls >= 6) {
+        nextOvers += 1;
+        nextBalls = 0;
+      }
+    }
+    const nextRuns = liveState.score.runs + totalTeamRuns;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -393,11 +474,12 @@ export function useLiveScoringEngine({
       onMaiden?.({ bowlerName: bowlerNameForMoment, maidens: liveState.bowler.maidens + 1 });
       pushToast(`🧤 MAIDEN OVER — ${bowlerNameForMoment || "Bowler"}`, "maiden");
     }
+
+    // NEW — check auto-completion last, after the ball's own moments have
+    // already been queued/toasted.
+    checkAutoEndConditions({ runs: nextRuns, wickets: liveState.score.wickets, overs: nextOvers, balls: nextBalls });
   }
 
-  // step 1 — snapshot, don't touch score/wickets yet; resolveWicket does
-  // all of that once we know the dismissal type and (for a run out) how
-  // many runs were completed.
   function recordWicket() {
     if (assignmentsMissing()) {
       pushToast("⚠️ Set striker, non-striker & bowler before recording a wicket", "warning");
@@ -429,7 +511,6 @@ export function useLiveScoringEngine({
     setExtraType("none");
   }
 
-  // step 2 — dialog has resolved who/how/runs completed.
   function resolveWicket(
     batsmanOut: "striker" | "nonStriker",
     fire: boolean,
@@ -449,13 +530,23 @@ export function useLiveScoringEngine({
     const strikerFinalRuns = legality.batterCanScoreOffBat ? strikerBefore.runs + completedRuns : strikerBefore.runs;
     const strikerFinalBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
 
-    // Maiden bookkeeping — a wicket doesn't break a maiden; only runs
-    // charged to the bowler do. Deferred to here (not recordWicket step 1)
-    // because completedRuns depends on what's chosen in the dialog.
     const concededThisBall = legality.bowlerConcedesRuns ? totalTeamRuns : 0;
     const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
     const maidenFired = overComplete && overRunsAfterThisBall === 0;
     overRunsConcededRef.current = overComplete ? 0 : overRunsAfterThisBall;
+
+    // NEW — compute the resulting team score/wickets/overs for auto-check.
+    let nextOvers = liveState.score.overs;
+    let nextBalls = liveState.score.balls;
+    if (legality.countsAsLegalBall) {
+      nextBalls += 1;
+      if (nextBalls >= 6) {
+        nextOvers += 1;
+        nextBalls = 0;
+      }
+    }
+    const nextWickets = Math.min(10, liveState.score.wickets + 1);
+    const nextRuns = liveState.score.runs + totalTeamRuns;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -498,10 +589,6 @@ export function useLiveScoringEngine({
     });
     setLiveDirty(true);
 
-    // NEW — mark this batter as out for the rest of the innings, whether
-    // or not we also broadcast the graphic (`fire`). The dismissal is a
-    // real game event either way; `fire` only controls whether the
-    // overlay shows it. Cleared automatically at the next endInnings().
     {
       const dismissedName = batsmanOut === "striker" ? strikerBefore.name : nonStrikerBefore.name;
       if (dismissedName) {
@@ -530,33 +617,33 @@ export function useLiveScoringEngine({
       pushToast(`🧤 MAIDEN OVER — ${bowlerName || "Bowler"}`, "maiden");
     }
 
+    // NEW — check whether this wicket ends the innings / the match.
+    checkAutoEndConditions({ runs: nextRuns, wickets: nextWickets, overs: nextOvers, balls: nextBalls });
+
     setActiveSlot(batsmanOut);
     setPendingWicket(null);
   }
 
-  // Ends the current innings: snapshots a target (1st innings only),
-  // resets score/partnership/striker/non-striker/bowler so the operator
-  // MUST reassign everyone for the new innings (this doubles as the fix
-  // for "players carrying over unset" at innings change), and carries
-  // matchBoundaries/tournamentBoundaries forward since those are
-  // whole-match / whole-tournament cumulative totals, not per-innings.
-  // The caller (LiveStatePanel) is responsible for the confirmation
-  // dialog — this function assumes confirmation already happened.
   function endInnings() {
     snapshotForUndo();
     overRunsConcededRef.current = 0;
-    // NEW — a fresh innings means nobody has batted yet in it, so the
-    // dismissed-players list from the previous innings no longer applies.
     setDismissedPlayers(new Set());
 
     const currentInningsNumber = (liveState.inningsNumber ?? 1) as 1 | 2;
 
     if (currentInningsNumber >= 2) {
-      // Ending the 2nd innings = match over. Lock further scoring rather
-      // than silently resetting a match that's actually finished.
-      setLiveState((prev) => ({ ...prev, matchComplete: true }));
-      setLiveDirty(true);
-      pushToast("🏁 Match marked complete", "info");
+      // CHANGED — manual "End Match" now computes a real result the same
+      // way the auto-detector does, instead of just flagging complete
+      // with no winner info.
+      const target = liveState.target;
+      const result = target !== undefined ? computeInnings2Result(liveState.score.runs, liveState.score.wickets, target) : null;
+      if (result) {
+        applyMatchComplete(result);
+      } else {
+        setLiveState((prev) => ({ ...prev, matchComplete: true }));
+        setLiveDirty(true);
+        pushToast("🏁 Match marked complete", "info");
+      }
       return;
     }
 
@@ -572,8 +659,6 @@ export function useLiveScoringEngine({
       nonStriker: emptyBatterSlot(),
       bowler: emptyBowlerSlot(),
       partnership: { runs: 0, balls: 0 },
-      // matchBoundaries / tournamentBoundaries intentionally NOT reset —
-      // they're cumulative, per the naming.
     }));
     setLiveDirty(true);
     onInningsEnd?.({ target, previousInningsRuns, inningsNumber: 2 });

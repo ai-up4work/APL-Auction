@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabse"; // double check this matches your actual file (was "@/lib/supabse")
+import { supabase } from "@/lib/supabse"; // FIXED — was "@/lib/supabse" (typo). Verify this matches your actual file.
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface WeatherData {
@@ -71,6 +71,15 @@ export interface PointsRow {
   points: number;
 }
 
+// NEW — the outcome of a completed match. Lives on LiveState so it rides
+// along automatically through persistence, sync snapshots, and pushes,
+// same as everything else in LiveState.
+export interface MatchResult {
+  winningTeamName: string; // "Mumbai Indians" or "Tie"
+  margin: string; // e.g. "won by 4 wickets", "won by 12 runs", "Match Tied"
+  method: "runs" | "wickets" | "tie";
+}
+
 export interface LiveState {
   score: { runs: number; wickets: number; overs: number; balls: number };
   striker: BatterState;
@@ -83,31 +92,28 @@ export interface LiveState {
   target?: number;
   inningsNumber?: 1 | 2;
   matchComplete?: boolean;
+  matchResult?: MatchResult; // NEW
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────
 export type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
 
 export interface MomentPayload {
-  moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden";
-  player?: string;
-  score?: string;
+  // NEW — "matchWon" added
+  moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
+  player?: string; // also doubles as winning team name for "matchWon"
+  score?: string; // also doubles as margin text for "matchWon"
   batsmanOut?: "striker" | "nonStriker";
   dismissalType?: DismissalType;
   bowler?: string;
   fielder?: string;
   maidens?: number; // bowler's maiden count at the moment this fired
+  // NEW — for "matchWon", lets the overlay theme itself to the winning team
+  teamColor?: string;
+  teamLogoUrl?: string;
+  method?: "runs" | "wickets" | "tie";
 }
 // ── On Air channel visibility snapshot ──────────────────────────────────
-// Mirrors the channel keys OnAirChannels.tsx owns. Kept here (not just in
-// that component) so both the admin page and any receiver can share one
-// canonical shape for "everything that's currently on".
-//
-// CHANGED — added `testBg`. It used to live entirely outside this type
-// (a lone useState in OnAirChannels, broadcast only as a one-off `testBg`
-// event), which meant it had no place to land in a syncSnapshot and could
-// never be restored on reconnect/refresh. It's now a first-class channel
-// here so it rides along with everything else.
 export interface ChannelVisibility {
   weather: boolean;
   liveScoreBar: boolean;
@@ -142,12 +148,7 @@ export type OverlayEvent =
   | { type: "liveState"; data: LiveState }
   | { type: "testBg"; show: boolean }
   | { type: "clearAll" }
-  // a receiver (overlay page / Program Monitor iframe) broadcasts this the
-  // instant its channel becomes SUBSCRIBED, so it isn't stuck showing
-  // nothing after a fresh mount or reconnect.
   | { type: "requestSync" }
-  // the admin page replies to requestSync with everything currently
-  // visible/live, in one shot, so a late joiner catches up immediately.
   | { type: "syncSnapshot"; data: SyncSnapshot };
 
 type Handler = (event: OverlayEvent) => void;

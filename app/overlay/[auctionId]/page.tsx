@@ -212,7 +212,10 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         stopRetrying();
       }
       if (event.type === "moment") {
-        (window as any).triggerBoundaryCelebration?.(event.moment);
+        // CHANGED — pass the full event through so matchWon (team name/color/
+        // logo/margin) and maiden (bowler name) can render dynamic text instead
+        // of always showing static copy.
+        (window as any).triggerBoundaryCelebration?.(event.moment, event);
         return;
       }
       dispatch(event);

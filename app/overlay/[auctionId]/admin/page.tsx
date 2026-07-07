@@ -57,9 +57,6 @@ interface WicketDraft {
 
 const emptyWicketDraft: WicketDraft = { batsmanOut: "striker", dismissalType: "bowled", fielder: "" };
 
-// Shared shape for anything that wants to trigger a wicket moment —
-// used by both the manual Moments-panel form AND the auto-fire dialog
-// that now lives inside the Scorer (LiveStatePanel).
 interface WicketMomentPayload {
   batsmanOut: "striker" | "nonStriker";
   batter: { name: string; runs: number; balls: number };
@@ -68,7 +65,14 @@ interface WicketMomentPayload {
   bowlerName: string;
 }
 
-// ── Batter picker — shows the player photo so admins confirm at a glance ─
+// NEW — shared shape for the auto-completion callback coming out of the
+// scoring hook (via LiveStatePanel), used to fire the "match won" moment.
+interface MatchCompletePayload {
+  winningTeamName: string;
+  margin: string;
+  method: "batting" | "bowling" | "tie";
+}
+
 function BatterPickerButton({
   batter,
   label,
@@ -121,6 +125,8 @@ function BatterPickerButton({
 
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   // const { auctionId } = use(params);
+  // NOTE: hardcoded for now — restore the line above (and the params prop)
+  // before running multiple concurrent auctions/matches.
   const auctionId = "2c5915d0-6b31-47cb-9597-0bd721afe2a9";
 
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
@@ -148,11 +154,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
 
-  // refs mirroring the latest matchSetup/matchSetupCompleted/liveState.
-  // The bus-connection effect below only runs once per auctionId, so its
-  // closures would otherwise see stale values from the first render. These
-  // refs are how sendFullSnapshot() always reads the CURRENT state, however
-  // long the admin page has been open.
   const matchSetupRef = useRef(matchSetup);
   const matchSetupCompletedRef = useRef(matchSetupCompleted);
   const liveStateRef = useRef(liveState);
@@ -169,16 +170,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     liveStateRef.current = liveState;
   }, [liveState]);
 
-  // NEW — if a requestSync arrives before OnAirChannels has mounted (ref
-  // is still null), sendFullSnapshot() used to just `return` and silently
-  // drop it — no reply, no retry, no memory that anything was asked for.
-  // This is what caused "sometimes tournamentLogo/liveScoreBar/etc. just
-  // don't show up" even with the overlay-side retry loop in place: if
-  // every single retry attempt happened to land in the window before this
-  // ref existed, none of them ever got answered.
-  //
-  // Now we remember that a request came in while unready, and flush it the
-  // moment OnAirChannels actually mounts.
   const pendingSyncRequestRef = useRef(false);
 
   function fire(event: OverlayEvent, label: string) {
@@ -186,14 +177,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 12));
   }
 
-  // replies to a receiver's "requestSync" with everything it needs to
-  // render the current picture in one shot: channel visibility, match setup
-  // (if pushed), and the live scoreboard state.
   function sendFullSnapshot() {
     const channels = onAirRef.current?.getVisibleSnapshot();
     if (!channels) {
-      // CHANGED — remember instead of dropping. OnAirChannels isn't
-      // mounted yet; we'll answer as soon as it is (see the effect below).
       pendingSyncRequestRef.current = true;
       return;
     }
@@ -206,11 +192,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fire({ type: "syncSnapshot", data: snapshot }, "Sent full sync snapshot");
   }
 
-  // NEW — flush any requestSync that arrived too early and got queued in
-  // pendingSyncRequestRef, the moment OnAirChannels becomes available.
-  // Cheap no-dep check on every render; only actually does anything on the
-  // render right after onAirRef.current first becomes non-null while a
-  // request is pending.
   useEffect(() => {
     if (onAirRef.current && pendingSyncRequestRef.current) {
       pendingSyncRequestRef.current = false;
@@ -223,9 +204,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     busRef.current = bus;
     bus.onReady(() => setConnected(true));
 
-    // a receiver (overlay page / Program Monitor iframe) asks for a
-    // snapshot the moment it connects or reconnects. This is the fix for
-    // "black screen after refresh" — respond immediately with everything.
     const unsubscribe = bus.on((event) => {
       if (event.type === "requestSync") {
         sendFullSnapshot();
@@ -254,6 +232,15 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     } catch {
       // ignore malformed cache
     }
+    try {
+      // FIX — matchSetupCompleted wasn't persisted before, so a refresh
+      // mid-match hid the whole Scorer panel even though matchSetup and
+      // liveState both survived intact.
+      const rawCompleted = window.localStorage.getItem(`overlay:${auctionId}:matchSetupCompleted`);
+      if (rawCompleted) setMatchSetupCompleted(JSON.parse(rawCompleted));
+    } catch {
+      // ignore malformed cache
+    }
     setSetupHydrated(true);
     setLiveHydrated(true);
   }, [auctionId]);
@@ -263,15 +250,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     window.localStorage.setItem(`overlay:${auctionId}:matchSetup`, JSON.stringify(matchSetup));
   }, [matchSetup, auctionId, setupHydrated]);
 
+  // NEW — persist matchSetupCompleted alongside matchSetup.
+  useEffect(() => {
+    if (!setupHydrated || typeof window === "undefined") return;
+    window.localStorage.setItem(`overlay:${auctionId}:matchSetupCompleted`, JSON.stringify(matchSetupCompleted));
+  }, [matchSetupCompleted, auctionId, setupHydrated]);
+
   useEffect(() => {
     if (!liveHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(`overlay:${auctionId}:liveState`, JSON.stringify(liveState));
   }, [liveState, auctionId, liveHydrated]);
 
-  // Match Setup / Live State / wicket detail aren't in the OverlayEvent
-  // union yet — lib/overlayBus.ts needs "matchSetup" | "liveState" | "wicket"
-  // added to it. Cast through `any` here so the admin panel can be built
-  // and wired up now; tighten this once that type is extended.
   function fireLoose(event: Record<string, unknown>, label: string) {
     fire(event as unknown as OverlayEvent, label);
   }
@@ -293,10 +282,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }
 
   // ── Moments helpers ──────────────────────────────────────────────────
-  // CHANGED — now accepts an optional override so the Scorer (ball pad)
-  // can drive this directly with the exact batter/runs/balls at the
-  // instant the boundary was scored, instead of only ever reading
-  // whatever liveState.striker happens to be when a button is clicked.
   function fireBoundaryMoment(moment: "four" | "six", override?: { name: string; runs: number; balls: number }) {
     const batter = override ?? liveState.striker;
     fireLoose(
@@ -306,8 +291,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // CHANGED — same idea: optional override lets the Scorer auto-fire a
-  // fifty/hundred the instant the crossing ball is recorded.
   function fireMilestoneMoment(
     moment: "fifty" | "hundred",
     override?: { name: string; runs: number; balls: number; label?: string }
@@ -321,11 +304,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // NEW — single shared implementation for firing a wicket moment, used by
-  // both the manual Moments-panel form (fireWicketMoment, below) and the
-  // Scorer's own quick wicket-detail dialog (onWicketConfirm passed to
-  // LiveStatePanel). Keeping one implementation means the overlay event
-  // shape can't drift between the two entry points.
   function fireWicketMomentFrom(payload: WicketMomentPayload) {
     const { batsmanOut, batter, dismissalType, fielder, bowlerName } = payload;
     const batterLabel = batter.name || (batsmanOut === "striker" ? "Striker" : "Non-striker");
@@ -357,6 +335,34 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
+  // NEW — look up a team's brand color/logo by name, so the "match won"
+  // overlay can theme itself to whichever side actually won.
+  function teamVisualsByName(name: string): { color?: string; logoUrl?: string } {
+    if (matchSetup.teamA.name === name) return { color: matchSetup.teamA.color, logoUrl: matchSetup.teamA.logoUrl };
+    if (matchSetup.teamB.name === name) return { color: matchSetup.teamB.color, logoUrl: matchSetup.teamB.logoUrl };
+    return {};
+  }
+
+  // NEW — fires the celebratory "match won" graphic. Called automatically
+  // by the auto-completion logic in the scoring hook (via LiveStatePanel's
+  // onMatchComplete), and also by the manual End Match button.
+  function fireMatchWonMoment(payload: MatchCompletePayload) {
+    const visuals = teamVisualsByName(payload.winningTeamName);
+    fireLoose(
+      {
+        type: "moment",
+        moment: "matchWon",
+        player: payload.winningTeamName,
+        score: payload.margin,
+        method: payload.method === "tie" ? "tie" : payload.method === "bowling" ? "runs" : "wickets",
+        teamColor: visuals.color,
+        teamLogoUrl: visuals.logoUrl,
+      },
+      `Moment: MATCH WON — ${payload.winningTeamName} ${payload.margin}`
+    );
+    onAirRef.current?.notifyMomentFired();
+  }
+
   function logInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
     setLog((prev) => [
       `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Innings ended — target set to ${payload.target}`,
@@ -368,7 +374,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireMilestoneMoment(moment);
   }
 
-  // add this function in page.tsx, near pushLiveState/pushMatchSetup
+  // CHANGED — restartMatch now also clears the previous matchResult so a
+  // stale "Team X won by 12 runs" banner can't linger into a fresh match.
   function restartMatch() {
     setLiveState((prev) => ({
       score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
@@ -382,12 +389,11 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       target: undefined,
       inningsNumber: undefined,
       matchComplete: false,
+      matchResult: undefined,
     }));
     setLiveDirty(true);
   }
 
-  // manual Moments-panel wicket form — unchanged behavior, now just
-  // delegates to the shared helper above.
   function fireWicketMoment() {
     const batter = liveState[wicketDraft.batsmanOut];
     fireWicketMomentFrom({
@@ -472,6 +478,26 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
             className="w-10 h-[3px] rounded-full"
             style={{ background: "linear-gradient(90deg, transparent, var(--color-theme-orange), transparent)" }}
           />
+
+          <div className="flex items-center gap-3 flex-wrap justify-center">
+            {scoreIsLive && (
+              <div
+                className="flex items-baseline gap-2.5 px-4 py-2 rounded-xl"
+                style={{ background: "rgba(201,151,31,0.06)", border: "1px solid rgba(201,151,31,0.2)" }}
+              >
+                <span style={{ fontFamily: "var(--font-label-mono)", fontWeight: 700, fontSize: "18px", color: "var(--color-theme-orange)" }}>
+                  {liveState.score.runs}
+                  <span style={{ opacity: 0.6, fontSize: "14px" }}>/{liveState.score.wickets}</span>
+                </span>
+                <span
+                  className="text-[10px] uppercase tracking-wide whitespace-nowrap"
+                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}
+                >
+                  {liveState.score.overs}.{liveState.score.balls} ov · RR {runRate}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Desk — scoring flow left, monitor + fast-fire right ────── */}
@@ -500,7 +526,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onWicketConfirm={fireWicketMomentFrom}
                 onMaiden={fireMaidenMoment}
                 onInningsEnd={logInningsEnd}
-                onRestartMatch={restartMatch}   // ← this line is what's missing
+                onMatchComplete={fireMatchWonMoment}
+                onRestartMatch={restartMatch}
               />
             ) : (
               <div
@@ -570,7 +597,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                       >
                         Four, Six, Fifty and Hundred now also fire automatically from the
                         ball pad in the Scorer panel — these buttons are still here for
-                        manual/backup firing.
+                        manual/backup firing. Maiden overs fire automatically too; Match Won
+                        fires automatically when a match completes (or via manual End Match).
                       </p>
 
                       <div className="grid grid-cols-2 gap-2.5">
