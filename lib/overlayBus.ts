@@ -80,21 +80,24 @@ export interface LiveState {
   matchBoundaries: { fours: number; sixes: number };
   tournamentBoundaries: { fours: number; sixes: number };
   pointsTable: PointsRow[];
+  target?: number;
+  inningsNumber?: 1 | 2;
+  matchComplete?: boolean;
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────
 export type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
 
 export interface MomentPayload {
-  moment: "four" | "six" | "wicket" | "fifty" | "hundred";
+  moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden";
   player?: string;
   score?: string;
   batsmanOut?: "striker" | "nonStriker";
   dismissalType?: DismissalType;
   bowler?: string;
   fielder?: string;
+  maidens?: number; // bowler's maiden count at the moment this fired
 }
-
 // ── On Air channel visibility snapshot ──────────────────────────────────
 // Mirrors the channel keys OnAirChannels.tsx owns. Kept here (not just in
 // that component) so both the admin page and any receiver can share one

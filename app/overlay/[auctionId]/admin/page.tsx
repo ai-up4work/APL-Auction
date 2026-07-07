@@ -349,6 +349,21 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireBoundaryMoment(moment);
   }
 
+  function fireMaidenMoment(payload: { bowlerName: string; maidens: number }) {
+    fireLoose(
+      { type: "moment", moment: "maiden", bowler: payload.bowlerName, maidens: payload.maidens },
+      `Moment: MAIDEN OVER — ${payload.bowlerName || "Bowler"} (${payload.maidens})`
+    );
+    onAirRef.current?.notifyMomentFired();
+  }
+
+  function logInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
+    setLog((prev) => [
+      `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Innings ended — target set to ${payload.target}`,
+      ...prev,
+    ].slice(0, 12));
+  }
+
   function fireMilestoneMomentFromPanel(moment: "fifty" | "hundred") {
     fireMilestoneMoment(moment);
   }
@@ -485,6 +500,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onBoundary={fireBoundaryMoment}
                 onMilestone={fireMilestoneMoment}
                 onWicketConfirm={fireWicketMomentFrom}
+                onMaiden={fireMaidenMoment}
+                onInningsEnd={logInningsEnd}
               />
             ) : (
               <div

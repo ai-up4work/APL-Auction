@@ -27,7 +27,7 @@ export const FREE_HIT_DISMISSAL_OPTIONS: { value: DismissalType; label: string }
   { value: "runOut", label: "Run Out" },
 ];
 
-// NEW — a wide restricts dismissals differently: bowled/caught/lbw are
+// A wide restricts dismissals differently: bowled/caught/lbw are
 // impossible (the ball was never bowled within reach), but run out,
 // stumped, and hit wicket are all still valid off a wide.
 export const WIDE_DISMISSAL_OPTIONS: { value: DismissalType; label: string }[] = [
@@ -51,19 +51,21 @@ export function emptyBatterSlot(): BatterState {
   return { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined };
 }
 
+export function emptyBowlerSlot(): BowlerState {
+  return { name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0 };
+}
+
 export interface PendingWicket {
   strikerBefore: { name: string; runs: number; balls: number };
   nonStrikerBefore: { name: string; runs: number; balls: number };
   bowlerName: string;
   overComplete: boolean;
   extraType: ExtraType;
-  // was Free Hit armed for THIS ball (independent of extraType — a wide
-  // can carry a free hit over, a no-ball forces the SAME restriction via
-  // extraType alone, handled separately in getValidDismissalOptions).
   isFreeHitActive: boolean;
 }
 
-export type Toast = { id: number; text: string; tone: "boundary" | "milestone" | "wicket" };
+export type ToastTone = "boundary" | "milestone" | "wicket" | "maiden" | "warning" | "info";
+export type Toast = { id: number; text: string; tone: ToastTone };
 
 function ballLegality(extraType: ExtraType) {
   const isWide = extraType === "wide";
@@ -78,6 +80,8 @@ function ballLegality(extraType: ExtraType) {
     countsAsLegalBall: !isWide && !isNoBall,
     extraPenaltyRun: isWide || isNoBall ? 1 : 0,
     batterCanScoreOffBat: extraType === "none" || isNoBall,
+    // Byes/leg-byes are never charged to the bowler — this is also exactly
+    // why they don't break a maiden over even though the team total moves.
     bowlerConcedesRuns: !isBye && !isLegBye,
   };
 }
@@ -105,6 +109,8 @@ export function useLiveScoringEngine({
   onBoundary,
   onMilestone,
   onWicketConfirm,
+  onMaiden,
+  onInningsEnd,
 }: {
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
@@ -118,6 +124,8 @@ export function useLiveScoringEngine({
     fielder: string;
     bowlerName: string;
   }) => void;
+  onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
+  onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
 }) {
   const [extraType, setExtraType] = useState<ExtraType>("none");
   const [isFreeHit, setIsFreeHit] = useState(false);
@@ -130,10 +138,21 @@ export function useLiveScoringEngine({
   const toastIdRef = useRef(0);
   const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(null);
 
-  function pushToast(text: string, tone: Toast["tone"]) {
+  // Runs conceded by the CURRENT bowler in the over currently in progress.
+  // Reset to 0 whenever that over completes, or a different bowler is
+  // assigned into the slot (a fresh spell can't inherit a partial over's
+  // concession count). This is what lets us detect a maiden the instant
+  // the 6th legal ball of the over lands.
+  const overRunsConcededRef = useRef(0);
+
+  function pushToast(text: string, tone: ToastTone) {
     const id = ++toastIdRef.current;
     setToasts((t) => [...t, { id, text, tone }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 1600);
+  }
+
+  function assignmentsMissing() {
+    return !liveState.striker.name || !liveState.nonStriker.name || !liveState.bowler.name;
   }
 
   function snapshotForUndo() {
@@ -148,6 +167,12 @@ export function useLiveScoringEngine({
     undoRef.current = null;
     setCanUndo(false);
     setPendingWicket(null);
+    // Best-effort only — we can't recover exactly how many runs the
+    // current-bowler-over-in-progress had conceded before the undone
+    // ball, so we just zero it. Worst case: one over's maiden detection
+    // is slightly off immediately after an undo. Flagged as a known
+    // limitation, same as undo being single-level.
+    overRunsConcededRef.current = 0;
   }
 
   function patchLive(patch: Partial<LiveState>) {
@@ -157,27 +182,76 @@ export function useLiveScoringEngine({
 
   function assignPlayer(slot: "striker" | "nonStriker" | "bowler", player: { name: string; imageUrl?: string }) {
     if (slot === "bowler") {
-      setLiveState((prev) => ({ ...prev, bowler: { ...prev.bowler, name: player.name, imageUrl: player.imageUrl } }));
+      const isNewBowler = liveState.bowler.name !== player.name;
+      if (isNewBowler) overRunsConcededRef.current = 0;
+      setLiveState((prev) => ({
+        ...prev,
+        bowler: isNewBowler
+          ? { ...emptyBowlerSlot(), name: player.name, imageUrl: player.imageUrl }
+          : { ...prev.bowler, name: player.name, imageUrl: player.imageUrl },
+      }));
     } else {
-      setLiveState((prev) => ({ ...prev, [slot]: { ...prev[slot], name: player.name, imageUrl: player.imageUrl } }));
+      // FIX — assigning a genuinely different batter into this slot must
+      // start that batter's runs/balls/4s/6s at 0. Previously ONLY the
+      // bowler slot had this "new person -> reset stats" guard; a batter
+      // slot just spread {...prev[slot], name, imageUrl}, which meant
+      // swapping in a different batter (e.g. correcting a wrong pick, or
+      // after using the new "clear slot" button below) silently handed
+      // the new batter whatever runs/balls the OUTGOING batter already
+      // had in that slot. Re-assigning the SAME name (e.g. re-picking
+      // after a misfire) still preserves their figures, same as before.
+      const isNewBatter = liveState[slot].name !== player.name;
+      setLiveState((prev) => ({
+        ...prev,
+        [slot]: isNewBatter
+          ? { ...emptyBatterSlot(), name: player.name, imageUrl: player.imageUrl }
+          : { ...prev[slot], name: player.name, imageUrl: player.imageUrl },
+      }));
     }
     setLiveDirty(true);
     if (slot === "striker") setActiveSlot("nonStriker");
     else if (slot === "nonStriker") setActiveSlot("bowler");
   }
 
+  // NEW — clears a slot back to fully empty (name, image, and all stats)
+  // instead of only ever being overwritable by assigning a different
+  // player on top of it. Use case: wrong player picked and you want to
+  // undo the assignment outright, not just swap in a replacement.
+  function clearSlot(slot: "striker" | "nonStriker" | "bowler") {
+    snapshotForUndo();
+    if (slot === "bowler") {
+      overRunsConcededRef.current = 0;
+    }
+    setLiveState((prev) => ({
+      ...prev,
+      [slot]: slot === "bowler" ? emptyBowlerSlot() : emptyBatterSlot(),
+    }));
+    setLiveDirty(true);
+    setActiveSlot(slot);
+    const label = slot === "striker" ? "Striker" : slot === "nonStriker" ? "Non-striker" : "Bowler";
+    pushToast(`${label} cleared — pick a replacement`, "info");
+  }
+
   function swapStrike() {
     snapshotForUndo();
     setLiveState((prev) => ({ ...prev, striker: prev.nonStriker, nonStriker: prev.striker }));
     setLiveDirty(true);
+    pushToast("Strike swapped ↺", "info");
   }
 
   function newPartnership() {
+    snapshotForUndo();
     setLiveState((prev) => ({ ...prev, partnership: { runs: 0, balls: 0 } }));
     setLiveDirty(true);
+    pushToast("New partnership started ↺", "info");
   }
 
   function recordBall(runs: number) {
+    if (assignmentsMissing()) {
+      pushToast("⚠️ Set striker, non-striker & bowler before scoring", "warning");
+      return;
+    }
+
     snapshotForUndo();
     const legality = ballLegality(extraType);
     const wasFreeHitBall = isFreeHit;
@@ -187,9 +261,19 @@ export function useLiveScoringEngine({
     const newRuns = legality.batterCanScoreOffBat ? runsBefore + runs : runsBefore;
     const newBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
 
-    setLiveState((prev) => {
-      const totalTeamRuns = runs + legality.extraPenaltyRun;
+    // Maiden bookkeeping — computed against the CURRENT bowler state
+    // (before this ball), so it's deterministic regardless of what the
+    // state updater below does.
+    const totalTeamRuns = runs + legality.extraPenaltyRun;
+    const concededThisBall = legality.bowlerConcedesRuns ? totalTeamRuns : 0;
+    const bowlerOverCompletesThisBall = legality.countsAsLegalBall && liveState.bowler.balls + 1 >= 6;
+    const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
+    const maidenFired = bowlerOverCompletesThisBall && overRunsAfterThisBall === 0;
+    overRunsConcededRef.current = bowlerOverCompletesThisBall ? 0 : overRunsAfterThisBall;
 
+    const bowlerNameForMoment = liveState.bowler.name;
+
+    setLiveState((prev) => {
       let { overs, balls } = prev.score;
       let overComplete = false;
       if (legality.countsAsLegalBall) {
@@ -218,6 +302,7 @@ export function useLiveScoringEngine({
           bowler.balls = 0;
         }
       }
+      if (maidenFired) bowler.maidens += 1;
 
       const partnership = {
         runs: prev.partnership.runs + totalTeamRuns,
@@ -284,12 +369,21 @@ export function useLiveScoringEngine({
       onMilestone?.("hundred", { name: strikerBefore.name, runs: newRuns, balls: newBalls, label: strikerBefore.name || "Striker" });
       pushToast(`💯 HUNDRED fired — ${strikerBefore.name || "Striker"}`, "milestone");
     }
+    if (maidenFired) {
+      onMaiden?.({ bowlerName: bowlerNameForMoment, maidens: liveState.bowler.maidens + 1 });
+      pushToast(`🧤 MAIDEN OVER — ${bowlerNameForMoment || "Bowler"}`, "maiden");
+    }
   }
 
   // step 1 — snapshot, don't touch score/wickets yet; resolveWicket does
   // all of that once we know the dismissal type and (for a run out) how
   // many runs were completed.
   function recordWicket() {
+    if (assignmentsMissing()) {
+      pushToast("⚠️ Set striker, non-striker & bowler before recording a wicket", "warning");
+      return;
+    }
+
     snapshotForUndo();
 
     const strikerBefore = { ...liveState.striker };
@@ -330,16 +424,18 @@ export function useLiveScoringEngine({
     const completedRuns = dismissalType === "runOut" ? Math.max(0, runsCompleted) : 0;
     const totalTeamRuns = completedRuns + legality.extraPenaltyRun;
 
-    // FIX — a run out is a fielding dismissal; it must NOT count toward
-    // the bowler's personal wicket tally, only the team's total.
     const creditsBowler = dismissalType !== "runOut";
 
-    // FIX — the striker is always the one who faced the ball, so they
-    // get credit for any completed runs + the ball faced regardless of
-    // which end is actually given out. This is the score the fired
-    // wicket graphic/toast must show.
     const strikerFinalRuns = legality.batterCanScoreOffBat ? strikerBefore.runs + completedRuns : strikerBefore.runs;
     const strikerFinalBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
+
+    // Maiden bookkeeping — a wicket doesn't break a maiden; only runs
+    // charged to the bowler do. Deferred to here (not recordWicket step 1)
+    // because completedRuns depends on what's chosen in the dialog.
+    const concededThisBall = legality.bowlerConcedesRuns ? totalTeamRuns : 0;
+    const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
+    const maidenFired = overComplete && overRunsAfterThisBall === 0;
+    overRunsConcededRef.current = overComplete ? 0 : overRunsAfterThisBall;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -360,6 +456,7 @@ export function useLiveScoringEngine({
           bowler.balls = 0;
         }
       }
+      if (maidenFired) bowler.maidens += 1;
 
       const strikerFacing: BatterState = { ...prev.striker, runs: strikerFinalRuns, balls: strikerFinalBalls };
       const resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
@@ -393,9 +490,56 @@ export function useLiveScoringEngine({
         "wicket"
       );
     }
+    if (maidenFired) {
+      onMaiden?.({ bowlerName, maidens: liveState.bowler.maidens + 1 });
+      pushToast(`🧤 MAIDEN OVER — ${bowlerName || "Bowler"}`, "maiden");
+    }
 
     setActiveSlot(batsmanOut);
     setPendingWicket(null);
+  }
+
+  // Ends the current innings: snapshots a target (1st innings only),
+  // resets score/partnership/striker/non-striker/bowler so the operator
+  // MUST reassign everyone for the new innings (this doubles as the fix
+  // for "players carrying over unset" at innings change), and carries
+  // matchBoundaries/tournamentBoundaries forward since those are
+  // whole-match / whole-tournament cumulative totals, not per-innings.
+  // The caller (LiveStatePanel) is responsible for the confirmation
+  // dialog — this function assumes confirmation already happened.
+  function endInnings() {
+    snapshotForUndo();
+    overRunsConcededRef.current = 0;
+
+    const currentInningsNumber = (liveState.inningsNumber ?? 1) as 1 | 2;
+
+    if (currentInningsNumber >= 2) {
+      // Ending the 2nd innings = match over. Lock further scoring rather
+      // than silently resetting a match that's actually finished.
+      setLiveState((prev) => ({ ...prev, matchComplete: true }));
+      setLiveDirty(true);
+      pushToast("🏁 Match marked complete", "info");
+      return;
+    }
+
+    const previousInningsRuns = liveState.score.runs;
+    const target = previousInningsRuns + 1;
+
+    setLiveState((prev) => ({
+      ...prev,
+      target,
+      inningsNumber: 2,
+      score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+      striker: emptyBatterSlot(),
+      nonStriker: emptyBatterSlot(),
+      bowler: emptyBowlerSlot(),
+      partnership: { runs: 0, balls: 0 },
+      // matchBoundaries / tournamentBoundaries intentionally NOT reset —
+      // they're cumulative, per the naming.
+    }));
+    setLiveDirty(true);
+    onInningsEnd?.({ target, previousInningsRuns, inningsNumber: 2 });
+    pushToast(`🔁 Innings 1 closed — target set to ${target}`, "info");
   }
 
   return {
@@ -409,12 +553,15 @@ export function useLiveScoringEngine({
     undo,
     toasts,
     pendingWicket,
+    assignmentsMissing,
     patchLive,
     assignPlayer,
+    clearSlot,
     swapStrike,
     newPartnership,
     recordBall,
     recordWicket,
     resolveWicket,
+    endInnings,
   };
 }

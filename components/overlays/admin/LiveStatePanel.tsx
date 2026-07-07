@@ -89,7 +89,9 @@ function CrewSlot({
   statLine,
   allPlayers,
   onAssign,
+  onClear,
   placeholder,
+  locked,
 }: {
   title: string;
   accentColor?: string;
@@ -100,23 +102,58 @@ function CrewSlot({
   statLine?: string;
   allPlayers: SquadPlayer[];
   onAssign: (p: SquadPlayer) => void;
+  onClear?: () => void;
   placeholder: string;
+  locked?: boolean;
 }) {
+  // CHANGED — no more separate banner text for "player not set". The card
+  // itself carries the warning now: an amber dashed border + a small ⚠
+  // badge next to the title when nothing's assigned yet. Once a name is
+  // set, the card returns to its normal look and a small × appears so the
+  // pick can be cleared outright instead of only ever being overwritten
+  // by dragging/tapping a different player onto it.
+  const isEmpty = !displayName;
   return (
     <div
       className={`crew-slot ${active ? "is-active" : ""}`}
-      onClick={onActivate}
-      onDragOver={(e) => e.preventDefault()}
+      onClick={locked ? undefined : onActivate}
+      onDragOver={(e) => !locked && e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
+        if (locked) return;
         const id = e.dataTransfer.getData("text/player-id");
         const player = allPlayers.find((p) => p.id === id);
         if (player) onAssign(player);
       }}
+      style={{
+        opacity: locked ? 0.6 : 1,
+        cursor: locked ? "not-allowed" : "pointer",
+        border: isEmpty ? "1px dashed rgba(217,83,79,0.45)" : undefined,
+        background: isEmpty ? "rgba(217,83,79,0.05)" : undefined,
+      }}
     >
       <div className="crew-slot-header">
-        <Eyebrow color={accentColor}>{title}</Eyebrow>
-        {active && <span className="crew-slot-pick-hint">tap or drag a player below ▾</span>}
+        <Eyebrow color={isEmpty ? "#D9534F" : accentColor}>
+          {isEmpty ? "⚠ " : ""}
+          {title}
+        </Eyebrow>
+        <div className="flex items-center gap-2">
+          {active && !locked && <span className="crew-slot-pick-hint">tap or drag a player below ▾</span>}
+          {!isEmpty && onClear && !locked && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClear();
+              }}
+              title={`Clear ${title}`}
+              aria-label={`Clear ${title}`}
+              className="crew-slot-clear-btn"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
       <div className="crew-slot-body">
         <span className="squad-avatar" style={{ width: 48, height: 48 }}>
@@ -321,6 +358,70 @@ function WicketDetailDialog({
   );
 }
 
+// NEW — real confirmation dialog for ending an innings. Previously
+// "Swap Innings" silently flipped a display-only local variable with no
+// confirmation and no actual state reset. This dialog is the gate in
+// front of engine.endInnings(), which does the real reset (target,
+// score, striker/non-striker/bowler, partnership) but was never wired
+// to any button before.
+function EndInningsDialog({
+  currentRuns,
+  isSecondInnings,
+  onConfirm,
+  onCancel,
+}: {
+  currentRuns: number;
+  isSecondInnings: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="scorer-dialog-backdrop" onClick={onCancel}>
+      <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
+            {isSecondInnings ? "End Match?" : "End Innings?"}
+          </span>
+        </div>
+        {isSecondInnings ? (
+          <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
+            This is the 2nd innings — ending it marks the match complete and locks scoring. This can&apos;t be undone.
+          </p>
+        ) : (
+          <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
+            This will set the target to <strong>{currentRuns + 1}</strong>, and reset the score, overs, striker,
+            non-striker, and bowler for Innings 2. Match &amp; tournament boundary totals carry over. This can&apos;t
+            be undone.
+          </p>
+        )}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              background: "var(--color-surface-container-low)",
+              border: "1px solid var(--color-border-overlay)",
+              color: "var(--color-on-surface)",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+            style={{ fontFamily: "var(--font-label-mono)", background: "var(--color-error)", color: "var(--color-on-primary)" }}
+          >
+            {isSecondInnings ? "End Match" : "End Innings"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LiveStatePanel({
   liveState,
   setLiveState,
@@ -332,6 +433,8 @@ export default function LiveStatePanel({
   onBoundary,
   onMilestone,
   onWicketConfirm,
+  onMaiden,
+  onInningsEnd,
 }: {
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
@@ -349,18 +452,44 @@ export default function LiveStatePanel({
     fielder: string;
     bowlerName: string;
   }) => void;
+  onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
+  onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
 }) {
-  const engine = useLiveScoringEngine({ liveState, setLiveState, setLiveDirty, onBoundary, onMilestone, onWicketConfirm });
-
-  const [battingTeamKey, setBattingTeamKey] = useState<"teamA" | "teamB">(() => {
-    if (matchSetup?.tossWinner && matchSetup.tossDecision) {
-      const winnerBats = matchSetup.tossDecision === "bat";
-      const winnerIsA = matchSetup.tossWinner === "A";
-      const aBats = winnerBats ? winnerIsA : !winnerIsA;
-      return aBats ? "teamA" : "teamB";
-    }
-    return "teamA";
+  const engine = useLiveScoringEngine({
+    liveState,
+    setLiveState,
+    setLiveDirty,
+    onBoundary,
+    onMilestone,
+    onWicketConfirm,
+    onMaiden,
+    onInningsEnd,
   });
+
+  // CHANGED — battingTeamKey is now DERIVED from toss info + the actual
+  // liveState.inningsNumber, instead of being a separate local toggle.
+  // Before, this was a plain useState that only ever got flipped by a
+  // button click and had zero connection to what engine.endInnings()
+  // does — so it was possible (in fact guaranteed, since the old "Swap
+  // Innings" button never called endInnings() at all) for this label to
+  // say "Team B batting" while the score/striker/bowler underneath were
+  // still 100% Team A's numbers. Deriving it means there is exactly one
+  // source of truth: once endInnings() bumps inningsNumber to 2, this
+  // recomputes automatically on the next render — it cannot drift.
+  const battingTeamKey: "teamA" | "teamB" = useMemo(() => {
+    const firstInningsTeamIsA = (() => {
+      if (matchSetup?.tossWinner && matchSetup.tossDecision) {
+        const winnerBats = matchSetup.tossDecision === "bat";
+        const winnerIsA = matchSetup.tossWinner === "A";
+        return winnerBats ? winnerIsA : !winnerIsA;
+      }
+      return true;
+    })();
+    const firstInningsTeam: "teamA" | "teamB" = firstInningsTeamIsA ? "teamA" : "teamB";
+    const isSecondInningsNow = (liveState.inningsNumber ?? 1) === 2;
+    if (!isSecondInningsNow) return firstInningsTeam;
+    return firstInningsTeam === "teamA" ? "teamB" : "teamA";
+  }, [matchSetup?.tossWinner, matchSetup?.tossDecision, liveState.inningsNumber]);
   const bowlingTeamKey = battingTeamKey === "teamA" ? "teamB" : "teamA";
 
   const battingSquad = useMemo(() => squadFor(matchSetup, battingTeamKey), [matchSetup, battingTeamKey]);
@@ -369,6 +498,31 @@ export default function LiveStatePanel({
   const bowlingTeamLabel = matchSetup?.[bowlingTeamKey]?.shortCode || (bowlingTeamKey === "teamA" ? "Team A" : "Team B");
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // NEW — gate in front of engine.endInnings(). See EndInningsDialog above.
+  const [showEndInningsConfirm, setShowEndInningsConfirm] = useState(false);
+
+  // NEW — target / required-run-rate bookkeeping for the innings-2 header.
+  // maxOversByFormat is a soft cap only used to estimate balls remaining
+  // for the RRR display; Test matches have no over cap so RRR is simply
+  // omitted for that format (ballsRemaining stays undefined).
+  const maxOversByFormat: Record<string, number | undefined> = { T20: 20, ODI: 50, Test: undefined };
+  const maxOvers = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
+  const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
+  const ballsBowled = liveState.score.overs * 6 + liveState.score.balls;
+  const totalBalls = maxOvers !== undefined ? maxOvers * 6 : undefined;
+  const ballsRemaining = totalBalls !== undefined ? Math.max(0, totalBalls - ballsBowled) : undefined;
+  const runsNeeded = liveState.target !== undefined ? Math.max(0, liveState.target - liveState.score.runs) : undefined;
+  const requiredRunRate =
+    runsNeeded !== undefined && ballsRemaining ? ((runsNeeded / ballsRemaining) * 6).toFixed(2) : undefined;
+
+  // NEW — single source of truth for "can scoring happen right now". Used
+  // to visually + functionally lock the ball pad, extras selector, free
+  // hit toggle, swap-strike, and new-partnership controls until striker,
+  // non-striker, AND bowler are all set. engine.recordBall/recordWicket
+  // already refuse silently-ish via a toast if this is bypassed somehow,
+  // but the UI shouldn't invite the tap in the first place.
+  const controlsLocked = engine.assignmentsMissing();
 
   function patchBatter(who: "striker" | "nonStriker", patch: Partial<LiveState["striker"]>) {
     setLiveState((prev) => ({ ...prev, [who]: { ...prev[who], ...patch } }));
@@ -421,10 +575,70 @@ export default function LiveStatePanel({
         .free-hit-toggle.is-active .free-hit-toggle-thumb { transform: translateX(12px); background: #60a5fa; box-shadow: 0 0 6px rgba(96, 165, 250, 0.7); animation: freeHitPulse 1.6s ease-in-out infinite; }
         .free-hit-toggle.is-active .free-hit-toggle-title { color: #60a5fa; }
         .free-hit-toggle.is-active .free-hit-toggle-state { color: #60a5fa; }
+        .swap-strike-btn {
+          align-self: center;
+          flex-shrink: 0;
+          width: 36px;
+          height: 36px;
+          border-radius: 999px;
+          border: 1px solid var(--color-border-overlay);
+          background: var(--color-surface-container-low);
+          color: var(--color-outline);
+          font-size: 17px;
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: transform 160ms ease, color 160ms ease, border-color 160ms ease, background 160ms ease;
+          transform: rotate(90deg);
+        }
+        .swap-strike-btn:hover {
+          color: var(--color-theme-orange);
+          border-color: rgba(201,151,31,0.5);
+          background: rgba(201,151,31,0.08);
+          transform: rotate(90deg) scale(1.1);
+        }
+        @media (min-width: 768px) {
+          .swap-strike-btn { transform: rotate(0deg); }
+          .swap-strike-btn:hover { transform: scale(1.1); }
+        }
+        .crew-slot-clear-btn {
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          border: 1px solid var(--color-border-overlay);
+          background: var(--color-surface-container-low);
+          color: var(--color-outline);
+          font-size: 13px;
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: all 140ms ease;
+        }
+        .crew-slot-clear-btn:hover {
+          color: var(--color-error);
+          border-color: rgba(217,83,79,0.5);
+          background: rgba(217,83,79,0.1);
+        }
       `}</style>
 
       <ToastStack toasts={engine.toasts} />
       {engine.pendingWicket && <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} />}
+      {showEndInningsConfirm && (
+        <EndInningsDialog
+          currentRuns={liveState.score.runs}
+          isSecondInnings={isSecondInnings}
+          onCancel={() => setShowEndInningsConfirm(false)}
+          onConfirm={() => {
+            engine.endInnings();
+            setShowEndInningsConfirm(false);
+          }}
+        />
+      )}
 
       <div className="scoreboard-strip">
         <div className="scoreboard-main">
@@ -437,38 +651,102 @@ export default function LiveStatePanel({
           <span>RR {runRate}</span>
           <span>·</span>
           <span>{battingTeamLabel} batting</span>
+          {/* NEW — target / need / required-run-rate, only meaningful once
+              engine.endInnings() has actually run and set liveState.target. */}
+          {isSecondInnings && liveState.target !== undefined && (
+            <>
+              <span>·</span>
+              <span>Target {liveState.target}</span>
+              {runsNeeded !== undefined && (
+                <>
+                  <span>·</span>
+                  <span>
+                    Need {runsNeeded}
+                    {ballsRemaining !== undefined ? ` off ${ballsRemaining}` : ""}
+                  </span>
+                </>
+              )}
+              {requiredRunRate && (
+                <>
+                  <span>·</span>
+                  <span>RRR {requiredRunRate}</span>
+                </>
+              )}
+            </>
+          )}
         </div>
-        <SmallButton onClick={() => setBattingTeamKey((k) => (k === "teamA" ? "teamB" : "teamA"))} style={{ marginLeft: "auto" }}>
-          Swap Innings
-        </SmallButton>
+        {/* CHANGED — this used to be a "Swap Innings" button that only
+            flipped a local display variable and reset nothing. It now
+            opens a real confirmation dialog gating the actual reset
+            logic in engine.endInnings(). Hidden once the match is marked
+            complete, since there's nothing further to end. */}
+        {!liveState.matchComplete && (
+          <SmallButton
+            onClick={() => setShowEndInningsConfirm(true)}
+            style={{ marginLeft: "auto", color: "var(--color-error)" }}
+          >
+            {isSecondInnings ? "End Match" : "End Innings"}
+          </SmallButton>
+        )}
+        {liveState.matchComplete && (
+          <span
+            className="text-[10px] font-black uppercase tracking-widest ml-auto"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}
+          >
+            Match Complete
+          </span>
+        )}
       </div>
 
       <div>
         <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <CrewSlot
-            title="Striker *"
-            accentColor="#E8C468"
-            active={engine.activeSlot === "striker"}
-            onActivate={() => engine.setActiveSlot("striker")}
-            displayName={liveState.striker.name}
-            imageUrl={liveState.striker.imageUrl}
-            statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
-            allPlayers={battingSquad}
-            onAssign={(p) => engine.assignPlayer("striker", p)}
-            placeholder="Select striker"
-          />
-          <CrewSlot
-            title="Non-Striker"
-            active={engine.activeSlot === "nonStriker"}
-            onActivate={() => engine.setActiveSlot("nonStriker")}
-            displayName={liveState.nonStriker.name}
-            imageUrl={liveState.nonStriker.imageUrl}
-            statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
-            allPlayers={battingSquad}
-            onAssign={(p) => engine.assignPlayer("nonStriker", p)}
-            placeholder="Select non-striker"
-          />
+        {/* CHANGED — Swap Strike now lives as a double-arrow button
+            physically between the two batter cards instead of as a
+            separate labeled button in the row below. Placing it right
+            where the two names sit makes "this swaps these two" obvious
+            at a glance, and it still fires the same engine.swapStrike().
+            Stacks vertically on mobile (arrow rotates to point up/down),
+            sits side-by-side on md+ (arrow points left/right). */}
+        <div className="flex flex-col md:flex-row items-stretch gap-3">
+          <div className="flex-1 min-w-0">
+            <CrewSlot
+              title="Striker *"
+              accentColor="#E8C468"
+              active={engine.activeSlot === "striker"}
+              onActivate={() => engine.setActiveSlot("striker")}
+              displayName={liveState.striker.name}
+              imageUrl={liveState.striker.imageUrl}
+              statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
+              allPlayers={battingSquad}
+              onAssign={(p) => engine.assignPlayer("striker", p)}
+              onClear={() => engine.clearSlot("striker")}
+              placeholder="Select striker"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={engine.swapStrike}
+            className="swap-strike-btn"
+            title="Swap Strike"
+            aria-label="Swap strike between batters"
+          >
+            ⇄
+          </button>
+
+          <div className="flex-1 min-w-0">
+            <CrewSlot
+              title="Non-Striker"
+              active={engine.activeSlot === "nonStriker"}
+              onActivate={() => engine.setActiveSlot("nonStriker")}
+              displayName={liveState.nonStriker.name}
+              imageUrl={liveState.nonStriker.imageUrl}
+              statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
+              allPlayers={battingSquad}
+              onAssign={(p) => engine.assignPlayer("nonStriker", p)}
+              placeholder="Select non-striker"
+            />
+          </div>
         </div>
 
         <div className="mt-3">
@@ -495,7 +773,6 @@ export default function LiveStatePanel({
         </div>
 
         <div className="flex items-center gap-2 mt-3">
-          <SmallButton onClick={engine.swapStrike}>Swap Strike</SmallButton>
           <SmallButton onClick={engine.newPartnership}>New Partnership</SmallButton>
         </div>
       </div>
@@ -537,13 +814,22 @@ export default function LiveStatePanel({
           </div>
         </div>
 
-        <div className="ball-pad">
+        {/* CHANGED — ball pad visually + functionally locks once the match
+            is marked complete, instead of silently continuing to accept
+            taps that would score onto a match that's already finished. */}
+        <div className="ball-pad" style={liveState.matchComplete ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
           {[0, 1, 2, 3, 4, 6].map((r) => (
-            <button key={r} type="button" className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`} onClick={() => engine.recordBall(r)}>
+            <button
+              key={r}
+              type="button"
+              className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`}
+              onClick={() => engine.recordBall(r)}
+              disabled={liveState.matchComplete}
+            >
               {r}
             </button>
           ))}
-          <button type="button" className="ball-btn ball-btn-wicket" onClick={engine.recordWicket}>
+          <button type="button" className="ball-btn ball-btn-wicket" onClick={engine.recordWicket} disabled={liveState.matchComplete}>
             OUT
           </button>
         </div>
