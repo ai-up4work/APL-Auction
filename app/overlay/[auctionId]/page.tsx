@@ -257,29 +257,33 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
 
       {matchBoundariesVis.mounted && (
         <MatchBoundaries
-          fours={state.matchBoundaries.fours}
-          sixes={state.matchBoundaries.sixes}
+          fours={state.liveState?.matchBoundaries.fours ?? state.matchBoundaries.fours}
+          sixes={state.liveState?.matchBoundaries.sixes ?? state.matchBoundaries.sixes}
           closing={matchBoundariesVis.closing}
         />
       )}
 
       {tournamentBoundariesVis.mounted && (
         <TournamentBoundaries
-          fours={state.tournamentBoundaries.fours}
-          sixes={state.tournamentBoundaries.sixes}
+          fours={state.liveState?.tournamentBoundaries.fours ?? state.tournamentBoundaries.fours}
+          sixes={state.liveState?.tournamentBoundaries.sixes ?? state.tournamentBoundaries.sixes}
           closing={tournamentBoundariesVis.closing}
         />
       )}
 
       <MatchMomentOverlay hideDemoButtons />
+      
       <LiveScoreBar
         show={state.liveScoreBar.show}
         hideTrigger
         liveState={state.liveState ?? undefined}
         matchSetup={state.matchSetup ?? undefined}
       />
-        <PointsTable show={state.pointsTable.show} hideTrigger />
+      
+      <PointsTable show={state.pointsTable.show} hideTrigger />
+      
       <CricketScorecard show={state.matchScorecard.show} hideTrigger />
+      
       <CricketMatchIntro
         show={state.matchIntro.show}
         hideTrigger
@@ -287,6 +291,7 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         tournament={state.matchSetup?.tournament ?? undefined}
         matchMeta={state.matchSetup?.matchMeta ?? undefined}
       />
+
       {state.tournamentLogo.show && (
         <TournamentLogoDisplay
           name={state.matchSetup?.tournamentName || undefined}
