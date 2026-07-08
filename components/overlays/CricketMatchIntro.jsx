@@ -5,36 +5,42 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ambientGlow } from "@/lib/overlayTokens";
 
-// ---- Hardcoded match data ----
-// Team art is hardcoded here (icon + colors) rather than generated from
-// initials, so each side reads as a distinct, fixed identity.
-const TEAM_A = {
-  name: "COASTAL SHARKS",
-  short: "CS",
-  image: "/Franchises/CSK.png",
-  color: "#3B8BD4", // aplBlue
-  colorSoft: "rgba(59,139,212,0.22)",
+// ---- Fallback match data ----
+// These are the same values that used to be hardcoded as TEAM_A/TEAM_B/
+// TOURNAMENT/MATCH_META. They're now defaults only — real values come
+// from the `matchSetup` prop (and the `tournament` / `matchMeta`
+// override props for the couple of fields matchSetup doesn't carry),
+// so the panel shows whatever was actually configured in Match Setup
+// instead of always showing the Coastal Sharks vs Desert Falcons demo.
+const TEAM_VISUAL_DEFAULTS = {
+  teamA: { name: "COASTAL SHARKS", short: "CS", image: "/Franchises/CSK.png", color: "#3B8BD4" },
+  teamB: { name: "DESERT FALCONS", short: "DF", image: "/Franchises/RCB.png", color: "#2A9D5C" },
 };
 
-const TEAM_B = {
-  name: "DESERT FALCONS",
-  short: "DF",
-  image: "/Franchises/RCB.png",
-  color: "#2A9D5C", // aplGreen
-  colorSoft: "rgba(42,157,92,0.2)",
-};
-
-const TOURNAMENT = {
+const TOURNAMENT_DEFAULTS = {
   name: "MOON KNIGHT CUP",
   edition: "SEASON 7 · T20",
   logo: "/moon-knight-logo.png",
 };
 
-const MATCH_META = {
+const MATCH_META_DEFAULTS = {
   venue: "Meridian Stadium",
   format: "20 OVERS",
-  time: "19:30 LOCAL",
 };
+
+// A color hex like "#3B8BD4" -> "rgba(59,139,212,0.22)" for the soft glow
+// behind each crest. Falls back to a neutral gold-tinted glow if the hex
+// doesn't parse, so a malformed color value never breaks the render.
+function softGlowFromHex(hex) {
+  const fallback = "rgba(201,151,31,0.18)";
+  if (!hex) return fallback;
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return fallback;
+  const r = parseInt(m[1].slice(0, 2), 16);
+  const g = parseInt(m[1].slice(2, 4), 16);
+  const b = parseInt(m[1].slice(4, 6), 16);
+  return `rgba(${r},${g},${b},0.22)`;
+}
 
 // Total time the exit choreography needs before we actually unmount.
 // Keep this in sync with the longest exit animation + its delay below.
@@ -50,8 +56,16 @@ const EXIT_DURATION_MS = 420;
  *   - `hideTrigger`: hides the on-screen "Match Center" trigger button,
  *     for use on the OBS-facing overlay page where there's no one to
  *     click it.
+ *   - `matchSetup`: the MatchSetup object from the admin panel. Drives
+ *     team names/short codes/colors/logos and the format-derived overs
+ *     label, so this panel shows whatever was actually configured in
+ *     Match Setup instead of the hardcoded demo teams.
+ *   - `tournament` / `matchMeta`: optional overrides for tournament
+ *     branding, venue, format, or kickoff time — for cases where you
+ *     want to show something other than what's on matchSetup. Anything
+ *     not passed falls back to matchSetup or the defaults above.
  */
-export default function CricketMatchIntro({ show, hideTrigger = false }) {
+export default function CricketMatchIntro({ show, hideTrigger = false, matchSetup, tournament, matchMeta }) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false); // panel is in the DOM
   const [closing, setClosing] = useState(false); // panel is mid exit-animation
@@ -106,6 +120,56 @@ export default function CricketMatchIntro({ show, hideTrigger = false }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, closing, closePanel]);
+
+  // ---- Derive team cards + tournament/match meta from matchSetup ----
+  // Falls back to the original hardcoded demo values field-by-field, so
+  // if matchSetup (or a particular field on it) isn't provided yet, the
+  // panel renders exactly as it always did.
+  const TEAM_A = {
+    name: matchSetup?.teamA?.name || TEAM_VISUAL_DEFAULTS.teamA.name,
+    short: matchSetup?.teamA?.shortCode || TEAM_VISUAL_DEFAULTS.teamA.short,
+    image: matchSetup?.teamA?.logoUrl || TEAM_VISUAL_DEFAULTS.teamA.image,
+    color: matchSetup?.teamA?.color || TEAM_VISUAL_DEFAULTS.teamA.color,
+    colorSoft: softGlowFromHex(matchSetup?.teamA?.color || TEAM_VISUAL_DEFAULTS.teamA.color),
+  };
+  const TEAM_B = {
+    name: matchSetup?.teamB?.name || TEAM_VISUAL_DEFAULTS.teamB.name,
+    short: matchSetup?.teamB?.shortCode || TEAM_VISUAL_DEFAULTS.teamB.short,
+    image: matchSetup?.teamB?.logoUrl || TEAM_VISUAL_DEFAULTS.teamB.image,
+    color: matchSetup?.teamB?.color || TEAM_VISUAL_DEFAULTS.teamB.color,
+    colorSoft: softGlowFromHex(matchSetup?.teamB?.color || TEAM_VISUAL_DEFAULTS.teamB.color),
+  };
+
+  // Tournament name/logo come from MatchSetup; `edition` is built from
+  // season + format since MatchSetup has no single "edition" string.
+  const TOURNAMENT = {
+    name: matchSetup?.tournamentName || TOURNAMENT_DEFAULTS.name,
+    edition:
+      [matchSetup?.season && `SEASON ${matchSetup.season}`, matchSetup?.format].filter(Boolean).join(" · ") ||
+      TOURNAMENT_DEFAULTS.edition,
+    logo: matchSetup?.tournamentLogoUrl || TOURNAMENT_DEFAULTS.logo,
+    ...tournament,
+  };
+
+  const formatLabel =
+    matchSetup?.format === "T20"
+      ? "20 OVERS"
+      : matchSetup?.format === "ODI"
+      ? "50 OVERS"
+      : matchSetup?.format === "Test"
+      ? "TEST"
+      : MATCH_META_DEFAULTS.format;
+
+  // Venue comes from MatchSetup. Kickoff time also comes from MatchSetup
+  // now that it's a real field there — `time` stays undefined when it's
+  // not set, which is what the footer below checks before rendering the
+  // Kickoff block at all.
+  const MATCH_META = {
+    venue: matchSetup?.venue || MATCH_META_DEFAULTS.venue,
+    format: formatLabel,
+    time: matchSetup?.kickoffTime || undefined,
+    ...matchMeta,
+  };
 
   return (
     <>
@@ -454,7 +518,10 @@ export default function CricketMatchIntro({ show, hideTrigger = false }) {
                       />
 
                       <div className="flex flex-col sm:flex-row">
-                        {/* Main stub — venue + kickoff, asymmetric, not four equal tiles */}
+                        {/* Main stub — venue always shows; Kickoff only
+                            renders when matchSetup.kickoffTime is actually
+                            set, so there's no more hardcoded "19:30 LOCAL"
+                            standing in for real data. */}
                         <div className="flex-1 flex items-center gap-8 px-6 sm:px-10 py-6">
                           <div>
                             <span
@@ -470,24 +537,28 @@ export default function CricketMatchIntro({ show, hideTrigger = false }) {
                               {MATCH_META.venue}
                             </p>
                           </div>
-                          <div
-                            className="w-px self-stretch my-1"
-                            style={{ background: "var(--color-border-overlay)" }}
-                          />
-                          <div>
-                            <span
-                              className="block font-bold tracking-[0.25em] uppercase text-[9px]"
-                              style={{ color: "var(--color-outline)" }}
-                            >
-                              Kickoff
-                            </span>
-                            <p
-                              className="font-heading text-base sm:text-lg font-black tabular-nums"
-                              style={{ color: "var(--color-theme-orange)" }}
-                            >
-                              {MATCH_META.time}
-                            </p>
-                          </div>
+                          {MATCH_META.time && (
+                            <>
+                              <div
+                                className="w-px self-stretch my-1"
+                                style={{ background: "var(--color-border-overlay)" }}
+                              />
+                              <div>
+                                <span
+                                  className="block font-bold tracking-[0.25em] uppercase text-[9px]"
+                                  style={{ color: "var(--color-outline)" }}
+                                >
+                                  Kickoff
+                                </span>
+                                <p
+                                  className="font-heading text-base sm:text-lg font-black tabular-nums"
+                                  style={{ color: "var(--color-theme-orange)" }}
+                                >
+                                  {MATCH_META.time}
+                                </p>
+                              </div>
+                            </>
+                          )}
                         </div>
 
                         {/* Stub compartment — faint warm paper tint distinguishes it as its

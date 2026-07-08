@@ -384,6 +384,11 @@ function LockedSummaryBar({
             · {matchSetup.venue}
           </span>
         )}
+        {matchSetup.kickoffTime && (
+          <span className="text-[11px] truncate hidden md:inline" style={{ color: "var(--color-on-surface-variant)" }}>
+            · {matchSetup.kickoffTime}
+          </span>
+        )}
         {tossLine && (
           <span className="text-[11px] truncate hidden lg:inline" style={{ color: "var(--color-outline)" }}>
             · {tossLine}
@@ -514,9 +519,19 @@ export default function MatchSetupPanel({
           onChange={(v) => setMatchSetup((p) => ({ ...p, matchNumber: v }))}
           placeholder="e.g. Match 14"
         />
+        {/* NEW — free text so any local format works ("19:30", "7:30 PM
+            IST", "Starts after lunch break", etc.) rather than forcing a
+            single timezone-aware time picker. Feeds CricketMatchIntro's
+            Kickoff line, which only renders when this is non-empty. */}
+        <TextField
+          label="Kickoff Time"
+          value={matchSetup.kickoffTime}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, kickoffTime: v }))}
+          placeholder="e.g. 19:30 LOCAL"
+        />
         <TextField
           label="Match Title"
-          span={2}
+          span={1}
           value={matchSetup.matchTitle}
           onChange={(v) => setMatchSetup((p) => ({ ...p, matchTitle: v }))}
           placeholder="e.g. Semi-Final"

@@ -36,6 +36,7 @@ export interface MatchSetup {
   format: "T20" | "ODI" | "Test";
   matchNumber: string;
   matchTitle: string;
+  kickoffTime: string; // NEW — e.g. "19:30" or "7:30 PM IST", free text
   teamA: TeamInfo;
   teamB: TeamInfo;
   tossWinner: "A" | "B" | "";
