@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot, type WeatherData } from "@/lib/overlayBus";
+import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot, type WeatherData, type BatterState, type BowlerState } from "@/lib/overlayBus";
 import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
 import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
@@ -53,7 +53,7 @@ const emptyLiveState: LiveState = {
   matchBoundaries: { fours: 0, sixes: 0 },
   tournamentBoundaries: { fours: 0, sixes: 0 },
   pointsTable: [],
-  thisOver: [], // NEW — ball-by-ball history for the score bar's "This Over" strip
+  thisOver: [], // ball-by-ball history for the score bar's "This Over" strip
 };
 
 // ── Weather (last pushed) ───────────────────────────────────────────────
@@ -86,6 +86,75 @@ interface MatchCompletePayload {
   winningTeamName: string;
   margin: string;
   method: "batting" | "bowling" | "tie";
+}
+
+// ── NEW — hydration sanitizers ───────────────────────────────────────────
+// Any cached localStorage blob from an older schema (or a partial/corrupt
+// write) can be missing fields entirely. Reading those straight into state
+// means arithmetic like `bowler.balls + 1` runs on `undefined`, produces
+// `NaN`, and — because `NaN >= 6` is always false — that `NaN` never clears
+// itself out again. These normalizers rebuild the full expected shape on
+// every load, coercing every numeric field with `Number(x) || 0` so a bad
+// cache entry can never poison a live session again.
+function sanitizeBatter(b: any): BatterState {
+  return {
+    name: typeof b?.name === "string" ? b.name : "",
+    runs: Number(b?.runs) || 0,
+    balls: Number(b?.balls) || 0,
+    fours: Number(b?.fours) || 0,
+    sixes: Number(b?.sixes) || 0,
+    imageUrl: typeof b?.imageUrl === "string" ? b.imageUrl : undefined,
+  };
+}
+
+function sanitizeBowler(b: any): BowlerState {
+  return {
+    name: typeof b?.name === "string" ? b.name : "",
+    overs: Number(b?.overs) || 0,
+    balls: Number(b?.balls) || 0,
+    maidens: Number(b?.maidens) || 0,
+    runs: Number(b?.runs) || 0,
+    wickets: Number(b?.wickets) || 0,
+  };
+}
+
+function sanitizeLiveState(raw: any): LiveState {
+  return {
+    score: {
+      runs: Number(raw?.score?.runs) || 0,
+      wickets: Number(raw?.score?.wickets) || 0,
+      overs: Number(raw?.score?.overs) || 0,
+      balls: Number(raw?.score?.balls) || 0,
+    },
+    striker: sanitizeBatter(raw?.striker),
+    nonStriker: sanitizeBatter(raw?.nonStriker),
+    bowler: sanitizeBowler(raw?.bowler),
+    partnership: {
+      runs: Number(raw?.partnership?.runs) || 0,
+      balls: Number(raw?.partnership?.balls) || 0,
+    },
+    matchBoundaries: {
+      fours: Number(raw?.matchBoundaries?.fours) || 0,
+      sixes: Number(raw?.matchBoundaries?.sixes) || 0,
+    },
+    tournamentBoundaries: {
+      fours: Number(raw?.tournamentBoundaries?.fours) || 0,
+      sixes: Number(raw?.tournamentBoundaries?.sixes) || 0,
+    },
+    pointsTable: Array.isArray(raw?.pointsTable) ? raw.pointsTable : [],
+    thisOver: Array.isArray(raw?.thisOver) ? raw.thisOver : [],
+    target: raw?.target !== undefined && raw?.target !== null ? Number(raw.target) : undefined,
+    inningsNumber: raw?.inningsNumber === 2 ? 2 : raw?.inningsNumber === 1 ? 1 : undefined,
+    matchComplete: !!raw?.matchComplete,
+    matchResult:
+      raw?.matchResult && typeof raw.matchResult.winningTeamName === "string"
+        ? {
+            winningTeamName: raw.matchResult.winningTeamName,
+            margin: typeof raw.matchResult.margin === "string" ? raw.matchResult.margin : "",
+            method: raw.matchResult.method === "runs" || raw.matchResult.method === "tie" ? raw.matchResult.method : "wickets",
+          }
+        : undefined,
+  };
 }
 
 function BatterPickerButton({
@@ -268,7 +337,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     }
     try {
       const rawLive = window.localStorage.getItem(`overlay:${auctionId}:liveState`);
-      if (rawLive) setLiveState(JSON.parse(rawLive));
+      // CHANGED — run through sanitizeLiveState instead of trusting the
+      // cached shape verbatim. Fixes bowler/batter stats coming back as
+      // NaN/undefined after a schema change or a half-written cache entry.
+      if (rawLive) setLiveState(sanitizeLiveState(JSON.parse(rawLive)));
     } catch {
       // ignore malformed cache
     }
@@ -308,7 +380,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     window.localStorage.setItem(`overlay:${auctionId}:weather`, JSON.stringify(weatherData));
   }, [weatherData, auctionId, setupHydrated]);
 
-  // NEW — auto-push Live State to the overlay shortly after every change,
+  // Auto-push Live State to the overlay shortly after every change,
   // instead of waiting for a manual "Push Live State" click. Debounced so
   // a burst of rapid state updates (e.g. undo immediately followed by a
   // re-tap) collapses into a single broadcast rather than spamming the
@@ -499,6 +571,37 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     ].slice(0, 12));
   }
 
+  // NEW — replaces the old direct `fireMatchWonMoment` wiring below.
+  // Previously, the instant the engine detected the match was over
+  // (target chased, all out, or overs used up) it fired the on-air
+  // "Match Won" graphic immediately with zero human confirmation. That's
+  // risky — margins/wording can need a tweak, or the auto-detected
+  // winner could be wrong if toss/innings data was off. Now: the score
+  // still locks automatically (you can't keep scoring a finished match),
+  // but the graphic is never fired without you looking at it first. This
+  // pre-fills the existing Match Won form with the computed result and
+  // pops it open so you just have to glance and tap "Fire Match Won".
+  function handleAutoMatchComplete(result: MatchCompletePayload) {
+    const winner: "teamA" | "teamB" | "custom" =
+      result.winningTeamName === matchSetup.teamA.name
+        ? "teamA"
+        : result.winningTeamName === matchSetup.teamB.name
+        ? "teamB"
+        : "custom";
+    setMatchWonDraft({
+      winner,
+      customName: winner === "custom" ? result.winningTeamName : "",
+      margin: result.margin,
+      method: result.method,
+    });
+    setShowMoments(true);
+    setShowMatchWonForm(true);
+    setLog((prev) => [
+      `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Match complete detected — ${result.winningTeamName} ${result.margin}. Review the Match Won form and fire when ready.`,
+      ...prev,
+    ].slice(0, 12));
+  }
+
   function fireMilestoneMomentFromPanel(moment: "fifty" | "hundred") {
     fireMilestoneMoment(moment);
   }
@@ -517,7 +620,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       inningsNumber: undefined,
       matchComplete: false,
       matchResult: undefined,
-      thisOver: [], // NEW — clear the over strip on restart too
+      thisOver: [],
     }));
     setLiveDirty(true);
   }
@@ -628,14 +731,14 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 setLiveDirty={setLiveDirty}
                 liveDirty={liveDirty}
                 onPush={pushLiveState}
-                pushLabel={livePushed ? "Pushed ✓" : liveDirty ? "Syncing…" : "Push Live State"}
+                pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
                 matchSetup={matchSetup}
                 onBoundary={fireBoundaryMoment}
                 onMilestone={fireMilestoneMoment}
                 onWicketConfirm={fireWicketMomentFrom}
                 onMaiden={fireMaidenMoment}
                 onInningsEnd={logInningsEnd}
-                onMatchComplete={fireMatchWonMoment}
+                onMatchComplete={handleAutoMatchComplete}
                 onRestartMatch={restartMatch}
               />
             ) : (
@@ -708,8 +811,8 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                         ball pad in the Scorer panel — these buttons are still here for
                         manual/backup firing. Maiden overs fire automatically too, and the
                         Maiden button re-fires using whoever's set as bowler right now. Match
-                        Won can fire automatically when a match completes, or opens a form
-                        below for firing it manually at any time.
+                        Won never fires itself — when a match completes this form opens
+                        pre-filled so you can double check the winner and margin before firing.
                       </p>
 
                       <div className="grid grid-cols-2 gap-2.5">

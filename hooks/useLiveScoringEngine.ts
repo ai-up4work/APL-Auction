@@ -127,6 +127,26 @@ function computeInnings2Result(
   return { winningSide: "bowling", margin: `won by ${marginRuns} run${marginRuns === 1 ? "" : "s"}` };
 }
 
+// NEW — how many squad members are left who are neither already dismissed
+// nor already occupying a crease slot. If the squad list is empty/unknown
+// (e.g. no squad was entered in Match Setup) we return null rather than 0,
+// so callers treat "unknown" as unrestricted instead of falsely flagging
+// every innings as short on players.
+function countAvailableBatters(
+  squad: { name: string }[] | undefined,
+  dismissedPlayers: Set<string>,
+  striker: { name: string },
+  nonStriker: { name: string }
+): number | null {
+  if (!squad || squad.length === 0) return null;
+  return squad.filter(
+    (p) =>
+      !dismissedPlayers.has(p.name) &&
+      p.name !== striker.name &&
+      p.name !== nonStriker.name
+  ).length;
+}
+
 export function useLiveScoringEngine({
   liveState,
   setLiveState,
@@ -134,6 +154,7 @@ export function useLiveScoringEngine({
   maxOvers,
   battingTeamName,
   bowlingTeamName,
+  battingSquad,
   onBoundary,
   onMilestone,
   onWicketConfirm,
@@ -147,6 +168,11 @@ export function useLiveScoringEngine({
   maxOvers?: number;
   battingTeamName: string;
   bowlingTeamName: string;
+  // NEW — the batting side's squad list. Used only to detect "no
+  // replacement batter left" so we can stop demanding a non-striker pick
+  // and nudge the scorer to end the innings instead. Optional: if not
+  // passed (or empty), behavior is unchanged from before.
+  battingSquad?: { name: string }[];
   onBoundary?: (moment: "four" | "six", batter: { name: string; runs: number; balls: number }) => void;
   onMilestone?: (moment: "fifty" | "hundred", batter: { name: string; runs: number; balls: number; label?: string }) => void;
   onWicketConfirm?: (payload: {
@@ -188,6 +214,25 @@ export function useLiveScoringEngine({
   // Also carried across undo, same as the other refs below.
   const overJustCompletedUndoRef = useRef(false);
 
+  // NEW — how many squad members remain who could be sent in as a
+  // replacement right now. null means "we don't know" (no squad data),
+  // so downstream checks treat that as unrestricted.
+  const availableBattersCount = countAvailableBatters(
+    battingSquad,
+    dismissedPlayers,
+    liveState.striker,
+    liveState.nonStriker
+  );
+
+  // NEW — true only when we *know* the squad is exhausted (0 available)
+  // AND one of the two crease slots is currently empty. This is what
+  // drives both the relaxed "assignments missing" check and the red
+  // "end the innings" alert in the UI.
+  const noPartnerAvailable =
+    availableBattersCount !== null &&
+    availableBattersCount === 0 &&
+    (!liveState.striker.name || !liveState.nonStriker.name);
+
   function pushToast(text: string, tone: ToastTone) {
     const id = ++toastIdRef.current;
     setToasts((t) => [...t, { id, text, tone }]);
@@ -195,6 +240,13 @@ export function useLiveScoringEngine({
   }
 
   function assignmentsMissing() {
+    // CHANGED — when there's genuinely no replacement batter left, don't
+    // force a non-striker pick that can't exist. Scoring can continue with
+    // just the striker + bowler set; the UI nudges the scorer to end the
+    // innings instead of blocking the ball pad.
+    if (noPartnerAvailable) {
+      return !liveState.striker.name || !liveState.bowler.name;
+    }
     return !liveState.striker.name || !liveState.nonStriker.name || !liveState.bowler.name;
   }
 
@@ -290,6 +342,14 @@ export function useLiveScoringEngine({
       pushToast(`⚠️ ${player.name} is already out this innings`, "warning");
       return;
     }
+    if (slot === "striker" && liveState.nonStriker.name === player.name) {
+      pushToast(`⚠️ ${player.name} is already at the non-striker's end`, "warning");
+      return;
+    }
+    if (slot === "nonStriker" && liveState.striker.name === player.name) {
+      pushToast(`⚠️ ${player.name} is already on strike`, "warning");
+      return;
+    }
 
     if (slot === "bowler") {
       const isNewBowler = liveState.bowler.name !== player.name;
@@ -330,6 +390,10 @@ export function useLiveScoringEngine({
   }
 
   function swapStrike() {
+    if (!liveState.striker.name || !liveState.nonStriker.name) {
+      pushToast("⚠️ Need a player on both ends to swap", "warning");
+      return;
+    }
     snapshotForUndo();
     setLiveState((prev) => ({ ...prev, striker: prev.nonStriker, nonStriker: prev.striker }));
     setLiveDirty(true);
@@ -433,14 +497,19 @@ export function useLiveScoringEngine({
         tournamentBoundaries.sixes += 1;
       }
 
-      let finalStriker = striker;
+let finalStriker = striker;
       let finalNonStriker = prev.nonStriker;
-      const rotatesOnOdd = extraType !== "wide";
+      // Only rotate strike (odd runs or over-complete) when there's an
+      // actual player on both ends. If the non-striker slot is empty —
+      // lone batter, no replacement — rotating would swap the real
+      // batter out for "nobody". Keep them on strike instead.
+      const bothPresent = !!prev.striker.name && !!prev.nonStriker.name;
+      const rotatesOnOdd = extraType !== "wide" && bothPresent;
       if (rotatesOnOdd && runs % 2 === 1) {
         finalStriker = prev.nonStriker;
         finalNonStriker = striker;
       }
-      if (overComplete) {
+      if (overComplete && bothPresent) {
         const tmp = finalStriker;
         finalStriker = finalNonStriker;
         finalNonStriker = tmp;
@@ -546,6 +615,25 @@ export function useLiveScoringEngine({
     const { strikerBefore, nonStrikerBefore, bowlerName, extraType: ballExtraType, overComplete } = pendingWicket;
     const legality = ballLegality(ballExtraType);
 
+    // NEW — figure out, before any state updates land, whether THIS
+    // dismissal is the one that leaves the batting side with no possible
+    // replacement. dismissedPlayers hasn't been updated yet at this point
+    // in the function, so we project it forward by one name rather than
+    // reading a stale value.
+    const dismissedNameForThisWicket = batsmanOut === "striker" ? strikerBefore.name : nonStrikerBefore.name;
+    const survivorName = batsmanOut === "striker" ? nonStrikerBefore.name : strikerBefore.name;
+    const projectedDismissed = new Set(dismissedPlayers);
+    if (dismissedNameForThisWicket) projectedDismissed.add(dismissedNameForThisWicket);
+    const availableAfterThisWicket = countAvailableBatters(
+      battingSquad,
+      projectedDismissed,
+      // pretend the survivor already occupies a slot so they're excluded
+      // from the "available replacements" count.
+      { name: survivorName },
+      { name: "" }
+    );
+    const noPartnerAfterThisWicket = availableAfterThisWicket !== null && availableAfterThisWicket === 0;
+
     const completedRuns = dismissalType === "runOut" ? Math.max(0, runsCompleted) : 0;
     const totalTeamRuns = completedRuns + legality.extraPenaltyRun;
 
@@ -600,7 +688,14 @@ export function useLiveScoringEngine({
       if (maidenFired) bowler.maidens += 1;
 
       const strikerFacing: BatterState = { ...prev.striker, runs: strikerFinalRuns, balls: strikerFinalBalls };
-      const resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
+      let resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
+
+      // NEW — if there's no replacement left, make sure the lone survivor
+      // ends up on strike rather than stranded as a non-striker sitting
+      // next to an empty, "needs a pick" striker slot.
+      if (noPartnerAfterThisWicket && !resolved.striker.name && resolved.nonStriker.name) {
+        resolved = { striker: resolved.nonStriker, nonStriker: resolved.striker };
+      }
 
       const baseRow = startFreshRow ? [] : prev.thisOver ?? [];
       const thisOver = [...baseRow, wicketBallValue];
@@ -714,6 +809,10 @@ export function useLiveScoringEngine({
     toasts,
     pendingWicket,
     dismissedPlayers,
+    // NEW — true when the batting squad is genuinely exhausted (no one
+    // left to send in) and a crease slot is empty as a result. Drives the
+    // "end the innings" alert and the relaxed assignmentsMissing check.
+    noPartnerAvailable,
     assignmentsMissing,
     patchLive,
     assignPlayer,

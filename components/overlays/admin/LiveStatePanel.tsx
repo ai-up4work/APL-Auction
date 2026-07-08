@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { LiveState, MatchSetup, SquadPlayer } from "@/lib/overlayBus";
 import { DrawerSection, Eyebrow, FieldLabel, SmallButton, PrimaryButton, SegmentedControl } from "./ui";
@@ -40,16 +40,27 @@ function ViewportPortal({ children }: { children: React.ReactNode }) {
   return createPortal(children, document.body);
 }
 
+type PlayerRole = "striker" | "nonStriker" | "bowler";
+
 function PlayerCarousel({
   players,
   onSelect,
   emptyLabel,
   dismissedNames,
+  roleByName,
 }: {
   players: SquadPlayer[];
   onSelect: (p: SquadPlayer) => void;
   emptyLabel?: string;
   dismissedNames?: Set<string>;
+  // NEW — maps a player's name to whichever role they currently occupy
+  // (striker / non-striker / bowler), plus whether picking them right now
+  // is disallowed. Lets the carousel (a) visually badge whoever's already
+  // in play so the admin can see at a glance who's where, and (b)
+  // pre-emptively grey out + disable the player sitting at the *other*
+  // crease end, instead of only catching the mistake after the tap via a
+  // toast.
+  roleByName?: Map<string, { role: PlayerRole; locked?: boolean }>;
 }) {
   if (players.length === 0) {
     return (
@@ -62,23 +73,51 @@ function PlayerCarousel({
     <div className="carousel-row">
       {players.map((p) => {
         const isOut = !!dismissedNames?.has(p.name);
+        const roleInfo = roleByName?.get(p.name);
+        const isLocked = isOut || !!roleInfo?.locked;
+        const roleLabel =
+          roleInfo?.role === "striker"
+            ? "On Strike"
+            : roleInfo?.role === "nonStriker"
+            ? "Non-Striker"
+            : roleInfo?.role === "bowler"
+            ? "Bowling"
+            : undefined;
+        const ringColor = roleInfo?.role === "bowler" ? "var(--color-theme-orange)" : "#E8C468";
+
         return (
           <button
             key={p.id}
             type="button"
-            draggable={!isOut}
-            disabled={isOut}
+            draggable={!isLocked}
+            disabled={isLocked}
             onDragStart={(e) => {
-              if (isOut) {
+              if (isLocked) {
                 e.preventDefault();
                 return;
               }
               e.dataTransfer.setData("text/player-id", p.id);
             }}
-            onClick={() => !isOut && onSelect(p)}
+            onClick={() => !isLocked && onSelect(p)}
             className="carousel-chip"
-            title={isOut ? `${p.name} — already out this innings` : p.name}
-            style={isOut ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}
+            title={
+              isOut
+                ? `${p.name} — already out this innings`
+                : roleInfo?.locked
+                ? `${p.name} — already ${roleLabel} at the other end`
+                : roleInfo
+                ? `${p.name} — currently ${roleLabel}`
+                : p.name
+            }
+            style={
+              isOut
+                ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(1)" }
+                : roleInfo?.locked
+                ? { opacity: 0.45, cursor: "not-allowed" }
+                : roleInfo
+                ? { outline: `2px solid ${ringColor}`, outlineOffset: 2, borderRadius: 10 }
+                : undefined
+            }
           >
             <span className="squad-avatar" style={{ width: 44, height: 44 }}>
               {p.imageUrl ? (
@@ -90,7 +129,10 @@ function PlayerCarousel({
                 </span>
               )}
             </span>
-            <span className="carousel-chip-name">{p.name}{isOut ? " · OUT" : ""}</span>
+            <span className="carousel-chip-name">
+              {p.name}
+              {isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
+            </span>
           </button>
         );
       })}
@@ -112,6 +154,10 @@ function CrewSlot({
   placeholder,
   locked,
   dismissedNames,
+  blockedName,
+  noReplacement,
+  onEndInnings,
+  endInningsLabel,
 }: {
   title: string;
   accentColor?: string;
@@ -126,8 +172,47 @@ function CrewSlot({
   placeholder: string;
   locked?: boolean;
   dismissedNames?: Set<string>;
+  // NEW — the name currently occupying the OTHER crease slot. Dropping
+  // that same player here is a no-op mistake (can't be on strike and
+  // non-strike at once), so we refuse the drop instead of only warning
+  // about it after the fact.
+  blockedName?: string;
+  // NEW — true when the squad is confirmed exhausted and THIS slot is
+  // the empty one with nobody left to send in. Swaps the alarming
+  // dashed-red "needs a pick" card for a calmer, informational card with
+  // a direct "Finish Innings" action, since no amount of tapping the
+  // squad list below will ever fill this slot.
+  noReplacement?: boolean;
+  onEndInnings?: () => void;
+  endInningsLabel?: string;
 }) {
   const isEmpty = !displayName;
+
+  if (noReplacement && isEmpty) {
+    return (
+      <div className="crew-slot crew-slot-no-replacement">
+        <div className="crew-slot-header">
+          <Eyebrow color="var(--color-outline)">{title}</Eyebrow>
+        </div>
+        <div className="crew-slot-body crew-slot-no-replacement-body">
+          <span className="squad-avatar" style={{ width: 48, height: 48, opacity: 0.6 }}>
+            <span className="squad-avatar-fallback" style={{ fontSize: 14 }}>
+              —
+            </span>
+          </span>
+          <div className="flex flex-col flex-1 min-w-0">
+            <span className="crew-slot-no-replacement-text">No replacement left in the squad</span>
+            {onEndInnings && (
+              <button type="button" onClick={onEndInnings} className="crew-slot-finish-btn">
+                {endInningsLabel ?? "Finish Innings"} →
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`crew-slot ${active ? "is-active" : ""}`}
@@ -138,7 +223,10 @@ function CrewSlot({
         if (locked) return;
         const id = e.dataTransfer.getData("text/player-id");
         const player = allPlayers.find((p) => p.id === id);
-        if (player && !dismissedNames?.has(player.name)) onAssign(player);
+        if (!player) return;
+        if (dismissedNames?.has(player.name)) return;
+        if (blockedName && player.name === blockedName) return;
+        onAssign(player);
       }}
       style={{
         opacity: locked ? 0.6 : 1,
@@ -553,6 +641,10 @@ export default function LiveStatePanel({
     maxOvers,
     battingTeamName,
     bowlingTeamName,
+    // NEW — lets the engine know how many squad members are left so it
+    // can detect "last man batting" (no replacement available) instead
+    // of forever demanding a non-striker pick that doesn't exist.
+    battingSquad,
     onBoundary,
     onMilestone,
     onWicketConfirm,
@@ -573,10 +665,47 @@ export default function LiveStatePanel({
 
   const controlsLocked = engine.assignmentsMissing();
 
+  // NEW — which crease slot (if either) is the one with no replacement
+  // available. engine.noPartnerAvailable is only ever true when exactly
+  // one of the two batting slots is empty, so at most one of these is
+  // ever true at once.
+  const strikerNeedsReplacement = engine.noPartnerAvailable && !liveState.striker.name;
+  const nonStrikerNeedsReplacement = engine.noPartnerAvailable && !liveState.nonStriker.name;
+
+  // NEW — role map for the shared "pick from squad" carousel below the
+  // crew slots. Batting picks (striker/non-striker) get the opposite
+  // occupant locked out; the bowler pick is unrestricted (no overlap
+  // with the batting side) but still gets the "currently bowling" badge.
+  const battingRoleMap = useMemo(() => {
+    const m = new Map<string, { role: "striker" | "nonStriker"; locked?: boolean }>();
+    if (liveState.striker.name) {
+      m.set(liveState.striker.name, { role: "striker", locked: engine.activeSlot === "nonStriker" });
+    }
+    if (liveState.nonStriker.name) {
+      m.set(liveState.nonStriker.name, { role: "nonStriker", locked: engine.activeSlot === "striker" });
+    }
+    return m;
+  }, [liveState.striker.name, liveState.nonStriker.name, engine.activeSlot]);
+
+  const bowlingRoleMap = useMemo(() => {
+    const m = new Map<string, { role: "bowler" }>();
+    if (liveState.bowler.name) m.set(liveState.bowler.name, { role: "bowler" });
+    return m;
+  }, [liveState.bowler.name]);
+
   const runRate =
     liveState.score.overs + liveState.score.balls / 6 > 0
       ? (liveState.score.runs / (liveState.score.overs + liveState.score.balls / 6)).toFixed(2)
       : "0.00";
+
+  // NEW — tracks whether the match-complete banner has already been seen
+  // once, purely to decide whether to show the "just happened" framing
+  // ("Review & fire below") vs the steady-state framing after the admin
+  // has had a chance to look. Doesn't gate any behavior, just copy.
+  const matchCompleteSeenRef = useRef(false);
+  useEffect(() => {
+    if (liveState.matchComplete) matchCompleteSeenRef.current = true;
+  }, [liveState.matchComplete]);
 
   return (
     <DrawerSection step="3" title="Scorer" description="Tap the ball, we do the maths" dirty={liveDirty} defaultOpen>
@@ -585,6 +714,7 @@ export default function LiveStatePanel({
         @keyframes scorerDialogIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
         @keyframes scorerBackdropIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes freeHitPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(96,165,250,0.45); } 50% { box-shadow: 0 0 0 5px rgba(96,165,250,0); } }
+        @keyframes matchCompletePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,151,31,0.35); } 50% { box-shadow: 0 0 0 7px rgba(201,151,31,0); } }
         .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; }
         .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
         .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 9000; animation: scorerBackdropIn 140ms ease-out; padding: 16px; }
@@ -652,6 +782,44 @@ export default function LiveStatePanel({
           border-color: rgba(217,83,79,0.5);
           background: rgba(217,83,79,0.1);
         }
+        .crew-slot-no-replacement {
+          border: 1px dashed var(--color-border-overlay);
+          background: var(--color-surface-container-low);
+          border-radius: 12px;
+          padding: 12px;
+        }
+        .crew-slot-no-replacement-body {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-top: 6px;
+        }
+        .crew-slot-no-replacement-text {
+          font-family: var(--font-label-mono);
+          font-size: 10px;
+          font-weight: 700;
+          color: var(--color-outline);
+          margin-bottom: 4px;
+        }
+        .crew-slot-finish-btn {
+          align-self: flex-start;
+          font-family: var(--font-label-mono);
+          font-size: 10px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--color-theme-orange);
+          background: rgba(201,151,31,0.1);
+          border: 1px solid rgba(201,151,31,0.4);
+          border-radius: 8px;
+          padding: 5px 10px;
+          cursor: pointer;
+          transition: all 140ms ease;
+        }
+        .crew-slot-finish-btn:hover {
+          background: rgba(201,151,31,0.18);
+          border-color: rgba(201,151,31,0.6);
+        }
         .assignment-needed-banner {
           font-family: var(--font-label-mono);
           font-size: 11px;
@@ -663,7 +831,7 @@ export default function LiveStatePanel({
           color: var(--color-error);
           margin-bottom: 12px;
         }
-        .match-complete-banner {
+        .no-partner-banner {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -671,12 +839,42 @@ export default function LiveStatePanel({
           font-family: var(--font-label-mono);
           font-size: 11px;
           font-weight: 700;
+          padding: 10px 14px;
+          border-radius: 10px;
+          background: rgba(201,151,31,0.08);
+          border: 1px solid rgba(201,151,31,0.35);
+          color: var(--color-theme-orange);
+          margin-bottom: 12px;
+        }
+        .match-complete-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          font-family: var(--font-label-mono);
+          font-size: 11px;
+          font-weight: 700;
           padding: 12px 16px;
           border-radius: 10px;
-          background: rgba(217,83,79,0.08);
-          border: 1px solid rgba(217,83,79,0.35);
-          color: var(--color-error);
+          background: rgba(201,151,31,0.1);
+          border: 1px solid rgba(201,151,31,0.4);
+          color: var(--color-theme-orange);
           margin-bottom: 12px;
+          animation: matchCompletePulse 2.4s ease-in-out infinite;
+        }
+        .match-complete-banner-title {
+          font-size: 13px;
+          font-weight: 900;
+        }
+        .match-complete-banner-sub {
+          display: block;
+          font-size: 10px;
+          font-weight: 600;
+          color: var(--color-outline);
+          margin-top: 2px;
+          text-transform: none;
+          letter-spacing: 0;
         }
       `}</style>
 
@@ -717,10 +915,14 @@ export default function LiveStatePanel({
         <div className="match-complete-banner">
           <span>
             🏁{" "}
-            {liveState.matchResult
-              ? `${liveState.matchResult.winningTeamName} ${liveState.matchResult.margin}`
-              : "Match marked complete"}{" "}
-            — scoring is locked.
+            <span className="match-complete-banner-title">
+              {liveState.matchResult
+                ? `${liveState.matchResult.winningTeamName} ${liveState.matchResult.margin}`
+                : "Match marked complete"}
+            </span>
+            <span className="match-complete-banner-sub">
+              Scoring is locked. Head to the Moments panel to confirm the winner and fire the Match Won graphic.
+            </span>
           </span>
           <div className="flex items-center gap-2 flex-shrink-0">
             {engine.canUndo && (
@@ -737,10 +939,19 @@ export default function LiveStatePanel({
         </div>
       )}
 
-      {!liveState.matchComplete && controlsLocked && (
+      {!liveState.matchComplete && controlsLocked && !engine.noPartnerAvailable && (
         <div className="assignment-needed-banner">
           ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
           after starting a new innings.
+        </div>
+      )}
+
+      {!liveState.matchComplete && engine.noPartnerAvailable && (
+        <div className="no-partner-banner">
+          <span>⚠ Last man batting — no replacement left in the squad.</span>
+          <SmallButton onClick={() => setShowEndInningsConfirm(true)} style={{ color: "var(--color-theme-orange)" }}>
+            {isSecondInnings ? "End Match" : "End Innings"} →
+          </SmallButton>
         </div>
       )}
 
@@ -789,6 +1000,7 @@ export default function LiveStatePanel({
 
       <div>
         <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
+
         <div className="flex flex-col md:flex-row items-stretch gap-3">
           <div className="flex-1 min-w-0">
             <CrewSlot
@@ -804,6 +1016,10 @@ export default function LiveStatePanel({
               onClear={() => engine.clearSlot("striker")}
               placeholder="Select striker"
               dismissedNames={engine.dismissedPlayers}
+              blockedName={liveState.nonStriker.name || undefined}
+              noReplacement={strikerNeedsReplacement}
+              onEndInnings={() => setShowEndInningsConfirm(true)}
+              endInningsLabel={isSecondInnings ? "Finish Match" : "Finish Innings"}
             />
           </div>
 
@@ -830,6 +1046,10 @@ export default function LiveStatePanel({
               onClear={() => engine.clearSlot("nonStriker")}
               placeholder="Select non-striker"
               dismissedNames={engine.dismissedPlayers}
+              blockedName={liveState.striker.name || undefined}
+              noReplacement={nonStrikerNeedsReplacement}
+              onEndInnings={() => setShowEndInningsConfirm(true)}
+              endInningsLabel={isSecondInnings ? "Finish Match" : "Finish Innings"}
             />
           </div>
         </div>
@@ -855,6 +1075,7 @@ export default function LiveStatePanel({
             onSelect={(p) => engine.assignPlayer(engine.activeSlot, p)}
             emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in the Fix a Mistake section below."
             dismissedNames={engine.activeSlot === "bowler" ? undefined : engine.dismissedPlayers}
+            roleByName={engine.activeSlot === "bowler" ? bowlingRoleMap : battingRoleMap}
           />
         </div>
 
