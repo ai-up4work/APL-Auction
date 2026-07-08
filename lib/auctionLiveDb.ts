@@ -121,6 +121,7 @@ export interface LiveState {
   bidHistory:    BidEntry[];
   completedLots: AuctionLot[];
   lotNumber:     number;
+  
 }
 
 export async function loadLiveState(auctionId: string): Promise<LiveState> {

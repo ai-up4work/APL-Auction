@@ -78,8 +78,8 @@ export interface PointsRow {
 // automatically through persistence, sync snapshots, and pushes, same as
 // everything else in LiveState.
 export interface MatchResult {
-  winningTeamName: string; // "Mumbai Indians" or "Tie"
-  margin: string; // e.g. "won by 4 wickets", "won by 12 runs", "Match Tied"
+  winningTeamName: string;
+  margin: string;
   method: "runs" | "wickets" | "tie";
 }
 
@@ -96,6 +96,7 @@ export interface LiveState {
   inningsNumber?: 1 | 2;
   matchComplete?: boolean;
   matchResult?: MatchResult;
+  thisOver?: string[];
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────

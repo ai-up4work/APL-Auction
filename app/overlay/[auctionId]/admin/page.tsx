@@ -32,10 +32,10 @@ const emptyMatchSetup: MatchSetup = {
   matchNumber: "",
   matchTitle: "",
   teamA: emptyTeam(),
-  kickoffTime: "", // NEW
+  kickoffTime: "",
   teamB: emptyTeam(),
-  matchMeta: "", // NEW
-  tournament: "", // NEW
+  matchMeta: "",
+  tournament: "",
   tossWinner: "",
   tossDecision: "",
 };
@@ -53,13 +53,10 @@ const emptyLiveState: LiveState = {
   matchBoundaries: { fours: 0, sixes: 0 },
   tournamentBoundaries: { fours: 0, sixes: 0 },
   pointsTable: [],
+  thisOver: [], // NEW — ball-by-ball history for the score bar's "This Over" strip
 };
 
 // ── Weather (last pushed) ───────────────────────────────────────────────
-// NEW — tracked in state (+ ref, for the same reason matchSetup/liveState
-// have refs: sendFullSnapshot is called from callbacks that shouldn't be
-// stale-closed over the state value) so a full-sync snapshot can carry the
-// actual last-fetched conditions instead of only a visibility boolean.
 const defaultWeatherData: WeatherData = {
   venue: "INLAND CRICKET GROUND",
   temp: 28,
@@ -85,8 +82,6 @@ interface WicketMomentPayload {
   bowlerName: string;
 }
 
-// shared shape for the auto-completion callback coming out of the
-// scoring hook (via LiveStatePanel), used to fire the "match won" moment.
 interface MatchCompletePayload {
   winningTeamName: string;
   margin: string;
@@ -183,11 +178,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [setupPushCount, setSetupPushCount] = useState(0);
 
 
-  // NEW — manual "Match Won" draft. Match Won used to only be fireable
-  // once liveState.matchResult existed (i.e. after auto-detection or
-  // "End Match"), which meant nothing fired if that hadn't happened yet.
-  // This lets you pick the winner / margin / method by hand and fire
-  // regardless of whether a result has been computed.
   const [showMatchWonForm, setShowMatchWonForm] = useState(false);
   const [matchWonDraft, setMatchWonDraft] = useState<{
     winner: "teamA" | "teamB" | "custom";
@@ -201,7 +191,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const matchSetupRef = useRef(matchSetup);
   const matchSetupCompletedRef = useRef(matchSetupCompleted);
   const liveStateRef = useRef(liveState);
-  const weatherRef = useRef(weatherData); // NEW
+  const weatherRef = useRef(weatherData);
 
   useEffect(() => {
     matchSetupRef.current = matchSetup;
@@ -237,7 +227,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       matchSetup: matchSetupRef.current,
       matchSetupCompleted: matchSetupCompletedRef.current,
       liveState: liveStateRef.current,
-      weather: weatherRef.current, // NEW — carries last-fetched conditions through reconnects
+      weather: weatherRef.current,
     };
     fire({ type: "syncSnapshot", data: snapshot }, "Sent full sync snapshot");
   }
@@ -283,17 +273,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       // ignore malformed cache
     }
     try {
-      // matchSetupCompleted is persisted alongside matchSetup/liveState so a
-      // refresh mid-match doesn't hide the whole Scorer panel.
       const rawCompleted = window.localStorage.getItem(`overlay:${auctionId}:matchSetupCompleted`);
       if (rawCompleted) setMatchSetupCompleted(JSON.parse(rawCompleted));
     } catch {
       // ignore malformed cache
     }
     try {
-      // NEW — same treatment for weather: without this, an admin-page
-      // refresh loses the last-fetched conditions just like the overlay
-      // page did before the snapshot fix below.
       const rawWeather = window.localStorage.getItem(`overlay:${auctionId}:weather`);
       if (rawWeather) setWeatherData(JSON.parse(rawWeather));
     } catch {
@@ -319,24 +304,40 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   }, [liveState, auctionId, liveHydrated]);
 
   useEffect(() => {
-    // NEW — persist weather the same way matchSetup does, gated on the
-    // same hydration flag so we don't clobber the cached value with the
-    // default before it's had a chance to load.
     if (!setupHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(`overlay:${auctionId}:weather`, JSON.stringify(weatherData));
   }, [weatherData, auctionId, setupHydrated]);
+
+  // NEW — auto-push Live State to the overlay shortly after every change,
+  // instead of waiting for a manual "Push Live State" click. Debounced so
+  // a burst of rapid state updates (e.g. undo immediately followed by a
+  // re-tap) collapses into a single broadcast rather than spamming the
+  // channel. The manual button below is untouched and still works — it's
+  // just rarely needed now since this effect beats it to the punch during
+  // normal scoring. Gated on `liveHydrated` so the very first render
+  // (before localStorage has loaded) doesn't broadcast a blank/default
+  // liveState and stomp on whatever the overlay already has.
+  const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!liveHydrated) return;
+    if (!liveDirty) return;
+
+    if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
+    autoPushTimerRef.current = setTimeout(() => {
+      pushLiveState();
+    }, 150);
+
+    return () => {
+      if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveDirty, liveState, liveHydrated]);
 
   function fireLoose(event: Record<string, unknown>, label: string) {
     fire(event as unknown as OverlayEvent, label);
   }
 
   function pushFetchedWeather(wx: { venue: string; temp: number; unit: "C"; condition: string }) {
-    // CHANGED — build the full WeatherData payload once, store it in state
-    // (so it becomes part of what sendFullSnapshot() sends on reconnect),
-    // and broadcast the same object. Previously the fetched data was only
-    // ever broadcast as a one-off event and never retained anywhere the
-    // sync snapshot could see it, so a reconnecting overlay page fell back
-    // to DEFAULT_WEATHER even though the visibility flag was preserved.
     const weatherPayload: WeatherData = {
       venue: wx.venue.toUpperCase(),
       temp: wx.temp,
@@ -356,13 +357,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireLoose({ type: "matchSetup", data: matchSetup }, "Match Setup pushed to overlay");
     setSetupPushed(true);
     setMatchSetupCompleted(true);
-    setSetupPushCount((n) => n + 1); // NEW — triggers WeatherPanel's auto-fetch
+    setSetupPushCount((n) => n + 1);
     setTimeout(() => setSetupPushed(false), 1500);
   }
 
   // ── Live State helpers ───────────────────────────────────────────────
+  // Manual push — kept exactly as before. Still useful as a forced
+  // resync (e.g. right after a Manual Correction Panel edit, or if you
+  // just want to be sure) even though the auto-push effect above now
+  // covers normal ball-by-ball scoring on its own.
   function pushLiveState() {
-    fireLoose({ type: "liveState", data: liveState }, "Live State pushed to overlay");
+    fireLoose({ type: "liveState", data: liveStateRef.current }, "Live State pushed to overlay");
     setLiveDirty(false);
     setLivePushed(true);
     setTimeout(() => setLivePushed(false), 1500);
@@ -422,9 +427,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // NEW — manual "Maiden" button in the Moments panel. Fires using
-  // whichever bowler is currently set in Live State, rather than only
-  // ever firing automatically after the 6th ball of a maiden over.
   function fireMaidenMomentFromPanel() {
     if (!liveState.bowler.name) {
       setLog((prev) => [
@@ -436,18 +438,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireMaidenMoment({ bowlerName: liveState.bowler.name, maidens: liveState.bowler.maidens });
   }
 
-  // look up a team's brand color/logo by name, so the "match won" overlay
-  // can theme itself to whichever side actually won.
   function teamVisualsByName(name: string): { color?: string; logoUrl?: string } {
     if (matchSetup.teamA.name === name) return { color: matchSetup.teamA.color, logoUrl: matchSetup.teamA.logoUrl };
     if (matchSetup.teamB.name === name) return { color: matchSetup.teamB.color, logoUrl: matchSetup.teamB.logoUrl };
     return {};
   }
 
-  // fires the celebratory "match won" graphic. Called automatically by
-  // the auto-completion logic in the scoring hook (via LiveStatePanel's
-  // onMatchComplete), and also manually — see fireMatchWonMomentFromPanel
-  // below and the manual End Match button.
   function fireMatchWonMoment(payload: MatchCompletePayload) {
     const visuals = teamVisualsByName(payload.winningTeamName);
     fireLoose(
@@ -465,10 +461,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // NEW — opens the manual Match Won form. If a result already exists
-  // (match ended normally) the form is pre-filled from it so you can just
-  // hit Fire; if not, it starts blank so you can pick the winner, type a
-  // margin, and fire without waiting for auto-detection or "End Match".
   function openMatchWonForm() {
     if (liveState.matchResult) {
       const { winningTeamName, margin, method } = liveState.matchResult;
@@ -488,11 +480,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     setShowMatchWonForm((v) => !v);
   }
 
-  // NEW — fires Match Won from whatever is currently in the manual draft.
-  // Works whether or not liveState.matchResult has been computed yet, so
-  // this is the button to use if the auto-detector hasn't fired (e.g. you
-  // want to fire it early, or the match ended in an unusual way it didn't
-  // catch).
   function fireMatchWonMomentFromForm() {
     const winningTeamName =
       matchWonDraft.winner === "teamA"
@@ -516,8 +503,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireMilestoneMoment(moment);
   }
 
-  // restartMatch also clears the previous matchResult so a stale
-  // "Team X won by 12 runs" banner can't linger into a fresh match.
   function restartMatch() {
     setLiveState((prev) => ({
       score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
@@ -532,6 +517,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       inningsNumber: undefined,
       matchComplete: false,
       matchResult: undefined,
+      thisOver: [], // NEW — clear the over strip on restart too
     }));
     setLiveDirty(true);
   }
@@ -642,7 +628,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 setLiveDirty={setLiveDirty}
                 liveDirty={liveDirty}
                 onPush={pushLiveState}
-                pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
+                pushLabel={livePushed ? "Pushed ✓" : liveDirty ? "Syncing…" : "Push Live State"}
                 matchSetup={matchSetup}
                 onBoundary={fireBoundaryMoment}
                 onMilestone={fireMilestoneMoment}

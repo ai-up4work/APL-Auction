@@ -272,8 +272,13 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       )}
 
       <MatchMomentOverlay hideDemoButtons />
-      <LiveScoreBar show={state.liveScoreBar.show} hideTrigger />
-      <PointsTable show={state.pointsTable.show} hideTrigger />
+      <LiveScoreBar
+        show={state.liveScoreBar.show}
+        hideTrigger
+        liveState={state.liveState ?? undefined}
+        matchSetup={state.matchSetup ?? undefined}
+      />
+        <PointsTable show={state.pointsTable.show} hideTrigger />
       <CricketScorecard show={state.matchScorecard.show} hideTrigger />
       <CricketMatchIntro
         show={state.matchIntro.show}

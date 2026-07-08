@@ -1,38 +1,51 @@
 "use client";
 
 import { ChevronRight, ChevronDown, ChevronUp, Radio } from "lucide-react";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { GOLD_BEZEL, ambientGlow, teamBlockClip } from "@/lib/overlayTokens";
-import { LIVE, VENUE, BALLS_PER_OVER, TOURNAMENT } from "@/lib/matchData";
 import CricketBall from "@/components/overlays/shared/CricketBall";
+// NOTE: no `import type ... from "@/lib/overlayBus"` here — this file is
+// plain .jsx, and `import type` is TS-only syntax. The shapes of
+// `liveState` / `matchSetup` still come from overlayBus.ts at runtime,
+// we just don't annotate them here. If you want compile-time type
+// checking on this component, rename it to LiveScoreBar.tsx instead and
+// re-add `import type { LiveState, MatchSetup, TeamInfo } from "@/lib/overlayBus";`
 
-const OVERS_LABEL = `${LIVE.oversDone}.${LIVE.ballsDone}`;
-
-// Single shared timeline for the entrance: the bare logo appears big and
-// holds in place (where the bar will be) for the first ~30%, then for the
-// rest of the duration it shrinks + rises to its resting spot above the bar
-// while the bar explodes outward from center underneath it. The pill
-// chrome (background/border) and the tournament name only fade in once the
-// logo is most of the way through its rise, so the logo visually leads and
-// the label/pill "arrives" after it. Exit reverses the same beats, faster.
 const ENTRANCE_MS = 900;
 const EXIT_MS = 650;
+const BALLS_PER_OVER = 6;
 
-// Cricket-ball styled chip: a small rendered sphere with a stitched seam
-// (like an actual cricket ball) instead of a flat gradient circle.
-// - Pops in with a little overshoot, staggered left-to-right so a fresh
-//   over reads as a quick cascade rather than appearing all at once.
-// - The most recently bowled ball gets a soft "live" pulse ring so the eye
-//   knows where to look.
-// - Boundaries get a slow diagonal shine sweep across the sphere.
-//
-// The sphere itself is now the shared CricketBall component — this used
-// to hand-draw its own gradient circle + seam SVG locally, duplicating
-// exactly what CricketBall already does (same gradient stops, same seam
-// path, same box-shadow). CricketBall's own default fill matches the
-// plain/dot gradient this used to hardcode, so that case now just omits
-// `fill` and lets the component fall back to it.
+// Fallback team shape used before matchSetup has synced in, or if a slot
+// is somehow missing — keeps TeamCrest/TeamBlock from crashing on
+// undefined fields.
+const FALLBACK_TEAM = {
+  name: "Team",
+  shortCode: "TBD",
+  color: "#c9971f",
+  logoUrl: "",
+  squad: [],
+};
+
+const maxOversByFormat = { T20: 20, ODI: 50, Test: undefined };
+
+// Softens a hex color into an rgba() glow — replaces the hardcoded
+// `colorSoft` field the old local `LIVE` fixture used to carry. Team
+// data now comes from MatchSetup, which only stores a single hex color,
+// so we derive the soft/glow version here instead.
+function softenColor(hex, alpha = 0.18) {
+  const clean = (hex || "#c9971f").replace("#", "");
+  const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+  const r = parseInt(full.slice(0, 2), 16) || 0;
+  const g = parseInt(full.slice(2, 4), 16) || 0;
+  const b = parseInt(full.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Cricket-ball styled chip — unchanged from the original component,
+// still driven purely by the string value passed in
+// ("0".."6" | "." | "W" | "wd" | "nb"). Kept exactly as-is; no feature
+// change needed here, this part was already correct.
 function BallChip({ value, index = 0, isLatest = false }) {
   const isEmpty = value == null;
   const isWicket = value === "W";
@@ -46,7 +59,7 @@ function BallChip({ value, index = 0, isLatest = false }) {
     ? "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange) 68%, #8a5c0d 100%)"
     : isExtra
     ? "radial-gradient(circle at 32% 26%, #f3f3f3 0%, #cfcfd2 45%, #8f8f95 85%, #6b6b70 100%)"
-    : undefined; // use CricketBall's default "leather" fill — identical gradient to what was hardcoded here before
+    : undefined; // falls back to CricketBall's default leather gradient
 
   const seamColor = isBoundary ? "rgba(58,37,4,0.55)" : "rgba(255,255,255,0.5)";
   const labelColor = isWicket ? "#fff" : isBoundary ? "#3a2504" : isExtra ? "#2b2b2e" : "rgba(255,255,255,0.6)";
@@ -90,11 +103,10 @@ function BallChip({ value, index = 0, isLatest = false }) {
   );
 }
 
-// Circular medallion crest with the same shine-ring treatment used on the
-// intro/scorecard cards. Takes an explicit `variant` ("blue" | "green")
-// rather than comparing the team object's identity against a hardcoded
-// constant, since team data now comes from lib/matchData instead of a
-// local TEAM_A/TEAM_B pair this file used to own.
+// Circular medallion crest. `team` now comes from MatchSetup.teamA/teamB
+// (real logoUrl / shortCode fields) instead of the old local TEAM_A/
+// TEAM_B fixture, so we render team.logoUrl with a shortCode fallback
+// (initials-style badge) when no logo has been set yet.
 function TeamCrest({ team, variant }) {
   return (
     <div className="relative w-9 h-9 sm:w-11 sm:h-11 shrink-0">
@@ -107,7 +119,17 @@ function TeamCrest({ team, variant }) {
         }}
       >
         <div className="relative w-full h-full rounded-full overflow-hidden bg-black">
-          <img src={team.image} alt={team.name} className="w-full h-full object-cover" />
+          {team.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={team.logoUrl} alt={team.name} className="w-full h-full object-cover" />
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center font-heading font-black text-white/80"
+              style={{ fontSize: 12 }}
+            >
+              {team.shortCode || "?"}
+            </div>
+          )}
           <div
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{
@@ -125,20 +147,13 @@ function TeamCrest({ team, variant }) {
   );
 }
 
-// One consistent team block: crest anchored to the bar's outer edge, name +
-// opponent label toward the center — used on both sides, just mirrored.
-// The block is clipped into a one-sided rhombus/parallelogram: the outer
-// edge (against the bar's rounded corner) stays vertical, the inner edge
-// (facing the score/center) is cut on a diagonal so the two team panels
-// read as angled wedges rather than flat rectangles.
-const SLANT_PX = 22; // how far the inner edge leans, in px
+// One consistent team block: crest anchored to the bar's outer edge, name
+// + opponent label toward the center. Uses team.shortCode (from
+// MatchSetup) instead of the old fixture's team.short.
+const SLANT_PX = 22;
 
 function TeamBlock({ team, opponent, align, variant }) {
   const isRight = align === "right";
-
-  // Diagonal cut on the edge facing the center of the bar — was a locally
-  // hand-typed polygon() ternary that matched teamBlockClip()'s formula
-  // exactly; now calls the shared helper instead of re-deriving the math.
   const clipPath = teamBlockClip(SLANT_PX, align);
 
   return (
@@ -156,10 +171,10 @@ function TeamBlock({ team, opponent, align, variant }) {
       <TeamCrest team={team} variant={variant} />
       <div className={`leading-tight ${isRight ? "text-right" : "text-left"}`}>
         <p className="font-heading text-sm sm:text-lg font-black uppercase tracking-wide text-white">
-          {team.short}
+          {team.shortCode}
         </p>
         <p className="text-[8px] sm:text-[9px] font-semibold uppercase tracking-wide text-white/65">
-          v {opponent.short}
+          v {opponent.shortCode}
         </p>
       </div>
     </div>
@@ -167,20 +182,19 @@ function TeamBlock({ team, opponent, align, variant }) {
 }
 
 /**
- * LiveScoreBar — remote-controllable, same pattern as PointsTable:
- *   - `show` (boolean | undefined): when provided, drives the bar
- *     open/closed externally (e.g. from a bus event). When omitted
- *     (undefined), the component behaves exactly as before — it opens
- *     itself on mount and can be dismissed/reopened via its own controls.
- *   - `hideTrigger`: hides the on-screen "Show Score" reopen pill and the
- *     in-bar dismiss chevron, for use on the OBS-facing overlay page where
- *     there's no one to click them and no reason for on-stream controls.
+ * LiveScoreBar — CHANGED: now fully driven by `liveState` / `matchSetup`
+ * props, which come straight off the overlayBus (matchSetup + liveState
+ * events are already real-time-synced there via the existing Supabase
+ * channel — no second channel needed). Falls back to safe placeholders
+ * if either prop hasn't arrived yet, so the bar doesn't crash before the
+ * first sync lands.
+ *
+ * `show`/`hideTrigger` behavior is unchanged from the original —
+ * remote-controllable the same way PointsTable is, with the same
+ * self-contained-vs-externally-driven `show` prop pattern.
  */
-export default function LiveScoreBar({ show, hideTrigger = false }) {
+export default function LiveScoreBar({ show, hideTrigger = false, liveState, matchSetup }) {
   const [mounted, setMounted] = useState(false);
-  // Self-contained default (no `show` prop passed) keeps its old
-  // behavior of appearing immediately; once `show` is provided it takes
-  // over via the effect below.
   const [open, setOpen] = useState(show ?? true);
   const [closing, setClosing] = useState(false);
   const closeTimer = useRef(null);
@@ -225,12 +239,50 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  // Pad the current over out to a full 6 balls with hollow placeholders.
-  const overChips = [
-    ...LIVE.thisOver,
-    ...Array(Math.max(0, BALLS_PER_OVER - LIVE.thisOver.length)).fill(null),
-  ];
-  const latestBallIndex = LIVE.thisOver.length - 1;
+  // ── Derive display data from the synced liveState/matchSetup ───────
+  // Same "who's batting right now" logic LiveStatePanel.tsx already
+  // uses (toss winner/decision + current innings number), duplicated
+  // here so the overlay can compute it independently of the admin page.
+  const battingTeamKey = useMemo(() => {
+    const firstInningsTeamIsA = (() => {
+      if (matchSetup?.tossWinner && matchSetup.tossDecision) {
+        const winnerBats = matchSetup.tossDecision === "bat";
+        const winnerIsA = matchSetup.tossWinner === "A";
+        return winnerBats ? winnerIsA : !winnerIsA;
+      }
+      return true;
+    })();
+    const firstInningsTeam = firstInningsTeamIsA ? "teamA" : "teamB";
+    const isSecondInningsNow = (liveState?.inningsNumber ?? 1) === 2;
+    if (!isSecondInningsNow) return firstInningsTeam;
+    return firstInningsTeam === "teamA" ? "teamB" : "teamA";
+  }, [matchSetup?.tossWinner, matchSetup?.tossDecision, liveState?.inningsNumber]);
+  const bowlingTeamKey = battingTeamKey === "teamA" ? "teamB" : "teamA";
+
+  const battingTeam = matchSetup?.[battingTeamKey] ?? FALLBACK_TEAM;
+  const fieldingTeam = matchSetup?.[bowlingTeamKey] ?? FALLBACK_TEAM;
+  const battingColorSoft = softenColor(battingTeam.color);
+  const fieldingColorSoft = softenColor(fieldingTeam.color);
+
+  const score = liveState?.score ?? { runs: 0, wickets: 0, overs: 0, balls: 0 };
+  const striker = liveState?.striker ?? { name: "", runs: 0, balls: 0, fours: 0, sixes: 0 };
+  const nonStriker = liveState?.nonStriker ?? { name: "", runs: 0, balls: 0, fours: 0, sixes: 0 };
+  const bowler = liveState?.bowler ?? { name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0 };
+
+  const oversLimit = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
+  const oversLabel = `${score.overs}.${score.balls}`;
+  const venue = matchSetup?.venue || "";
+  const tournamentName = matchSetup?.tournamentName || "";
+  const tournamentLogo = matchSetup?.tournamentLogoUrl || "";
+
+  // Pad the current over out to a full 6 balls with hollow placeholders,
+  // sourced from liveState.thisOver (synced via the bus) instead of the
+  // old hardcoded LIVE.thisOver fixture.
+  const overChips = useMemo(() => {
+    const balls = liveState?.thisOver ?? [];
+    return [...balls, ...Array(Math.max(0, BALLS_PER_OVER - balls.length)).fill(null)];
+  }, [liveState?.thisOver]);
+  const latestBallIndex = (liveState?.thisOver?.length ?? 0) - 1;
 
   return (
     <>
@@ -257,10 +309,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
             className="fixed inset-x-0 bottom-0 z-[100] flex flex-col items-center px-2 pb-3 sm:pb-5 pointer-events-none"
             aria-live="polite"
           >
-            {/* The bar — stays collapsed to a sliver while the logo holds
-                big, then explodes outward from its own horizontal center
-                once the logo starts rising. Sized to a true 90% of the
-                viewport width (vw), not 90% of an already-padded parent. */}
             <div
               className="lsb-wrap origin-center pointer-events-auto relative"
               style={{
@@ -270,53 +318,48 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                   : `lsbBarIn ${ENTRANCE_MS}ms cubic-bezier(0.22,1,0.36,1) both`,
               }}
             >
-              {/* Logo badge — just the logo, no name, no pill. It holds
-                  big (~15% of the viewport height) and low (roughly the
-                  bar's own center) for the first ~30% of the timeline, then
-                  shrinks and rises so it ends up sitting dead-center on the
-                  bar's top seam, half over the bezel and half above it —
-                  popping out of the middle of the card rather than floating
-                  separately above it. Size is animated directly (not via
-                  transform: scale) so the big entrance state can be pinned
-                  to a viewport-relative size independent of the resting
-                  badge size. */}
-              <div className="absolute left-1/2 top-0 z-20">
-                <div
-                  className="lsb-log-badge [--badge-rest:56px] sm:[--badge-rest:76px] rounded-full overflow-hidden flex items-center justify-center"
-                  style={{
-                    padding: "12%",
-                    background: "rgba(12,16,26,0.85)",
-                    border: "1px solid rgba(201,151,31,0.5)",
-                    boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
-                    animation: closing
-                      ? `lsbLogOut ${EXIT_MS}ms cubic-bezier(0.4,0,0.8,1) both`
-                      : `lsbLogIn ${ENTRANCE_MS}ms cubic-bezier(0.22,1,0.36,1) both`,
-                  }}
-                >
-                  <img
-                    src={TOURNAMENT.logo}
-                    alt={TOURNAMENT.name}
-                    className="w-full h-full object-contain"
-                    style={{ filter: "grayscale(1) contrast(1.3) brightness(1.7)" }}
-                  />
+              {/* Logo badge — only render if a tournament logo has
+                  actually been set in Match Setup; the old version
+                  always rendered TOURNAMENT.logo from the hardcoded
+                  fixture, which doesn't exist anymore. */}
+              {tournamentLogo && (
+                <div className="absolute left-1/2 top-0 z-20">
+                  <div
+                    className="lsb-log-badge [--badge-rest:56px] sm:[--badge-rest:76px] rounded-full overflow-hidden flex items-center justify-center"
+                    style={{
+                      padding: "12%",
+                      background: "rgba(12,16,26,0.85)",
+                      border: "1px solid rgba(201,151,31,0.5)",
+                      boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
+                      animation: closing
+                        ? `lsbLogOut ${EXIT_MS}ms cubic-bezier(0.4,0,0.8,1) both`
+                        : `lsbLogIn ${ENTRANCE_MS}ms cubic-bezier(0.22,1,0.36,1) both`,
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={tournamentLogo}
+                      alt={tournamentName}
+                      className="w-full h-full object-contain"
+                      style={{ filter: "grayscale(1) contrast(1.3) brightness(1.7)" }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Ambient glow — same gold-led, team-tinted treatment as the
-                  intro/scorecard cards. Now sourced from the shared
-                  overlayTokens ambientGlow() helper instead of a locally
-                  hand-typed duplicate of the same gradient. */}
+              {/* Ambient glow — team-tinted, sourced from softenColor()
+                  instead of the fixture's hardcoded colorSoft field. */}
               <div
                 className="absolute -inset-4 sm:-inset-5 blur-2xl rounded-[28px] pointer-events-none"
                 style={{
-                  background: ambientGlow(LIVE.battingTeam, LIVE.fieldingTeam),
+                  background: ambientGlow(
+                    { ...battingTeam, colorSoft: battingColorSoft },
+                    { ...fieldingTeam, colorSoft: fieldingColorSoft }
+                  ),
                 }}
               />
 
-              {/* Metallic bezel — the same brushed-steel/gold frame used on
-                  the scorecard's plaque, wrapped around the whole bar. Now
-                  sourced from the shared overlayTokens GOLD_BEZEL instead
-                  of a locally hand-typed duplicate. */}
+              {/* Metallic bezel — unchanged, still from shared overlayTokens */}
               <div
                 className="relative p-[2px] sm:p-[3px] rounded-2xl sm:rounded-[22px]"
                 style={{
@@ -332,31 +375,26 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                       "linear-gradient(180deg, var(--color-surface) 0%, var(--color-surface-container-lowest) 100%)",
                   }}
                 >
-                  {/* Soft localized team glows only */}
                   <div
                     className="absolute inset-0 pointer-events-none"
                     style={{
-                      background: `radial-gradient(circle at 6% 50%, ${LIVE.battingTeam.colorSoft} 0%, transparent 40%), radial-gradient(circle at 98% 50%, ${LIVE.fieldingTeam.colorSoft} 0%, transparent 32%)`,
+                      background: `radial-gradient(circle at 6% 50%, ${battingColorSoft} 0%, transparent 40%), radial-gradient(circle at 98% 50%, ${fieldingColorSoft} 0%, transparent 32%)`,
                     }}
                   />
 
-                  {/* Main row */}
                   <div className="relative flex items-stretch">
-                    {/* Batting team block */}
-                    <TeamBlock team={LIVE.battingTeam} opponent={LIVE.fieldingTeam} align="left" />
+                    <TeamBlock team={battingTeam} opponent={fieldingTeam} align="left" variant="blue" />
 
-                    {/* Score */}
                     <div className="relative z-10 flex items-center px-2 sm:px-4 shrink-0">
                       <span
                         className="font-heading font-black text-xl sm:text-3xl tabular-nums leading-none"
                         style={{ color: "var(--color-on-surface)" }}
                       >
-                        {LIVE.score}
-                        <span style={{ color: "var(--color-outline)" }}>-{LIVE.wickets}</span>
+                        {score.runs}
+                        <span style={{ color: "var(--color-outline)" }}>-{score.wickets}</span>
                       </span>
                     </div>
 
-                    {/* Overs pill */}
                     <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
                       <div
                         className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-1 sm:py-1.5"
@@ -376,24 +414,21 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                           className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
                           style={{ color: "var(--color-on-surface)" }}
                         >
-                          {OVERS_LABEL}
-                          <span
-                            className="text-[9px] sm:text-[11px] font-semibold"
-                            style={{ color: "var(--color-outline)" }}
-                          >
-                            /{LIVE.oversLimit}
-                          </span>
+                          {oversLabel}
+                          {oversLimit !== undefined && (
+                            <span
+                              className="text-[9px] sm:text-[11px] font-semibold"
+                              style={{ color: "var(--color-outline)" }}
+                            >
+                              /{oversLimit}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
 
                     <div className="relative z-10 w-px my-2.5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
 
-                    {/* Batters — split into two groups pushed toward the
-                        outer edges of this section (justify-between) so
-                        the true center stays clear underneath the popped-
-                        out logo badge above the bar. On mobile, only the
-                        striker group is shown, centered as before. */}
                     <div className="relative z-10 flex-1 flex items-center justify-center sm:justify-between gap-2 sm:gap-3 px-2 sm:px-5 min-w-0">
                       <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                         <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" style={{ color: "var(--color-theme-orange)" }} />
@@ -401,15 +436,15 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                           className="text-[11px] sm:text-base font-bold uppercase truncate"
                           style={{ color: "var(--color-on-surface)" }}
                         >
-                          {LIVE.striker.name}
+                          {striker.name}
                         </span>
                         <span
                           className="text-[11px] sm:text-base font-black tabular-nums shrink-0"
                           style={{ color: "var(--color-theme-orange)" }}
                         >
-                          {LIVE.striker.runs}
+                          {striker.runs}
                           <span className="text-[9px] sm:text-sm font-semibold" style={{ color: "var(--color-outline)" }}>
-                            ({LIVE.striker.balls})
+                            ({striker.balls})
                           </span>
                         </span>
                       </div>
@@ -420,23 +455,20 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                           className="text-base font-bold uppercase truncate"
                           style={{ color: "var(--color-on-surface-variant)" }}
                         >
-                          {LIVE.nonStriker.name}
+                          {nonStriker.name}
                         </span>
                         <span
                           className="text-base font-black tabular-nums shrink-0"
                           style={{ color: "var(--color-on-surface)" }}
                         >
-                          {LIVE.nonStriker.runs}
+                          {nonStriker.runs}
                           <span className="text-sm font-semibold" style={{ color: "var(--color-outline)" }}>
-                            ({LIVE.nonStriker.balls})
+                            ({nonStriker.balls})
                           </span>
                         </span>
                       </div>
                     </div>
 
-                    {/* Dismiss control — hidden on the OBS-facing overlay
-                        page (hideTrigger) since there's no one to click it
-                        and it shouldn't render as an on-stream control. */}
                     {!hideTrigger && (
                       <button
                         onClick={toggle}
@@ -450,13 +482,9 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                       </button>
                     )}
 
-                    {/* Fielding team block — identical treatment, mirrored */}
-                    <TeamBlock team={LIVE.fieldingTeam} opponent={LIVE.battingTeam} align="right" />
+                    <TeamBlock team={fieldingTeam} opponent={battingTeam} align="right" variant="green" />
                   </div>
 
-                  {/* Tear-seam — bite-notch circles + dashed perforation,
-                      same "ticket stub" device used on the scorecard and
-                      intro footers */}
                   <div className="relative">
                     <div
                       className="absolute -left-[9px] top-0 w-[18px] h-[18px] rounded-full -translate-y-1/2"
@@ -476,7 +504,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                     />
                   </div>
 
-                  {/* Ticker row */}
                   <div
                     className="relative flex items-center gap-2.5 sm:gap-5 px-3 sm:px-5 py-1.5 sm:py-2"
                     style={{ background: "var(--color-surface-container-lowest)" }}
@@ -501,7 +528,7 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                         style={{ color: "var(--color-on-surface-variant)" }}
                       >
                         Live from <span className="font-bold" style={{ color: "var(--color-theme-orange)" }}>
-                          {VENUE}
+                          {venue}
                         </span>
                       </span>
                     </div>
@@ -511,16 +538,16 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                         className="text-[10px] sm:text-xs font-bold uppercase truncate"
                         style={{ color: "var(--color-on-surface)" }}
                       >
-                        {LIVE.bowler.name}
+                        {bowler.name}
                       </span>
                       <span
                         className="text-[10px] sm:text-xs font-black tabular-nums shrink-0"
                         style={{ color: "var(--color-theme-orange)" }}
                       >
-                        {LIVE.bowler.wickets}-{LIVE.bowler.runsConceded}
+                        {bowler.wickets}-{bowler.runs}
                         <span className="text-[9px] sm:text-[11px] font-semibold" style={{ color: "var(--color-outline)" }}>
                           {" "}
-                          ({LIVE.bowler.overs})
+                          ({bowler.overs}.{bowler.balls})
                         </span>
                       </span>
                     </div>
@@ -543,17 +570,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
           transform-origin: center;
         }
 
-        /* Logo badge: pops out of the middle of the card. It starts big
-           (~15% of the viewport height) and centered roughly in the middle
-           of the bar's own footprint (translateY pulls it down into that
-           space), holds there through the first third of the timeline,
-           then shrinks down to the resting badge size (--badge-rest) and
-           rises to sit dead-center on the bar's top seam. Width/height are
-           animated directly rather than via transform: scale so the big
-           state can be pinned to an absolute, viewport-relative size. The
-           translate(-50%, -50%) is baked into every step so the badge
-           always stays centered on its anchor point at the horizontal
-           middle of the bar. */
         @keyframes lsbLogIn {
           0% { opacity: 0; width: 15vh; height: 15vh; transform: translate(-50%, -50%) translateY(40px); }
           32% { opacity: 1; width: 15vh; height: 15vh; transform: translate(-50%, -50%) translateY(40px); }
@@ -565,8 +581,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
           100% { opacity: 0; width: 15vh; height: 15vh; transform: translate(-50%, -50%) translateY(40px); }
         }
 
-        /* Bar: stays collapsed to nothing while the logo holds big, then
-           explodes outward from center once the logo starts rising. */
         @keyframes lsbBarIn {
           0% { opacity: 0; transform: scaleX(0); }
           32% { opacity: 0; transform: scaleX(0); }
@@ -578,9 +592,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
           100% { opacity: 0; transform: scaleX(0); }
         }
 
-        /* Shine ring — rotating conic-gradient arc masked to a thin ring,
-           same device used around the team badges on the intro/scorecard
-           cards. */
         .shine-ring {
           position: absolute;
           inset: -5px;
@@ -614,7 +625,6 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
           to { transform: rotate(360deg); }
         }
 
-        /* Ball chips ("this over" row) */
         .ball-chip {
           animation: ballPopIn 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
         }

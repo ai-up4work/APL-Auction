@@ -62,13 +62,22 @@ export interface PendingWicket {
 export type ToastTone = "boundary" | "milestone" | "wicket" | "maiden" | "warning" | "info";
 export type Toast = { id: number; text: string; tone: ToastTone };
 
-// NEW — result of a completed match, as computed by the auto-detection
-// logic (or by the manual End Match button, which now uses the same
-// computation instead of just flipping matchComplete with no data).
 export interface AutoMatchResult {
   winningTeamName: string;
   margin: string;
   method: "batting" | "bowling" | "tie";
+}
+
+// The "this over" chip value for a delivery. Kept as a tiny pure function
+// so recordBall/resolveWicket agree on the exact strings BallChip
+// expects ("0".."6", ".", "wd", "nb"); "W" is applied separately in
+// resolveWicket since a wicket can happen alongside a run-out's partial
+// runs, but the chip itself is always just "W".
+function ballDisplayValue(runs: number, extraType: ExtraType): string {
+  if (extraType === "wide") return "wd";
+  if (extraType === "noBall") return "nb";
+  if (runs === 0) return ".";
+  return String(runs);
 }
 
 function ballLegality(extraType: ExtraType) {
@@ -104,9 +113,6 @@ function resolveBatterSlots(
   return { striker, nonStriker };
 }
 
-// NEW — shared math for deciding who won innings 2, given a final score
-// state and the target. Used by both the automatic detector and the
-// manual "End Match" button, so the two can never disagree.
 function computeInnings2Result(
   finalRuns: number,
   finalWickets: number,
@@ -138,12 +144,7 @@ export function useLiveScoringEngine({
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
-  // NEW — undefined means no overs limit (Test cricket): only all-out ends
-  // an innings automatically.
   maxOvers?: number;
-  // NEW — names of the CURRENT batting/bowling side, for building match
-  // result text. LiveStatePanel recomputes these each render based on
-  // toss + inningsNumber, so they're always correct for "right now".
   battingTeamName: string;
   bowlingTeamName: string;
   onBoundary?: (moment: "four" | "six", batter: { name: string; runs: number; balls: number }) => void;
@@ -157,8 +158,6 @@ export function useLiveScoringEngine({
   }) => void;
   onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
-  // NEW — fired the moment a match auto-completes (or completes via the
-  // manual End Match button with a determinable result).
   onMatchComplete?: (result: AutoMatchResult) => void;
 }) {
   const [extraType, setExtraType] = useState<ExtraType>("none");
@@ -177,6 +176,18 @@ export function useLiveScoringEngine({
 
   const overRunsConcededRef = useRef(0);
 
+  // NEW — set to true right after a ball completes an over (i.e. after
+  // that ball's own chip has already been appended to thisOver). The
+  // *next* recordBall/resolveWicket call checks this flag first and, if
+  // set, starts a brand-new thisOver array for its own chip instead of
+  // appending onto the just-finished over's row. This is the actual fix:
+  // previously the row was cleared on the SAME ball that completed the
+  // over, which discarded that ball's own chip instead of showing it.
+  const overJustCompletedRef = useRef(false);
+
+  // Also carried across undo, same as the other refs below.
+  const overJustCompletedUndoRef = useRef(false);
+
   function pushToast(text: string, tone: ToastTone) {
     const id = ++toastIdRef.current;
     setToasts((t) => [...t, { id, text, tone }]);
@@ -190,6 +201,7 @@ export function useLiveScoringEngine({
   function snapshotForUndo() {
     undoRef.current = liveState;
     dismissedPlayersUndoRef.current = new Set(dismissedPlayers);
+    overJustCompletedUndoRef.current = overJustCompletedRef.current;
     setCanUndo(true);
   }
 
@@ -198,6 +210,7 @@ export function useLiveScoringEngine({
     setLiveState(undoRef.current);
     setLiveDirty(true);
     setDismissedPlayers(dismissedPlayersUndoRef.current ?? new Set());
+    overJustCompletedRef.current = overJustCompletedUndoRef.current;
     undoRef.current = null;
     dismissedPlayersUndoRef.current = null;
     setCanUndo(false);
@@ -210,12 +223,9 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
   }
 
-  // ── Auto match/innings completion ────────────────────────────────────
-  // NEW — flips innings 1 -> 2 with a target, exactly like the manual End
-  // Innings button, but driven by a freshly-computed run total rather than
-  // whatever's in `liveState` (which hasn't re-rendered yet this tick).
   function applyInningsOneComplete(finalRuns: number) {
     const target = finalRuns + 1;
+    overJustCompletedRef.current = false; // fresh innings, fresh over
     setLiveState((prev) => ({
       ...prev,
       target,
@@ -225,6 +235,7 @@ export function useLiveScoringEngine({
       nonStriker: emptyBatterSlot(),
       bowler: emptyBowlerSlot(),
       partnership: { runs: 0, balls: 0 },
+      thisOver: [],
     }));
     setLiveDirty(true);
     setDismissedPlayers(new Set());
@@ -233,8 +244,6 @@ export function useLiveScoringEngine({
     pushToast(`🔁 Innings complete — target set to ${target}`, "info");
   }
 
-  // NEW — marks the match complete with a real result (winner + margin),
-  // and notifies the parent so it can fire the "match won" overlay moment.
   function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie"; margin: string }) {
     const winningTeamName =
       opts.winningSide === "batting" ? battingTeamName : opts.winningSide === "bowling" ? bowlingTeamName : "Tie";
@@ -251,9 +260,6 @@ export function useLiveScoringEngine({
     onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
   }
 
-  // NEW — call after every ball/wicket with the FRESHLY COMPUTED next
-  // score, not `liveState` (which is stale until next render). Decides
-  // whether the innings or the whole match should auto-complete.
   function checkAutoEndConditions(next: { runs: number; wickets: number; overs: number; balls: number }) {
     if (liveState.matchComplete) return;
 
@@ -268,7 +274,7 @@ export function useLiveScoringEngine({
     }
 
     const target = liveState.target;
-    if (target === undefined) return; // shouldn't happen in innings 2, but stay safe
+    if (target === undefined) return;
 
     if (next.runs >= target) {
       applyMatchComplete(computeInnings2Result(next.runs, next.wickets, target));
@@ -346,6 +352,7 @@ export function useLiveScoringEngine({
     snapshotForUndo();
     const legality = ballLegality(extraType);
     const wasFreeHitBall = isFreeHit;
+    const ballValue = ballDisplayValue(runs, extraType);
 
     const strikerBefore = liveState.striker;
     const runsBefore = strikerBefore.runs;
@@ -361,8 +368,6 @@ export function useLiveScoringEngine({
 
     const bowlerNameForMoment = liveState.bowler.name;
 
-    // NEW — compute what the TEAM score will be after this ball, so we
-    // can check auto-completion conditions right after committing state.
     let nextOvers = liveState.score.overs;
     let nextBalls = liveState.score.balls;
     if (legality.countsAsLegalBall) {
@@ -373,6 +378,13 @@ export function useLiveScoringEngine({
       }
     }
     const nextRuns = liveState.score.runs + totalTeamRuns;
+
+    // NEW — read + consume the "over just finished" flag from the LAST
+    // ball, before this ball's own chip is computed. This is what makes
+    // the reset happen at the START of the new over instead of erasing
+    // the completing ball's own chip.
+    const startFreshRow = overJustCompletedRef.current;
+    overJustCompletedRef.current = false;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -434,6 +446,13 @@ export function useLiveScoringEngine({
         finalNonStriker = tmp;
       }
 
+      // CHANGED — this ball's chip is ALWAYS appended, whether or not it
+      // completes the over. If the PREVIOUS ball completed an over
+      // (startFreshRow), we start a new row with just this ball's chip
+      // instead of appending to the old (finished) over's row.
+      const baseRow = startFreshRow ? [] : prev.thisOver ?? [];
+      const thisOver = [...baseRow, ballValue];
+
       return {
         ...prev,
         score: { ...prev.score, runs: prev.score.runs + totalTeamRuns, overs, balls },
@@ -443,8 +462,15 @@ export function useLiveScoringEngine({
         partnership,
         matchBoundaries,
         tournamentBoundaries,
+        thisOver,
       };
     });
+
+    // Record (for the NEXT call) that this ball completed the over, so
+    // the next delivery knows to start a fresh row rather than append.
+    if (legality.countsAsLegalBall && liveState.score.balls + 1 >= 6) {
+      overJustCompletedRef.current = true;
+    }
 
     setLiveDirty(true);
 
@@ -475,8 +501,6 @@ export function useLiveScoringEngine({
       pushToast(`🧤 MAIDEN OVER — ${bowlerNameForMoment || "Bowler"}`, "maiden");
     }
 
-    // NEW — check auto-completion last, after the ball's own moments have
-    // already been queued/toasted.
     checkAutoEndConditions({ runs: nextRuns, wickets: liveState.score.wickets, overs: nextOvers, balls: nextBalls });
   }
 
@@ -535,7 +559,6 @@ export function useLiveScoringEngine({
     const maidenFired = overComplete && overRunsAfterThisBall === 0;
     overRunsConcededRef.current = overComplete ? 0 : overRunsAfterThisBall;
 
-    // NEW — compute the resulting team score/wickets/overs for auto-check.
     let nextOvers = liveState.score.overs;
     let nextBalls = liveState.score.balls;
     if (legality.countsAsLegalBall) {
@@ -547,6 +570,13 @@ export function useLiveScoringEngine({
     }
     const nextWickets = Math.min(10, liveState.score.wickets + 1);
     const nextRuns = liveState.score.runs + totalTeamRuns;
+
+    const wicketBallValue = "W";
+
+    // Same fix applied here — consume the flag left by the previous ball
+    // before deciding whether this wicket's chip starts a fresh row.
+    const startFreshRow = overJustCompletedRef.current;
+    overJustCompletedRef.current = false;
 
     setLiveState((prev) => {
       let { overs, balls } = prev.score;
@@ -572,6 +602,9 @@ export function useLiveScoringEngine({
       const strikerFacing: BatterState = { ...prev.striker, runs: strikerFinalRuns, balls: strikerFinalBalls };
       const resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
 
+      const baseRow = startFreshRow ? [] : prev.thisOver ?? [];
+      const thisOver = [...baseRow, wicketBallValue];
+
       return {
         ...prev,
         score: {
@@ -585,8 +618,14 @@ export function useLiveScoringEngine({
         striker: resolved.striker,
         nonStriker: resolved.nonStriker,
         partnership: { runs: 0, balls: 0 },
+        thisOver,
       };
     });
+
+    if (overComplete) {
+      overJustCompletedRef.current = true;
+    }
+
     setLiveDirty(true);
 
     {
@@ -617,7 +656,6 @@ export function useLiveScoringEngine({
       pushToast(`🧤 MAIDEN OVER — ${bowlerName || "Bowler"}`, "maiden");
     }
 
-    // NEW — check whether this wicket ends the innings / the match.
     checkAutoEndConditions({ runs: nextRuns, wickets: nextWickets, overs: nextOvers, balls: nextBalls });
 
     setActiveSlot(batsmanOut);
@@ -627,14 +665,12 @@ export function useLiveScoringEngine({
   function endInnings() {
     snapshotForUndo();
     overRunsConcededRef.current = 0;
+    overJustCompletedRef.current = false;
     setDismissedPlayers(new Set());
 
     const currentInningsNumber = (liveState.inningsNumber ?? 1) as 1 | 2;
 
     if (currentInningsNumber >= 2) {
-      // CHANGED — manual "End Match" now computes a real result the same
-      // way the auto-detector does, instead of just flagging complete
-      // with no winner info.
       const target = liveState.target;
       const result = target !== undefined ? computeInnings2Result(liveState.score.runs, liveState.score.wickets, target) : null;
       if (result) {
@@ -659,6 +695,7 @@ export function useLiveScoringEngine({
       nonStriker: emptyBatterSlot(),
       bowler: emptyBowlerSlot(),
       partnership: { runs: 0, balls: 0 },
+      thisOver: [],
     }));
     setLiveDirty(true);
     onInningsEnd?.({ target, previousInningsRuns, inningsNumber: 2 });
