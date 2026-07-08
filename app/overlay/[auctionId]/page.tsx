@@ -276,7 +276,22 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       <PointsTable show={state.pointsTable.show} hideTrigger />
       <CricketScorecard show={state.matchScorecard.show} hideTrigger />
       <CricketMatchIntro show={state.matchIntro.show} hideTrigger />
-      {state.tournamentLogo.show && <TournamentLogoDisplay />}
+      {state.tournamentLogo.show && (
+        <TournamentLogoDisplay
+          name={state.matchSetup?.tournamentName || undefined}
+          edition={
+            state.matchSetup
+              ? [
+                  state.matchSetup.season && `SEASON ${state.matchSetup.season}`,
+                  state.matchSetup.format,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              : undefined
+          }
+          logo={state.matchSetup?.tournamentLogoUrl || undefined}
+        />
+      )}
     </div>
   );
 }

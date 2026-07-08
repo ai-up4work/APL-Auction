@@ -6,6 +6,9 @@ import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
 import { ImageUploader } from "./ImageUploader";
 import { DrawerSection, Eyebrow, FieldLabel, Input, TextField, SelectField, ColorField, LinkBtn, SmallButton, PrimaryButton, StatusPill } from "./ui";
 
+import { LocationAutocompleteInput } from "./LocationAutocomplete";
+import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
+
 // ── Roster source ────────────────────────────────────────────────────
 interface RosterRow {
   id: string;
@@ -399,6 +402,7 @@ export default function MatchSetupPanel({
   onPush,
   pushLabel,
   completed,
+  onVenueSelect,
 }: {
   auctionId: string;
   matchSetup: MatchSetup;
@@ -406,6 +410,7 @@ export default function MatchSetupPanel({
   onPush: () => void;
   pushLabel: string;
   completed: boolean;
+  onVenueSelect?: (match: GeocodeMatch, displayName?: string) => void;
 }) {
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);

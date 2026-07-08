@@ -10,6 +10,7 @@ import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/u
 import { ChevronDown } from "lucide-react";
 
 import WeatherPanel, { type WeatherPanelHandle } from "@/components/overlays/admin/WeatherPanel";
+import { GeocodeMatch } from "@/lib/fetchVenueWeather";
 
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
@@ -628,7 +629,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               onPush={pushMatchSetup}
               pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
               completed={matchSetupCompleted}
-              onVenueSelect={(match, displayName) => weatherPanelRef.current?.scheduleFetch(match, displayName)}
+              onVenueSelect={(match: GeocodeMatch, displayName: string | undefined) => weatherPanelRef.current?.scheduleFetch(match, displayName)}
             />
 
             {matchSetupCompleted ? (
