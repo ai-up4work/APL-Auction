@@ -359,21 +359,30 @@ export default function LiveScoreBar({ show, hideTrigger = false }) {
                     {/* Overs pill */}
                     <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
                       <div
-                        className="flex flex-col items-center justify-center rounded-md px-1.5 sm:px-2.5 py-0.5 sm:py-1"
-                        style={{ background: "rgba(59,139,212,0.18)", border: "1px solid rgba(59,139,212,0.4)" }}
+                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-1 sm:py-1.5"
+                        style={{
+                          background: "linear-gradient(160deg, rgba(201,151,31,0.16) 0%, rgba(201,151,31,0.05) 100%)",
+                          border: "1px solid rgba(201,151,31,0.35)",
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                        }}
                       >
                         <span
                           className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
-                          style={{ color: "var(--color-outline)" }}
+                          style={{ color: "var(--color-theme-orange)", opacity: 0.85 }}
                         >
                           Overs
                         </span>
                         <span
-                          className="font-heading font-black text-[10px] sm:text-xs tabular-nums leading-none"
+                          className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
                           style={{ color: "var(--color-on-surface)" }}
                         >
                           {OVERS_LABEL}
-                          <span style={{ color: "var(--color-outline)" }}>({LIVE.oversLimit})</span>
+                          <span
+                            className="text-[9px] sm:text-[11px] font-semibold"
+                            style={{ color: "var(--color-outline)" }}
+                          >
+                            /{LIVE.oversLimit}
+                          </span>
                         </span>
                       </div>
                     </div>
