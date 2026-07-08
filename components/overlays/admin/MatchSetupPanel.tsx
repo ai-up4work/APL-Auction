@@ -3,10 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabse";
 import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
-import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
 import { ImageUploader } from "./ImageUploader";
 import { DrawerSection, Eyebrow, FieldLabel, Input, TextField, SelectField, ColorField, LinkBtn, SmallButton, PrimaryButton, StatusPill } from "./ui";
-import { LocationAutocompleteInput } from "./LocationAutocomplete";
 
 // ── Roster source ────────────────────────────────────────────────────
 interface RosterRow {
@@ -401,7 +399,6 @@ export default function MatchSetupPanel({
   onPush,
   pushLabel,
   completed,
-  onVenueSelect,
 }: {
   auctionId: string;
   matchSetup: MatchSetup;
@@ -409,11 +406,6 @@ export default function MatchSetupPanel({
   onPush: () => void;
   pushLabel: string;
   completed: boolean;
-  // NEW — fires (in addition to the venue text updating) when the admin
-  // picks a suggestion from the Venue field's dropdown, so a parent can
-  // kick off a weather fetch for the newly-picked coordinates without
-  // this component needing to know anything about weather.
-  onVenueSelect?: (match: GeocodeMatch, displayName: string) => void;
 }) {
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);
@@ -492,21 +484,19 @@ export default function MatchSetupPanel({
           label="Tournament Logo"
         />
 
-        <div className="flex flex-col gap-1.5">
-          <FieldLabel>Venue</FieldLabel>
-          <LocationAutocompleteInput
-            value={matchSetup.venue}
-            onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
-            onSelect={onVenueSelect}
-            placeholder="Ground name"
-            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={{
-              background: "var(--color-surface-container-low)",
-              border: "1px solid var(--color-border-overlay)",
-              color: "var(--color-on-surface)",
-            }}
-          />
-        </div>
+        {/* Free text — deliberately NOT autocomplete-backed. This is a
+            display label only ("Akkaraipattu Public Ground", etc.) and
+            has no bearing on weather lookups; those are handled entirely
+            inside WeatherPanel via its own autocomplete search field.
+            Decoupling these two means a venue that isn't in OSM's
+            database (small/local grounds) can still be typed here
+            freely without needing to resolve anywhere. */}
+        <TextField
+          label="Venue"
+          value={matchSetup.venue}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
+          placeholder="Ground name"
+        />
 
         <SelectField label="Format" value={matchSetup.format} onChange={(v) => setMatchSetup((p) => ({ ...p, format: v as MatchSetup["format"] }))}>
           <option value="T20">T20</option>

@@ -1125,11 +1125,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               </Section>
 
               <WeatherPanel
-                ref={weatherPanelRef} 
                 defaultVenue={matchSetup.venue}
-                onFetched={pushFetchedWeather}
+                onFetched={(wx) => {  }}
                 autoFetchKey={setupPushCount}
-              />        
+              />
               <OnAirChannels ref={onAirRef} fire={fire} />
 
             <Section title="Event Log">
