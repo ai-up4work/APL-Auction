@@ -1,13 +1,16 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot } from "@/lib/overlayBus";
+import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot, type WeatherData } from "@/lib/overlayBus";
 import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
 import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
 import { ChevronDown } from "lucide-react";
+
+import WeatherPanel, { type WeatherPanelHandle } from "@/components/overlays/admin/WeatherPanel";
+
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
 const emptyTeam = () => ({
@@ -46,6 +49,19 @@ const emptyLiveState: LiveState = {
   matchBoundaries: { fours: 0, sixes: 0 },
   tournamentBoundaries: { fours: 0, sixes: 0 },
   pointsTable: [],
+};
+
+// ── Weather (last pushed) ───────────────────────────────────────────────
+// NEW — tracked in state (+ ref, for the same reason matchSetup/liveState
+// have refs: sendFullSnapshot is called from callbacks that shouldn't be
+// stale-closed over the state value) so a full-sync snapshot can carry the
+// actual last-fetched conditions instead of only a visibility boolean.
+const defaultWeatherData: WeatherData = {
+  venue: "INLAND CRICKET GROUND",
+  temp: 28,
+  unit: "C",
+  condition: "sunny",
+  corner: "top-right",
 };
 
 // ── Moments (EVENT) ─────────────────────────────────────────────────────
@@ -123,6 +139,8 @@ function BatterPickerButton({
   );
 }
 
+
+
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   // const { auctionId } = use(params);
   // NOTE: hardcoded for now — restore the line above (and the params prop)
@@ -133,6 +151,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const onAirRef = useRef<OnAirChannelsHandle>(null);
   const [connected, setConnected] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+
+  const weatherPanelRef = useRef<WeatherPanelHandle>(null);
+
 
   // ── Match Setup state (session) ─────────────────────────────────────
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
@@ -146,11 +167,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [livePushed, setLivePushed] = useState(false);
   const [liveHydrated, setLiveHydrated] = useState(false);
 
+  // ── Weather (last pushed, so full-sync snapshots can include it) ────
+  const [weatherData, setWeatherData] = useState<WeatherData>(defaultWeatherData);
+
   // ── Moments (event) ─────────────────────────────────────────────────
   const [wicketDraft, setWicketDraft] = useState<WicketDraft>(emptyWicketDraft);
   const [showWicketForm, setShowWicketForm] = useState(false);
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
   const [showMoments, setShowMoments] = useState(false);
+
+  const [setupPushCount, setSetupPushCount] = useState(0);
+
 
   // NEW — manual "Match Won" draft. Match Won used to only be fireable
   // once liveState.matchResult existed (i.e. after auto-detection or
@@ -170,6 +197,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const matchSetupRef = useRef(matchSetup);
   const matchSetupCompletedRef = useRef(matchSetupCompleted);
   const liveStateRef = useRef(liveState);
+  const weatherRef = useRef(weatherData); // NEW
 
   useEffect(() => {
     matchSetupRef.current = matchSetup;
@@ -182,6 +210,10 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   useEffect(() => {
     liveStateRef.current = liveState;
   }, [liveState]);
+
+  useEffect(() => {
+    weatherRef.current = weatherData;
+  }, [weatherData]);
 
   const pendingSyncRequestRef = useRef(false);
 
@@ -201,6 +233,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       matchSetup: matchSetupRef.current,
       matchSetupCompleted: matchSetupCompletedRef.current,
       liveState: liveStateRef.current,
+      weather: weatherRef.current, // NEW — carries last-fetched conditions through reconnects
     };
     fire({ type: "syncSnapshot", data: snapshot }, "Sent full sync snapshot");
   }
@@ -230,7 +263,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auctionId]);
 
-  // ── Match Setup + Live State persistence ────────────────────────────
+  // ── Match Setup + Live State + Weather persistence ──────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -253,6 +286,15 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     } catch {
       // ignore malformed cache
     }
+    try {
+      // NEW — same treatment for weather: without this, an admin-page
+      // refresh loses the last-fetched conditions just like the overlay
+      // page did before the snapshot fix below.
+      const rawWeather = window.localStorage.getItem(`overlay:${auctionId}:weather`);
+      if (rawWeather) setWeatherData(JSON.parse(rawWeather));
+    } catch {
+      // ignore malformed cache
+    }
     setSetupHydrated(true);
     setLiveHydrated(true);
   }, [auctionId]);
@@ -272,8 +314,37 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     window.localStorage.setItem(`overlay:${auctionId}:liveState`, JSON.stringify(liveState));
   }, [liveState, auctionId, liveHydrated]);
 
+  useEffect(() => {
+    // NEW — persist weather the same way matchSetup does, gated on the
+    // same hydration flag so we don't clobber the cached value with the
+    // default before it's had a chance to load.
+    if (!setupHydrated || typeof window === "undefined") return;
+    window.localStorage.setItem(`overlay:${auctionId}:weather`, JSON.stringify(weatherData));
+  }, [weatherData, auctionId, setupHydrated]);
+
   function fireLoose(event: Record<string, unknown>, label: string) {
     fire(event as unknown as OverlayEvent, label);
+  }
+
+  function pushFetchedWeather(wx: { venue: string; temp: number; unit: "C"; condition: string }) {
+    // CHANGED — build the full WeatherData payload once, store it in state
+    // (so it becomes part of what sendFullSnapshot() sends on reconnect),
+    // and broadcast the same object. Previously the fetched data was only
+    // ever broadcast as a one-off event and never retained anywhere the
+    // sync snapshot could see it, so a reconnecting overlay page fell back
+    // to DEFAULT_WEATHER even though the visibility flag was preserved.
+    const weatherPayload: WeatherData = {
+      venue: wx.venue.toUpperCase(),
+      temp: wx.temp,
+      unit: wx.unit,
+      condition: wx.condition,
+      corner: weatherRef.current.corner,
+    };
+    setWeatherData(weatherPayload);
+    fireLoose(
+      { type: "weather", show: true, data: weatherPayload },
+      `Weather fetched — ${wx.venue}: ${wx.temp}°C, ${wx.condition}`
+    );
   }
 
   // ── Match Setup helpers ──────────────────────────────────────────────
@@ -281,6 +352,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     fireLoose({ type: "matchSetup", data: matchSetup }, "Match Setup pushed to overlay");
     setSetupPushed(true);
     setMatchSetupCompleted(true);
+    setSetupPushCount((n) => n + 1); // NEW — triggers WeatherPanel's auto-fetch
     setTimeout(() => setSetupPushed(false), 1500);
   }
 
@@ -556,6 +628,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               onPush={pushMatchSetup}
               pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
               completed={matchSetupCompleted}
+              onVenueSelect={(match, displayName) => weatherPanelRef.current?.scheduleFetch(match, displayName)}
             />
 
             {matchSetupCompleted ? (
@@ -1051,7 +1124,13 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 </div>
               </Section>
 
-            <OnAirChannels ref={onAirRef} fire={fire} />
+              <WeatherPanel
+                ref={weatherPanelRef} 
+                defaultVenue={matchSetup.venue}
+                onFetched={pushFetchedWeather}
+                autoFetchKey={setupPushCount}
+              />        
+              <OnAirChannels ref={onAirRef} fire={fire} />
 
             <Section title="Event Log">
               <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">

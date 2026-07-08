@@ -14,18 +14,6 @@ import CricketMatchIntro from "@/components/overlays/CricketMatchIntro";
 import MatchMomentOverlay from "@/components/overlays/MatchMomentOverlay";
 import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 
-// export const DEFAULT_CONDITIONS = {
-//   sunny: { icon: Sun, color: "#F2B33D", label: "Sunny" },
-//   clear: { icon: Sun, color: "#F2B33D", label: "Clear" },
-//   "partly-cloudy": { icon: CloudSun, color: "#9FC6E8", label: "Partly Cloudy" },
-//   cloudy: { icon: Cloud, color: "#8A93A6", label: "Cloudy" },
-//   overcast: { icon: Cloud, color: "#6B7280", label: "Overcast" },
-//   rain: { icon: CloudRain, color: "#4C8BD9", label: "Rain" },
-//   storm: { icon: CloudLightning, color: "#C9971F", label: "Stormy" },
-//   snow: { icon: CloudSnow, color: "#CFE6F2", label: "Snow" },
-//   fog: { icon: CloudFog, color: "#9AA3B0", label: "Foggy" },
-// };
-
 const DEFAULT_WEATHER: WeatherData = {
   venue: "INLAND CRICKET GROUND",
   temp: 28,
@@ -122,7 +110,13 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
       const c = event.data.channels;
       return {
         ...state,
-        weather: { ...state.weather, show: c.weather },
+        // CHANGED — previously this only restored `show` from the channel
+        // visibility flags, leaving `data` (venue/temp/condition) frozen at
+        // whatever it already was — which on a fresh page load is just the
+        // hardcoded DEFAULT_WEATHER. Now the snapshot carries the actual
+        // last-fetched weather too, so a reconnect shows real conditions
+        // instead of resetting to 28°C/sunny.
+        weather: { show: c.weather, data: event.data.weather ?? state.weather.data },
         matchBoundaries: { ...state.matchBoundaries, show: c.matchBoundaries },
         tournamentBoundaries: { ...state.tournamentBoundaries, show: c.tournamentBoundaries },
         liveScoreBar: { show: c.liveScoreBar },

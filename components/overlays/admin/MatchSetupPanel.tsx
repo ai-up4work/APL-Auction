@@ -3,8 +3,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabse";
 import type { MatchSetup, SquadPlayer, TeamInfo } from "@/lib/overlayBus";
+import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
 import { ImageUploader } from "./ImageUploader";
 import { DrawerSection, Eyebrow, FieldLabel, Input, TextField, SelectField, ColorField, LinkBtn, SmallButton, PrimaryButton, StatusPill } from "./ui";
+import { LocationAutocompleteInput } from "./LocationAutocomplete";
 
 // ── Roster source ────────────────────────────────────────────────────
 interface RosterRow {
@@ -344,8 +346,6 @@ function TeamRosterPicker({
 }
 
 // ── Locked summary strip — replaces the full form once pushed ────────
-// This is what "only the panels below matter now" looks like: one slim
-// line of context (teams, toss, venue) instead of the whole editor.
 function LockedSummaryBar({
   matchSetup,
   onEdit,
@@ -401,6 +401,7 @@ export default function MatchSetupPanel({
   onPush,
   pushLabel,
   completed,
+  onVenueSelect,
 }: {
   auctionId: string;
   matchSetup: MatchSetup;
@@ -408,14 +409,15 @@ export default function MatchSetupPanel({
   onPush: () => void;
   pushLabel: string;
   completed: boolean;
+  // NEW — fires (in addition to the venue text updating) when the admin
+  // picks a suggestion from the Venue field's dropdown, so a parent can
+  // kick off a weather fetch for the newly-picked coordinates without
+  // this component needing to know anything about weather.
+  onVenueSelect?: (match: GeocodeMatch, displayName: string) => void;
 }) {
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);
 
-  // Once pushed, the whole panel collapses down to LockedSummaryBar so the
-  // Scorer / Live State panel below becomes the focus of the screen. `locked`
-  // starts in sync with `completed` (covers page refresh, where
-  // matchSetupCompleted is already true from persisted state).
   const [locked, setLocked] = useState(completed);
   useEffect(() => {
     if (completed) setLocked(true);
@@ -439,7 +441,7 @@ export default function MatchSetupPanel({
 
   useEffect(() => {
     if (roster.status !== "ready") return;
-    if (locked) return; // don't churn squad data on a panel the admin can't see/edit
+    if (locked) return;
 
     (["teamA", "teamB"] as const).forEach((teamKey) => {
       const team = matchSetup[teamKey];
@@ -461,7 +463,6 @@ export default function MatchSetupPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roster.status, locked]);
 
-  // ── Locked → collapse to a slim summary bar, nothing else rendered ──
   if (locked) {
     return <LockedSummaryBar matchSetup={matchSetup} onEdit={handleEdit} />;
   }
@@ -490,12 +491,23 @@ export default function MatchSetupPanel({
           onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
           label="Tournament Logo"
         />
-        <TextField
-          label="Venue"
-          value={matchSetup.venue}
-          onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
-          placeholder="Ground name"
-        />
+
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel>Venue</FieldLabel>
+          <LocationAutocompleteInput
+            value={matchSetup.venue}
+            onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
+            onSelect={onVenueSelect}
+            placeholder="Ground name"
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style={{
+              background: "var(--color-surface-container-low)",
+              border: "1px solid var(--color-border-overlay)",
+              color: "var(--color-on-surface)",
+            }}
+          />
+        </div>
+
         <SelectField label="Format" value={matchSetup.format} onChange={(v) => setMatchSetup((p) => ({ ...p, format: v as MatchSetup["format"] }))}>
           <option value="T20">T20</option>
           <option value="ODI">ODI</option>

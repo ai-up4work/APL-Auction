@@ -71,9 +71,9 @@ export interface PointsRow {
   points: number;
 }
 
-// NEW — the outcome of a completed match. Lives on LiveState so it rides
-// along automatically through persistence, sync snapshots, and pushes,
-// same as everything else in LiveState.
+// The outcome of a completed match. Lives on LiveState so it rides along
+// automatically through persistence, sync snapshots, and pushes, same as
+// everything else in LiveState.
 export interface MatchResult {
   winningTeamName: string; // "Mumbai Indians" or "Tie"
   margin: string; // e.g. "won by 4 wickets", "won by 12 runs", "Match Tied"
@@ -92,14 +92,13 @@ export interface LiveState {
   target?: number;
   inningsNumber?: 1 | 2;
   matchComplete?: boolean;
-  matchResult?: MatchResult; // NEW
+  matchResult?: MatchResult;
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────
 export type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
 
 export interface MomentPayload {
-  // NEW — "matchWon" added
   moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
   player?: string; // also doubles as winning team name for "matchWon"
   score?: string; // also doubles as margin text for "matchWon"
@@ -108,11 +107,12 @@ export interface MomentPayload {
   bowler?: string;
   fielder?: string;
   maidens?: number; // bowler's maiden count at the moment this fired
-  // NEW — for "matchWon", lets the overlay theme itself to the winning team
+  // for "matchWon", lets the overlay theme itself to the winning team
   teamColor?: string;
   teamLogoUrl?: string;
   method?: "runs" | "wickets" | "tie";
 }
+
 // ── On Air channel visibility snapshot ──────────────────────────────────
 export interface ChannelVisibility {
   weather: boolean;
@@ -132,6 +132,12 @@ export interface SyncSnapshot {
   matchSetup: MatchSetup;
   matchSetupCompleted: boolean;
   liveState: LiveState;
+  // NEW — last known weather payload. Previously only `channels.weather`
+  // (a visibility boolean) was included in the snapshot, so a reconnecting
+  // overlay page correctly restored show/hide but always fell back to
+  // DEFAULT_WEATHER for the actual venue/temp/condition, since that data
+  // never rode along with anything persisted or resynced.
+  weather: WeatherData;
 }
 
 export type OverlayEvent =
