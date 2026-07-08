@@ -34,6 +34,8 @@ const emptyMatchSetup: MatchSetup = {
   teamA: emptyTeam(),
   kickoffTime: "", // NEW
   teamB: emptyTeam(),
+  matchMeta: "", // NEW
+  tournament: "", // NEW
   tossWinner: "",
   tossDecision: "",
 };

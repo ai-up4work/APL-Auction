@@ -39,6 +39,8 @@ export interface MatchSetup {
   kickoffTime: string; // NEW — e.g. "19:30" or "7:30 PM IST", free text
   teamA: TeamInfo;
   teamB: TeamInfo;
+  matchMeta: string; // e.g. "Semi-Final", "Qualifier 2", free text
+  tournament: string; // e.g. "Season 7", free text
   tossWinner: "A" | "B" | "";
   tossDecision: "bat" | "bowl" | "";
 }
