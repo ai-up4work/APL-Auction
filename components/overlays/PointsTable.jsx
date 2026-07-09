@@ -1,39 +1,25 @@
 "use client";
 
 import { Award, Star } from "lucide-react";
-import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayPanel } from "@/hooks/useOverlayPanel";
+import { usePointsTableLedger } from "@/hooks/usePointsTableLedger";
 import { GOLD_BEZEL, plaqueClip } from "@/lib/overlayTokens";
 
-// ---- Default data — override any of these via props. Kept exported so a
-// parent (e.g. the OBS overlay page) can import and tweak just one field
-// without redefining the whole roster. ----
+// ---- Defaults for props that still don't come from a DB table (there's
+// no `tournaments` table yet) — override via props same as before. ----
 export const DEFAULT_TOURNAMENT = {
   name: "MOON KNIGHT CUP",
   edition: "SEASON 7 · WOMEN'S T20",
   logo: "/moon-knight-logo.png",
 };
 
-export const DEFAULT_TEAMS = [
-  { rank: 1, short: "CSK", name: "CHENNAI SUPER KINGS", image: "/Franchises/CSK.png", color: "#FDB913", colorSoft: "rgba(253,185,19,0.22)", p: 7, w: 6, l: 1, t: 0, nr: 0, pts: 12, nrr: 1.512 },
-  { rank: 2, short: "GT", name: "GUJARAT TITANS", image: "/Franchises/GT.png", color: "#1C1C84", colorSoft: "rgba(28,28,132,0.24)", p: 7, w: 5, l: 2, t: 0, nr: 0, pts: 10, nrr: 0.876 },
-  { rank: 3, short: "MI", name: "MUMBAI INDIANS", image: "/Franchises/MI.png", color: "#004BA0", colorSoft: "rgba(0,75,160,0.22)", p: 7, w: 5, l: 2, t: 0, nr: 0, pts: 10, nrr: 0.421 },
-  { rank: 4, short: "RCB", name: "ROYAL CHALLENGERS BENGALURU", image: "/Franchises/RCB.png", color: "#DA1818", colorSoft: "rgba(218,24,24,0.2)", p: 7, w: 4, l: 3, t: 0, nr: 0, pts: 8, nrr: 0.156 },
-  { rank: 5, short: "KKR", name: "KOLKATA KNIGHT RIDERS", image: "/Franchises/KKR.jpg", color: "#3A225D", colorSoft: "rgba(58,34,93,0.24)", p: 7, w: 4, l: 3, t: 0, nr: 0, pts: 8, nrr: -0.042 },
-  { rank: 6, short: "SRH", name: "SUNRISERS HYDERABAD", image: "/Franchises/SRH.webp", color: "#F26522", colorSoft: "rgba(242,101,34,0.22)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.183 },
-  { rank: 7, short: "RR", name: "RAJASTHAN ROYALS", image: "/Franchises/RR.png", color: "#EA1E63", colorSoft: "rgba(234,30,99,0.2)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.298 },
-  { rank: 8, short: "DC", name: "DELHI CAPITALS", image: "/Franchises/DLC.jpg", color: "#17479E", colorSoft: "rgba(23,71,158,0.22)", p: 7, w: 3, l: 4, t: 0, nr: 0, pts: 6, nrr: -0.415 },
-];
-
 export const DEFAULT_QUALIFY_CUTOFF = 4; // top N advance — draws the cut line under this rank
 export const DEFAULT_RESULT_LINE = "TOP 4 ADVANCE TO THE SEMI-FINALS";
 
 const EXIT_DURATION_MS = 400;
 
-// Same cut-corner "plaque" clip used on the scorecard — reads as a struck
-// medallion/plate rather than a plain rounded rectangle. Now sourced from
-// the shared overlayTokens helper (was two hand-typed polygon() strings
-// that happened to match plaqueClip()'s formula exactly).
+// Same cut-corner "plaque" clip used on the scorecard.
 const PLAQUE_CLIP = plaqueClip(30);
 const PLAQUE_CLIP_INNER = plaqueClip(27);
 
@@ -44,10 +30,7 @@ function formatNrr(value) {
 }
 
 // Circular medallion crest — same shine-ring / gloss / inset-shadow
-// treatment as the team badges on the other cards, now showing the real
-// franchise crest artwork on a team-colored backdrop (object-contain, not
-// object-cover, since these are badge/logo art rather than square photos
-// and shouldn't get cropped).
+// treatment as the team badges on the other cards.
 function TeamCrest({ team }) {
   return (
     <div className="relative w-6 h-6 sm:w-8 sm:h-8 shrink-0">
@@ -68,7 +51,11 @@ function TeamCrest({ team }) {
           className="relative w-full h-full rounded-full overflow-hidden flex items-center justify-center p-[2px]"
           style={{ background: team.color }}
         >
-          <img src={team.image} alt={team.name} className="w-full h-full object-contain" />
+          {team.image ? (
+            <img src={team.image} alt={team.name} className="w-full h-full object-contain" />
+          ) : (
+            <span className="text-[10px] font-black text-white">{team.short}</span>
+          )}
           <div
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{
@@ -87,8 +74,7 @@ function TeamCrest({ team }) {
 }
 
 // Column grid shared by the header row and every data row in a column, so
-// the two stay pixel-aligned. Narrower than a single full-width layout
-// since each column only spans half the card in the landscape split below.
+// the two stay pixel-aligned.
 const ROW_GRID =
   "grid-cols-[1.35rem_1fr_repeat(6,1.5rem)_2.9rem] sm:grid-cols-[1.6rem_1fr_repeat(6,1.7rem)_3.2rem]";
 
@@ -162,82 +148,33 @@ function TeamRow({ team, closing, delay }) {
 }
 
 /**
- * PointsTable — self-contained trigger button + modal panel, now
- * remote-controllable:
- *   - `show` (boolean | undefined): when provided, drives the panel
- *     open/closed externally (e.g. from a bus event). When omitted
- *     (undefined), the component behaves exactly as before — purely
- *     driven by its own trigger button.
- *   - `hideTrigger`: hides the on-screen "Standings" trigger button, for
- *     use on the OBS-facing overlay page where there's no one to click it.
+ * PointsTable — now driven by a live `auctionId` instead of a static
+ * `teams` prop. Standings (P/W/L/T/NR/Pts/NRR) come from the `standings`
+ * table via usePointsTableLedger, joined with `teams` for name/logo/color.
+ * Open/close panel state now uses the same useOverlayPanel hook as
+ * CricketScorecard, for the same remote-control (`show` prop) behavior.
  *
- * All data is now props: `tournament`, `teams`, `qualifyCutoff`,
- * `resultLine` — defaulting to the values this card shipped with.
+ * `tournament`, `qualifyCutoff`, `resultLine` remain props since there's
+ * no tournament table yet — set these per broadcast same as before.
  */
 export default function PointsTable({
+  auctionId,
   tournament = DEFAULT_TOURNAMENT,
-  teams = DEFAULT_TEAMS,
   qualifyCutoff = DEFAULT_QUALIFY_CUTOFF,
   resultLine = DEFAULT_RESULT_LINE,
   show,
   hideTrigger = false,
 }) {
-  const [mounted, setMounted] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const closeTimer = useRef(null);
+  const { mounted, open, closing, toggle, closePanel } = useOverlayPanel(show, EXIT_DURATION_MS, {
+    defaultOpen: false,
+    escapeToClose: true,
+  });
 
-  useEffect(() => {
-    setMounted(true);
-    return () => {
-      if (closeTimer.current) clearTimeout(closeTimer.current);
-    };
-  }, []);
-
-  const openPanel = useCallback(() => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-    setClosing(false);
-    setOpen(true);
-  }, []);
-
-  const closePanel = useCallback(() => {
-    setClosing((alreadyClosing) => {
-      if (alreadyClosing) return true;
-      closeTimer.current = setTimeout(() => {
-        setOpen(false);
-        setClosing(false);
-      }, EXIT_DURATION_MS);
-      return true;
-    });
-  }, []);
-
-  const toggle = useCallback(() => {
-    if (open && !closing) closePanel();
-    else if (!open) openPanel();
-  }, [open, closing, openPanel, closePanel]);
-
-  // External control — only takes effect when `show` is actually passed.
-  useEffect(() => {
-    if (show === undefined) return;
-    if (show) openPanel();
-    else closePanel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show]);
-
-  useEffect(() => {
-    if (!open || closing) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") closePanel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, closing, closePanel]);
+  const { teams, loading } = usePointsTableLedger(auctionId, mounted);
 
   const before = teams.filter((t) => t.rank <= qualifyCutoff);
   const after = teams.filter((t) => t.rank > qualifyCutoff);
+  const hasTeams = teams.length > 0;
 
   return (
     <>
@@ -276,8 +213,6 @@ export default function PointsTable({
                     : "ptCardEnter 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.03s both",
                 }}
               >
-                {/* Ambient glow — gold-led, faint blue/green nod to the two
-                    lead teams so it ties back to the same visual family */}
                 <div
                   className="absolute -inset-6 blur-3xl rounded-[40px]"
                   style={{
@@ -286,9 +221,6 @@ export default function PointsTable({
                   }}
                 />
 
-                {/* Metallic bezel — same brushed-steel/gold plaque frame,
-                    now sourced from the shared overlayTokens GOLD_BEZEL
-                    instead of a locally hand-typed duplicate. */}
                 <div
                   className="relative p-[3px] sm:p-[4px]"
                   style={{
@@ -309,7 +241,6 @@ export default function PointsTable({
                       WebkitClipPath: PLAQUE_CLIP_INNER,
                     }}
                   >
-                    {/* Tournament emblem watermark */}
                     <div
                       className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
                       aria-hidden="true"
@@ -323,7 +254,6 @@ export default function PointsTable({
                       />
                     </div>
 
-                    {/* Header — tournament identity, same crest-banner device */}
                     <div
                       className="relative z-10 flex items-center justify-center gap-4 pt-5 pb-3 px-8 sm:px-12"
                       style={{
@@ -345,58 +275,60 @@ export default function PointsTable({
                       <div className="hidden sm:block h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(201,151,31,0.5), transparent)" }} />
                     </div>
 
-                    {/* Two-column landscape split: ranks 1-N (qualifyCutoff)
-                        on the left, the rest on the right, so the whole
-                        table sits inside one wide, short card instead of a
-                        tall scrolling list. */}
-                    <div
-                      className="relative z-10 flex items-stretch pt-4 pb-3"
-                      style={{
-                        animation: closing
-                          ? "ptHeaderOut 0.2s ease-in 0.1s both"
-                          : "ptHeaderIn 0.4s cubic-bezier(0.22,1,0.36,1) 0.22s both",
-                      }}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <ColumnHeader />
-                        {before.map((team, i) => (
-                          <TeamRow key={team.short} team={team} closing={closing} delay={0.26 + i * 0.04} />
-                        ))}
-                      </div>
-
-                      {/* Divider — same vertical-line-with-gold-dot device as
-                          the VS divider, carrying the qualification label
-                          along the seam instead of a horizontal banner */}
-                      <div className="relative w-px mx-3 sm:mx-5 shrink-0 self-stretch flex items-center justify-center">
-                        <div
-                          className="w-px h-full"
-                          style={{
-                            background:
-                              "linear-gradient(180deg, transparent 0%, var(--color-border-overlay, rgba(255,255,255,0.12)) 15%, rgba(201,151,31,0.55) 50%, var(--color-border-overlay, rgba(255,255,255,0.12)) 85%, transparent 100%)",
-                          }}
-                        />
-                        <span
-                          className="absolute px-1.5 py-3 whitespace-nowrap font-bold uppercase text-[7px] sm:text-[8px] tracking-[0.25em]"
-                          style={{
-                            color: "var(--color-theme-orange, #C9971F)",
-                            writingMode: "vertical-rl",
-                            background: "var(--color-surface, #0e1420)",
-                          }}
+                    {!hasTeams ? (
+                      <div className="relative z-10 flex items-center justify-center py-14 px-8">
+                        <p
+                          className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-center"
+                          style={{ color: "var(--color-outline, #7a8194)" }}
                         >
-                          Qualify for Semis
-                        </span>
+                          {loading ? "Loading standings…" : "Standings will appear once matches are recorded."}
+                        </p>
                       </div>
+                    ) : (
+                      <div
+                        className="relative z-10 flex items-stretch pt-4 pb-3"
+                        style={{
+                          animation: closing
+                            ? "ptHeaderOut 0.2s ease-in 0.1s both"
+                            : "ptHeaderIn 0.4s cubic-bezier(0.22,1,0.36,1) 0.22s both",
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <ColumnHeader />
+                          {before.map((team, i) => (
+                            <TeamRow key={team.short} team={team} closing={closing} delay={0.26 + i * 0.04} />
+                          ))}
+                        </div>
 
-                      <div className="flex-1 min-w-0">
-                        <ColumnHeader />
-                        {after.map((team, i) => (
-                          <TeamRow key={team.short} team={team} closing={closing} delay={0.34 + i * 0.04} />
-                        ))}
+                        <div className="relative w-px mx-3 sm:mx-5 shrink-0 self-stretch flex items-center justify-center">
+                          <div
+                            className="w-px h-full"
+                            style={{
+                              background:
+                                "linear-gradient(180deg, transparent 0%, var(--color-border-overlay, rgba(255,255,255,0.12)) 15%, rgba(201,151,31,0.55) 50%, var(--color-border-overlay, rgba(255,255,255,0.12)) 85%, transparent 100%)",
+                            }}
+                          />
+                          <span
+                            className="absolute px-1.5 py-3 whitespace-nowrap font-bold uppercase text-[7px] sm:text-[8px] tracking-[0.25em]"
+                            style={{
+                              color: "var(--color-theme-orange, #C9971F)",
+                              writingMode: "vertical-rl",
+                              background: "var(--color-surface, #0e1420)",
+                            }}
+                          >
+                            Qualify for Semis
+                          </span>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <ColumnHeader />
+                          {after.map((team, i) => (
+                            <TeamRow key={team.short} team={team} closing={closing} delay={0.34 + i * 0.04} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    {/* Footer — ticket stub, same tear-seam device as the
-                        other cards in this family */}
                     <div
                       className="relative z-10 flex flex-col sm:flex-row"
                       style={{
