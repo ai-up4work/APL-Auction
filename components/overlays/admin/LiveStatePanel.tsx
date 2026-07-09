@@ -47,6 +47,7 @@ function ViewportPortal({ children }: { children: React.ReactNode }) {
   return createPortal(children, document.body);
 }
 
+
 type PlayerRole = "striker" | "nonStriker" | "bowler";
 
 function PlayerCarousel({
@@ -650,7 +651,6 @@ function MatchOverScreen({
       </h2>
       {!isTie && margin && <p className="match-over-margin">{margin}</p>}
 
-      <p className="match-over-hint">Scoring is locked. The Match Won graphic has already fired to the overlay.</p>
 
       <div className="match-over-actions">
         {canUndo && (
@@ -671,6 +671,7 @@ function MatchOverScreen({
 }
 
 export default function LiveStatePanel({
+  auctionId,                 // NEW
   liveState,
   setLiveState,
   setLiveDirty,
@@ -698,6 +699,7 @@ export default function LiveStatePanel({
   // in case the parent also wants to log or pre-fill something.
   onFireMatchWonMoment,
 }: {
+  auctionId?: string;          // NEW — optional, for logging / analytics
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
@@ -777,7 +779,8 @@ export default function LiveStatePanel({
   const maxOvers = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
 
   const engine = useLiveScoringEngine({
-    liveState,
+    persistKey: auctionId,   // NEW
+    liveState,               // restored — required by the hook
     setLiveState,
     setLiveDirty,
     maxOvers,
@@ -800,6 +803,52 @@ export default function LiveStatePanel({
   // resets when the match is undone (matchComplete flips back to
   // false/undefined) so the next completion can fire again.
   const matchWonFiredRef = useRef(false);
+
+  // CHANGED — matchWonFiredRef used to be a plain in-memory ref, so a
+  // refresh right after match completion reset it to false and caused
+  // the "Match Won" graphic to fire a second time (since matchComplete/
+  // matchResult are restored from localStorage but the "already fired"
+  // fact wasn't). We now persist which result signature has already
+  // fired, keyed by auctionId, so a refresh doesn't re-trigger it — but
+  // a genuinely NEW result (new winningTeamName+margin after a restart)
+  // still fires normally.
+  function matchWonFiredKey() {
+    return `overlay:${auctionId}:matchWonFiredSignature`;
+  }
+
+  function resultSignature(result: { winningTeamName: string; margin: string; method: string }) {
+    return `${result.winningTeamName}|${result.margin}|${result.method}`;
+  }
+
+  useEffect(() => {
+    if (!liveState.matchComplete || !liveState.matchResult) {
+      return;
+    }
+    const sig = resultSignature(liveState.matchResult);
+    let alreadyFired = false;
+    try {
+      alreadyFired = typeof window !== "undefined" && window.localStorage.getItem(matchWonFiredKey()) === sig;
+    } catch {
+      alreadyFired = false;
+    }
+    if (alreadyFired) return;
+
+    try {
+      window.localStorage.setItem(matchWonFiredKey(), sig);
+    } catch {
+      // non-fatal
+    }
+
+    onFireMatchWonMoment?.({
+      winningTeamName: liveState.matchResult.winningTeamName,
+      margin: liveState.matchResult.margin,
+      method: liveState.matchResult.method,
+      teamColor: winningTeamColor,
+      teamLogoUrl: winningTeamLogo,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveState.matchComplete, liveState.matchResult, winningTeamLogo, winningTeamColor, auctionId]);
+  
   useEffect(() => {
     if (!liveState.matchComplete || !liveState.matchResult) {
       matchWonFiredRef.current = false;
@@ -1103,7 +1152,7 @@ export default function LiveStatePanel({
           align-items: center;
           text-align: center;
           gap: 6px;
-          padding: 40px 24px 32px;
+          padding: 40px 48px 32px;
           border-radius: 20px;
           background: linear-gradient(180deg, rgba(201,151,31,0.10) 0%, rgba(201,151,31,0.03) 100%);
           border: 1px solid rgba(201,151,31,0.28);
@@ -1283,6 +1332,12 @@ export default function LiveStatePanel({
           <RestartMatchDialog
             onCancel={() => setShowRestartConfirm(false)}
             onConfirm={() => {
+              engine.clearPersistedEngineState();       // NEW
+              try {
+                window.localStorage.removeItem(matchWonFiredKey()); // NEW
+              } catch {
+                // ignore
+              }
               onRestartMatch?.();
               setShowRestartConfirm(false);
             }}

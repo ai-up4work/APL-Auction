@@ -755,6 +755,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
             {matchSetupCompleted ? (
               <LiveStatePanel
+                auctionId={auctionId}
                 liveState={liveState}
                 setLiveState={setLiveState}
                 setLiveDirty={setLiveDirty}

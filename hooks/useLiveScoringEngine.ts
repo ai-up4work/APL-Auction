@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LiveState, BatterState, BowlerState } from "@/lib/overlayBus";
 
 export type ExtraType = "none" | "wide" | "noBall" | "bye" | "legBye";
@@ -68,11 +68,6 @@ export interface AutoMatchResult {
   method: "batting" | "bowling" | "tie" | "runs" | "wickets";
 }
 
-// The "this over" chip value for a delivery. Kept as a tiny pure function
-// so recordBall/resolveWicket agree on the exact strings BallChip
-// expects ("0".."6", ".", "wd", "nb"); "W" is applied separately in
-// resolveWicket since a wicket can happen alongside a run-out's partial
-// runs, but the chip itself is always just "W".
 function ballDisplayValue(runs: number, extraType: ExtraType): string {
   if (extraType === "wide") return "wd";
   if (extraType === "noBall") return "nb";
@@ -127,11 +122,6 @@ function computeInnings2Result(
   return { winningSide: "bowling", margin: `won by ${marginRuns} run${marginRuns === 1 ? "" : "s"}` };
 }
 
-// NEW — how many squad members are left who are neither already dismissed
-// nor already occupying a crease slot. If the squad list is empty/unknown
-// (e.g. no squad was entered in Match Setup) we return null rather than 0,
-// so callers treat "unknown" as unrestricted instead of falsely flagging
-// every innings as short on players.
 function countAvailableBatters(
   squad: { name: string }[] | undefined,
   dismissedPlayers: Set<string>,
@@ -147,7 +137,83 @@ function countAvailableBatters(
   ).length;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// PERSISTENCE — everything below this line is new. The engine used to
+// carry `dismissedPlayers`, undo history, the mid-over refs, extraType,
+// isFreeHit, activeSlot, and any open wicket dialog purely in React
+// state/refs. None of that survived a page refresh, even though
+// `liveState` itself did (persisted one level up in page.tsx). This
+// section mirrors that same localStorage pattern for the engine's own
+// state so a refresh mid-over restores EXACTLY where you left off.
+//
+// NOTE: `persistKey` is optional (string | undefined) because the
+// caller's `auctionId` prop is itself optional — a match can be scored
+// before it has ever been saved/named. When no key is available,
+// persistence is simply skipped (load returns null, saves are no-ops)
+// rather than forcing every caller to invent a placeholder key that
+// could collide across unrelated sessions.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface UndoSnapshot {
+  liveState: LiveState;
+  dismissedPlayers: string[];
+  overJustCompleted: boolean;
+}
+
+interface PersistedEngineState {
+  dismissedPlayers: string[];
+  extraType: ExtraType;
+  isFreeHit: boolean;
+  activeSlot: "striker" | "nonStriker" | "bowler";
+  overRunsConceded: number;
+  overJustCompleted: boolean;
+  pendingWicket: PendingWicket | null;
+  undoSnapshot: UndoSnapshot | null;
+}
+
+function engineStorageKey(persistKey: string) {
+  return `overlay:${persistKey}:engineState`;
+}
+
+function loadPersistedEngineState(persistKey: string | undefined): PersistedEngineState | null {
+  if (typeof window === "undefined" || !persistKey) return null;
+  try {
+    const raw = window.localStorage.getItem(engineStorageKey(persistKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const validSlot =
+      parsed?.activeSlot === "nonStriker" || parsed?.activeSlot === "bowler" ? parsed.activeSlot : "striker";
+    const validExtra: ExtraType = ["none", "wide", "noBall", "bye", "legBye"].includes(parsed?.extraType)
+      ? parsed.extraType
+      : "none";
+    return {
+      dismissedPlayers: Array.isArray(parsed?.dismissedPlayers)
+        ? parsed.dismissedPlayers.filter((x: unknown) => typeof x === "string")
+        : [],
+      extraType: validExtra,
+      isFreeHit: !!parsed?.isFreeHit,
+      activeSlot: validSlot,
+      overRunsConceded: Number(parsed?.overRunsConceded) || 0,
+      overJustCompleted: !!parsed?.overJustCompleted,
+      pendingWicket: parsed?.pendingWicket ?? null,
+      undoSnapshot:
+        parsed?.undoSnapshot && parsed.undoSnapshot.liveState
+          ? {
+              liveState: parsed.undoSnapshot.liveState,
+              dismissedPlayers: Array.isArray(parsed.undoSnapshot.dismissedPlayers)
+                ? parsed.undoSnapshot.dismissedPlayers
+                : [],
+              overJustCompleted: !!parsed.undoSnapshot.overJustCompleted,
+            }
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function useLiveScoringEngine({
+  persistKey,
   liveState,
   setLiveState,
   setLiveDirty,
@@ -162,16 +228,17 @@ export function useLiveScoringEngine({
   onInningsEnd,
   onMatchComplete,
 }: {
+  // A stable key (pass your auctionId) used to namespace this engine's
+  // persisted ephemeral state in localStorage, same pattern as
+  // matchSetup/liveState use one level up. Optional — when undefined,
+  // persistence is skipped entirely (see notes above).
+  persistKey: string | undefined;
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
   maxOvers?: number;
   battingTeamName: string;
   bowlingTeamName: string;
-  // NEW — the batting side's squad list. Used only to detect "no
-  // replacement batter left" so we can stop demanding a non-striker pick
-  // and nudge the scorer to end the innings instead. Optional: if not
-  // passed (or empty), behavior is unchanged from before.
   battingSquad?: { name: string }[];
   onBoundary?: (moment: "four" | "six", batter: { name: string; runs: number; balls: number }) => void;
   onMilestone?: (moment: "fifty" | "hundred", batter: { name: string; runs: number; balls: number; label?: string }) => void;
@@ -186,37 +253,116 @@ export function useLiveScoringEngine({
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
   onMatchComplete?: (result: AutoMatchResult) => void;
 }) {
-  const [extraType, setExtraType] = useState<ExtraType>("none");
-  const [isFreeHit, setIsFreeHit] = useState(false);
-  const [activeSlot, setActiveSlot] = useState<"striker" | "nonStriker" | "bowler">("striker");
+  // Loaded once, synchronously, on first render — avoids a hydration
+  // flash where the panel briefly shows empty/default state before an
+  // effect kicks in. Safe under SSR since loadPersistedEngineState
+  // guards on `typeof window`, and safe with no persistKey since it
+  // guards on that too.
+  const initialRef = useRef<PersistedEngineState | null>(null);
+  if (initialRef.current === null) {
+    initialRef.current = loadPersistedEngineState(persistKey) ?? {
+      dismissedPlayers: [],
+      extraType: "none",
+      isFreeHit: false,
+      activeSlot: "striker",
+      overRunsConceded: 0,
+      overJustCompleted: false,
+      pendingWicket: null,
+      undoSnapshot: null,
+    };
+  }
+  const initial = initialRef.current;
 
-  const undoRef = useRef<LiveState | null>(null);
-  const [canUndo, setCanUndo] = useState(false);
+  const [extraType, setExtraType] = useState<ExtraType>(initial.extraType);
+  const [isFreeHit, setIsFreeHit] = useState(initial.isFreeHit);
+  const [activeSlot, setActiveSlot] = useState<"striker" | "nonStriker" | "bowler">(initial.activeSlot);
+
+  const undoRef = useRef<LiveState | null>(initial.undoSnapshot?.liveState ?? null);
+  const [canUndo, setCanUndo] = useState(!!initial.undoSnapshot);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastIdRef = useRef(0);
-  const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(null);
+  const [pendingWicket, setPendingWicket] = useState<PendingWicket | null>(initial.pendingWicket);
 
-  const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set());
-  const dismissedPlayersUndoRef = useRef<Set<string> | null>(null);
+  const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set(initial.dismissedPlayers));
+  const dismissedPlayersUndoRef = useRef<Set<string> | null>(
+    initial.undoSnapshot ? new Set(initial.undoSnapshot.dismissedPlayers) : null
+  );
 
-  const overRunsConcededRef = useRef(0);
+  const overRunsConcededRef = useRef(initial.overRunsConceded);
+  const overJustCompletedRef = useRef(initial.overJustCompleted);
+  const overJustCompletedUndoRef = useRef(initial.undoSnapshot?.overJustCompleted ?? false);
 
-  // NEW — set to true right after a ball completes an over (i.e. after
-  // that ball's own chip has already been appended to thisOver). The
-  // *next* recordBall/resolveWicket call checks this flag first and, if
-  // set, starts a brand-new thisOver array for its own chip instead of
-  // appending onto the just-finished over's row. This is the actual fix:
-  // previously the row was cleared on the SAME ball that completed the
-  // over, which discarded that ball's own chip instead of showing it.
-  const overJustCompletedRef = useRef(false);
+  // Writes the full ephemeral bundle to localStorage. Called explicitly
+  // at the end of every mutating function (not just from a useEffect)
+  // because overRunsConcededRef/overJustCompletedRef are refs and
+  // mutating a ref doesn't trigger re-renders or effects. No-ops
+  // whenever persistKey is undefined.
+  function persistEngineState() {
+    if (typeof window === "undefined" || !persistKey) return;
+    const payload: PersistedEngineState = {
+      dismissedPlayers: Array.from(dismissedPlayersLive.current),
+      extraType: extraTypeLive.current,
+      isFreeHit: isFreeHitLive.current,
+      activeSlot: activeSlotLive.current,
+      overRunsConceded: overRunsConcededRef.current,
+      overJustCompleted: overJustCompletedRef.current,
+      pendingWicket: pendingWicketLive.current,
+      undoSnapshot: undoRef.current
+        ? {
+            liveState: undoRef.current,
+            dismissedPlayers: Array.from(dismissedPlayersUndoRef.current ?? new Set()),
+            overJustCompleted: overJustCompletedUndoRef.current,
+          }
+        : null,
+    };
+    try {
+      window.localStorage.setItem(engineStorageKey(persistKey), JSON.stringify(payload));
+    } catch {
+      // storage full/unavailable — non-fatal, just means this particular
+      // save is lost, next mutation will try again
+    }
+  }
 
-  // Also carried across undo, same as the other refs below.
-  const overJustCompletedUndoRef = useRef(false);
+  // "Live" mirrors of state that persistEngineState needs to read
+  // synchronously right after a setState call, before React has
+  // re-rendered. Kept in sync via the effects below.
+  const dismissedPlayersLive = useRef(dismissedPlayers);
+  const extraTypeLive = useRef(extraType);
+  const isFreeHitLive = useRef(isFreeHit);
+  const activeSlotLive = useRef(activeSlot);
+  const pendingWicketLive = useRef(pendingWicket);
 
-  // NEW — how many squad members remain who could be sent in as a
-  // replacement right now. null means "we don't know" (no squad data),
-  // so downstream checks treat that as unrestricted.
+  useEffect(() => {
+    dismissedPlayersLive.current = dismissedPlayers;
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dismissedPlayers]);
+  useEffect(() => {
+    extraTypeLive.current = extraType;
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extraType]);
+  useEffect(() => {
+    isFreeHitLive.current = isFreeHit;
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFreeHit]);
+  useEffect(() => {
+    activeSlotLive.current = activeSlot;
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSlot]);
+  useEffect(() => {
+    pendingWicketLive.current = pendingWicket;
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWicket]);
+  useEffect(() => {
+    persistEngineState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canUndo]);
+
   const availableBattersCount = countAvailableBatters(
     battingSquad,
     dismissedPlayers,
@@ -224,10 +370,6 @@ export function useLiveScoringEngine({
     liveState.nonStriker
   );
 
-  // NEW — true only when we *know* the squad is exhausted (0 available)
-  // AND one of the two crease slots is currently empty. This is what
-  // drives both the relaxed "assignments missing" check and the red
-  // "end the innings" alert in the UI.
   const noPartnerAvailable =
     availableBattersCount !== null &&
     availableBattersCount === 0 &&
@@ -240,10 +382,6 @@ export function useLiveScoringEngine({
   }
 
   function assignmentsMissing() {
-    // CHANGED — when there's genuinely no replacement batter left, don't
-    // force a non-striker pick that can't exist. Scoring can continue with
-    // just the striker + bowler set; the UI nudges the scorer to end the
-    // innings instead of blocking the ball pad.
     if (noPartnerAvailable) {
       return !liveState.striker.name || !liveState.bowler.name;
     }
@@ -255,6 +393,7 @@ export function useLiveScoringEngine({
     dismissedPlayersUndoRef.current = new Set(dismissedPlayers);
     overJustCompletedUndoRef.current = overJustCompletedRef.current;
     setCanUndo(true);
+    persistEngineState();
   }
 
   function undo() {
@@ -268,6 +407,7 @@ export function useLiveScoringEngine({
     setCanUndo(false);
     setPendingWicket(null);
     overRunsConcededRef.current = 0;
+    persistEngineState();
   }
 
   function patchLive(patch: Partial<LiveState>) {
@@ -277,7 +417,7 @@ export function useLiveScoringEngine({
 
   function applyInningsOneComplete(finalRuns: number) {
     const target = finalRuns + 1;
-    overJustCompletedRef.current = false; // fresh innings, fresh over
+    overJustCompletedRef.current = false;
     setLiveState((prev) => ({
       ...prev,
       target,
@@ -294,6 +434,7 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = 0;
     onInningsEnd?.({ target, previousInningsRuns: finalRuns, inningsNumber: 2 });
     pushToast(`🔁 Innings complete — target set to ${target}`, "info");
+    persistEngineState();
   }
 
   function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie" | "runs" | "wickets"; margin: string }) {
@@ -303,14 +444,14 @@ export function useLiveScoringEngine({
       opts.winningSide === "bowling" ? "runs" : opts.winningSide === "batting" ? "wickets" : "tie";
 
     setLiveState((prev) => ({
-        ...prev,
-        matchComplete: true,
-        matchResult: { winningTeamName, margin: opts.margin, method },
-      }));
-      setLiveDirty(true);
-      pushToast(`🏁 ${winningTeamName} ${opts.margin}`, "info");
-      onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
-    }
+      ...prev,
+      matchComplete: true,
+      matchResult: { winningTeamName, margin: opts.margin, method },
+    }));
+    setLiveDirty(true);
+    pushToast(`🏁 ${winningTeamName} ${opts.margin}`, "info");
+    onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
+  }
 
   function checkAutoEndConditions(next: { runs: number; wickets: number; overs: number; balls: number }) {
     if (liveState.matchComplete) return;
@@ -372,6 +513,7 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
     if (slot === "striker") setActiveSlot("nonStriker");
     else if (slot === "nonStriker") setActiveSlot("bowler");
+    persistEngineState();
   }
 
   function clearSlot(slot: "striker" | "nonStriker" | "bowler") {
@@ -387,6 +529,7 @@ export function useLiveScoringEngine({
     setActiveSlot(slot);
     const label = slot === "striker" ? "Striker" : slot === "nonStriker" ? "Non-striker" : "Bowler";
     pushToast(`${label} cleared — pick a replacement`, "info");
+    persistEngineState();
   }
 
   function swapStrike() {
@@ -443,10 +586,6 @@ export function useLiveScoringEngine({
     }
     const nextRuns = liveState.score.runs + totalTeamRuns;
 
-    // NEW — read + consume the "over just finished" flag from the LAST
-    // ball, before this ball's own chip is computed. This is what makes
-    // the reset happen at the START of the new over instead of erasing
-    // the completing ball's own chip.
     const startFreshRow = overJustCompletedRef.current;
     overJustCompletedRef.current = false;
 
@@ -497,12 +636,8 @@ export function useLiveScoringEngine({
         tournamentBoundaries.sixes += 1;
       }
 
-let finalStriker = striker;
+      let finalStriker = striker;
       let finalNonStriker = prev.nonStriker;
-      // Only rotate strike (odd runs or over-complete) when there's an
-      // actual player on both ends. If the non-striker slot is empty —
-      // lone batter, no replacement — rotating would swap the real
-      // batter out for "nobody". Keep them on strike instead.
       const bothPresent = !!prev.striker.name && !!prev.nonStriker.name;
       const rotatesOnOdd = extraType !== "wide" && bothPresent;
       if (rotatesOnOdd && runs % 2 === 1) {
@@ -515,10 +650,6 @@ let finalStriker = striker;
         finalNonStriker = tmp;
       }
 
-      // CHANGED — this ball's chip is ALWAYS appended, whether or not it
-      // completes the over. If the PREVIOUS ball completed an over
-      // (startFreshRow), we start a new row with just this ball's chip
-      // instead of appending to the old (finished) over's row.
       const baseRow = startFreshRow ? [] : prev.thisOver ?? [];
       const thisOver = [...baseRow, ballValue];
 
@@ -535,8 +666,6 @@ let finalStriker = striker;
       };
     });
 
-    // Record (for the NEXT call) that this ball completed the over, so
-    // the next delivery knows to start a fresh row rather than append.
     if (legality.countsAsLegalBall && liveState.score.balls + 1 >= 6) {
       overJustCompletedRef.current = true;
     }
@@ -571,6 +700,7 @@ let finalStriker = striker;
     }
 
     checkAutoEndConditions({ runs: nextRuns, wickets: liveState.score.wickets, overs: nextOvers, balls: nextBalls });
+    persistEngineState();
   }
 
   function recordWicket() {
@@ -602,6 +732,7 @@ let finalStriker = striker;
       /* carries over */
     } else setIsFreeHit(false);
     setExtraType("none");
+    persistEngineState();
   }
 
   function resolveWicket(
@@ -615,11 +746,6 @@ let finalStriker = striker;
     const { strikerBefore, nonStrikerBefore, bowlerName, extraType: ballExtraType, overComplete } = pendingWicket;
     const legality = ballLegality(ballExtraType);
 
-    // NEW — figure out, before any state updates land, whether THIS
-    // dismissal is the one that leaves the batting side with no possible
-    // replacement. dismissedPlayers hasn't been updated yet at this point
-    // in the function, so we project it forward by one name rather than
-    // reading a stale value.
     const dismissedNameForThisWicket = batsmanOut === "striker" ? strikerBefore.name : nonStrikerBefore.name;
     const survivorName = batsmanOut === "striker" ? nonStrikerBefore.name : strikerBefore.name;
     const projectedDismissed = new Set(dismissedPlayers);
@@ -627,8 +753,6 @@ let finalStriker = striker;
     const availableAfterThisWicket = countAvailableBatters(
       battingSquad,
       projectedDismissed,
-      // pretend the survivor already occupies a slot so they're excluded
-      // from the "available replacements" count.
       { name: survivorName },
       { name: "" }
     );
@@ -661,8 +785,6 @@ let finalStriker = striker;
 
     const wicketBallValue = "W";
 
-    // Same fix applied here — consume the flag left by the previous ball
-    // before deciding whether this wicket's chip starts a fresh row.
     const startFreshRow = overJustCompletedRef.current;
     overJustCompletedRef.current = false;
 
@@ -690,9 +812,6 @@ let finalStriker = striker;
       const strikerFacing: BatterState = { ...prev.striker, runs: strikerFinalRuns, balls: strikerFinalBalls };
       let resolved = resolveBatterSlots(batsmanOut, strikerFacing, { ...prev.nonStriker }, overComplete);
 
-      // NEW — if there's no replacement left, make sure the lone survivor
-      // ends up on strike rather than stranded as a non-striker sitting
-      // next to an empty, "needs a pick" striker slot.
       if (noPartnerAfterThisWicket && !resolved.striker.name && resolved.nonStriker.name) {
         resolved = { striker: resolved.nonStriker, nonStriker: resolved.striker };
       }
@@ -755,6 +874,7 @@ let finalStriker = striker;
 
     setActiveSlot(batsmanOut);
     setPendingWicket(null);
+    persistEngineState();
   }
 
   function endInnings() {
@@ -775,6 +895,7 @@ let finalStriker = striker;
         setLiveDirty(true);
         pushToast("🏁 Match marked complete", "info");
       }
+      persistEngineState();
       return;
     }
 
@@ -795,6 +916,32 @@ let finalStriker = striker;
     setLiveDirty(true);
     onInningsEnd?.({ target, previousInningsRuns, inningsNumber: 2 });
     pushToast(`🔁 Innings 1 closed — target set to ${target}`, "info");
+    persistEngineState();
+  }
+
+  // Clears ALL persisted engine state for this key. Call this from the
+  // page's restartMatch() so a fresh match doesn't inherit stale
+  // dismissed players / undo history / pending wickets from the last
+  // one. No-op (aside from resetting in-memory state) when there's no
+  // persistKey to clear.
+  function clearPersistedEngineState() {
+    setDismissedPlayers(new Set());
+    setPendingWicket(null);
+    setCanUndo(false);
+    undoRef.current = null;
+    dismissedPlayersUndoRef.current = null;
+    overRunsConcededRef.current = 0;
+    overJustCompletedRef.current = false;
+    setExtraType("none");
+    setIsFreeHit(false);
+    setActiveSlot("striker");
+    if (typeof window !== "undefined" && persistKey) {
+      try {
+        window.localStorage.removeItem(engineStorageKey(persistKey));
+      } catch {
+        // ignore
+      }
+    }
   }
 
   return {
@@ -809,9 +956,6 @@ let finalStriker = striker;
     toasts,
     pendingWicket,
     dismissedPlayers,
-    // NEW — true when the batting squad is genuinely exhausted (no one
-    // left to send in) and a crease slot is empty as a result. Drives the
-    // "end the innings" alert and the relaxed assignmentsMissing check.
     noPartnerAvailable,
     assignmentsMissing,
     patchLive,
@@ -823,5 +967,6 @@ let finalStriker = striker;
     recordWicket,
     resolveWicket,
     endInnings,
+    clearPersistedEngineState, // wire to restartMatch
   };
 }
