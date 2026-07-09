@@ -3,6 +3,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ChannelVisibility, OverlayEvent } from "@/lib/overlayBus";
 import { Section, ChannelRow } from "./ui";
+import { loadOnAirChannels, saveOnAirChannels } from "@/lib/matchPersistence"; // CHANGED — was localStorage
 
 const AMBIENT_CHANNELS = [
   { key: "weather", label: "Weather" },
@@ -60,12 +61,11 @@ function allOff(): Record<ChannelKey, boolean> {
   }, {} as Record<ChannelKey, boolean>);
 }
 
-// NEW — rebuilds a full, valid `on` record from whatever's in
-// localStorage. Starts from initialOn() (not allOff()) so a missing or
-// unreadable cache entry still gives a sane default, and only copies
-// over keys that are actually known ChannelKeys with boolean values —
-// so a stale/partial/corrupt cache entry can't inject garbage into
-// state the way a raw JSON.parse() value would.
+// Rebuilds a full, valid `on` record from whatever Supabase returned.
+// Starts from initialOn() so a missing/partial row still gives a sane
+// default, and only copies over keys that are actually known
+// ChannelKeys with boolean values, so a stale/partial row can't inject
+// garbage into state.
 function sanitizeOn(raw: any): Record<ChannelKey, boolean> {
   const base = initialOn();
   if (raw && typeof raw === "object") {
@@ -101,15 +101,19 @@ export type OnAirChannelsHandle = {
 
 const OnAirChannels = forwardRef<
   OnAirChannelsHandle,
-  { fire: (event: OverlayEvent, label: string) => void; auctionId: string } // CHANGED — added auctionId
->(function OnAirChannels({ fire, auctionId }, ref) {
+  // CHANGED — auctionId swapped for matchId. matchId is the Supabase
+  // row id, resolved asynchronously by page.tsx's getOrCreateMatch();
+  // it's `null` until that resolves, so every effect below waits for
+  // it before touching the DB.
+  { fire: (event: OverlayEvent, label: string) => void; matchId: string | null }
+>(function OnAirChannels({ fire, matchId }, ref) {
   const [on, setOn] = useState<Record<ChannelKey, boolean>>(initialOn);
   const [suppressed, setSuppressed] = useState<Record<SuppressibleKey, boolean>>(initialSuppressed);
 
-  // NEW — mirrors the hydrated/liveHydrated pattern used elsewhere in
-  // page.tsx: true only once localStorage has actually been read, so
-  // we don't fire/persist the default on-air state and stomp on
-  // whatever was really live before the refresh.
+  // True only once we've actually attempted a Supabase read (or
+  // confirmed there's no matchId yet to read with) — same purpose as
+  // the localStorage version's hydrated flag: don't fire/persist the
+  // default on-air state and stomp on whatever was really live.
   const [hydrated, setHydrated] = useState(false);
 
   const prevVisibleRef = useRef<Record<ChannelKey, boolean>>({
@@ -124,33 +128,33 @@ const OnAirChannels = forwardRef<
     testBg: false,
   });
 
-  // NEW — load persisted On Air state on mount. This was the missing
-  // piece: every other piece of session state (matchSetup, liveState,
-  // engineState, weather) is round-tripped through localStorage in
-  // page.tsx, but `on` lived purely in this component's own useState
-  // with nothing backing it, so a refresh always fell back to
-  // initialOn() — the "always on" three, everything else off — no
-  // matter what was actually live a second before.
+  // CHANGED — load persisted On Air state from Supabase instead of
+  // localStorage. Waits for matchId to resolve (it starts as null
+  // while page.tsx's getOrCreateMatch() is still in flight). This is
+  // what makes On Air state shared across devices/tabs instead of
+  // being stuck per-browser the way localStorage was.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(`overlay:${auctionId}:onAir`);
-      if (raw) setOn(sanitizeOn(JSON.parse(raw)));
-    } catch {
-      // ignore malformed cache
-    }
-    setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auctionId]);
+    if (!matchId) return;
+    let cancelled = false;
+    (async () => {
+      const channels = await loadOnAirChannels(matchId);
+      if (cancelled) return;
+      if (channels) setOn(sanitizeOn(channels));
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [matchId]);
 
-  // NEW — persist every change, same shape as everything else in page.tsx.
+  // CHANGED — persist every change to Supabase instead of localStorage.
   useEffect(() => {
-    if (!hydrated || typeof window === "undefined") return;
-    window.localStorage.setItem(`overlay:${auctionId}:onAir`, JSON.stringify(on));
-  }, [on, auctionId, hydrated]);
+    if (!hydrated || !matchId) return;
+    saveOnAirChannels(matchId, on);
+  }, [on, matchId, hydrated]);
 
   useEffect(() => {
-    if (!hydrated) return; // NEW — wait for persisted state before syncing to the overlay
+    if (!hydrated) return; // wait for persisted state before syncing to the overlay
     const visible = computeVisible(on, suppressed);
     const prev = prevVisibleRef.current;
     (Object.keys(visible) as ChannelKey[]).forEach((k) => {

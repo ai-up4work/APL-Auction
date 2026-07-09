@@ -673,6 +673,7 @@ function MatchOverScreen({
 
 export default function LiveStatePanel({
   auctionId,
+  matchId,
   liveState,
   setLiveState,
   setLiveDirty,
@@ -701,6 +702,7 @@ export default function LiveStatePanel({
   initialEngineState,
 }: {
   auctionId?: string;
+  matchId?: string | null;
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
@@ -789,6 +791,7 @@ export default function LiveStatePanel({
   // though liveState itself survived. Now forwarded straight through
   // to the parent-provided persistence layer.
   const engine = useLiveScoringEngine({
+    matchId,
     liveState,
     setLiveState,
     setLiveDirty,

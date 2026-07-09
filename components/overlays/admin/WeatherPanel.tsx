@@ -15,6 +15,7 @@ import {
 } from "@/lib/fetchVenueWeather";
 import { LocationAutocompleteInput } from "./LocationAutocomplete";
 import { Pencil } from "lucide-react";
+import { loadWeather, saveWeather } from "@/lib/matchPersistence"; // CHANGED — was localStorage
 
 const SELECT_FETCH_DELAY_MS = 5000;
 const AUTO_REFRESH_MS = 5 * 60 * 1000; // re-check conditions every 5 minutes
@@ -31,49 +32,16 @@ export interface WeatherPanelHandle {
 }
 
 interface WeatherPanelProps {
-  // NEW — needed to key the localStorage entry, same pattern as
-  // matchSetup/liveState/engineState/weather in page.tsx.
-  auctionId: string;
+  // CHANGED — matchId (Supabase row id) instead of auctionId. Resolves
+  // asynchronously from page.tsx's getOrCreateMatch(); null until then.
+  matchId: string | null;
   defaultVenue: string;
   onFetched: (data: WeatherFetchResult) => void;
   autoFetchKey?: number | string;
 }
 
-// NEW — what actually gets persisted: the last successful reading, plus
-// the coordinates it came from (needed to resume the 5-min auto-refresh
-// loop without re-geocoding).
-interface PersistedWeatherPanelState {
-  lastResult: WeatherFetchResult | null;
-  coords: { latitude: number; longitude: number } | null;
-}
-
-// NEW — defensively rebuilds persisted state from whatever's in
-// localStorage. A missing/partial/corrupt entry degrades to "nothing
-// cached" rather than handing bad data into state.
-function sanitizeWeatherPanelCache(raw: any): PersistedWeatherPanelState {
-  const lastResult =
-    raw?.lastResult &&
-    typeof raw.lastResult.venue === "string" &&
-    typeof raw.lastResult.temp === "number" &&
-    typeof raw.lastResult.condition === "string"
-      ? {
-          venue: raw.lastResult.venue,
-          temp: raw.lastResult.temp,
-          unit: "C" as const,
-          condition: raw.lastResult.condition,
-        }
-      : null;
-  const coords =
-    raw?.coords &&
-    typeof raw.coords.latitude === "number" &&
-    typeof raw.coords.longitude === "number"
-      ? { latitude: raw.coords.latitude, longitude: raw.coords.longitude }
-      : null;
-  return { lastResult, coords };
-}
-
 const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
-  function WeatherPanel({ auctionId, defaultVenue, onFetched, autoFetchKey }, ref) {
+  function WeatherPanel({ matchId, defaultVenue, onFetched, autoFetchKey }, ref) {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState<
       "idle" | "scheduled" | "loading" | "error"
@@ -103,25 +71,28 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       defaultVenueRef.current = defaultVenue;
     }, [defaultVenue]);
 
-    // NEW — same storage-key convention as everywhere else in page.tsx.
-    function weatherPanelStorageKey() {
-      return `overlay:${auctionId}:weatherPanel`;
-    }
+    // NEW — keeps matchId reachable inside scheduleAutoRefresh's closure
+    // without needing it in that function's dependency chain (it's a
+    // plain function, not an effect, so this mirrors defaultVenueRef's
+    // pattern above).
+    const matchIdRef = useRef(matchId);
+    useEffect(() => {
+      matchIdRef.current = matchId;
+    }, [matchId]);
 
-    // NEW — writes the latest successful reading + coords to
-    // localStorage. Called right after a successful fetch (manual,
-    // scheduled-selection, or auto-refresh) so a refresh can pick up
-    // exactly where things left off.
+    // CHANGED — writes the latest successful reading + coords to
+    // Supabase instead of localStorage. Note: this shares the same
+    // `weather_readings` row that page.tsx's own persistence effect
+    // writes to (with the full WeatherData including `corner`) — we
+    // pass a default corner here since this panel has no corner UI;
+    // page.tsx's write (triggered moments later via onFetched ->
+    // pushFetchedWeather -> setWeatherData) is the actual source of
+    // truth for corner. Both writes carry the same venue/temp/condition
+    // so there's no meaningful conflict, just a harmless double-write.
     function persistWeatherPanelState(result: WeatherFetchResult, coords: { latitude: number; longitude: number }) {
-      if (typeof window === "undefined") return;
-      try {
-        window.localStorage.setItem(
-          weatherPanelStorageKey(),
-          JSON.stringify({ lastResult: result, coords })
-        );
-      } catch {
-        // non-fatal
-      }
+      const id = matchIdRef.current;
+      if (!id) return;
+      saveWeather(id, { ...result, corner: "top-right" }, coords);
     }
 
     function clearScheduledFetch() {
@@ -158,7 +129,7 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
           console.log("[WeatherPanel] auto-refresh fetch SUCCESS:", wx);
           setLastResult(wx);
           onFetched(wx);
-          persistWeatherPanelState(wx, target); // NEW — keep the cache current across the auto-refresh loop too
+          persistWeatherPanelState(wx, target); // keep the DB cache current across the auto-refresh loop too
         } catch (e) {
           console.log("[WeatherPanel] auto-refresh fetch FAILED:", e);
         } finally {
@@ -167,36 +138,38 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       }, AUTO_REFRESH_MS);
     }
 
-    // NEW — hydrate on mount. This is the actual fix: previously
-    // `lastFetchedRef` came back `null` after every refresh, which
-    // meant `scheduleAutoRefresh()` was never called again — the
-    // 5-minute loop only ever got (re)started from inside
-    // runFetchForCoords, so a page reload silently killed live
-    // auto-refresh until someone manually re-fetched. Now we restore
-    // both the last reading (so the collapsed summary is accurate
-    // immediately) and the coords (so the auto-refresh loop resumes).
+    // CHANGED — hydrate from Supabase instead of localStorage, gated on
+    // matchId resolving. This is the actual fix from before, now backed
+    // by the DB: without restoring `lastFetchedRef`, the 5-minute
+    // auto-refresh loop never restarts after a reload — it only ever
+    // gets (re)started from inside runFetchForCoords.
     const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
-      if (typeof window === "undefined") return;
-      try {
-        const raw = window.localStorage.getItem(weatherPanelStorageKey());
-        if (raw) {
-          const { lastResult: cachedResult, coords } = sanitizeWeatherPanelCache(JSON.parse(raw));
-          if (cachedResult) {
-            setLastResult(cachedResult);
-            setCollapsed(true);
-          }
-          if (coords) {
-            lastFetchedRef.current = coords;
-            scheduleAutoRefresh();
-          }
+      if (!matchId) return;
+      let cancelled = false;
+      (async () => {
+        const weather = await loadWeather(matchId);
+        if (cancelled) return;
+        if (weather?.data) {
+          setLastResult({
+            venue: weather.data.venue,
+            temp: weather.data.temp,
+            unit: "C",
+            condition: weather.data.condition,
+          });
+          setCollapsed(true);
         }
-      } catch {
-        // ignore malformed cache
-      }
-      setHydrated(true);
+        if (weather?.coords) {
+          lastFetchedRef.current = weather.coords;
+          scheduleAutoRefresh();
+        }
+        setHydrated(true);
+      })();
+      return () => {
+        cancelled = true;
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [auctionId]);
+    }, [matchId]);
 
     useEffect(() => {
       return () => {
@@ -223,7 +196,7 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
         setLastResult(wx);
         onFetched(wx);
         lastFetchedRef.current = { latitude, longitude };
-        persistWeatherPanelState(wx, { latitude, longitude }); // NEW
+        persistWeatherPanelState(wx, { latitude, longitude });
         scheduleAutoRefresh();
         setStatus("idle");
         setCollapsed(true);

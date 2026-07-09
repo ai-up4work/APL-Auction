@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveState, BatterState, BowlerState } from "@/lib/overlayBus";
+import { appendBall, deleteLastBall } from "@/lib/matchPersistence"; // NEW
 
 export type ExtraType = "none" | "wide" | "noBall" | "bye" | "legBye";
 
@@ -137,25 +138,6 @@ function countAvailableBatters(
   ).length;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// SYNC — the engine used to carry `dismissedPlayers`, undo history, the
-// mid-over refs, extraType, isFreeHit, activeSlot, and any open wicket
-// dialog purely in React state/refs, persisted to localStorage so a
-// refresh on the SAME device restored them. That doesn't help when a
-// different device/tab needs to pick up where another one left off, so
-// this has been replaced with two hooks the parent wires up to whatever
-// transport it likes (in practice: Supabase table + realtime broadcast,
-// see lib/matchStateSync.ts):
-//
-//   - `onEngineStateChange(state)` fires at every point the old
-//     `persistEngineState()` used to write to localStorage. The parent
-//     uses this to broadcast/save the engine's ephemeral state.
-//   - `applyRemoteEngineState(state)` is returned from the hook so the
-//     parent can push an incoming state (from a DB load or a broadcast
-//     from another admin panel) back INTO this hook, overwriting local
-//     state.
-// ─────────────────────────────────────────────────────────────────────────
-
 export interface UndoSnapshot {
   liveState: LiveState;
   dismissedPlayers: string[];
@@ -171,6 +153,12 @@ export interface EngineSyncState {
   overJustCompleted: boolean;
   pendingWicket: PendingWicket | null;
   undoSnapshot: UndoSnapshot | null;
+  // NEW — the ledger's per-innings delivery counter. Synced like every
+  // other ephemeral field so a reload (or another device picking up the
+  // scorer) continues the sequence correctly instead of restarting at 0
+  // and colliding with the unique (match_id, innings_number, sequence)
+  // constraint on the `balls` table.
+  ballSequence: number;
 }
 
 function defaultEngineSyncState(): EngineSyncState {
@@ -183,10 +171,12 @@ function defaultEngineSyncState(): EngineSyncState {
     overJustCompleted: false,
     pendingWicket: null,
     undoSnapshot: null,
+    ballSequence: 0, // NEW
   };
 }
 
 export function useLiveScoringEngine({
+  matchId, // NEW — Supabase row id; null until page.tsx's getOrCreateMatch() resolves
   liveState,
   setLiveState,
   setLiveDirty,
@@ -203,6 +193,7 @@ export function useLiveScoringEngine({
   onEngineStateChange,
   initialEngineState,
 }: {
+  matchId?: string | null; // NEW
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
@@ -222,14 +213,7 @@ export function useLiveScoringEngine({
   onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
   onMatchComplete?: (result: AutoMatchResult) => void;
-  // Fires on every mutation with the engine's full ephemeral state, so
-  // the parent can push it to the sync layer (broadcast + DB save).
   onEngineStateChange?: (state: EngineSyncState) => void;
-  // Optional synchronous seed for first render, if the parent already
-  // has state in hand at mount time. Most callers won't have this yet
-  // (the DB load is async) — that's fine, they just call
-  // `applyRemoteEngineState` once the load resolves, a moment after
-  // mount.
   initialEngineState?: EngineSyncState | null;
 }) {
   const initialRef = useRef<EngineSyncState | null>(null);
@@ -258,12 +242,20 @@ export function useLiveScoringEngine({
   const overJustCompletedRef = useRef(initial.overJustCompleted);
   const overJustCompletedUndoRef = useRef(initial.undoSnapshot?.overJustCompleted ?? false);
 
-  // While a remote update is being applied (via applyRemoteEngineState),
-  // suppress outbound notifications — otherwise we'd immediately
-  // broadcast right back out the state we just received, which is
-  // harmless (self:false + no version conflicts) but wasteful and can
-  // cause a visible flicker of stale intermediate values while the
-  // several setState calls below settle one by one.
+  // NEW — the ledger's per-innings delivery counter, seeded from
+  // whatever was synced in. Incremented once per actual delivery
+  // (recordBall or resolveWicket), reset to 0 whenever the innings
+  // number changes, since `balls.sequence` is only unique per
+  // (match_id, innings_number).
+  const ballSequenceRef = useRef(initial.ballSequence);
+
+  // Keeps matchId reachable inside closures without pulling it into
+  // every effect's dependency array.
+  const matchIdRef = useRef(matchId ?? null);
+  useEffect(() => {
+    matchIdRef.current = matchId ?? null;
+  }, [matchId]);
+
   const suppressNotifyRef = useRef(false);
 
   const onEngineStateChangeRef = useRef(onEngineStateChange);
@@ -271,9 +263,6 @@ export function useLiveScoringEngine({
     onEngineStateChangeRef.current = onEngineStateChange;
   }, [onEngineStateChange]);
 
-  // "Live" mirrors of state that notifyEngineStateChange needs to read
-  // synchronously right after a setState call, before React has
-  // re-rendered.
   const dismissedPlayersLive = useRef(dismissedPlayers);
   const extraTypeLive = useRef(extraType);
   const isFreeHitLive = useRef(isFreeHit);
@@ -297,6 +286,7 @@ export function useLiveScoringEngine({
             overJustCompleted: overJustCompletedUndoRef.current,
           }
         : null,
+      ballSequence: ballSequenceRef.current, // NEW
     };
     onEngineStateChangeRef.current?.(state);
   }
@@ -331,10 +321,6 @@ export function useLiveScoringEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUndo]);
 
-  // Called by the parent when a DB load or an incoming broadcast from
-  // another admin panel arrives. Overwrites every piece of local
-  // ephemeral state to match. Guarded by suppressNotifyRef so this
-  // doesn't immediately bounce back out as an outbound update.
   function applyRemoteEngineState(remote: EngineSyncState) {
     suppressNotifyRef.current = true;
 
@@ -346,6 +332,7 @@ export function useLiveScoringEngine({
 
     overRunsConcededRef.current = remote.overRunsConceded;
     overJustCompletedRef.current = remote.overJustCompleted;
+    ballSequenceRef.current = remote.ballSequence ?? 0; // NEW
 
     if (remote.undoSnapshot) {
       undoRef.current = remote.undoSnapshot.liveState;
@@ -359,9 +346,6 @@ export function useLiveScoringEngine({
       setCanUndo(false);
     }
 
-    // Release the suppression once the batched state updates above have
-    // been committed and their effects (which call notifyEngineStateChange)
-    // have run. A macrotask reliably runs after that effect flush.
     setTimeout(() => {
       suppressNotifyRef.current = false;
     }, 0);
@@ -402,6 +386,15 @@ export function useLiveScoringEngine({
 
   function undo() {
     if (!undoRef.current) return;
+
+    // NEW — the ball we're about to revert past is whatever the counter
+    // currently points at, for the innings we're still in. Captured
+    // before any state changes below. If a delivery genuinely wasn't
+    // logged (e.g. matchId was null at the time it was recorded), the
+    // delete below is a harmless no-op — nothing to clean up.
+    const inningsForDelete = (liveState.inningsNumber ?? 1) as 1 | 2;
+    const sequenceToDelete = ballSequenceRef.current;
+
     setLiveState(undoRef.current);
     setLiveDirty(true);
     setDismissedPlayers(dismissedPlayersUndoRef.current ?? new Set());
@@ -411,6 +404,15 @@ export function useLiveScoringEngine({
     setCanUndo(false);
     setPendingWicket(null);
     overRunsConcededRef.current = 0;
+
+    if (sequenceToDelete > 0) {
+      ballSequenceRef.current = sequenceToDelete - 1;
+      const id = matchIdRef.current;
+      if (id) {
+        deleteLastBall(id, inningsForDelete, sequenceToDelete);
+      }
+    }
+
     notifyEngineStateChange();
   }
 
@@ -422,6 +424,7 @@ export function useLiveScoringEngine({
   function applyInningsOneComplete(finalRuns: number) {
     const target = finalRuns + 1;
     overJustCompletedRef.current = false;
+    ballSequenceRef.current = 0; // NEW — sequence restarts per innings
     setLiveState((prev) => ({
       ...prev,
       target,
@@ -564,8 +567,10 @@ export function useLiveScoringEngine({
     const legality = ballLegality(extraType);
     const wasFreeHitBall = isFreeHit;
     const ballValue = ballDisplayValue(runs, extraType);
+    const currentExtraType = extraType; // NEW — captured before it gets reset below, for the ledger row
 
     const strikerBefore = liveState.striker;
+    const nonStrikerBefore = liveState.nonStriker; // NEW — for the ledger row
     const runsBefore = strikerBefore.runs;
     const newRuns = legality.batterCanScoreOffBat ? runsBefore + runs : runsBefore;
     const newBalls = legality.countsAsLegalBall ? strikerBefore.balls + 1 : strikerBefore.balls;
@@ -578,6 +583,13 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = bowlerOverCompletesThisBall ? 0 : overRunsAfterThisBall;
 
     const bowlerNameForMoment = liveState.bowler.name;
+
+    // NEW — the delivery's position before this ball is applied, and
+    // the innings it belongs to. Captured here (not after setLiveState)
+    // since setLiveState's updater runs against a snapshot too.
+    const overNumberForLedger = liveState.score.overs;
+    const ballNumberForLedger = liveState.score.balls;
+    const inningsForLedger = (liveState.inningsNumber ?? 1) as 1 | 2;
 
     let nextOvers = liveState.score.overs;
     let nextBalls = liveState.score.balls;
@@ -704,6 +716,28 @@ export function useLiveScoringEngine({
     }
 
     checkAutoEndConditions({ runs: nextRuns, wickets: liveState.score.wickets, overs: nextOvers, balls: nextBalls });
+
+    // NEW — log this delivery to the ledger. One row per actual ball
+    // bowled, whether legal or not (a wide is still a delivery). Fire-
+    // and-forget: doesn't block or gate anything above.
+    const ballSeq = ++ballSequenceRef.current;
+    const idForBall = matchIdRef.current;
+    if (idForBall) {
+      appendBall(idForBall, {
+        inningsNumber: inningsForLedger,
+        sequence: ballSeq,
+        overNumber: overNumberForLedger,
+        ballNumber: ballNumberForLedger,
+        strikerName: strikerBefore.name,
+        nonStrikerName: nonStrikerBefore.name,
+        bowlerName: bowlerNameForMoment,
+        runs,
+        extraType: currentExtraType,
+        isWicket: false,
+        isFreeHit: wasFreeHitBall,
+      });
+    }
+
     notifyEngineStateChange();
   }
 
@@ -774,6 +808,11 @@ export function useLiveScoringEngine({
     const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
     const maidenFired = overComplete && overRunsAfterThisBall === 0;
     overRunsConcededRef.current = overComplete ? 0 : overRunsAfterThisBall;
+
+    // NEW — ledger position, captured before liveState mutates.
+    const overNumberForLedger = liveState.score.overs;
+    const ballNumberForLedger = liveState.score.balls;
+    const inningsForLedger = (liveState.inningsNumber ?? 1) as 1 | 2;
 
     let nextOvers = liveState.score.overs;
     let nextBalls = liveState.score.balls;
@@ -878,6 +917,31 @@ export function useLiveScoringEngine({
 
     setActiveSlot(batsmanOut);
     setPendingWicket(null);
+
+    // NEW — log the delivery regardless of `fire`: the ball physically
+    // happened either way, `fire` only controls whether the on-air
+    // graphic fires.
+    const ballSeq = ++ballSequenceRef.current;
+    const idForBall = matchIdRef.current;
+    if (idForBall) {
+      appendBall(idForBall, {
+        inningsNumber: inningsForLedger,
+        sequence: ballSeq,
+        overNumber: overNumberForLedger,
+        ballNumber: ballNumberForLedger,
+        strikerName: strikerBefore.name,
+        nonStrikerName: nonStrikerBefore.name,
+        bowlerName,
+        runs: completedRuns,
+        extraType: ballExtraType,
+        isWicket: true,
+        dismissalType,
+        batsmanOut,
+        fielder,
+        isFreeHit: pendingWicket.isFreeHitActive,
+      });
+    }
+
     notifyEngineStateChange();
   }
 
@@ -906,6 +970,8 @@ export function useLiveScoringEngine({
     const previousInningsRuns = liveState.score.runs;
     const target = previousInningsRuns + 1;
 
+    ballSequenceRef.current = 0; // NEW — new innings, sequence restarts
+
     setLiveState((prev) => ({
       ...prev,
       target,
@@ -923,11 +989,10 @@ export function useLiveScoringEngine({
     notifyEngineStateChange();
   }
 
-  // Resets ALL ephemeral engine state to defaults in memory. Call this
-  // from the page's restartMatch() so a fresh match doesn't inherit
-  // stale dismissed players / undo history / pending wickets from the
-  // last one. The parent is responsible for also clearing/overwriting
-  // the durable row (DB) and broadcasting the reset — this function
+  // Resets ALL ephemeral engine state to defaults in memory. The parent
+  // (page.tsx's restartMatch) is responsible for also clearing/
+  // overwriting the durable row (DB) — including the balls ledger via
+  // deleteAllBalls(matchId) — and broadcasting the reset. This function
   // only touches in-memory React state.
   function resetEngineState() {
     setDismissedPlayers(new Set());
@@ -937,6 +1002,7 @@ export function useLiveScoringEngine({
     dismissedPlayersUndoRef.current = null;
     overRunsConcededRef.current = 0;
     overJustCompletedRef.current = false;
+    ballSequenceRef.current = 0; // NEW
     setExtraType("none");
     setIsFreeHit(false);
     setActiveSlot("striker");
@@ -965,7 +1031,7 @@ export function useLiveScoringEngine({
     recordWicket,
     resolveWicket,
     endInnings,
-    applyRemoteEngineState, // NEW — parent calls this on DB load / incoming broadcast
-    resetEngineState, // renamed from clearPersistedEngineState — no longer touches localStorage
+    applyRemoteEngineState,
+    resetEngineState,
   };
 }
