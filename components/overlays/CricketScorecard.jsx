@@ -1,19 +1,67 @@
+// components/overlays/CricketScorecard.jsx
 "use client";
 
 import { ListOrdered, Star } from "lucide-react";
 import { createPortal } from "react-dom";
-
 import { useOverlayPanel } from "@/hooks/useOverlayPanel";
 import { useBallsLedger } from "@/hooks/useBallsLedger";
 import { buildInningsCard } from "@/lib/scorecardAggregator";
 import { GOLD_BEZEL, plaqueClip, ambientGlow } from "@/lib/overlayTokens";
-import TeamBadge from "@/components/overlays/shared/TeamBadge";
 import TearLine from "@/components/overlays/shared/TearLine";
 
 const EXIT_DURATION_MS = 400;
 
 const PLAQUE_CLIP = plaqueClip(30);
 const PLAQUE_CLIP_INNER = plaqueClip(27);
+
+// Custom team badge component that properly handles logoUrl
+function TeamBadge({ team, variant, sizeClass = "w-14 h-14", glowInset = "-inset-2.5" }) {
+  const logoUrl = team?.logoUrl || team?.logo;
+  
+  return (
+    <div className={`relative ${sizeClass} shrink-0`}>
+      {/* Glow ring */}
+      <div 
+        className={`absolute ${glowInset} rounded-full opacity-30`}
+        style={{
+          background: `radial-gradient(circle, ${team?.color || '#c9971f'}44 0%, transparent 70%)`,
+        }}
+      />
+      
+      {/* Frame */}
+      <div 
+        className="relative w-full h-full rounded-full overflow-hidden"
+        style={{
+          border: `2px solid ${team?.color || '#c9971f'}`,
+          background: '#0e1420',
+        }}
+      >
+        {logoUrl ? (
+          <img 
+            src={logoUrl} 
+            alt={team?.name || 'Team'} 
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div 
+            className="w-full h-full flex items-center justify-center text-white font-bold text-sm"
+            style={{ background: team?.color || '#2a2a3a' }}
+          >
+            {team?.shortCode || team?.name?.charAt(0) || '?'}
+          </div>
+        )}
+        
+        {/* Gloss overlay */}
+        <div 
+          className="absolute inset-0 rounded-full pointer-events-none"
+          style={{
+            background: 'linear-gradient(160deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.02) 30%, transparent 55%)',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function StatRow({ label, value1, value2, top, ringColor }) {
   return (
@@ -65,7 +113,7 @@ function TeamInnings({ team, innings, closing, delay, variant }) {
 
       <div className="relative z-10 flex items-center justify-between gap-4 px-5 sm:px-6 lg:px-6 pb-4">
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-          <TeamBadge team={team} variant={variant} sizeClass="w-14 h-14 sm:w-16 sm:h-16" framePadding="2.5px" glowInset="-inset-2.5" />
+          <TeamBadge team={team} variant={variant} sizeClass="w-14 h-14 sm:w-16 sm:h-16" glowInset="-inset-2.5" />
           <span className="font-heading font-black text-sm sm:text-lg lg:text-xl uppercase tracking-wide leading-tight truncate" style={{ color: "var(--color-on-surface)" }}>
             {team.name}
           </span>
@@ -131,8 +179,8 @@ export default function CricketScorecard({
   show,
   hideTrigger = false,
   matchId,
-  matchSetup,
-  liveState,
+  matchSetup = {},
+  liveState = {},
 }) {
   const { mounted, open, closing, toggle, closePanel } = useOverlayPanel(show, EXIT_DURATION_MS, {
     defaultOpen: false,
@@ -141,23 +189,40 @@ export default function CricketScorecard({
 
   const { balls } = useBallsLedger(matchId, mounted);
 
-  const teamA = matchSetup?.teamA;
-  const teamB = matchSetup?.teamB;
+  // Destructure matchSetup with fallbacks
+  const {
+    teamA,
+    teamB,
+    tournamentLogoUrl,
+    tournamentName,
+  } = matchSetup;
 
-  const innings1Label = liveState?.inningsNumber === 2 || liveState?.matchComplete ? "1st Innings" : "1st Innings (in progress)";
+  // Destructure liveState
+  const {
+    inningsNumber = 1,
+    matchComplete = false,
+    matchResult,
+  } = liveState;
+
+  const innings1Label = inningsNumber === 2 || matchComplete ? "1st Innings" : "1st Innings (in progress)";
   const innings2Label = "2nd Innings";
 
   const inningsA = buildInningsCard(balls, 1, innings1Label);
   const inningsB = buildInningsCard(balls, 2, innings2Label);
 
-  const resultLine = liveState?.matchComplete && liveState.matchResult
-    ? `${liveState.matchResult.winningTeamName} ${liveState.matchResult.margin}`
+  const resultLine = matchComplete && matchResult
+    ? `${matchResult.winningTeamName} ${matchResult.margin}`
     : "Match in progress";
 
-  const tournamentLogo = matchSetup?.tournamentLogoUrl;
-  const tournamentName = matchSetup?.tournamentName;
+  // Add debug logging
+  console.log('CricketScorecard - matchSetup:', matchSetup);
+  console.log('CricketScorecard - teamA:', teamA);
+  console.log('CricketScorecard - teamB:', teamB);
 
-  if (!teamA || !teamB) return null;
+  if (!teamA || !teamB) {
+    console.warn('CricketScorecard: Missing team data');
+    return null;
+  }
 
   return (
     <>
@@ -216,14 +281,14 @@ export default function CricketScorecard({
                       WebkitClipPath: PLAQUE_CLIP_INNER,
                     }}
                   >
-                    {tournamentLogo && (
+                    {tournamentLogoUrl && (
                       <div
                         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
                         aria-hidden="true"
                         style={{ opacity: 0.16, mixBlendMode: "screen" }}
                       >
                         <img
-                          src={tournamentLogo}
+                          src={tournamentLogoUrl}
                           alt=""
                           className="w-2/3 h-2/3 object-contain"
                           style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
