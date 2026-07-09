@@ -15,59 +15,36 @@ import CricketBall from "./shared/CricketBall";
      blood-crimson #A32F2A
 
    ------------------------------------------------------------
-   REDESIGN NOTES (v2)
+   REDESIGN NOTES (v2 – v4)
    ------------------------------------------------------------
-   The old version was a full-bleed color wipe that blanked out
-   the whole screen. This version is a floating glass "broadcast
-   card": a contained, rounded panel with a translucent tinted
-   background and a real backdrop-blur, so the live feed stays
-   visible behind it. Ambient FX (rings/particles/fireworks/
-   confetti) still play across the full viewport since they don't
-   obscure anything, but the readable graphic itself is a compact
-   card, not a screen takeover.
-
-   The crescent+helmet crest mark is replaced with the league's
-   actual logo (/moon-knight-logo.png), used two ways: a crisp
-   badge above the headline, and a large, slowly breathing
-   low-opacity watermark behind the content inside the card.
-
-   Animation has been layered up: a light-sweep "sheen" crosses
-   the card on entry, the card border pulses gently in the event
-   color, the logo has a soft glow pulse, and the card itself
-   blurs/scales in rather than just fading.
+   See earlier revisions: glass "broadcast card" instead of a
+   full-bleed wipe, league logo watermark + badge, layered entry
+   animation (sheen, border pulse, logo glow), trophy ring +
+   bigger multi-word headlines, non-rotating watermark, natural
+   word-wrap headline.
 
    ------------------------------------------------------------
-   REDESIGN NOTES (v3)
+   REDESIGN NOTES (v5)
    ------------------------------------------------------------
-   - Match-won trophy ring now snugly frames the team logo
-     (double-ring treatment: soft accent-colored outer ring +
-     crisp white inner ring hugging the logo) instead of leaving
-     a big empty gap.
-   - Team name headline is noticeably larger for multi-word
-     names (the common case for match-won team names) so it
-     reads clearly on a broadcast.
-   - The background logo watermark inside the card is bigger
-     across every moment, especially the trophy moment.
-   - Every moment stays on screen 2x as long as before so
-     viewers have time to actually read it.
-
-   ------------------------------------------------------------
-   REDESIGN NOTES (v4)
-   ------------------------------------------------------------
-   - Watermark is bigger again for four / six / maiden (ball +
-     shield moments) so it reads as a real presence, not a
-     shadow of its former self.
-   - Watermark no longer rotates — it only breathes via
-     opacity/scale, so it stays dead-center under everything
-     else instead of drifting off-axis.
-   - Headline words now wrap naturally in a centered row instead
-     of being forced one-per-line, with tighter tracking and a
-     crisper two-layer shadow + thin stroke so team names read
-     clean instead of blocky.
-   - Trophy ring pulse (the "border" around the team crest) is
-     now anchored with the same center point as the logo itself,
-     including through its scale animation, so it can no longer
-     drift off-center while pulsing.
+   - Moments now fire through a QUEUE instead of a single
+     overwritable slot. Previously, firing a new moment while
+     one was still on screen instantly replaced it — no exit
+     animation, no chance to read it. Now every fire (`trigger`)
+     enqueues; only one moment is ever shown at a time, and the
+     next one in line waits until the current one has fully
+     finished (duration + exit) PLUS a 1s breathing gap before
+     it appears. Nothing gets clobbered anymore.
+   - Match Won is decluttered: the old double-ring "trophy ring"
+     treatment around the team crest has been removed entirely
+     (no more accent-colored glow ring + white inner ring). The
+     team logo is shown plain, cleanly cropped to a circle, no
+     extra bling.
+   - The background watermark for the Match Won moment now uses
+     the WINNING TEAM'S logo instead of the league logo, so you
+     no longer see two different logos (league watermark behind
+     + team crest in front) at once. Every other moment (four,
+     six, wicket, fifty, hundred, maiden) is untouched and still
+     uses the league logo as its watermark.
    ============================================================ */
 
 export const DEFAULT_MOMENTS = {
@@ -181,6 +158,10 @@ export const DEFAULT_MOMENTS = {
 };
 
 const EXIT_DURATION_MS = 260;
+// NEW — gap held between one moment finishing (fully exited/unmounted)
+// and the next queued moment being allowed to start. This is what
+// prevents back-to-back fires from feeling like a jump-cut.
+const QUEUE_GAP_MS = 1000;
 export const DEFAULT_CONFETTI_COLORS = ["#D4AF37", "#EAF1FB", "#C7CFDE", "#8FA6C9", "#ffffff"];
 const LOGO_SRC = "/moon-knight-logo.png";
 
@@ -193,6 +174,19 @@ const WATERMARK_SIZE_BY_MODE = {
   shield: 400,
   stumps: 340,
   milestone: 340,
+};
+
+// NEW — per-mode base opacity for the watermark. Match Won gets a
+// noticeably stronger watermark (0.35 vs the usual 0.15) since it's now
+// the ONLY branding element on that screen (no more foreground crest),
+// so it needs to read as a real presence rather than a faint hint.
+// Every other moment is untouched at the original 0.15.
+const WATERMARK_OPACITY_BY_MODE = {
+  trophy: 0.35,
+  ball: 0.15,
+  shield: 0.15,
+  stumps: 0.15,
+  milestone: 0.15,
 };
 
 function seededRand(seed) {
@@ -216,11 +210,21 @@ function soloGradient(color) {
    sitting behind the content inside the card. Sized per-moment
    via WATERMARK_SIZE_BY_MODE. It only breathes via opacity/scale
    (no rotation) so its center never drifts.
+
+   CHANGED — now accepts a `src` prop instead of always hardcoding
+   the league logo. The Match Won moment passes the winning team's
+   logo here so the card shows ONE consistent logo (the team's),
+   not the league logo behind + team crest in front. Every other
+   moment still defaults to the league logo.
    ------------------------------------------------------------ */
-function LogoWatermark({ size = 320 }) {
+function LogoWatermark({ size = 320, src = LOGO_SRC, opacity = 0.15 }) {
+  // Derive the "dim" (resting) and "peak" (breathing-in) opacity values
+  // from the single `opacity` prop so callers only ever set one number.
+  const dim = Math.max(0, opacity - 0.02);
+  const peak = Math.min(1, opacity + 0.05);
   return (
     <img
-      src={LOGO_SRC}
+      src={src}
       alt=""
       aria-hidden="true"
       draggable={false}
@@ -231,15 +235,18 @@ function LogoWatermark({ size = 320 }) {
         objectFit: "contain",
         top: "50%",
         left: "50%",
+        "--mk-wm-base": opacity,
+        "--mk-wm-dim": dim,
+        "--mk-wm-peak": peak,
       }}
     />
   );
 }
 
 /* ------------------------------------------------------------
-   LogoBadge — crisp small logo above the headline. This is the
-   one signature branded touch, replacing the old crescent+helmet
-   crest mark.
+   LogoBadge — crisp small logo above the headline. Currently
+   unused in the render tree (kept in case it's wired back in),
+   left untouched.
    ------------------------------------------------------------ */
 function LogoBadge({ size = 60 }) {
   return (
@@ -296,39 +303,12 @@ function StumpsShatter() {
   );
 }
 
-// Trophy pop-in. A double ring (soft accent-colored outer glow ring +
-// crisp white inner ring) sized to snugly hug the team logo. Both
-// rings are anchored to the exact same center point as the logo via
-// top:50%/left:50% + transform, and that centering transform is baked
-// into the pulse keyframes too, so the ring can never drift off-axis
-// while it animates.
-function TrophyRise({ cfg, logoUrl }) {
-  return (
-    <div className="mk-trophy-wrap relative flex items-center justify-center" style={{ width: 210, height: 210 }}>
-      <span
-        className="mk-trophy-ring mk-trophy-ring-outer absolute"
-        style={{ top: "50%", left: "50%", borderColor: cfg.accent, boxShadow: `0 0 34px ${cfg.glow}` }}
-      />
-      <span
-        className="mk-trophy-ring mk-trophy-ring-inner absolute"
-        style={{ top: "50%", left: "50%", borderColor: "#ffffff" }}
-      />
-      {logoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={logoUrl}
-          alt=""
-          className="rounded-full object-cover relative z-10"
-          style={{ width: 178, height: 178, border: "4px solid #ffffff", boxShadow: `0 0 28px ${cfg.glow}` }}
-        />
-      ) : (
-        <span className="relative z-10" style={{ fontSize: 140 }}>
-          🏆
-        </span>
-      )}
-    </div>
-  );
-}
+// REMOVED — the foreground circular team-logo badge (TrophyRise) is
+// gone entirely per feedback: showing a small crest AND a big
+// watermark at once read as two competing logos. The match-won
+// moment now shows ONLY the watermark behind the headline — no icon
+// in the icon slot at all. See the `icon` ternary further down,
+// which no longer has a "trophy" case.
 
 // milestone medallion — a plain flat disc with the number, a thin
 // ring, no laurel/crescent flanks.
@@ -501,11 +481,10 @@ function computeHeadlineFontSize(label) {
   return "clamp(1.3rem, 4.2vw, 2.4rem)";
 }
 
-// Flat, clean broadcast-style headline. Words now wrap naturally in a
+// Flat, clean broadcast-style headline. Words wrap naturally in a
 // centered row (instead of being forced one-word-per-line), with
 // tighter tracking, a thin dark stroke, and a two-layer drop shadow
-// for depth — this is what fixes the blocky/"ugly" stacked look on
-// long multi-word team names.
+// for depth.
 function BigText({ cfg, footer }) {
   const words = cfg.label.split(" ").filter(Boolean);
   const wordClass = cfg.dropText ? "mk-word-drop" : "mk-word";
@@ -575,7 +554,21 @@ export default function MatchMomentOverlay({
   const [triggerId, setTriggerId] = useState(0);
   const timers = useRef([]);
 
+  // NEW — queue plumbing. `queueRef` holds pending { type, evt } fires
+  // that haven't been shown yet. `busyRef` is true whenever a moment is
+  // either on screen OR sitting in its post-exit QUEUE_GAP_MS cooldown —
+  // i.e. true for the whole window during which nothing new should start.
+  const queueRef = useRef([]);
+  const busyRef = useRef(false);
+
+  // Keep a live ref to the merged moments config so timers/queue
+  // callbacks (which can fire well after a render) always see the
+  // latest `moments` prop instead of a stale closure.
   const mergedMoments = { ...DEFAULT_MOMENTS, ...moments };
+  const mergedMomentsRef = useRef(mergedMoments);
+  useEffect(() => {
+    mergedMomentsRef.current = mergedMoments;
+  });
 
   useEffect(() => setMounted(true), []);
 
@@ -584,51 +577,96 @@ export default function MatchMomentOverlay({
     timers.current = [];
   };
 
+  // Pops the next queued moment (if any) and displays it. No-ops if
+  // something is already showing/cooling down, or the queue is empty.
+  const processQueue = useCallback(() => {
+    if (busyRef.current) return;
+    const next = queueRef.current.shift();
+    if (!next) return;
+    busyRef.current = true;
+    showMoment(next.type, next.evt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Actually renders a single moment and schedules its own lifecycle:
+  // display for cfg.duration -> play exit for EXIT_DURATION_MS -> unmount
+  // -> wait QUEUE_GAP_MS -> release busyRef -> let the next queued moment
+  // (if any) start. This is what guarantees a full 1s breathing gap
+  // between any two moments, so a rapid-fire burst always plays out
+  // moment-by-moment instead of overwriting itself.
+  const showMoment = useCallback((type, evt) => {
+    const currentMoments = mergedMomentsRef.current;
+    if (!currentMoments[type]) {
+      busyRef.current = false;
+      processQueue();
+      return;
+    }
+
+    clearTimers();
+    setClosing(false);
+    setActive(type);
+    setPayload(evt || null);
+
+    const baseCfg = currentMoments[type];
+    let cfg = baseCfg;
+
+    if (type === "matchWon") {
+      const teamName = (evt?.player || "WINNER").toUpperCase();
+      const margin = evt?.score || "MATCH WON";
+      const accent = evt?.teamColor || baseCfg.accent;
+      cfg = {
+        ...baseCfg,
+        label: teamName,
+        subtitle: margin,
+        accent,
+        glow: evt?.teamColor ? `${evt.teamColor}CC` : baseCfg.glow,
+        gradient: evt?.teamColor ? soloGradient(evt.teamColor) : baseCfg.gradient,
+      };
+    }
+
+    setActiveCfg(cfg);
+    setTriggerId((id) => id + 1);
+
+    timers.current.push(
+      setTimeout(() => setClosing(true), cfg.duration),
+      setTimeout(() => {
+        setActive(null);
+        setActiveCfg(null);
+        setPayload(null);
+        setClosing(false);
+
+        // Hold here for QUEUE_GAP_MS before allowing the next moment to
+        // start — this is the actual "one second after one second" gap.
+        timers.current.push(
+          setTimeout(() => {
+            busyRef.current = false;
+            processQueue();
+          }, QUEUE_GAP_MS)
+        );
+      }, cfg.duration + EXIT_DURATION_MS)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processQueue]);
+
+  // Public entry point — what window.triggerBoundaryCelebration calls.
+  // Always enqueues rather than showing immediately, so a burst of fires
+  // (four, then six, then a wicket, all within the same second) plays
+  // out fully instead of only the last one landing.
   const trigger = useCallback(
     (type, evt) => {
-      if (!mergedMoments[type]) return;
-      clearTimers();
-      setClosing(false);
-      setActive(type);
-      setPayload(evt || null);
-
-      const baseCfg = mergedMoments[type];
-      let cfg = baseCfg;
-
-      if (type === "matchWon") {
-        const teamName = (evt?.player || "WINNER").toUpperCase();
-        const margin = evt?.score || "MATCH WON";
-        const accent = evt?.teamColor || baseCfg.accent;
-        cfg = {
-          ...baseCfg,
-          label: teamName,
-          subtitle: margin,
-          accent,
-          glow: evt?.teamColor ? `${evt.teamColor}CC` : baseCfg.glow,
-          gradient: evt?.teamColor ? soloGradient(evt.teamColor) : baseCfg.gradient,
-        };
-      }
-
-      setActiveCfg(cfg);
-      setTriggerId((id) => id + 1);
-      timers.current.push(
-        setTimeout(() => setClosing(true), cfg.duration),
-        setTimeout(() => {
-          setActive(null);
-          setActiveCfg(null);
-          setPayload(null);
-          setClosing(false);
-        }, cfg.duration + EXIT_DURATION_MS)
-      );
+      if (!mergedMomentsRef.current[type]) return;
+      queueRef.current.push({ type, evt });
+      processQueue();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(moments)]
+    [processQueue]
   );
 
   useEffect(() => {
     window.triggerBoundaryCelebration = trigger;
     return () => {
       clearTimers();
+      queueRef.current = [];
+      busyRef.current = false;
       delete window.triggerBoundaryCelebration;
     };
   }, [trigger]);
@@ -656,9 +694,16 @@ export default function MatchMomentOverlay({
       />
     ) : cfg?.mode === "stumps" ? (
       <StumpsShatter />
-    ) : cfg?.mode === "trophy" ? (
-      <TrophyRise cfg={cfg} logoUrl={payload?.teamLogoUrl} />
     ) : null;
+    // NOTE — trophy (match-won) intentionally has no icon case here
+    // anymore. IconSlot returns null when it has no children, so this
+    // just skips rendering the icon row entirely for that moment,
+    // leaving only the watermark + headline + pill.
+
+  // CHANGED — the watermark now shows the winning team's own logo for
+  // the trophy (match-won) moment, instead of always defaulting to the
+  // league logo. Every other moment is untouched.
+  const watermarkSrc = cfg?.mode === "trophy" && payload?.teamLogoUrl ? payload.teamLogoUrl : LOGO_SRC;
 
   return (
     <>
@@ -677,16 +722,38 @@ export default function MatchMomentOverlay({
               bg: "rgba(212,175,55,0.9)",
               payload: { player: "Moon Knight Super League", score: "won by 2 runs", teamColor: "#8FA6C9" },
             },
-          ].map((b) => (
-            <button
-              key={b.key}
-              onClick={() => trigger(b.key, b.payload)}
-              className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
-              style={{ background: b.bg, border: "1px solid rgba(234,241,251,0.3)" }}
-            >
-              {b.label}
-            </button>
-          ))}
+            {
+              key: "queueTest",
+              label: "Test Queue (fires 4 at once)",
+              bg: "rgba(255,255,255,0.15)",
+              payload: null,
+            },
+          ].map((b) =>
+            b.key === "queueTest" ? (
+              <button
+                key={b.key}
+                onClick={() => {
+                  trigger("four", { player: "Batter A", score: "18(12)" });
+                  trigger("six", { player: "Batter A", score: "24(14)" });
+                  trigger("wicket", { player: "Batter B", score: "31(22)" });
+                  trigger("fifty", { player: "Batter C", score: "54(41)" });
+                }}
+                className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
+                style={{ background: b.bg, border: "1px solid rgba(234,241,251,0.3)" }}
+              >
+                {b.label}
+              </button>
+            ) : (
+              <button
+                key={b.key}
+                onClick={() => trigger(b.key, b.payload)}
+                className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider text-white transition-transform active:scale-95"
+                style={{ background: b.bg, border: "1px solid rgba(234,241,251,0.3)" }}
+              >
+                {b.label}
+              </button>
+            )
+          )}
         </div>
       )}
 
@@ -695,6 +762,7 @@ export default function MatchMomentOverlay({
         cfg &&
         createPortal(
           <div
+            key={triggerId}
             className={`mk-wrap fixed inset-0 z-[200] flex items-center justify-center overflow-hidden pointer-events-none ${closing ? "mk-closing" : ""}`}
           >
             {/* ambient FX plays across the full frame, but nothing here
@@ -728,7 +796,11 @@ export default function MatchMomentOverlay({
               }}
             >
               <span className="mk-panel-sheen" aria-hidden="true" />
-              <LogoWatermark size={WATERMARK_SIZE_BY_MODE[cfg.mode] ?? 320} />
+              <LogoWatermark
+                size={WATERMARK_SIZE_BY_MODE[cfg.mode] ?? 320}
+                src={watermarkSrc}
+                opacity={WATERMARK_OPACITY_BY_MODE[cfg.mode] ?? 0.15}
+              />
 
               <div className="mk-content relative z-10 flex flex-col items-center justify-center" style={{ gap: 6 }}>
                 <IconSlot minHeight={ICON_SLOT_HEIGHT[cfg.mode]}>{icon}</IconSlot>
@@ -835,18 +907,18 @@ export default function MatchMomentOverlay({
            breathing animation only touches opacity/scale so the
            watermark can never drift off its center point. */
         .mk-watermark {
-          opacity: 0.15;
+          opacity: var(--mk-wm-base, 0.15);
           filter: grayscale(0.15) brightness(1.5);
           transform: translate(-50%, -50%) scale(0.9);
           animation: mkWatermarkIn 0.6s ease-out 0.05s both, mkWatermarkFloat 6s ease-in-out 0.6s infinite;
         }
         @keyframes mkWatermarkIn {
           from { opacity: 0; transform: translate(-50%, -50%) scale(0.75); }
-          to { opacity: 0.15; transform: translate(-50%, -50%) scale(0.9); }
+          to { opacity: var(--mk-wm-base, 0.15); transform: translate(-50%, -50%) scale(0.9); }
         }
         @keyframes mkWatermarkFloat {
-          0%, 100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.13; }
-          50% { transform: translate(-50%, -50%) scale(0.96); opacity: 0.2; }
+          0%, 100% { transform: translate(-50%, -50%) scale(0.9); opacity: var(--mk-wm-dim, 0.13); }
+          50% { transform: translate(-50%, -50%) scale(0.96); opacity: var(--mk-wm-peak, 0.2); }
         }
 
         /* ---------------- logo badge ---------------- */
@@ -893,44 +965,6 @@ export default function MatchMomentOverlay({
           0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
           10% { opacity: 1; }
           100% { opacity: 0; transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); }
-        }
-        .mk-trophy-wrap {
-          opacity: 0;
-          animation: mkTrophyRise 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s both;
-        }
-        @keyframes mkTrophyRise {
-          0% { opacity: 0; transform: translateY(24px) scale(0.7); }
-          70% { opacity: 1; transform: translateY(-3px) scale(1.05); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        /* Both rings are anchored to the exact same center point as
-           the team logo (top:50%/left:50% + this base translate).
-           The pulse keyframes below re-declare that same translate
-           alongside the scale, so the ring can scale up/down without
-           ever drifting off the logo's center. */
-        .mk-trophy-ring {
-          border-radius: 999px;
-          border-style: solid;
-          box-sizing: border-box;
-          transform: translate(-50%, -50%);
-        }
-        .mk-trophy-ring-outer {
-          width: 210px;
-          height: 210px;
-          border-width: 2px;
-          opacity: 0.5;
-          animation: mkTrophyRingPulse 1.8s ease-in-out infinite;
-        }
-        .mk-trophy-ring-inner {
-          width: 190px;
-          height: 190px;
-          border-width: 2px;
-          opacity: 0.9;
-          animation: mkTrophyRingPulse 1.8s ease-in-out 0.2s infinite;
-        }
-        @keyframes mkTrophyRingPulse {
-          0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
-          50% { transform: translate(-50%, -50%) scale(1.045); opacity: 0.75; }
         }
         .mk-milestone-wrap {
           opacity: 0;
@@ -1019,7 +1053,7 @@ export default function MatchMomentOverlay({
           100% { opacity: 0.9; transform: translate(var(--drift), 110vh) rotate(var(--spin)); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .mk-wrap, .mk-panel, .mk-panel-sheen, .mk-watermark, .mk-word, .mk-word-drop, .mk-pill-slot, .mk-footer-line, .mk-particle, .mk-firework-spark, .mk-confetti, .mk-stump, .mk-trophy-wrap, .mk-trophy-ring, .mk-trophy-ring-outer, .mk-trophy-ring-inner, .mk-milestone-wrap, .mk-shield-wrap, .mk-logo-slot, .mk-logo-badge {
+          .mk-wrap, .mk-panel, .mk-panel-sheen, .mk-watermark, .mk-word, .mk-word-drop, .mk-pill-slot, .mk-footer-line, .mk-particle, .mk-firework-spark, .mk-confetti, .mk-stump, .mk-milestone-wrap, .mk-shield-wrap, .mk-logo-slot, .mk-logo-badge {
             animation-duration: 1ms !important;
             animation-delay: 0ms !important;
           }
