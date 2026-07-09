@@ -283,7 +283,8 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         matchSetup={state.matchSetup ?? undefined}
       />
 
-      <PointsTable show={state.pointsTable.show} hideTrigger />
+      <PointsTable show={state.pointsTable.show} hideTrigger auctionId={auctionId}/>
+
 
       {/* CHANGED — now fed matchId/matchSetup/liveState so it can derive
           the batting/bowling cards from the balls ledger instead of the
