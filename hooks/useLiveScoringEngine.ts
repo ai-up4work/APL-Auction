@@ -159,6 +159,25 @@ export interface EngineSyncState {
   // and colliding with the unique (match_id, innings_number, sequence)
   // constraint on the `balls` table.
   ballSequence: number;
+  // NEW — "bench" of stats for players who've been taken out of a slot
+  // (via Clear, or by picking someone else into their slot) but haven't
+  // been given out. Keyed by player name. When that same player is
+  // assigned back into a slot, their prior runs/balls/overs/wickets are
+  // restored from here instead of being reset to zero — this is what
+  // makes a bowler's second spell continue his earlier figures, and
+  // what stops "oops, wrong batter" corrections from erasing a real
+  // innings. Synced so it survives a page reload too.
+  benchedBatters: Record<string, BatterState>;
+  benchedBowlers: Record<string, BowlerState>;
+  // NEW — signature (`winner|margin|method`) of the last match result
+  // the "Match Won" graphic was fired for. This used to be a localStorage
+  // flag (`overlay:{auctionId}:matchWonFiredSignature`) living outside
+  // Supabase entirely, which is exactly the kind of second source of
+  // truth that goes stale. It now rides in this already-synced bundle,
+  // so a refresh (which restores liveState.matchComplete from Supabase)
+  // doesn't re-fire the graphic, while a genuinely new result — e.g.
+  // after Restart Match resets this to null — fires normally.
+  matchWonFiredSignature: string | null;
 }
 
 function defaultEngineSyncState(): EngineSyncState {
@@ -172,6 +191,9 @@ function defaultEngineSyncState(): EngineSyncState {
     pendingWicket: null,
     undoSnapshot: null,
     ballSequence: 0, // NEW
+    benchedBatters: {}, // NEW
+    benchedBowlers: {}, // NEW
+    matchWonFiredSignature: null, // NEW
   };
 }
 
@@ -249,6 +271,15 @@ export function useLiveScoringEngine({
   // (match_id, innings_number).
   const ballSequenceRef = useRef(initial.ballSequence);
 
+  // NEW — bench of stats for players pulled out of a slot but not given
+  // out, keyed by player name. See EngineSyncState comment above.
+  const benchedBattersRef = useRef<Record<string, BatterState>>(initial.benchedBatters ?? {});
+  const benchedBowlersRef = useRef<Record<string, BowlerState>>(initial.benchedBowlers ?? {});
+
+  // NEW — see EngineSyncState comment. Replaces the old localStorage
+  // "already fired" flag.
+  const matchWonFiredSignatureRef = useRef<string | null>(initial.matchWonFiredSignature ?? null);
+
   // Keeps matchId reachable inside closures without pulling it into
   // every effect's dependency array.
   const matchIdRef = useRef(matchId ?? null);
@@ -287,6 +318,9 @@ export function useLiveScoringEngine({
           }
         : null,
       ballSequence: ballSequenceRef.current, // NEW
+      benchedBatters: benchedBattersRef.current, // NEW
+      benchedBowlers: benchedBowlersRef.current, // NEW
+      matchWonFiredSignature: matchWonFiredSignatureRef.current, // NEW
     };
     onEngineStateChangeRef.current?.(state);
   }
@@ -333,6 +367,9 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = remote.overRunsConceded;
     overJustCompletedRef.current = remote.overJustCompleted;
     ballSequenceRef.current = remote.ballSequence ?? 0; // NEW
+    benchedBattersRef.current = remote.benchedBatters ?? {}; // NEW
+    benchedBowlersRef.current = remote.benchedBowlers ?? {}; // NEW
+    matchWonFiredSignatureRef.current = remote.matchWonFiredSignature ?? null; // NEW
 
     if (remote.undoSnapshot) {
       undoRef.current = remote.undoSnapshot.liveState;
@@ -349,6 +386,27 @@ export function useLiveScoringEngine({
     setTimeout(() => {
       suppressNotifyRef.current = false;
     }, 0);
+  }
+
+  // NEW — save a player's current figures to the bench before they
+  // leave a slot (whether via Clear or via being swapped out for
+  // someone else). No-op for an empty slot (nothing to preserve).
+  function benchBatter(state: BatterState) {
+    if (!state.name) return;
+    benchedBattersRef.current = { ...benchedBattersRef.current, [state.name]: state };
+  }
+  function benchBowler(state: BowlerState) {
+    if (!state.name) return;
+    benchedBowlersRef.current = { ...benchedBowlersRef.current, [state.name]: state };
+  }
+
+  // NEW — records that the Match Won moment has fired for this result
+  // signature, and pushes it through the same persistence pipeline as
+  // everything else (Supabase `engine_state`), so a refresh doesn't
+  // cause a duplicate fire.
+  function markMatchWonFired(signature: string) {
+    matchWonFiredSignatureRef.current = signature;
+    notifyEngineStateChange();
   }
 
   const availableBattersCount = countAvailableBatters(
@@ -501,21 +559,45 @@ export function useLiveScoringEngine({
 
     if (slot === "bowler") {
       const isNewBowler = liveState.bowler.name !== player.name;
-      if (isNewBowler) overRunsConcededRef.current = 0;
-      setLiveState((prev) => ({
-        ...prev,
-        bowler: isNewBowler
-          ? { ...emptyBowlerSlot(), name: player.name, imageUrl: player.imageUrl }
-          : { ...prev.bowler, name: player.name, imageUrl: player.imageUrl },
-      }));
+      if (isNewBowler) {
+        // NEW — preserve the outgoing bowler's figures on the bench
+        // before overwriting, then check whether the incoming bowler
+        // has prior figures of their own to resume (a second spell).
+        if (liveState.bowler.name) benchBowler(liveState.bowler);
+        const recalled = benchedBowlersRef.current[player.name];
+        overRunsConcededRef.current = 0;
+        setLiveState((prev) => ({
+          ...prev,
+          bowler: recalled
+            ? { ...recalled, imageUrl: player.imageUrl }
+            : { ...emptyBowlerSlot(), name: player.name, imageUrl: player.imageUrl },
+        }));
+      } else {
+        setLiveState((prev) => ({
+          ...prev,
+          bowler: { ...prev.bowler, name: player.name, imageUrl: player.imageUrl },
+        }));
+      }
     } else {
       const isNewBatter = liveState[slot].name !== player.name;
-      setLiveState((prev) => ({
-        ...prev,
-        [slot]: isNewBatter
-          ? { ...emptyBatterSlot(), name: player.name, imageUrl: player.imageUrl }
-          : { ...prev[slot], name: player.name, imageUrl: player.imageUrl },
-      }));
+      if (isNewBatter) {
+        // NEW — same idea for batters: bench the outgoing occupant's
+        // figures, then recall the incoming player's own figures if
+        // they'd batted (and been swapped out) earlier in this innings.
+        if (liveState[slot].name) benchBatter(liveState[slot]);
+        const recalled = benchedBattersRef.current[player.name];
+        setLiveState((prev) => ({
+          ...prev,
+          [slot]: recalled
+            ? { ...recalled, imageUrl: player.imageUrl }
+            : { ...emptyBatterSlot(), name: player.name, imageUrl: player.imageUrl },
+        }));
+      } else {
+        setLiveState((prev) => ({
+          ...prev,
+          [slot]: { ...prev[slot], name: player.name, imageUrl: player.imageUrl },
+        }));
+      }
     }
     setLiveDirty(true);
     if (slot === "striker") setActiveSlot("nonStriker");
@@ -525,8 +607,15 @@ export function useLiveScoringEngine({
 
   function clearSlot(slot: "striker" | "nonStriker" | "bowler") {
     snapshotForUndo();
+    const current = liveState[slot];
     if (slot === "bowler") {
+      // NEW — preserve figures on the bench before clearing, so picking
+      // this bowler again later (or accidentally clearing then
+      // re-picking the same one) resumes rather than restarts them.
+      benchBowler(current as BowlerState);
       overRunsConcededRef.current = 0;
+    } else {
+      benchBatter(current as BatterState);
     }
     setLiveState((prev) => ({
       ...prev,
@@ -893,6 +982,12 @@ export function useLiveScoringEngine({
           next.add(dismissedName);
           return next;
         });
+        // NEW — a player who's given out is gone for the innings, not
+        // "benched" for return. Make sure a stale bench entry (e.g. from
+        // an earlier clear-slot) can't resurrect their old figures if
+        // their name is ever mistakenly reused.
+        const { [dismissedName]: _dropped, ...restBenched } = benchedBattersRef.current;
+        benchedBattersRef.current = restBenched;
       }
     }
 
@@ -950,6 +1045,11 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = 0;
     overJustCompletedRef.current = false;
     setDismissedPlayers(new Set());
+    // NEW — bench doesn't carry across innings (batters/bowlers restart
+    // fresh figures next innings), so clear it here alongside the other
+    // per-innings ephemeral state.
+    benchedBattersRef.current = {};
+    benchedBowlersRef.current = {};
 
     const currentInningsNumber = (liveState.inningsNumber ?? 1) as 1 | 2;
 
@@ -1003,9 +1103,13 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = 0;
     overJustCompletedRef.current = false;
     ballSequenceRef.current = 0; // NEW
+    benchedBattersRef.current = {}; // NEW
+    benchedBowlersRef.current = {}; // NEW
+    matchWonFiredSignatureRef.current = null; // NEW
     setExtraType("none");
     setIsFreeHit(false);
     setActiveSlot("striker");
+    notifyEngineStateChange();
   }
 
   return {
@@ -1033,5 +1137,7 @@ export function useLiveScoringEngine({
     endInnings,
     applyRemoteEngineState,
     resetEngineState,
+    matchWonFiredSignature: matchWonFiredSignatureRef.current, // NEW
+    markMatchWonFired, // NEW
   };
 }

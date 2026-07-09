@@ -1,4 +1,4 @@
-// lib/supabase.ts
+// lib/supabse.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Singleton Supabase browser client.
 // Add your credentials to .env.local (never commit that file).

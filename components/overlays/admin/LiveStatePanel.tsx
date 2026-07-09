@@ -816,7 +816,6 @@ export default function LiveStatePanel({
   // it fires exactly once per completion, not on every re-render, and
   // resets when the match is undone (matchComplete flips back to
   // false/undefined) so the next completion can fire again.
-  const matchWonFiredRef = useRef(false);
 
   // CHANGED — matchWonFiredRef used to be a plain in-memory ref, so a
   // refresh right after match completion reset it to false and caused
@@ -826,60 +825,6 @@ export default function LiveStatePanel({
   // fired, keyed by auctionId, so a refresh doesn't re-trigger it — but
   // a genuinely NEW result (new winningTeamName+margin after a restart)
   // still fires normally.
-  function matchWonFiredKey() {
-    return `overlay:${auctionId}:matchWonFiredSignature`;
-  }
-
-  function resultSignature(result: { winningTeamName: string; margin: string; method: string }) {
-    return `${result.winningTeamName}|${result.margin}|${result.method}`;
-  }
-
-  useEffect(() => {
-    if (!liveState.matchComplete || !liveState.matchResult) {
-      return;
-    }
-    const sig = resultSignature(liveState.matchResult);
-    let alreadyFired = false;
-    try {
-      alreadyFired = typeof window !== "undefined" && window.localStorage.getItem(matchWonFiredKey()) === sig;
-    } catch {
-      alreadyFired = false;
-    }
-    if (alreadyFired) return;
-
-    try {
-      window.localStorage.setItem(matchWonFiredKey(), sig);
-    } catch {
-      // non-fatal
-    }
-
-    onFireMatchWonMoment?.({
-      winningTeamName: liveState.matchResult.winningTeamName,
-      margin: liveState.matchResult.margin,
-      method: liveState.matchResult.method,
-      teamColor: winningTeamColor,
-      teamLogoUrl: winningTeamLogo,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveState.matchComplete, liveState.matchResult, winningTeamLogo, winningTeamColor, auctionId]);
-  
-  useEffect(() => {
-    if (!liveState.matchComplete || !liveState.matchResult) {
-      matchWonFiredRef.current = false;
-      return;
-    }
-    if (matchWonFiredRef.current) return;
-    matchWonFiredRef.current = true;
-
-    onFireMatchWonMoment?.({
-      winningTeamName: liveState.matchResult.winningTeamName,
-      margin: liveState.matchResult.margin,
-      method: liveState.matchResult.method,
-      teamColor: winningTeamColor,
-      teamLogoUrl: winningTeamLogo,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveState.matchComplete, liveState.matchResult, winningTeamLogo, winningTeamColor]);
 
   const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
   const ballsBowled = liveState.score.overs * 6 + liveState.score.balls;
@@ -1346,17 +1291,7 @@ export default function LiveStatePanel({
           <RestartMatchDialog
             onCancel={() => setShowRestartConfirm(false)}
             onConfirm={() => {
-              // FIXED — `clearPersistedEngineState` was renamed to
-              // `resetEngineState` when the hook moved off localStorage;
-              // calling the old name threw at runtime and aborted the
-              // restart partway through. This now also clears the
-              // match-won "already fired" flag as before.
               engine.resetEngineState();
-              try {
-                window.localStorage.removeItem(matchWonFiredKey());
-              } catch {
-                // ignore
-              }
               onRestartMatch?.();
               setShowRestartConfirm(false);
             }}

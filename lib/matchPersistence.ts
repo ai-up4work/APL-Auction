@@ -7,6 +7,57 @@ import type {
 } from "@/lib/overlayBus";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 
+// ── error logging helper ────────────────────────────────────────────
+// PostgrestError instances often print as `{}` when passed as a second
+// console.error argument (Next's dev overlay can't serialize the class
+// instance's non-plain-enumerable shape in every case). Destructuring
+// the fields we care about guarantees we always see something useful —
+// message, details, hint, and the Postgres error code (e.g. 42501 =
+// insufficient_privilege, which is the classic "forgot to GRANT after
+// creating tables via the SQL editor" error).
+function logDbError(context: string, error: unknown) {
+  try {
+    const e = error as Record<string, unknown> | null;
+    console.error(`[matchPersistence] ${context} failed — raw:`, error);
+    console.error(`[matchPersistence] ${context} failed — typeof:`, typeof error);
+    console.error(`[matchPersistence] ${context} failed — keys:`, error && typeof error === "object" ? Object.keys(error) : null);
+
+    // Circular-safe stringify — the old plain JSON.stringify threw when the
+    // error object had a circular `cause`/`response` chain (common in fetch
+    // and some Postgrest errors), which crashed BEFORE the `fields:` log
+    // below ever ran — so you never actually saw message/code/hint.
+    const seen = new WeakSet();
+    let safeJson = "<unserializable>";
+    try {
+      safeJson = JSON.stringify(
+        error,
+        (_key, value) => {
+          if (typeof value === "object" && value !== null) {
+            if (seen.has(value)) return "[Circular]";
+            seen.add(value);
+          }
+          return value;
+        },
+        2
+      );
+    } catch (stringifyError) {
+      safeJson = `<failed to stringify: ${(stringifyError as Error)?.message}>`;
+    }
+    console.error(`[matchPersistence] ${context} failed — JSON:`, safeJson);
+
+    console.error(`[matchPersistence] ${context} failed — fields:`, {
+      message: e?.message,
+      details: e?.details,
+      hint: e?.hint,
+      code: e?.code,
+      status: e?.status,
+      name: e?.name,
+    });
+  } catch (loggingError) {
+    console.error(`[matchPersistence] ${context} failed — and logging itself threw:`, loggingError, error);
+  }
+}
+
 // ── matches ────────────────────────────────────────────────────────────
 // Every read/write below is keyed by auctionId, not the internal uuid —
 // callers never need to know the row id exists. getOrCreateMatch() is the
@@ -56,7 +107,7 @@ export async function appendBall(matchId: string, ball: BallInsert): Promise<boo
   });
 
   if (error) {
-    console.error("[matchPersistence] appendBall failed:", error);
+    logDbError("appendBall", error);
     return false;
   }
   return true;
@@ -79,7 +130,7 @@ export async function deleteLastBall(
     .eq("sequence", sequence);
 
   if (error) {
-    console.error("[matchPersistence] deleteLastBall failed:", error);
+    logDbError("deleteLastBall", error);
     return false;
   }
   return true;
@@ -91,7 +142,7 @@ export async function deleteLastBall(
 export async function deleteAllBalls(matchId: string): Promise<boolean> {
   const { error } = await supabase.from("balls").delete().eq("match_id", matchId);
   if (error) {
-    console.error("[matchPersistence] deleteAllBalls failed:", error);
+    logDbError("deleteAllBalls", error);
     return false;
   }
   return true;
@@ -112,7 +163,7 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     .maybeSingle();
 
   if (selectErr) {
-    console.error("[matchPersistence] getOrCreateMatch select failed:", selectErr);
+    logDbError("getOrCreateMatch select", selectErr);
     return null;
   }
   if (existing) return existing as MatchRow;
@@ -124,7 +175,7 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     .single();
 
   if (insertErr) {
-    console.error("[matchPersistence] getOrCreateMatch insert failed:", insertErr);
+    logDbError("getOrCreateMatch insert", insertErr);
     return null;
   }
   return created as MatchRow;
@@ -155,17 +206,26 @@ export async function saveMatchSetup(
   matchSetup: MatchSetup,
   matchSetupCompleted: boolean
 ): Promise<boolean> {
+  // CHANGED — was `.update().eq("auction_id", ...)`. An update against a
+  // missing row succeeds with 0 rows affected and NO error, so if the
+  // `matches` row is ever gone (deleted, recreated elsewhere, whatever),
+  // every save from that point on silently does nothing — explaining
+  // data that "disappears" on refresh. upsert on the unique auction_id
+  // column recreates the row if it's missing instead of no-op'ing.
   const { error } = await supabase
     .from("matches")
-    .update({
-      match_setup: matchSetup,
-      match_setup_completed: matchSetupCompleted,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("auction_id", auctionId);
+    .upsert(
+      {
+        auction_id: auctionId,
+        match_setup: matchSetup,
+        match_setup_completed: matchSetupCompleted,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "auction_id" }
+    );
 
   if (error) {
-    console.error("[matchPersistence] saveMatchSetup failed:", error);
+    logDbError("saveMatchSetup", error);
     return false;
   }
   return true;
@@ -181,7 +241,7 @@ export async function loadLiveState(matchId: string): Promise<LiveState | null> 
     .maybeSingle();
 
   if (error) {
-    console.error("[matchPersistence] loadLiveState failed:", error);
+    logDbError("loadLiveState", error);
     return null;
   }
   return (data?.live_state as LiveState) ?? null;
@@ -196,7 +256,7 @@ export async function saveLiveState(matchId: string, liveState: LiveState): Prom
     );
 
   if (error) {
-    console.error("[matchPersistence] saveLiveState failed:", error);
+    logDbError("saveLiveState", error);
     return false;
   }
   return true;
@@ -212,7 +272,7 @@ export async function loadEngineState(matchId: string): Promise<EngineSyncState 
     .maybeSingle();
 
   if (error) {
-    console.error("[matchPersistence] loadEngineState failed:", error);
+    logDbError("loadEngineState", error);
     return null;
   }
   return (data?.state as EngineSyncState) ?? null;
@@ -226,22 +286,17 @@ export async function saveEngineState(matchId: string, state: EngineSyncState): 
       { onConflict: "match_id" }
     );
 
-    if (error) {
-    console.error("[matchPersistence] saveEngineState failed:", {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-    });
+  if (error) {
+    logDbError("saveEngineState", error);
     return false;
-    }
+  }
   return true;
 }
 
 export async function clearEngineState(matchId: string): Promise<boolean> {
   const { error } = await supabase.from("engine_state").delete().eq("match_id", matchId);
   if (error) {
-    console.error("[matchPersistence] clearEngineState failed:", error);
+    logDbError("clearEngineState", error);
     return false;
   }
   return true;
@@ -264,7 +319,7 @@ export async function loadWeather(
     .maybeSingle();
 
   if (error) {
-    console.error("[matchPersistence] loadWeather failed:", error);
+    logDbError("loadWeather", error);
     return null;
   }
   if (!data) return null;
@@ -289,7 +344,7 @@ export async function saveWeather(
     );
 
   if (error) {
-    console.error("[matchPersistence] saveWeather failed:", error);
+    logDbError("saveWeather", error);
     return false;
   }
   return true;
@@ -305,7 +360,7 @@ export async function loadOnAirChannels(matchId: string): Promise<ChannelVisibil
     .maybeSingle();
 
   if (error) {
-    console.error("[matchPersistence] loadOnAirChannels failed:", error);
+    logDbError("loadOnAirChannels", error);
     return null;
   }
   return (data?.channels as ChannelVisibility) ?? null;
@@ -320,7 +375,7 @@ export async function saveOnAirChannels(matchId: string, channels: Record<string
     );
 
   if (error) {
-    console.error("[matchPersistence] saveOnAirChannels failed:", error);
+    logDbError("saveOnAirChannels", error);
     return false;
   }
   return true;
@@ -349,7 +404,7 @@ export async function loadStandings(tournamentId: string): Promise<StandingRow[]
     .order("nrr", { ascending: false });
 
   if (error) {
-    console.error("[matchPersistence] loadStandings failed:", error);
+    logDbError("loadStandings", error);
     return [];
   }
   return (data as StandingRow[]) ?? [];
@@ -364,7 +419,7 @@ export async function upsertStandingRow(
     .upsert({ tournament_id: tournamentId, ...row }, { onConflict: "tournament_id,team_short" });
 
   if (error) {
-    console.error("[matchPersistence] upsertStandingRow failed:", error);
+    logDbError("upsertStandingRow", error);
     return false;
   }
   return true;

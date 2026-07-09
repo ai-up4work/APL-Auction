@@ -8,7 +8,7 @@ import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
 import { ChevronDown } from "lucide-react";
-import type { EngineSyncState } from "@/hooks/useLiveScoringEngine"; // NEW
+import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 import {
   getOrCreateMatch,
   saveMatchSetup,
@@ -162,11 +162,6 @@ function sanitizeLiveState(raw: any): LiveState {
   };
 }
 
-// FIXED — this previously omitted `ballSequence` entirely, so the
-// returned object didn't satisfy `EngineSyncState` (TS2741: Property
-// 'ballSequence' is missing). It's now coerced the same defensive way
-// as every other numeric field, defaulting to 0 for any pre-existing
-// cached/DB row that predates this field.
 function sanitizeEngineState(raw: any): EngineSyncState | null {
   if (!raw || typeof raw !== "object") return null;
   return {
@@ -178,7 +173,10 @@ function sanitizeEngineState(raw: any): EngineSyncState | null {
     overJustCompleted: !!raw.overJustCompleted,
     pendingWicket: raw.pendingWicket && typeof raw.pendingWicket === "object" ? raw.pendingWicket : null,
     undoSnapshot: raw.undoSnapshot && typeof raw.undoSnapshot === "object" ? raw.undoSnapshot : null,
-    ballSequence: Number(raw.ballSequence) || 0, // FIXED — was missing
+    ballSequence: Number(raw.ballSequence) || 0,
+    benchedBatters: raw.benchedBatters && typeof raw.benchedBatters === "object" ? raw.benchedBatters : {},
+    benchedBowlers: raw.benchedBowlers && typeof raw.benchedBowlers === "object" ? raw.benchedBowlers : {},
+    matchWonFiredSignature: typeof raw.matchWonFiredSignature === "string" ? raw.matchWonFiredSignature : null,
   };
 }
 
@@ -253,13 +251,16 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
   const [setupPushed, setSetupPushed] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
-  const [setupHydrated, setSetupHydrated] = useState(false);
+  // NEW — single source-of-truth hydration flag. True only once the
+  // Supabase load (success OR failure) has resolved. Nothing writes to
+  // Supabase before this flips, so we can never clobber a real DB row
+  // with the empty initial state during the fetch window.
+  const [hydrated, setHydrated] = useState(false);
 
   // ── Live State (incremental) ────────────────────────────────────────
   const [liveState, setLiveState] = useState<LiveState>(emptyLiveState);
   const [liveDirty, setLiveDirty] = useState(false);
   const [livePushed, setLivePushed] = useState(false);
-  const [liveHydrated, setLiveHydrated] = useState(false);
 
   const [engineSyncState, setEngineSyncState] = useState<EngineSyncState | null>(null);
 
@@ -304,22 +305,17 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     weatherRef.current = weatherData;
   }, [weatherData]);
 
+  // ── SOLE hydration path — Supabase only. ──────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       const match = await getOrCreateMatch(auctionId);
       if (!match || cancelled) {
-        setSetupHydrated(true);
-        setLiveHydrated(true);
+        setHydrated(true);
         return;
       }
       matchIdRef.current = match.id;
-      setMatchId(match.id);
-
-
-      setMatchSetup(match.match_setup);
-      setMatchSetupCompleted(match.match_setup_completed);
 
       const [live, engine, weather] = await Promise.all([
         loadLiveState(match.id),
@@ -328,12 +324,24 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       ]);
 
       if (cancelled) return;
-      if (live) setLiveState(sanitizeLiveState(live));
-      if (engine) setEngineSyncState(sanitizeEngineState(engine));
-      if (weather) setWeatherData(weather.data);
 
-      setSetupHydrated(true);
-      setLiveHydrated(true);
+      // Set everything together, in one go, so LiveStatePanel doesn't
+      // mount (via matchSetupCompleted flipping true) until the engine
+      // state has actually arrived. The hook only seeds its internal
+      // state (dismissedPlayers, undo, activeSlot, etc.) from
+      // `initialEngineState` on its VERY FIRST render — if it mounts
+      // before this data is ready, it locks in empty defaults and never
+      // re-reads a later-arriving prop update. Setting matchSetupCompleted
+      // last, alongside the rest, guarantees the first mount already has
+      // the real data.
+      setMatchId(match.id);
+      setMatchSetup(match.match_setup);
+      setLiveState(live ? sanitizeLiveState(live) : emptyLiveState);
+      setEngineSyncState(engine ? sanitizeEngineState(engine) : null);
+      setWeatherData(weather ? weather.data : defaultWeatherData);
+      setMatchSetupCompleted(match.match_setup_completed);
+
+      setHydrated(true);
     })();
 
     return () => {
@@ -341,20 +349,22 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     };
   }, [auctionId]);
 
+  // ── Save-to-Supabase effects — all gated on `hydrated` + a real matchId,
+  // so nothing writes back before the initial load has actually resolved. ──
   useEffect(() => {
-    if (!setupHydrated || !matchIdRef.current) return;
+    if (!hydrated || !matchIdRef.current) return;
     saveMatchSetup(auctionId, matchSetup, matchSetupCompleted);
-  }, [matchSetup, matchSetupCompleted, auctionId, setupHydrated]);
+  }, [matchSetup, matchSetupCompleted, auctionId, hydrated]);
 
   useEffect(() => {
-    if (!liveHydrated || !matchIdRef.current) return;
+    if (!hydrated || !matchIdRef.current) return;
     saveLiveState(matchIdRef.current, liveState);
-  }, [liveState, liveHydrated]);
+  }, [liveState, hydrated]);
 
   useEffect(() => {
-    if (!setupHydrated || !matchIdRef.current) return;
+    if (!hydrated || !matchIdRef.current) return;
     saveWeather(matchIdRef.current, weatherData);
-  }, [weatherData, setupHydrated]);
+  }, [weatherData, hydrated]);
 
   const pendingSyncRequestRef = useRef(false);
 
@@ -404,62 +414,6 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auctionId]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const rawSetup = window.localStorage.getItem(`overlay:${auctionId}:matchSetup`);
-      if (rawSetup) setMatchSetup(JSON.parse(rawSetup));
-    } catch {
-      // ignore malformed cache
-    }
-    try {
-      const rawLive = window.localStorage.getItem(`overlay:${auctionId}:liveState`);
-      if (rawLive) setLiveState(sanitizeLiveState(JSON.parse(rawLive)));
-    } catch {
-      // ignore malformed cache
-    }
-    try {
-      const rawCompleted = window.localStorage.getItem(`overlay:${auctionId}:matchSetupCompleted`);
-      if (rawCompleted) setMatchSetupCompleted(JSON.parse(rawCompleted));
-    } catch {
-      // ignore malformed cache
-    }
-    try {
-      const rawEngine = window.localStorage.getItem(`overlay:${auctionId}:engineState`);
-      if (rawEngine) setEngineSyncState(sanitizeEngineState(JSON.parse(rawEngine)));
-    } catch {
-      // ignore malformed cache
-    }
-    try {
-      const rawWeather = window.localStorage.getItem(`overlay:${auctionId}:weather`);
-      if (rawWeather) setWeatherData(JSON.parse(rawWeather));
-    } catch {
-      // ignore malformed cache
-    }
-    setSetupHydrated(true);
-    setLiveHydrated(true);
-  }, [auctionId]);
-
-  useEffect(() => {
-    if (!setupHydrated || typeof window === "undefined") return;
-    window.localStorage.setItem(`overlay:${auctionId}:matchSetup`, JSON.stringify(matchSetup));
-  }, [matchSetup, auctionId, setupHydrated]);
-
-  useEffect(() => {
-    if (!setupHydrated || typeof window === "undefined") return;
-    window.localStorage.setItem(`overlay:${auctionId}:matchSetupCompleted`, JSON.stringify(matchSetupCompleted));
-  }, [matchSetupCompleted, auctionId, setupHydrated]);
-
-  useEffect(() => {
-    if (!liveHydrated || typeof window === "undefined") return;
-    window.localStorage.setItem(`overlay:${auctionId}:liveState`, JSON.stringify(liveState));
-  }, [liveState, auctionId, liveHydrated]);
-
-  useEffect(() => {
-    if (!setupHydrated || typeof window === "undefined") return;
-    window.localStorage.setItem(`overlay:${auctionId}:weather`, JSON.stringify(weatherData));
-  }, [weatherData, auctionId, setupHydrated]);
-
   function handleEngineStateChange(state: EngineSyncState) {
     setEngineSyncState(state);
     if (!matchIdRef.current) return;
@@ -468,7 +422,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
   const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!liveHydrated) return;
+    if (!hydrated) return;
     if (!liveDirty) return;
 
     if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
@@ -480,7 +434,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveDirty, liveState, liveHydrated]);
+  }, [liveDirty, liveState, hydrated]);
 
   function fireLoose(event: Record<string, unknown>, label: string) {
     fire(event as unknown as OverlayEvent, label);
@@ -706,27 +660,14 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     }));
     setLiveDirty(true);
 
-    // FIXED — `matchIdRef.current` is `string | null`, and both
-    // `deleteAllBalls` and `clearEngineState` require `string`. The
-    // second call previously wasn't guarded (TS2345). Both DB calls are
-    // now gated on the same null check, and separated from the
-    // localStorage try/catch below (that catch was only ever meant to
-    // swallow localStorage errors — clearEngineState reports its own
-    // errors via its return value / console.error).
+    // Both DB calls gated on matchIdRef — no localStorage cleanup needed
+    // anymore, Supabase is the only place this state lives.
     if (matchIdRef.current) {
       deleteAllBalls(matchIdRef.current);
       clearEngineState(matchIdRef.current);
     }
 
     setEngineSyncState(null);
-
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem(`overlay:${auctionId}:engineState`);
-      } catch {
-        // non-fatal
-      }
-    }
   }
 
   function fireWicketMoment() {
