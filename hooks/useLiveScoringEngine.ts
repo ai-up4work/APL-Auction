@@ -65,7 +65,7 @@ export type Toast = { id: number; text: string; tone: ToastTone };
 export interface AutoMatchResult {
   winningTeamName: string;
   margin: string;
-  method: "batting" | "bowling" | "tie";
+  method: "batting" | "bowling" | "tie" | "runs" | "wickets";
 }
 
 // The "this over" chip value for a delivery. Kept as a tiny pure function
@@ -117,7 +117,7 @@ function computeInnings2Result(
   finalRuns: number,
   finalWickets: number,
   target: number
-): { winningSide: "batting" | "bowling" | "tie"; margin: string } {
+): { winningSide: "batting" | "bowling" | "tie" | "runs" | "wickets"; margin: string } {
   if (finalRuns >= target) {
     const wicketsInHand = Math.max(0, 10 - finalWickets);
     return { winningSide: "batting", margin: `won by ${wicketsInHand} wicket${wicketsInHand === 1 ? "" : "s"}` };
@@ -296,21 +296,21 @@ export function useLiveScoringEngine({
     pushToast(`🔁 Innings complete — target set to ${target}`, "info");
   }
 
-  function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie"; margin: string }) {
+  function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie" | "runs" | "wickets"; margin: string }) {
     const winningTeamName =
       opts.winningSide === "batting" ? battingTeamName : opts.winningSide === "bowling" ? bowlingTeamName : "Tie";
     const method: "runs" | "wickets" | "tie" =
       opts.winningSide === "bowling" ? "runs" : opts.winningSide === "batting" ? "wickets" : "tie";
 
     setLiveState((prev) => ({
-      ...prev,
-      matchComplete: true,
-      matchResult: { winningTeamName, margin: opts.margin, method },
-    }));
-    setLiveDirty(true);
-    pushToast(`🏁 ${winningTeamName} ${opts.margin}`, "info");
-    onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
-  }
+        ...prev,
+        matchComplete: true,
+        matchResult: { winningTeamName, margin: opts.margin, method },
+      }));
+      setLiveDirty(true);
+      pushToast(`🏁 ${winningTeamName} ${opts.margin}`, "info");
+      onMatchComplete?.({ winningTeamName, margin: opts.margin, method: opts.winningSide });
+    }
 
   function checkAutoEndConditions(next: { runs: number; wickets: number; overs: number; balls: number }) {
     if (liveState.matchComplete) return;

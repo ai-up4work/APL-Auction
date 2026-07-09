@@ -85,7 +85,7 @@ interface WicketMomentPayload {
 interface MatchCompletePayload {
   winningTeamName: string;
   margin: string;
-  method: "batting" | "bowling" | "tie";
+  method: "batting" | "bowling" | "tie" | "runs" | "wickets" ;
 }
 
 // ── NEW — hydration sanitizers ───────────────────────────────────────────
@@ -252,7 +252,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     winner: "teamA" | "teamB" | "custom";
     customName: string;
     margin: string;
-    method: "batting" | "bowling" | "tie";
+    method: "batting" | "bowling" | "tie" | "runs" | "wickets";
   }>({ winner: "teamA", customName: "", margin: "", method: "batting" });
 
   const overlayUrl = typeof window !== "undefined" ? `${window.location.origin}/overlay/${auctionId}` : "";
@@ -533,6 +533,38 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
+  // NEW — the actual fix. `LiveStatePanel` already computes an
+  // `onFireMatchWonMoment` callback internally (it fires exactly once,
+  // automatically, the instant `liveState.matchComplete` flips true —
+  // see the `matchWonFiredRef` effect inside LiveStatePanel) but that
+  // prop was never wired up here, so the graphic never actually reached
+  // the overlay bus except via the manual "Fire Match Won" button.
+  // This handler is what that callback is passed into: it takes the
+  // already-resolved winner name/margin/method/color/logo straight from
+  // LiveStatePanel (no need to re-derive them via teamVisualsByName)
+  // and pushes the moment onto the bus immediately.
+  function fireMatchWonMomentAuto(payload: {
+    winningTeamName: string;
+    margin: string;
+    method: "runs" | "wickets" | "tie";
+    teamColor?: string;
+    teamLogoUrl?: string;
+  }) {
+    fireLoose(
+      {
+        type: "moment",
+        moment: "matchWon",
+        player: payload.winningTeamName,
+        score: payload.margin,
+        method: payload.method,
+        teamColor: payload.teamColor,
+        teamLogoUrl: payload.teamLogoUrl,
+      },
+      `Moment: MATCH WON (auto) — ${payload.winningTeamName} ${payload.margin}`
+    );
+    onAirRef.current?.notifyMomentFired();
+  }
+
   function openMatchWonForm() {
     if (liveState.matchResult) {
       const { winningTeamName, margin, method } = liveState.matchResult;
@@ -571,16 +603,13 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     ].slice(0, 12));
   }
 
-  // NEW — replaces the old direct `fireMatchWonMoment` wiring below.
-  // Previously, the instant the engine detected the match was over
-  // (target chased, all out, or overs used up) it fired the on-air
-  // "Match Won" graphic immediately with zero human confirmation. That's
-  // risky — margins/wording can need a tweak, or the auto-detected
-  // winner could be wrong if toss/innings data was off. Now: the score
-  // still locks automatically (you can't keep scoring a finished match),
-  // but the graphic is never fired without you looking at it first. This
-  // pre-fills the existing Match Won form with the computed result and
-  // pops it open so you just have to glance and tap "Fire Match Won".
+  // The score still auto-locks the instant the engine detects the match
+  // is over (target chased, all out, or overs used up), and the Match
+  // Won graphic now fires automatically at that same moment via
+  // fireMatchWonMomentAuto above. This handler still runs alongside it,
+  // purely to log the event and pop open the Match Won form pre-filled
+  // with the computed result, so you can review/re-fire with corrected
+  // wording if needed — it no longer gates the *first* fire.
   function handleAutoMatchComplete(result: MatchCompletePayload) {
     const winner: "teamA" | "teamB" | "custom" =
       result.winningTeamName === matchSetup.teamA.name
@@ -597,7 +626,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     setShowMoments(true);
     setShowMatchWonForm(true);
     setLog((prev) => [
-      `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Match complete detected — ${result.winningTeamName} ${result.margin}. Review the Match Won form and fire when ready.`,
+      `${new Date().toLocaleTimeString("en-GB", { hour12: false })}  Match complete detected — ${result.winningTeamName} ${result.margin}. Graphic fired automatically; form pre-filled if you need to re-fire.`,
       ...prev,
     ].slice(0, 12));
   }
@@ -739,6 +768,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onMaiden={fireMaidenMoment}
                 onInningsEnd={logInningsEnd}
                 onMatchComplete={handleAutoMatchComplete}
+                onFireMatchWonMoment={fireMatchWonMomentAuto}
                 onRestartMatch={restartMatch}
               />
             ) : (
@@ -811,8 +841,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                         ball pad in the Scorer panel — these buttons are still here for
                         manual/backup firing. Maiden overs fire automatically too, and the
                         Maiden button re-fires using whoever's set as bowler right now. Match
-                        Won never fires itself — when a match completes this form opens
-                        pre-filled so you can double check the winner and margin before firing.
+                        Won now fires automatically the instant a match completes — this
+                        form opens pre-filled so you can review the winner/margin and
+                        re-fire if anything needs a tweak.
                       </p>
 
                       <div className="grid grid-cols-2 gap-2.5">
@@ -1163,7 +1194,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                               onChange={(e) =>
                                 setMatchWonDraft((p) => ({
                                   ...p,
-                                  method: e.target.value as "batting" | "bowling" | "tie",
+                                  method: e.target.value as "batting" | "bowling" | "tie" | "runs" | "wickets",
                                 }))
                               }
                               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
@@ -1181,7 +1212,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
                           <p className="text-[10px]" style={{ color: "var(--color-outline)" }}>
                             {liveState.matchResult
-                              ? "Pre-filled from the last computed result — edit anything before firing."
+                              ? "Pre-filled from the last computed result — the graphic already fired automatically. Edit and re-fire if it needs a correction."
                               : "No result on record yet — fill this in by hand to fire early."}
                           </p>
 
@@ -1208,9 +1239,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                       >
                         Milestone and wicket graphics auto-hide after a few seconds — no need
                         to turn them off. Maiden pulls the bowler currently set in Live
-                        State. Match Won opens a small form — pick the winning team, type the
-                        margin, and fire whenever you like, whether or not a result has been
-                        computed automatically yet.
+                        State. Match Won fires automatically the instant the match is
+                        detected complete — this form is here if you need to review or
+                        re-fire it with corrected wording.
                       </p>
                     </>
                   )}
@@ -1219,7 +1250,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 
               <WeatherPanel
                 defaultVenue={matchSetup.venue}
-                onFetched={(wx) => {  }}
+                onFetched={pushFetchedWeather}
                 autoFetchKey={setupPushCount}
               />
               <OnAirChannels ref={onAirRef} fire={fire} />
