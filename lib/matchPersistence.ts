@@ -226,10 +226,15 @@ export async function saveEngineState(matchId: string, state: EngineSyncState): 
       { onConflict: "match_id" }
     );
 
-  if (error) {
-    console.error("[matchPersistence] saveEngineState failed:", error);
+    if (error) {
+    console.error("[matchPersistence] saveEngineState failed:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+    });
     return false;
-  }
+    }
   return true;
 }
 
