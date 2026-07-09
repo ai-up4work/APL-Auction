@@ -96,6 +96,9 @@ function computeVisible(on: Record<ChannelKey, boolean>, suppressed: Record<Supp
 
 export type OnAirChannelsHandle = {
   notifyMomentFired: () => void;
+  // NEW — match has ended: drop everything except the ambient channels
+  // that should keep running post-match (weather + tournament logo).
+  notifyMatchOver: () => void;
   getVisibleSnapshot: () => ChannelVisibility;
 };
 
@@ -211,6 +214,20 @@ const OnAirChannels = forwardRef<
   useImperativeHandle(ref, () => ({
     notifyMomentFired() {
       setOn((prev) => ({ ...prev, pointsTable: false, matchScorecard: false, matchIntro: false }));
+    },
+    // NEW — match has ended: drop everything except the two ambient
+    // channels that should keep running post-match (weather +
+    // tournament logo). Everything else (score bar, boundaries,
+    // fullscreen panels, test bg) goes off. This is a one-shot reset,
+    // not a lock — the regular toggle* functions above still work
+    // normally afterward, so anyone can manually flip a channel back
+    // on from the panel.
+    notifyMatchOver() {
+      setOn(() => ({
+        ...allOff(),
+        weather: true,
+        tournamentLogo: true,
+      }));
     },
     getVisibleSnapshot() {
       return computeVisible(on, suppressed) as ChannelVisibility;

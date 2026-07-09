@@ -394,33 +394,3 @@ export interface StandingRow {
   points: number;
   nrr: number;
 }
-
-export async function loadStandings(tournamentId: string): Promise<StandingRow[]> {
-  const { data, error } = await supabase
-    .from("tournament_standings")
-    .select("team_short, team_name, played, won, lost, tied, no_result, points, nrr")
-    .eq("tournament_id", tournamentId)
-    .order("points", { ascending: false })
-    .order("nrr", { ascending: false });
-
-  if (error) {
-    logDbError("loadStandings", error);
-    return [];
-  }
-  return (data as StandingRow[]) ?? [];
-}
-
-export async function upsertStandingRow(
-  tournamentId: string,
-  row: StandingRow
-): Promise<boolean> {
-  const { error } = await supabase
-    .from("tournament_standings")
-    .upsert({ tournament_id: tournamentId, ...row }, { onConflict: "tournament_id,team_short" });
-
-  if (error) {
-    logDbError("upsertStandingRow", error);
-    return false;
-  }
-  return true;
-}
