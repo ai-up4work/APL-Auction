@@ -13,6 +13,7 @@ import {
   type DismissalType,
   type PendingWicket,
   type Toast,
+  type EngineSyncState, // NEW — needed to type the sync props below
 } from "@/hooks/useLiveScoringEngine";
 import ManualCorrectionPanel from "./ManualCorrectionPanel";
 import { X, AlertTriangle, ArrowRight, UserX, Trophy, RotateCcw, Undo2 } from "lucide-react";
@@ -671,7 +672,7 @@ function MatchOverScreen({
 }
 
 export default function LiveStatePanel({
-  auctionId,                 // NEW
+  auctionId,
   liveState,
   setLiveState,
   setLiveDirty,
@@ -686,20 +687,20 @@ export default function LiveStatePanel({
   onInningsEnd,
   onMatchComplete,
   onRestartMatch,
-  // NEW — fired exactly once, automatically, the instant matchComplete
-  // flips true (whether from clicking End Match/End Innings, or the
-  // scoring engine's own auto-completion logic detecting the match is
-  // over). Wire this straight to your overlay bus, e.g.:
-  //   onFireMatchWonMoment={(payload) =>
-  //     bus.send({ type: "moment", moment: "matchWon", player: payload.winningTeamName,
-  //       score: payload.margin, teamColor: payload.teamColor,
-  //       teamLogoUrl: payload.teamLogoUrl, method: payload.method })
-  //   }
-  // onMatchComplete above is untouched and still fires alongside this,
-  // in case the parent also wants to log or pre-fill something.
   onFireMatchWonMoment,
+  // NEW — the two props the engine's ephemeral state (dismissed players,
+  // undo snapshot, active slot, extra type, free hit, pending wicket)
+  // actually needs to survive a refresh or be shared with another
+  // device/tab. `onEngineStateChange` fires on every mutation with the
+  // engine's full sync state so the parent can persist/broadcast it.
+  // `initialEngineState` seeds the hook on first render with whatever
+  // the parent already loaded (localStorage, or later a DB row). Both
+  // are optional — omit them and the engine just behaves as pure
+  // in-memory state, same as before.
+  onEngineStateChange,
+  initialEngineState,
 }: {
-  auctionId?: string;          // NEW — optional, for logging / analytics
+  auctionId?: string;
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
@@ -727,6 +728,8 @@ export default function LiveStatePanel({
     teamColor?: string;
     teamLogoUrl?: string;
   }) => void;
+  onEngineStateChange?: (state: EngineSyncState) => void;
+  initialEngineState?: EngineSyncState | null;
 }) {
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
@@ -778,8 +781,15 @@ export default function LiveStatePanel({
   const maxOversByFormat: Record<string, number | undefined> = { T20: 20, ODI: 50, Test: undefined };
   const maxOvers = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
 
+  // FIXED — this used to pass a bogus `persistKey` (a prop the hook
+  // never accepted) and never wired up `onEngineStateChange` /
+  // `initialEngineState`, which is why the scorer's own ephemeral
+  // state (dismissed players, undo history, active slot, free hit,
+  // pending wicket) reset to blank defaults on every refresh even
+  // though liveState itself survived. Now forwarded straight through
+  // to the parent-provided persistence layer.
   const engine = useLiveScoringEngine({
-    liveState,               // restored — required by the hook
+    liveState,
     setLiveState,
     setLiveDirty,
     maxOvers,
@@ -792,6 +802,8 @@ export default function LiveStatePanel({
     onMaiden,
     onInningsEnd,
     onMatchComplete,
+    onEngineStateChange,
+    initialEngineState,
   });
 
   const [showEndInningsConfirm, setShowEndInningsConfirm] = useState(false);
@@ -1331,9 +1343,14 @@ export default function LiveStatePanel({
           <RestartMatchDialog
             onCancel={() => setShowRestartConfirm(false)}
             onConfirm={() => {
-              // engine.clearPersistedEngineState();       // NEW
+              // FIXED — `clearPersistedEngineState` was renamed to
+              // `resetEngineState` when the hook moved off localStorage;
+              // calling the old name threw at runtime and aborted the
+              // restart partway through. This now also clears the
+              // match-won "already fired" flag as before.
+              engine.resetEngineState();
               try {
-                window.localStorage.removeItem(matchWonFiredKey()); // NEW
+                window.localStorage.removeItem(matchWonFiredKey());
               } catch {
                 // ignore
               }

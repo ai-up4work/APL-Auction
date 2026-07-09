@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { use, useEffect, useRef, useState } from "react";
 import { connectOverlayBus, type OverlayEvent, type MatchSetup, type LiveState, type SyncSnapshot, type WeatherData, type BatterState, type BowlerState } from "@/lib/overlayBus";
 import MatchSetupPanel from "@/components/overlays/admin/MatchSetupPanel";
 import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
@@ -8,6 +8,7 @@ import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
 import { ChevronDown } from "lucide-react";
+import type { EngineSyncState } from "@/hooks/useLiveScoringEngine"; // NEW
 
 import WeatherPanel, { type WeatherPanelHandle } from "@/components/overlays/admin/WeatherPanel";
 import { GeocodeMatch } from "@/lib/fetchVenueWeather";
@@ -157,6 +158,28 @@ function sanitizeLiveState(raw: any): LiveState {
   };
 }
 
+// NEW — same defensive normalization for the engine's own ephemeral
+// sync state. Without this, a stale/partial cache entry (e.g. from
+// before this field existed, or a half-written value) would hand the
+// hook `undefined` for things like `dismissedPlayers`, which the hook
+// then wraps in `new Set(undefined)` — that actually throws, since
+// `Set` requires an iterable. Coercing every field defensively here
+// means a bad cache entry degrades to "no engine state" instead of
+// crashing the panel on mount.
+function sanitizeEngineState(raw: any): EngineSyncState | null {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    dismissedPlayers: Array.isArray(raw.dismissedPlayers) ? raw.dismissedPlayers.filter((x: unknown) => typeof x === "string") : [],
+    extraType: ["none", "wide", "noBall", "bye", "legBye"].includes(raw.extraType) ? raw.extraType : "none",
+    isFreeHit: !!raw.isFreeHit,
+    activeSlot: ["striker", "nonStriker", "bowler"].includes(raw.activeSlot) ? raw.activeSlot : "striker",
+    overRunsConceded: Number(raw.overRunsConceded) || 0,
+    overJustCompleted: !!raw.overJustCompleted,
+    pendingWicket: raw.pendingWicket && typeof raw.pendingWicket === "object" ? raw.pendingWicket : null,
+    undoSnapshot: raw.undoSnapshot && typeof raw.undoSnapshot === "object" ? raw.undoSnapshot : null,
+  };
+}
+
 function BatterPickerButton({
   batter,
   label,
@@ -210,10 +233,15 @@ function BatterPickerButton({
 
 
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
-  // const { auctionId } = use(params);
-  // NOTE: hardcoded for now — restore the line above (and the params prop)
-  // before running multiple concurrent auctions/matches.
-  const auctionId = "2c5915d0-6b31-47cb-9597-0bd721afe2a9";
+  // FIXED — this was hardcoded to a single UUID while the overlay
+  // display page (app/overlay/[auctionId]/page.tsx) already reads the
+  // real auctionId from the route. Since connectOverlayBus subscribes
+  // to Supabase channel topic `overlay:${auctionId}`, the two pages
+  // were on two different channels unless the overlay happened to be
+  // opened at exactly this hardcoded UUID — which silently broke all
+  // syncing (no error, broadcasts just went nowhere). Restored to the
+  // dynamic param so both sides always agree on the same channel.
+  const { auctionId } = use(params);
 
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const onAirRef = useRef<OnAirChannelsHandle>(null);
@@ -234,6 +262,19 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [liveDirty, setLiveDirty] = useState(false);
   const [livePushed, setLivePushed] = useState(false);
   const [liveHydrated, setLiveHydrated] = useState(false);
+
+  // ── Scoring engine ephemeral state (NEW) ─────────────────────────────
+  // This is the piece that was previously missing entirely: the engine's
+  // own working state — dismissed players, undo snapshot, active slot,
+  // extra type, free hit, pending wicket dialog — was never persisted,
+  // so a refresh silently reset it to defaults even though `liveState`
+  // (the score itself) survived via its own localStorage key below.
+  // `engineSyncState` mirrors that ephemeral state; it's loaded in the
+  // same hydration effect as everything else and handed to
+  // LiveStatePanel as `initialEngineState`, while `handleEngineStateChange`
+  // is passed down as `onEngineStateChange` so every mutation the engine
+  // makes gets written straight back to localStorage.
+  const [engineSyncState, setEngineSyncState] = useState<EngineSyncState | null>(null);
 
   // ── Weather (last pushed, so full-sync snapshots can include it) ────
   const [weatherData, setWeatherData] = useState<WeatherData>(defaultWeatherData);
@@ -326,7 +367,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auctionId]);
 
-  // ── Match Setup + Live State + Weather persistence ──────────────────
+  // ── Match Setup + Live State + Engine State + Weather persistence ───
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -347,6 +388,19 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     try {
       const rawCompleted = window.localStorage.getItem(`overlay:${auctionId}:matchSetupCompleted`);
       if (rawCompleted) setMatchSetupCompleted(JSON.parse(rawCompleted));
+    } catch {
+      // ignore malformed cache
+    }
+    try {
+      // NEW — restore the scoring engine's ephemeral state (dismissed
+      // players, undo snapshot, active slot, extra type, free hit,
+      // pending wicket) alongside everything else. This is loaded in
+      // the same effect/render pass as `matchSetupCompleted`, so by the
+      // time LiveStatePanel first mounts (gated on matchSetupCompleted
+      // being true), `engineSyncState` is already populated and gets
+      // passed in as `initialEngineState` correctly on first render.
+      const rawEngine = window.localStorage.getItem(`overlay:${auctionId}:engineState`);
+      if (rawEngine) setEngineSyncState(sanitizeEngineState(JSON.parse(rawEngine)));
     } catch {
       // ignore malformed cache
     }
@@ -379,6 +433,21 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     if (!setupHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(`overlay:${auctionId}:weather`, JSON.stringify(weatherData));
   }, [weatherData, auctionId, setupHydrated]);
+
+  // NEW — called by LiveStatePanel (via the engine's onEngineStateChange)
+  // on every mutation. Mirrors the state into React state (so a restart
+  // can clear it) and writes it straight to localStorage so a refresh
+  // restores dismissed players / undo history / active slot / free hit /
+  // pending wicket instead of resetting them to defaults.
+  function handleEngineStateChange(state: EngineSyncState) {
+    setEngineSyncState(state);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(`overlay:${auctionId}:engineState`, JSON.stringify(state));
+    } catch {
+      // non-fatal
+    }
+  }
 
   // Auto-push Live State to the overlay shortly after every change,
   // instead of waiting for a manual "Push Live State" click. Debounced so
@@ -533,16 +602,13 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
     onAirRef.current?.notifyMomentFired();
   }
 
-  // NEW — the actual fix. `LiveStatePanel` already computes an
-  // `onFireMatchWonMoment` callback internally (it fires exactly once,
-  // automatically, the instant `liveState.matchComplete` flips true —
-  // see the `matchWonFiredRef` effect inside LiveStatePanel) but that
-  // prop was never wired up here, so the graphic never actually reached
-  // the overlay bus except via the manual "Fire Match Won" button.
-  // This handler is what that callback is passed into: it takes the
-  // already-resolved winner name/margin/method/color/logo straight from
-  // LiveStatePanel (no need to re-derive them via teamVisualsByName)
-  // and pushes the moment onto the bus immediately.
+  // The actual fix that makes `LiveStatePanel`'s internally-computed
+  // `onFireMatchWonMoment` callback (fires exactly once, automatically,
+  // the instant `liveState.matchComplete` flips true) reach the overlay
+  // bus at all: it takes the already-resolved winner name/margin/
+  // method/color/logo straight from LiveStatePanel (no need to
+  // re-derive them via teamVisualsByName) and pushes the moment onto
+  // the bus immediately.
   function fireMatchWonMomentAuto(payload: {
     winningTeamName: string;
     margin: string;
@@ -652,6 +718,21 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       thisOver: [],
     }));
     setLiveDirty(true);
+
+    // NEW — a restart used to leave the OLD engine sync state (dismissed
+    // players from the previous match, undo history, etc.) sitting in
+    // localStorage/React state, so a fresh match could inherit stale
+    // ephemeral state on the very next refresh. Clear both here,
+    // alongside LiveStatePanel's own call to engine.resetEngineState()
+    // which clears the in-memory copy inside the hook.
+    setEngineSyncState(null);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(`overlay:${auctionId}:engineState`);
+      } catch {
+        // non-fatal
+      }
+    }
   }
 
   function fireWicketMoment() {
@@ -771,6 +852,13 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
                 onMatchComplete={handleAutoMatchComplete}
                 onFireMatchWonMoment={fireMatchWonMomentAuto}
                 onRestartMatch={restartMatch}
+                // NEW — wires the engine's ephemeral state into the same
+                // localStorage-backed persistence as everything else, so
+                // dismissed players / undo history / active slot / free
+                // hit / pending wicket survive a refresh instead of
+                // silently resetting.
+                initialEngineState={engineSyncState}
+                onEngineStateChange={handleEngineStateChange}
               />
             ) : (
               <div
@@ -1250,11 +1338,13 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
               </Section>
 
               <WeatherPanel
+                ref={weatherPanelRef}
+                auctionId={auctionId}
                 defaultVenue={matchSetup.venue}
                 onFetched={pushFetchedWeather}
                 autoFetchKey={setupPushCount}
               />
-              <OnAirChannels ref={onAirRef} fire={fire} />
+              <OnAirChannels ref={onAirRef} fire={fire} auctionId={auctionId} />
 
             <Section title="Event Log">
               <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">

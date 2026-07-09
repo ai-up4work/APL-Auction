@@ -26,28 +26,54 @@ interface WeatherFetchResult {
   condition: string;
 }
 
-// Imperative handle — lets a parent (Match Setup's venue-select flow) hand
-// this panel an already-resolved lat/lng directly, bypassing this panel's
-// own search box entirely.
 export interface WeatherPanelHandle {
   scheduleFetch: (match: GeocodeMatch, displayName?: string) => void;
 }
 
 interface WeatherPanelProps {
-  // Display label used on the fetched result and broadcast to the overlay.
-  // Read via a ref internally so an edit to the venue name doesn't need to
-  // re-trigger a geocode/fetch — the label just updates on the next fetch
-  // (manual, scheduled, or auto-refresh).
+  // NEW — needed to key the localStorage entry, same pattern as
+  // matchSetup/liveState/engineState/weather in page.tsx.
+  auctionId: string;
   defaultVenue: string;
   onFetched: (data: WeatherFetchResult) => void;
-  // Bump this (e.g. a push counter) to trigger an automatic geocode+fetch
-  // of `defaultVenue` itself, for cases where no explicit coordinate
-  // selection has come through the ref yet. Ignored on first mount.
   autoFetchKey?: number | string;
 }
 
+// NEW — what actually gets persisted: the last successful reading, plus
+// the coordinates it came from (needed to resume the 5-min auto-refresh
+// loop without re-geocoding).
+interface PersistedWeatherPanelState {
+  lastResult: WeatherFetchResult | null;
+  coords: { latitude: number; longitude: number } | null;
+}
+
+// NEW — defensively rebuilds persisted state from whatever's in
+// localStorage. A missing/partial/corrupt entry degrades to "nothing
+// cached" rather than handing bad data into state.
+function sanitizeWeatherPanelCache(raw: any): PersistedWeatherPanelState {
+  const lastResult =
+    raw?.lastResult &&
+    typeof raw.lastResult.venue === "string" &&
+    typeof raw.lastResult.temp === "number" &&
+    typeof raw.lastResult.condition === "string"
+      ? {
+          venue: raw.lastResult.venue,
+          temp: raw.lastResult.temp,
+          unit: "C" as const,
+          condition: raw.lastResult.condition,
+        }
+      : null;
+  const coords =
+    raw?.coords &&
+    typeof raw.coords.latitude === "number" &&
+    typeof raw.coords.longitude === "number"
+      ? { latitude: raw.coords.latitude, longitude: raw.coords.longitude }
+      : null;
+  return { lastResult, coords };
+}
+
 const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
-  function WeatherPanel({ defaultVenue, onFetched, autoFetchKey }, ref) {
+  function WeatherPanel({ auctionId, defaultVenue, onFetched, autoFetchKey }, ref) {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState<
       "idle" | "scheduled" | "loading" | "error"
@@ -57,18 +83,12 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       null
     );
 
-    // Collapsed = showing the compact "last fetched" summary instead of the
-    // search box. Starts open (nothing fetched yet); collapses once a fetch
-    // resolves successfully; re-expands on error, or whenever a fetch is
-    // scheduled/in flight, so the admin can see and cancel it if needed.
     const [collapsed, setCollapsed] = useState(false);
 
     const selectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
       null
     );
 
-    // Coordinates of whatever venue was most recently fetched successfully.
-    // The 5-minute auto-refresh reuses these instead of re-geocoding.
     const lastFetchedRef = useRef<{
       latitude: number;
       longitude: number;
@@ -76,15 +96,33 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
     const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
       null
     );
-    // Guards against a stale response landing after a newer request started.
     const requestIdRef = useRef(0);
 
-    // Always read the latest venue label without needing it in effect
-    // dependency arrays.
     const defaultVenueRef = useRef(defaultVenue);
     useEffect(() => {
       defaultVenueRef.current = defaultVenue;
     }, [defaultVenue]);
+
+    // NEW — same storage-key convention as everywhere else in page.tsx.
+    function weatherPanelStorageKey() {
+      return `overlay:${auctionId}:weatherPanel`;
+    }
+
+    // NEW — writes the latest successful reading + coords to
+    // localStorage. Called right after a successful fetch (manual,
+    // scheduled-selection, or auto-refresh) so a refresh can pick up
+    // exactly where things left off.
+    function persistWeatherPanelState(result: WeatherFetchResult, coords: { latitude: number; longitude: number }) {
+      if (typeof window === "undefined") return;
+      try {
+        window.localStorage.setItem(
+          weatherPanelStorageKey(),
+          JSON.stringify({ lastResult: result, coords })
+        );
+      } catch {
+        // non-fatal
+      }
+    }
 
     function clearScheduledFetch() {
       if (selectTimeoutRef.current) {
@@ -100,10 +138,6 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       }
     }
 
-    // Restarts the 5-minute countdown, measured from "last time we
-    // actually updated," not from mount. Runs silently in the background —
-    // does not touch `collapsed`, since a successful background refresh
-    // shouldn't yank the panel open.
     function scheduleAutoRefresh() {
       clearAutoRefresh();
       console.log("[WeatherPanel] auto-refresh scheduled for", new Date(Date.now() + AUTO_REFRESH_MS).toLocaleTimeString());
@@ -124,6 +158,7 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
           console.log("[WeatherPanel] auto-refresh fetch SUCCESS:", wx);
           setLastResult(wx);
           onFetched(wx);
+          persistWeatherPanelState(wx, target); // NEW — keep the cache current across the auto-refresh loop too
         } catch (e) {
           console.log("[WeatherPanel] auto-refresh fetch FAILED:", e);
         } finally {
@@ -131,6 +166,37 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
         }
       }, AUTO_REFRESH_MS);
     }
+
+    // NEW — hydrate on mount. This is the actual fix: previously
+    // `lastFetchedRef` came back `null` after every refresh, which
+    // meant `scheduleAutoRefresh()` was never called again — the
+    // 5-minute loop only ever got (re)started from inside
+    // runFetchForCoords, so a page reload silently killed live
+    // auto-refresh until someone manually re-fetched. Now we restore
+    // both the last reading (so the collapsed summary is accurate
+    // immediately) and the coords (so the auto-refresh loop resumes).
+    const [hydrated, setHydrated] = useState(false);
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      try {
+        const raw = window.localStorage.getItem(weatherPanelStorageKey());
+        if (raw) {
+          const { lastResult: cachedResult, coords } = sanitizeWeatherPanelCache(JSON.parse(raw));
+          if (cachedResult) {
+            setLastResult(cachedResult);
+            setCollapsed(true);
+          }
+          if (coords) {
+            lastFetchedRef.current = coords;
+            scheduleAutoRefresh();
+          }
+        }
+      } catch {
+        // ignore malformed cache
+      }
+      setHydrated(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [auctionId]);
 
     useEffect(() => {
       return () => {
@@ -153,23 +219,22 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
           longitude,
           labelOverride ?? defaultVenueRef.current
         );
-        if (myId !== requestIdRef.current) return; // superseded by a newer request
+        if (myId !== requestIdRef.current) return;
         setLastResult(wx);
         onFetched(wx);
         lastFetchedRef.current = { latitude, longitude };
+        persistWeatherPanelState(wx, { latitude, longitude }); // NEW
         scheduleAutoRefresh();
         setStatus("idle");
-        setCollapsed(true); // tuck the search UI away now that we have a result
+        setCollapsed(true);
       } catch (e) {
         if (myId !== requestIdRef.current) return;
         setStatus("error");
         setErrorMsg((e as Error).message);
-        setCollapsed(false); // surface the error, don't hide it behind a collapsed card
+        setCollapsed(false);
       }
     }
 
-    // Manual "Fetch Weather" — geocodes whatever's currently typed in the
-    // search box, rather than requiring a dropdown selection.
     async function handleFetch() {
       const searchTerm = query.trim();
       if (!searchTerm) return;
@@ -193,9 +258,6 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       }
     }
 
-    // Picking a dropdown suggestion in THIS panel's own search box —
-    // schedules the fetch after a short delay so a wrong pick can be
-    // corrected without firing a request.
     function handleSelectSuggestion(match: GeocodeMatch) {
       clearScheduledFetch();
       setStatus("scheduled");
@@ -206,12 +268,6 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       }, SELECT_FETCH_DELAY_MS);
     }
 
-    // Imperative entry point for a parent that already resolved a
-    // coordinate elsewhere (e.g. an autocomplete pick inside Match Setup).
-    // Mirrors handleSelectSuggestion's cancellable-delay behavior. Expands
-    // the panel even if it was collapsed, so the "fetching in 5s" note (and
-    // the chance to cancel/change it) is visible rather than happening
-    // silently behind a collapsed card.
     useImperativeHandle(
       ref,
       () => ({
@@ -230,10 +286,6 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
       []
     );
 
-    // Auto-fetch on autoFetchKey change (e.g. Match Setup pushed). Skips
-    // the initial mount so it doesn't fire before there's anything to key
-    // off. Geocodes defaultVenue itself as a best-effort fallback when no
-    // explicit coordinate selection has come through scheduleFetch.
     const mountedAutoFetchRef = useRef(false);
     useEffect(() => {
       if (!mountedAutoFetchRef.current) {
