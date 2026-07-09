@@ -177,10 +177,12 @@ export function connectOverlayBus(auctionId: string) {
 
   channel.on("broadcast", { event: BROADCAST_EVENT_NAME }, (msg) => {
     const event = msg.payload as OverlayEvent;
+    console.log("[overlayBus] received", event.type, event); // TEMP: confirm delivery
     handlers.forEach((h) => h(event));
   });
 
   channel.subscribe((status) => {
+    console.log("[overlayBus] status:", status); // TEMP: watch for CLOSED/CHANNEL_ERROR/TIMED_OUT
     ready = status === "SUBSCRIBED";
     if (ready) {
       if (queue.length) {

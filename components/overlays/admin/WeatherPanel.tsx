@@ -106,21 +106,26 @@ const WeatherPanel = forwardRef<WeatherPanelHandle, WeatherPanelProps>(
     // shouldn't yank the panel open.
     function scheduleAutoRefresh() {
       clearAutoRefresh();
+      console.log("[WeatherPanel] auto-refresh scheduled for", new Date(Date.now() + AUTO_REFRESH_MS).toLocaleTimeString());
       autoRefreshTimeoutRef.current = setTimeout(async () => {
+        console.log("[WeatherPanel] auto-refresh timer FIRED at", new Date().toLocaleTimeString());
         autoRefreshTimeoutRef.current = null;
         const target = lastFetchedRef.current;
-        if (!target) return;
+        if (!target) {
+          console.log("[WeatherPanel] no lastFetchedRef, bailing");
+          return;
+        }
         try {
           const wx = await fetchWeatherForCoords(
             target.latitude,
             target.longitude,
             defaultVenueRef.current
           );
+          console.log("[WeatherPanel] auto-refresh fetch SUCCESS:", wx);
           setLastResult(wx);
           onFetched(wx);
-        } catch {
-          // Silent — a background refresh failing shouldn't interrupt
-          // whatever the admin is doing. The next cycle just tries again.
+        } catch (e) {
+          console.log("[WeatherPanel] auto-refresh fetch FAILED:", e);
         } finally {
           scheduleAutoRefresh();
         }
