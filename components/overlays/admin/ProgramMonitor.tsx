@@ -8,8 +8,11 @@ export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
   const [copied, setCopied] = useState(false);
   const monitorScreenRef = useRef<HTMLDivElement>(null);
   const [previewScale, setPreviewScale] = useState(1);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
+    
     function updateScale() {
       const el = monitorScreenRef.current;
       if (!el) return;
@@ -49,7 +52,7 @@ export default function ProgramMonitor({ overlayUrl }: { overlayUrl: string }) {
                   width: "1920px",
                   height: "1080px",
                   border: "none",
-                  transform: `scale(${previewScale})`,
+                  transform: isMounted ? `scale(${previewScale})` : "scale(1)",
                   transformOrigin: "center center",
                   flexShrink: 0,
                 }}

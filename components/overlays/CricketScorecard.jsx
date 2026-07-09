@@ -4,8 +4,9 @@ import { ListOrdered, Star } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { useOverlayPanel } from "@/hooks/useOverlayPanel";
+import { useBallsLedger } from "@/hooks/useBallsLedger";
+import { buildInningsCard } from "@/lib/scorecardAggregator";
 import { GOLD_BEZEL, plaqueClip, ambientGlow } from "@/lib/overlayTokens";
-import { TEAM_A, TEAM_B, TOURNAMENT, INNINGS_A, INNINGS_B, RESULT_LINE } from "@/lib/matchData";
 import TeamBadge from "@/components/overlays/shared/TeamBadge";
 import TearLine from "@/components/overlays/shared/TearLine";
 
@@ -52,7 +53,7 @@ function TeamInnings({ team, innings, closing, delay, variant }) {
     >
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ background: `radial-gradient(ellipse 90% 100% at 50% 0%, ${team.colorSoft} 0%, transparent 60%)` }}
+        style={{ background: `radial-gradient(ellipse 90% 100% at 50% 0%, ${team.color}33 0%, transparent 60%)` }}
       />
 
       <div className="relative z-10 flex items-center gap-3 px-5 sm:px-6 lg:px-6 pt-5 pb-3">
@@ -99,11 +100,24 @@ function TeamInnings({ team, innings, closing, delay, variant }) {
 
       <div className="relative z-10 grid grid-cols-2 px-3 sm:px-4 lg:px-4 pb-5 flex-1">
         <div>
+          {innings.batting.length === 0 && (
+            <p className="px-1 py-2 text-[10px] italic" style={{ color: "var(--color-outline)" }}>No batters yet</p>
+          )}
           {innings.batting.map((p) => (
-            <StatRow key={p.name} label={p.name} value1={p.runs} value2={p.balls} top={p.top} ringColor={team.color} />
+            <StatRow
+              key={p.name}
+              label={p.out ? `${p.name} · ${p.out}` : `${p.name}${p.balls > 0 ? " · not out" : ""}`}
+              value1={p.runs}
+              value2={p.balls}
+              top={p.top}
+              ringColor={team.color}
+            />
           ))}
         </div>
         <div style={{ borderLeft: "1px solid var(--color-border-overlay)" }}>
+          {innings.bowling.length === 0 && (
+            <p className="px-1 py-2 text-[10px] italic" style={{ color: "var(--color-outline)" }}>No bowlers yet</p>
+          )}
           {innings.bowling.map((p) => (
             <StatRow key={p.name} label={p.name} value1={p.figures} value2={p.overs} top={p.top} ringColor={team.color} />
           ))}
@@ -113,20 +127,37 @@ function TeamInnings({ team, innings, closing, delay, variant }) {
   );
 }
 
-/**
- * CricketScorecard — self-contained trigger button + modal panel, remote-
- * controllable via the shared useOverlayPanel hook:
- *   - `show` (boolean | undefined): when provided, drives the panel
- *     open/closed externally (e.g. from a bus event). When omitted, the
- *     component is purely driven by its own trigger button.
- *   - `hideTrigger`: hides the on-screen "Scorecard" trigger button, for
- *     use on the OBS-facing overlay page where there's no one to click it.
- */
-export default function CricketScorecard({ show, hideTrigger = false }) {
+export default function CricketScorecard({
+  show,
+  hideTrigger = false,
+  matchId,
+  matchSetup,
+  liveState,
+}) {
   const { mounted, open, closing, toggle, closePanel } = useOverlayPanel(show, EXIT_DURATION_MS, {
     defaultOpen: false,
     escapeToClose: true,
   });
+
+  const { balls } = useBallsLedger(matchId, mounted);
+
+  const teamA = matchSetup?.teamA;
+  const teamB = matchSetup?.teamB;
+
+  const innings1Label = liveState?.inningsNumber === 2 || liveState?.matchComplete ? "1st Innings" : "1st Innings (in progress)";
+  const innings2Label = "2nd Innings";
+
+  const inningsA = buildInningsCard(balls, 1, innings1Label);
+  const inningsB = buildInningsCard(balls, 2, innings2Label);
+
+  const resultLine = liveState?.matchComplete && liveState.matchResult
+    ? `${liveState.matchResult.winningTeamName} ${liveState.matchResult.margin}`
+    : "Match in progress";
+
+  const tournamentLogo = matchSetup?.tournamentLogoUrl;
+  const tournamentName = matchSetup?.tournamentName;
+
+  if (!teamA || !teamB) return null;
 
   return (
     <>
@@ -165,7 +196,7 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
                     : "mscCardEnter 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.03s both",
                 }}
               >
-                <div className="absolute -inset-6 blur-3xl rounded-[40px]" style={{ background: ambientGlow(TEAM_A, TEAM_B) }} />
+                <div className="absolute -inset-6 blur-3xl rounded-[40px]" style={{ background: ambientGlow(teamA, teamB) }} />
 
                 <div
                   className="relative p-[3px] sm:p-[4px]"
@@ -185,18 +216,20 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
                       WebkitClipPath: PLAQUE_CLIP_INNER,
                     }}
                   >
-                    <div
-                      className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
-                      aria-hidden="true"
-                      style={{ opacity: 0.16, mixBlendMode: "screen" }}
-                    >
-                      <img
-                        src={TOURNAMENT.logo}
-                        alt=""
-                        className="w-2/3 h-2/3 object-contain"
-                        style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
-                      />
-                    </div>
+                    {tournamentLogo && (
+                      <div
+                        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+                        aria-hidden="true"
+                        style={{ opacity: 0.16, mixBlendMode: "screen" }}
+                      >
+                        <img
+                          src={tournamentLogo}
+                          alt=""
+                          className="w-2/3 h-2/3 object-contain"
+                          style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
+                        />
+                      </div>
+                    )}
 
                     <div
                       className="relative z-10 flex items-center justify-center gap-4 pt-7 pb-4 px-8 sm:px-12"
@@ -210,16 +243,18 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
                         <p className="font-heading font-black text-sm sm:text-lg tracking-wide" style={{ color: "var(--color-on-surface)" }}>
                           Match Summary
                         </p>
-                        <p className="text-[9px] font-bold tracking-[0.3em] uppercase" style={{ color: "var(--color-theme-orange)" }}>
-                          {TOURNAMENT.name}
-                        </p>
+                        {tournamentName && (
+                          <p className="text-[9px] font-bold tracking-[0.3em] uppercase" style={{ color: "var(--color-theme-orange)" }}>
+                            {tournamentName}
+                          </p>
+                        )}
                       </div>
                       <div className="hidden sm:block h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(201,151,31,0.5), transparent)" }} />
                     </div>
 
                     <div className="flex flex-col lg:flex-row lg:items-stretch">
                       <div className="lg:w-1/2 lg:flex lg:flex-col">
-                        <TeamInnings team={TEAM_A} innings={INNINGS_A} closing={closing} delay={0.26} variant="blue" />
+                        <TeamInnings team={teamA} innings={inningsA} closing={closing} delay={0.26} variant="blue" />
                       </div>
 
                       <div
@@ -232,7 +267,7 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
                       />
 
                       <div className="lg:w-1/2 lg:flex lg:flex-col">
-                        <TeamInnings team={TEAM_B} innings={INNINGS_B} closing={closing} delay={0.38} variant="green" />
+                        <TeamInnings team={teamB} innings={inningsB} closing={closing} delay={0.38} variant="green" />
                       </div>
                     </div>
 
@@ -247,7 +282,7 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
                     >
                       <TearLine variant="inset" />
                       <p className="font-heading text-base sm:text-xl font-black uppercase tracking-tight" style={{ color: "var(--color-theme-orange)" }}>
-                        {RESULT_LINE}
+                        {resultLine}
                       </p>
                     </div>
                   </div>
@@ -258,8 +293,6 @@ export default function CricketScorecard({ show, hideTrigger = false }) {
           document.body
         )}
 
-      {/* Component-specific animations only — font import, .font-heading,
-          and .shine-ring live in lib/overlay-shared.css. */}
       <style jsx>{`
         @keyframes mscFadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes mscFadeOut { from { opacity: 1; } to { opacity: 0; } }

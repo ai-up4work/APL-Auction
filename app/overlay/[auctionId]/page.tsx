@@ -3,6 +3,7 @@
 
 import React, { use, useEffect, useReducer, useRef } from "react";
 import { connectOverlayBus, type OverlayEvent, type WeatherData, type MatchSetup, type LiveState } from "@/lib/overlayBus";
+import { getOrCreateMatch } from "@/lib/matchPersistence"; // NEW
 
 import WeatherCard from "@/components/overlays/WeatherCard";
 import MatchBoundaries from "@/components/overlays/MatchBoundaries";
@@ -22,8 +23,8 @@ const DEFAULT_WEATHER: WeatherData = {
   corner: "top-right",
 };
 
-// NEW — grace period after the channel reports SUBSCRIBED before we send
-// the first requestSync. Supabase Realtime broadcasts sent immediately on
+// Grace period after the channel reports SUBSCRIBED before we send the
+// first requestSync. Supabase Realtime broadcasts sent immediately on
 // "SUBSCRIBED" can get dropped because the subscription hasn't fully
 // propagated server-side yet — this gives both ends (this overlay AND the
 // admin tab, if it's also just reconnecting) a moment to actually settle
@@ -110,12 +111,6 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
       const c = event.data.channels;
       return {
         ...state,
-        // CHANGED — previously this only restored `show` from the channel
-        // visibility flags, leaving `data` (venue/temp/condition) frozen at
-        // whatever it already was — which on a fresh page load is just the
-        // hardcoded DEFAULT_WEATHER. Now the snapshot carries the actual
-        // last-fetched weather too, so a reconnect shows real conditions
-        // instead of resetting to 28°C/sunny.
         weather: { show: c.weather, data: event.data.weather ?? state.weather.data },
         matchBoundaries: { ...state.matchBoundaries, show: c.matchBoundaries },
         tournamentBoundaries: { ...state.tournamentBoundaries, show: c.tournamentBoundaries },
@@ -168,6 +163,24 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
   const [state, dispatch] = useReducer(reducer, initialState);
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
 
+  // NEW — resolved Supabase `matches.id` for this auctionId, independent
+  // of the bus. Needed by CricketScorecard to subscribe to the `balls`
+  // ledger directly. Resolved once on mount the same way the admin/scoring
+  // page does via getOrCreateMatch — this overlay page is read-only, so
+  // it's safe to call even though it may race the admin's own call (both
+  // resolve to the same row; getOrCreateMatch is idempotent).
+  const [matchId, setMatchId] = React.useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getOrCreateMatch(auctionId).then((row) => {
+      if (!cancelled && row) setMatchId(row.id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [auctionId]);
+
   useEffect(() => {
     document.body.style.background = "transparent";
     const bus = connectOverlayBus(auctionId);
@@ -199,13 +212,6 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
     }
 
     bus.onReady(() => {
-      // CHANGED — instead of firing the first requestSync the instant
-      // "ready" flips true, wait INITIAL_SYNC_DELAY_MS first. This is the
-      // actual fix for the Supabase "broadcast right after SUBSCRIBED can
-      // get silently dropped" race, rather than just relying on retries to
-      // eventually land. The retry loop still starts after this delay, as
-      // a safety net for anything that drops afterward (e.g. the admin's
-      // reply, or the admin tab itself still connecting).
       startupTimer = setTimeout(() => {
         attemptSync();
         retryTimer = setInterval(attemptSync, SYNC_RETRY_MS);
@@ -218,9 +224,6 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         stopRetrying();
       }
       if (event.type === "moment") {
-        // CHANGED — pass the full event through so matchWon (team name/color/
-        // logo/margin) and maiden (bowler name) can render dynamic text instead
-        // of always showing static copy.
         (window as any).triggerBoundaryCelebration?.(event.moment, event);
         return;
       }
@@ -272,18 +275,27 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       )}
 
       <MatchMomentOverlay hideDemoButtons />
-      
+
       <LiveScoreBar
         show={state.liveScoreBar.show}
         hideTrigger
         liveState={state.liveState ?? undefined}
         matchSetup={state.matchSetup ?? undefined}
       />
-      
+
       <PointsTable show={state.pointsTable.show} hideTrigger />
-      
-      <CricketScorecard show={state.matchScorecard.show} hideTrigger />
-      
+
+      {/* CHANGED — now fed matchId/matchSetup/liveState so it can derive
+          the batting/bowling cards from the balls ledger instead of the
+          old static matchData.ts imports. */}
+      <CricketScorecard
+        show={state.matchScorecard.show}
+        hideTrigger
+        matchId={matchId}
+        matchSetup={state.matchSetup ?? undefined}
+        liveState={state.liveState ?? undefined}
+      />
+
       <CricketMatchIntro
         show={state.matchIntro.show}
         hideTrigger
