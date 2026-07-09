@@ -779,7 +779,6 @@ export default function LiveStatePanel({
   const maxOvers = matchSetup?.format ? maxOversByFormat[matchSetup.format] : undefined;
 
   const engine = useLiveScoringEngine({
-    persistKey: auctionId,   // NEW
     liveState,               // restored — required by the hook
     setLiveState,
     setLiveDirty,
@@ -1332,7 +1331,7 @@ export default function LiveStatePanel({
           <RestartMatchDialog
             onCancel={() => setShowRestartConfirm(false)}
             onConfirm={() => {
-              engine.clearPersistedEngineState();       // NEW
+              // engine.clearPersistedEngineState();       // NEW
               try {
                 window.localStorage.removeItem(matchWonFiredKey()); // NEW
               } catch {

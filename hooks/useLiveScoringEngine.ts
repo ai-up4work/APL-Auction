@@ -138,29 +138,31 @@ function countAvailableBatters(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// PERSISTENCE — everything below this line is new. The engine used to
-// carry `dismissedPlayers`, undo history, the mid-over refs, extraType,
-// isFreeHit, activeSlot, and any open wicket dialog purely in React
-// state/refs. None of that survived a page refresh, even though
-// `liveState` itself did (persisted one level up in page.tsx). This
-// section mirrors that same localStorage pattern for the engine's own
-// state so a refresh mid-over restores EXACTLY where you left off.
+// SYNC — the engine used to carry `dismissedPlayers`, undo history, the
+// mid-over refs, extraType, isFreeHit, activeSlot, and any open wicket
+// dialog purely in React state/refs, persisted to localStorage so a
+// refresh on the SAME device restored them. That doesn't help when a
+// different device/tab needs to pick up where another one left off, so
+// this has been replaced with two hooks the parent wires up to whatever
+// transport it likes (in practice: Supabase table + realtime broadcast,
+// see lib/matchStateSync.ts):
 //
-// NOTE: `persistKey` is optional (string | undefined) because the
-// caller's `auctionId` prop is itself optional — a match can be scored
-// before it has ever been saved/named. When no key is available,
-// persistence is simply skipped (load returns null, saves are no-ops)
-// rather than forcing every caller to invent a placeholder key that
-// could collide across unrelated sessions.
+//   - `onEngineStateChange(state)` fires at every point the old
+//     `persistEngineState()` used to write to localStorage. The parent
+//     uses this to broadcast/save the engine's ephemeral state.
+//   - `applyRemoteEngineState(state)` is returned from the hook so the
+//     parent can push an incoming state (from a DB load or a broadcast
+//     from another admin panel) back INTO this hook, overwriting local
+//     state.
 // ─────────────────────────────────────────────────────────────────────────
 
-interface UndoSnapshot {
+export interface UndoSnapshot {
   liveState: LiveState;
   dismissedPlayers: string[];
   overJustCompleted: boolean;
 }
 
-interface PersistedEngineState {
+export interface EngineSyncState {
   dismissedPlayers: string[];
   extraType: ExtraType;
   isFreeHit: boolean;
@@ -171,49 +173,20 @@ interface PersistedEngineState {
   undoSnapshot: UndoSnapshot | null;
 }
 
-function engineStorageKey(persistKey: string) {
-  return `overlay:${persistKey}:engineState`;
-}
-
-function loadPersistedEngineState(persistKey: string | undefined): PersistedEngineState | null {
-  if (typeof window === "undefined" || !persistKey) return null;
-  try {
-    const raw = window.localStorage.getItem(engineStorageKey(persistKey));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const validSlot =
-      parsed?.activeSlot === "nonStriker" || parsed?.activeSlot === "bowler" ? parsed.activeSlot : "striker";
-    const validExtra: ExtraType = ["none", "wide", "noBall", "bye", "legBye"].includes(parsed?.extraType)
-      ? parsed.extraType
-      : "none";
-    return {
-      dismissedPlayers: Array.isArray(parsed?.dismissedPlayers)
-        ? parsed.dismissedPlayers.filter((x: unknown) => typeof x === "string")
-        : [],
-      extraType: validExtra,
-      isFreeHit: !!parsed?.isFreeHit,
-      activeSlot: validSlot,
-      overRunsConceded: Number(parsed?.overRunsConceded) || 0,
-      overJustCompleted: !!parsed?.overJustCompleted,
-      pendingWicket: parsed?.pendingWicket ?? null,
-      undoSnapshot:
-        parsed?.undoSnapshot && parsed.undoSnapshot.liveState
-          ? {
-              liveState: parsed.undoSnapshot.liveState,
-              dismissedPlayers: Array.isArray(parsed.undoSnapshot.dismissedPlayers)
-                ? parsed.undoSnapshot.dismissedPlayers
-                : [],
-              overJustCompleted: !!parsed.undoSnapshot.overJustCompleted,
-            }
-          : null,
-    };
-  } catch {
-    return null;
-  }
+function defaultEngineSyncState(): EngineSyncState {
+  return {
+    dismissedPlayers: [],
+    extraType: "none",
+    isFreeHit: false,
+    activeSlot: "striker",
+    overRunsConceded: 0,
+    overJustCompleted: false,
+    pendingWicket: null,
+    undoSnapshot: null,
+  };
 }
 
 export function useLiveScoringEngine({
-  persistKey,
   liveState,
   setLiveState,
   setLiveDirty,
@@ -227,12 +200,9 @@ export function useLiveScoringEngine({
   onMaiden,
   onInningsEnd,
   onMatchComplete,
+  onEngineStateChange,
+  initialEngineState,
 }: {
-  // A stable key (pass your auctionId) used to namespace this engine's
-  // persisted ephemeral state in localStorage, same pattern as
-  // matchSetup/liveState use one level up. Optional — when undefined,
-  // persistence is skipped entirely (see notes above).
-  persistKey: string | undefined;
   liveState: LiveState;
   setLiveState: React.Dispatch<React.SetStateAction<LiveState>>;
   setLiveDirty: (v: boolean) => void;
@@ -252,24 +222,19 @@ export function useLiveScoringEngine({
   onMaiden?: (payload: { bowlerName: string; maidens: number }) => void;
   onInningsEnd?: (payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) => void;
   onMatchComplete?: (result: AutoMatchResult) => void;
+  // Fires on every mutation with the engine's full ephemeral state, so
+  // the parent can push it to the sync layer (broadcast + DB save).
+  onEngineStateChange?: (state: EngineSyncState) => void;
+  // Optional synchronous seed for first render, if the parent already
+  // has state in hand at mount time. Most callers won't have this yet
+  // (the DB load is async) — that's fine, they just call
+  // `applyRemoteEngineState` once the load resolves, a moment after
+  // mount.
+  initialEngineState?: EngineSyncState | null;
 }) {
-  // Loaded once, synchronously, on first render — avoids a hydration
-  // flash where the panel briefly shows empty/default state before an
-  // effect kicks in. Safe under SSR since loadPersistedEngineState
-  // guards on `typeof window`, and safe with no persistKey since it
-  // guards on that too.
-  const initialRef = useRef<PersistedEngineState | null>(null);
+  const initialRef = useRef<EngineSyncState | null>(null);
   if (initialRef.current === null) {
-    initialRef.current = loadPersistedEngineState(persistKey) ?? {
-      dismissedPlayers: [],
-      extraType: "none",
-      isFreeHit: false,
-      activeSlot: "striker",
-      overRunsConceded: 0,
-      overJustCompleted: false,
-      pendingWicket: null,
-      undoSnapshot: null,
-    };
+    initialRef.current = initialEngineState ?? defaultEngineSyncState();
   }
   const initial = initialRef.current;
 
@@ -293,14 +258,31 @@ export function useLiveScoringEngine({
   const overJustCompletedRef = useRef(initial.overJustCompleted);
   const overJustCompletedUndoRef = useRef(initial.undoSnapshot?.overJustCompleted ?? false);
 
-  // Writes the full ephemeral bundle to localStorage. Called explicitly
-  // at the end of every mutating function (not just from a useEffect)
-  // because overRunsConcededRef/overJustCompletedRef are refs and
-  // mutating a ref doesn't trigger re-renders or effects. No-ops
-  // whenever persistKey is undefined.
-  function persistEngineState() {
-    if (typeof window === "undefined" || !persistKey) return;
-    const payload: PersistedEngineState = {
+  // While a remote update is being applied (via applyRemoteEngineState),
+  // suppress outbound notifications — otherwise we'd immediately
+  // broadcast right back out the state we just received, which is
+  // harmless (self:false + no version conflicts) but wasteful and can
+  // cause a visible flicker of stale intermediate values while the
+  // several setState calls below settle one by one.
+  const suppressNotifyRef = useRef(false);
+
+  const onEngineStateChangeRef = useRef(onEngineStateChange);
+  useEffect(() => {
+    onEngineStateChangeRef.current = onEngineStateChange;
+  }, [onEngineStateChange]);
+
+  // "Live" mirrors of state that notifyEngineStateChange needs to read
+  // synchronously right after a setState call, before React has
+  // re-rendered.
+  const dismissedPlayersLive = useRef(dismissedPlayers);
+  const extraTypeLive = useRef(extraType);
+  const isFreeHitLive = useRef(isFreeHit);
+  const activeSlotLive = useRef(activeSlot);
+  const pendingWicketLive = useRef(pendingWicket);
+
+  function notifyEngineStateChange() {
+    if (suppressNotifyRef.current) return;
+    const state: EngineSyncState = {
       dismissedPlayers: Array.from(dismissedPlayersLive.current),
       extraType: extraTypeLive.current,
       isFreeHit: isFreeHitLive.current,
@@ -316,52 +298,74 @@ export function useLiveScoringEngine({
           }
         : null,
     };
-    try {
-      window.localStorage.setItem(engineStorageKey(persistKey), JSON.stringify(payload));
-    } catch {
-      // storage full/unavailable — non-fatal, just means this particular
-      // save is lost, next mutation will try again
-    }
+    onEngineStateChangeRef.current?.(state);
   }
-
-  // "Live" mirrors of state that persistEngineState needs to read
-  // synchronously right after a setState call, before React has
-  // re-rendered. Kept in sync via the effects below.
-  const dismissedPlayersLive = useRef(dismissedPlayers);
-  const extraTypeLive = useRef(extraType);
-  const isFreeHitLive = useRef(isFreeHit);
-  const activeSlotLive = useRef(activeSlot);
-  const pendingWicketLive = useRef(pendingWicket);
 
   useEffect(() => {
     dismissedPlayersLive.current = dismissedPlayers;
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dismissedPlayers]);
   useEffect(() => {
     extraTypeLive.current = extraType;
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extraType]);
   useEffect(() => {
     isFreeHitLive.current = isFreeHit;
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFreeHit]);
   useEffect(() => {
     activeSlotLive.current = activeSlot;
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSlot]);
   useEffect(() => {
     pendingWicketLive.current = pendingWicket;
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingWicket]);
   useEffect(() => {
-    persistEngineState();
+    notifyEngineStateChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUndo]);
+
+  // Called by the parent when a DB load or an incoming broadcast from
+  // another admin panel arrives. Overwrites every piece of local
+  // ephemeral state to match. Guarded by suppressNotifyRef so this
+  // doesn't immediately bounce back out as an outbound update.
+  function applyRemoteEngineState(remote: EngineSyncState) {
+    suppressNotifyRef.current = true;
+
+    setDismissedPlayers(new Set(remote.dismissedPlayers));
+    setExtraType(remote.extraType);
+    setIsFreeHit(remote.isFreeHit);
+    setActiveSlot(remote.activeSlot);
+    setPendingWicket(remote.pendingWicket);
+
+    overRunsConcededRef.current = remote.overRunsConceded;
+    overJustCompletedRef.current = remote.overJustCompleted;
+
+    if (remote.undoSnapshot) {
+      undoRef.current = remote.undoSnapshot.liveState;
+      dismissedPlayersUndoRef.current = new Set(remote.undoSnapshot.dismissedPlayers);
+      overJustCompletedUndoRef.current = remote.undoSnapshot.overJustCompleted;
+      setCanUndo(true);
+    } else {
+      undoRef.current = null;
+      dismissedPlayersUndoRef.current = null;
+      overJustCompletedUndoRef.current = false;
+      setCanUndo(false);
+    }
+
+    // Release the suppression once the batched state updates above have
+    // been committed and their effects (which call notifyEngineStateChange)
+    // have run. A macrotask reliably runs after that effect flush.
+    setTimeout(() => {
+      suppressNotifyRef.current = false;
+    }, 0);
+  }
 
   const availableBattersCount = countAvailableBatters(
     battingSquad,
@@ -393,7 +397,7 @@ export function useLiveScoringEngine({
     dismissedPlayersUndoRef.current = new Set(dismissedPlayers);
     overJustCompletedUndoRef.current = overJustCompletedRef.current;
     setCanUndo(true);
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function undo() {
@@ -407,7 +411,7 @@ export function useLiveScoringEngine({
     setCanUndo(false);
     setPendingWicket(null);
     overRunsConcededRef.current = 0;
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function patchLive(patch: Partial<LiveState>) {
@@ -434,7 +438,7 @@ export function useLiveScoringEngine({
     overRunsConcededRef.current = 0;
     onInningsEnd?.({ target, previousInningsRuns: finalRuns, inningsNumber: 2 });
     pushToast(`🔁 Innings complete — target set to ${target}`, "info");
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function applyMatchComplete(opts: { winningSide: "batting" | "bowling" | "tie" | "runs" | "wickets"; margin: string }) {
@@ -513,7 +517,7 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
     if (slot === "striker") setActiveSlot("nonStriker");
     else if (slot === "nonStriker") setActiveSlot("bowler");
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function clearSlot(slot: "striker" | "nonStriker" | "bowler") {
@@ -529,7 +533,7 @@ export function useLiveScoringEngine({
     setActiveSlot(slot);
     const label = slot === "striker" ? "Striker" : slot === "nonStriker" ? "Non-striker" : "Bowler";
     pushToast(`${label} cleared — pick a replacement`, "info");
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function swapStrike() {
@@ -700,7 +704,7 @@ export function useLiveScoringEngine({
     }
 
     checkAutoEndConditions({ runs: nextRuns, wickets: liveState.score.wickets, overs: nextOvers, balls: nextBalls });
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function recordWicket() {
@@ -732,7 +736,7 @@ export function useLiveScoringEngine({
       /* carries over */
     } else setIsFreeHit(false);
     setExtraType("none");
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function resolveWicket(
@@ -874,7 +878,7 @@ export function useLiveScoringEngine({
 
     setActiveSlot(batsmanOut);
     setPendingWicket(null);
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
   function endInnings() {
@@ -895,7 +899,7 @@ export function useLiveScoringEngine({
         setLiveDirty(true);
         pushToast("🏁 Match marked complete", "info");
       }
-      persistEngineState();
+      notifyEngineStateChange();
       return;
     }
 
@@ -916,15 +920,16 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
     onInningsEnd?.({ target, previousInningsRuns, inningsNumber: 2 });
     pushToast(`🔁 Innings 1 closed — target set to ${target}`, "info");
-    persistEngineState();
+    notifyEngineStateChange();
   }
 
-  // Clears ALL persisted engine state for this key. Call this from the
-  // page's restartMatch() so a fresh match doesn't inherit stale
-  // dismissed players / undo history / pending wickets from the last
-  // one. No-op (aside from resetting in-memory state) when there's no
-  // persistKey to clear.
-  function clearPersistedEngineState() {
+  // Resets ALL ephemeral engine state to defaults in memory. Call this
+  // from the page's restartMatch() so a fresh match doesn't inherit
+  // stale dismissed players / undo history / pending wickets from the
+  // last one. The parent is responsible for also clearing/overwriting
+  // the durable row (DB) and broadcasting the reset — this function
+  // only touches in-memory React state.
+  function resetEngineState() {
     setDismissedPlayers(new Set());
     setPendingWicket(null);
     setCanUndo(false);
@@ -935,13 +940,6 @@ export function useLiveScoringEngine({
     setExtraType("none");
     setIsFreeHit(false);
     setActiveSlot("striker");
-    if (typeof window !== "undefined" && persistKey) {
-      try {
-        window.localStorage.removeItem(engineStorageKey(persistKey));
-      } catch {
-        // ignore
-      }
-    }
   }
 
   return {
@@ -967,6 +965,7 @@ export function useLiveScoringEngine({
     recordWicket,
     resolveWicket,
     endInnings,
-    clearPersistedEngineState, // wire to restartMatch
+    applyRemoteEngineState, // NEW — parent calls this on DB load / incoming broadcast
+    resetEngineState, // renamed from clearPersistedEngineState — no longer touches localStorage
   };
 }
