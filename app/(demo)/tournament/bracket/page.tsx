@@ -465,19 +465,22 @@ export default function TournamentBracketPage() {
   const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
   
   function getRoundGrowWeight(roundIndex: number, side: 'left' | 'right' | 'final'): number {
-    if (side === 'final') return GROW_WEIGHT.full;
+    if (side === 'final') return GROW_WEIGHT.full * 1.3; // 30% wider
     
     const totalRounds = nonFinalRounds.length;
     if (roundIndex <= 1) return GROW_WEIGHT.full;
     
-    if (roundIndex === 2 && totalRounds >= 4) return GROW_WEIGHT.quarter;
-    if (roundIndex === totalRounds - 1) return GROW_WEIGHT.semi;
+    // Push semi-finals apart by reducing their weight slightly
+    if (roundIndex === 2 && totalRounds >= 4) return GROW_WEIGHT.quarter * 0.85;
+    if (roundIndex === totalRounds - 1) return GROW_WEIGHT.semi * 0.85;
     
     return GROW_WEIGHT.compact;
   }
+  
   function shouldBeCompact(roundIndex: number): boolean {
     return false;
   }
+
   function recomputeLayout() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
@@ -697,7 +700,7 @@ export default function TournamentBracketPage() {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'left');
                 const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
-                const innerBleedLeft = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
+                const innerBleedLeft = i === 2 ? '-60%' : i === 3 ? '-60%' : undefined;
                 
                 return (
                   <BracketColumn
