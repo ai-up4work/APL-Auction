@@ -481,7 +481,7 @@ function BracketColumn({
       </div>
 
       {isLeaf ? (
-        <div ref={leafColumnRef} className="w-full flex flex-col gap-2.5 lg:gap-3 items-stretch">
+        <div ref={leafColumnRef} className="w-full flex flex-col gap-8 lg:gap-10 items-stretch">
           {matches.map((match) => (
             <div key={match.id} className="w-full px-0.5 lg:px-1">
               <MatchCard
