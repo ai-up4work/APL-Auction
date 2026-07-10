@@ -961,8 +961,8 @@ export default function TournamentBracketPage() {
                 {round.name}
               </h2>
 
-              <div
-                ref={(el) => (mobileVerticalRefs.current[round.id] = el)}
+                <div
+                ref={(el) => { mobileVerticalRefs.current[round.id] = el; }}
                 className="h-[65vh] overflow-y-auto bracket-scrollbar"
                 style={{ touchAction: "pan-y", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
               >
