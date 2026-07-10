@@ -745,7 +745,7 @@ export default function TournamentBracketPage() {
   }, [mobileRound]);
 
   return (
-    <div className="min-h-screen w-full bg-background text-on-surface p-4 md:p-8">
+    <div className="min-h-screen w-full bg-background text-on-surface p-2 md:p-2">
       <style>{`
         html {
           scrollbar-width: thin;
@@ -777,7 +777,7 @@ export default function TournamentBracketPage() {
       `}</style>
       
       {/* ── Header ── */}
-      <div className="max-w-[1600px] mx-auto mb-8 md:mb-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
+      <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
         <div>
           <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
             <Trophy className="w-3.5 h-3.5" />
