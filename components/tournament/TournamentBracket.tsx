@@ -689,7 +689,7 @@ export default function TournamentBracket({
               {nonFinalRounds.map((round, i) => {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, "left");
-                const bleedLeft = i === 2 ? "-85%" : i === 3 ? "-65%" : undefined;
+                const bleedLeft = i === 2 ? "-85%" : i === 3 ? "-85%" : undefined;
                 const innerBleedLeft = i === 2 ? "-60%" : i === 3 ? "-60%" : undefined;
 
                 return (
@@ -724,7 +724,7 @@ export default function TournamentBracket({
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, "right");
                 const bleedRight = i === 2 ? "-85%" : i === 3 ? "-85%" : undefined;
-                const innerBleedRight = i === 2 ? "-40%" : i === 3 ? "-40%" : undefined;
+                const innerBleedRight = i === 2 ? "-60%" : i === 3 ? "-60%" : undefined;
 
                 return (
                   <BracketColumn
