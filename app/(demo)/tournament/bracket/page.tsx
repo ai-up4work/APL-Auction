@@ -175,11 +175,21 @@ const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16; // below a Round of 16, one side i
 // feeders' real measured centers, recursively — see computeCentersFromLeaves
 // below — so positioning is correct regardless of actual card height,
 // wrapped text, compact vs normal styling, logos, etc.
+//
+// Every round always gets its OWN column, same as reference bracket UIs
+// (ESPN / Bing / FIFA) — rounds are never merged or overlapped into each
+// other's space. Round of 32 and Round of 16 both keep full-width, full-
+// detail columns; inner rounds (QF/SF/Final) naturally need less width
+// since their cards carry less text (mostly "TBD" until a feeder
+// completes), and `compact` mode trims their footer/caption once columns
+// get tight — but the columns themselves stay fully separate.
 
 // Stepped "elbow" connector: out → straight down/up in the middle → in,
 // with rounded corners, instead of a diagonal bezier swoop. This is what
 // gives the line visible breathing room against the card text on either
-// side, matching how reference bracket UIs draw their connectors.
+// side, matching how reference bracket UIs draw their connectors. Used for
+// side-entry connections (into full-detail R32/R16 cards, and into the
+// Final, whose two feeders sit to its left and right).
 function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12): string {
   const midX = (x1 + x2) / 2;
   if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -400,21 +410,12 @@ function MatchCard({
 }
 
 // One column of stacked match cards. Every column across the whole bracket
-// shares the same fixed `columnHeight` and uses `justify-around`, so no
-// matter how many matches a round has — 8 down to a single Final card — the
-// stack is centered on the exact same vertical axis. The actual connector
-// lines are drawn once, globally, in TournamentBracketPage (see
-// `<svg>` overlay) by measuring real card positions, so they always land on
-// the right slot regardless of how the cards happen to be spaced.
-//
-// NOTE on width: this column has NO min-width floor (`min-w-0`). It is a
-// true flex-1 fraction of the container, so with e.g. 9 columns in view
-// each one just gets ~1/9th of the viewport — the whole bracket fits one
-// screen width with no horizontal scrolling, the same way reference score
-// sites (ESPN/Bing/FIFA) lay theirs out. Cards shrink to fit their column;
-// `compact` (passed down when a round sits in the visually-denser middle
-// section) drops the secondary "From R32-3" caption line and the venue/date
-// footer so text doesn't wrap awkwardly in a narrow column.
+// shares the same fixed `columnHeight` and uses absolute positioning past
+// the leaf round, so no matter how many matches a round has — 8 down to a
+// single Final card — the stack is centered on the exact same vertical
+// axis. Every round always gets its own full column (never merged or
+// overlapped with a neighbouring round) — this is what keeps Round of 16
+// legible and separate from Round of 32, matching reference bracket UIs.
 function BracketColumn({
   roundName,
   matches,
@@ -515,6 +516,7 @@ export default function TournamentBracketPage() {
   const leafColumnRef = useRef<HTMLDivElement | null>(null);
   const cardEls = useRef<Record<string, HTMLDivElement | null>>({});
   const refCache = useRef<Record<string, RefSetter>>({});
+  const mobileVerticalRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [matchCenterY, setMatchCenterY] = useState<Record<string, number>>({});
   const [columnHeight, setColumnHeight] = useState(1200);
@@ -532,6 +534,16 @@ export default function TournamentBracketPage() {
   const nonFinalRounds = ROUNDS.slice(0, -1);
   const leftSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(0, r.matches.length / 2)) : [];
   const rightSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(r.matches.length / 2)) : [];
+
+  // Middle rounds (everything except Round of 32 AND Round of 16 on each
+  // side) get the compact card treatment once we're past a certain total
+  // column count, since QF/SF/Final are the columns squeezed hardest when
+  // everything has to fit in one viewport width and they carry the least
+  // information anyway (mostly "TBD" until a feeder completes). Round of 32
+  // and Round of 16 are never compacted — matching the reference bracket,
+  // they always keep full team names, scores, and venue/date footers.
+  const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
+  const compactMiddle = totalColumns > 5;
 
   // Step 1: measure the REAL rendered center of every leaf (Round-of-32)
   // card, then derive every later round's center purely from those real
@@ -699,15 +711,56 @@ export default function TournamentBracketPage() {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Middle rounds (everything except the outermost Round of 32 on each side)
-  // get the compact card treatment once we're past a certain total column
-  // count, since those are the columns squeezed hardest when everything
-  // has to fit in one viewport width.
-  const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
-  const compactMiddle = totalColumns > 5;
+  // Every round's vertical list scrolls independently, so without this a
+  // round you'd scrolled halfway down earlier would still be mid-scroll the
+  // next time you swiped back to it — always land at the top instead, same
+  // as the first time you ever see that round.
+  useEffect(() => {
+    const roundId = ROUNDS[mobileRound]?.id;
+    const el = roundId !== undefined ? mobileVerticalRefs.current[roundId] : null;
+    if (el) el.scrollTop = 0;
+  }, [mobileRound]);
 
   return (
     <div className="min-h-screen w-full bg-background text-on-surface p-4 md:p-8">
+      {/* `no-scrollbar` was never actually defined anywhere in the project,
+         so every "hidden" scrollbar was silently falling back to the plain
+         browser default — including the outer page scroll itself, which is
+         what the `html` rule below covers, since this whole layout is
+         taller than the viewport and always native-scrolls vertically.
+         The two classes after it replace `no-scrollbar` everywhere else in
+         this file: one truly hides the bar (for swipe-driven carousels
+         where a scrollbar doesn't belong), the other gives genuinely
+         scrollable lists a slim, on-theme bar instead of the OS default. */}
+      <style>{`
+        html {
+          scrollbar-width: thin;
+          scrollbar-color: var(--color-border-overlay) transparent;
+        }
+        html::-webkit-scrollbar { width: 8px; height: 8px; }
+        html::-webkit-scrollbar-track { background: transparent; }
+        html::-webkit-scrollbar-thumb {
+          background: var(--color-border-overlay);
+          border-radius: 9999px;
+          border: 2px solid var(--color-background);
+          background-clip: padding-box;
+        }
+        html::-webkit-scrollbar-thumb:hover { background: var(--color-theme-orange); }
+
+        .bracket-scrollbar-hidden::-webkit-scrollbar { display: none; }
+        .bracket-scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+
+        .bracket-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .bracket-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .bracket-scrollbar::-webkit-scrollbar-thumb {
+          background: var(--color-border-overlay);
+          border-radius: 9999px;
+          border: 1px solid transparent;
+          background-clip: padding-box;
+        }
+        .bracket-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--color-theme-orange); }
+        .bracket-scrollbar { scrollbar-width: thin; scrollbar-color: var(--color-border-overlay) transparent; }
+      `}</style>
       {/* ── Header ── */}
       <div className="max-w-[1600px] mx-auto mb-8 md:mb-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
         <div>
@@ -729,14 +782,12 @@ export default function TournamentBracketPage() {
       </div>
 
       {/* ══════════════════ DESKTOP / TABLET ══════════════════
-          Every column is a true flex-1 slice of the viewport with no
-          min-width floor, so the whole bracket — Round of 32 through Final
-          and back out — renders in exactly one viewport width, no
-          horizontal scrolling or paging required. Middle rounds switch to
-          `compact` cards (no "From X" caption, no venue/date footer) once
-          there are enough columns that space gets tight, the same way
-          reference bracket UIs (ESPN/Bing/FIFA) condense their center
-          columns. */}
+          Every round gets its own true flex column, same as ESPN/Bing/FIFA
+          reference brackets — Round of 32 through Final and back out, never
+          merged or overlapped. Middle rounds switch to `compact` cards (no
+          "From X" caption, no venue/date footer, wider bleed) once there are
+          enough columns that space gets tight, but Round of 32 and Round of
+          16 stay full detail since those are the columns with real content. */}
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="w-full overflow-x-hidden">
           {USE_MIRRORED_LAYOUT ? (
@@ -751,7 +802,7 @@ export default function TournamentBracketPage() {
                   getRef={getRef}
                   hoveredTeamCode={hoveredTeamCode}
                   setHoveredTeamCode={setHoveredTeamCode}
-                  compact={compactMiddle && i > 0}
+                  compact={compactMiddle && i > 1}
                   isLeaf={i === 0}
                   leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                 />
@@ -779,7 +830,7 @@ export default function TournamentBracketPage() {
                     getRef={getRef}
                     hoveredTeamCode={hoveredTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
-                    compact={compactMiddle && i < nonFinalRounds.length - 1}
+                    compact={compactMiddle && i > 1}
                     isLeaf={i === 0}
                   />
                 );
@@ -807,11 +858,14 @@ export default function TournamentBracketPage() {
                 <BracketColumn
                   key={round.id}
                   roundName={round.name}
-                  items={buildItems(round.matches, flatCenters[i], false)}
-                  columnHeight={COLUMN_HEIGHT}
+                  matches={round.matches}
+                  centerYByMatchId={matchCenterY}
+                  columnHeight={columnHeight}
                   getRef={getRef}
                   hoveredTeamCode={hoveredTeamCode}
                   setHoveredTeamCode={setHoveredTeamCode}
+                  isLeaf={i === 0}
+                  leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                 />
               ))}
 
@@ -848,7 +902,7 @@ export default function TournamentBracketPage() {
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto no-scrollbar">
+          <div className="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto bracket-scrollbar-hidden">
             {ROUNDS.map((round, i) => (
               <button
                 key={round.id}
@@ -876,10 +930,14 @@ export default function TournamentBracketPage() {
           </button>
         </div>
 
-        {/* Swipeable stage pages — horizontal swipe only, scrollbar hidden */}
+        {/* Swipeable stage pages — horizontal swipe only, scrollbar hidden.
+           Plain overflow-x-auto with full-width pages: no negative-margin
+           bleed trick, so there's nothing for the container to clip except
+           its own contents — cards render full size and the next round
+           never peeks through. */}
         <div
           ref={mobileScrollRef}
-          className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar -mx-4 px-4"
+          className="flex overflow-x-auto snap-x snap-mandatory bracket-scrollbar-hidden"
           style={{ touchAction: "pan-x" }}
         >
           {ROUNDS.map((round) => (
@@ -892,10 +950,11 @@ export default function TournamentBracketPage() {
                  center their cards instead of collapsing, and long stages
                  (Round of 32) scroll. Scrollbar hidden, vertical swipe still works. */}
               <div
-                className="h-[65vh] overflow-y-auto no-scrollbar"
+                ref={(el) => (mobileVerticalRefs.current[round.id] = el)}
+                className="h-[65vh] overflow-y-auto bracket-scrollbar"
                 style={{ touchAction: "pan-y", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
               >
-                <div className="min-h-full flex flex-col justify-center gap-3 py-2">
+                <div className="min-h-full flex flex-col justify-center gap-3 py-2 px-1">
                   {round.matches.map((match) => (
                     <MatchCard
                       key={match.id}
