@@ -12,11 +12,11 @@ interface TeamNode {
 }
 interface MatchNode {
   id: string;
-  label: string; // e.g. "R32-3" — used both as this match's own id and as the tag shown on whatever it feeds into
+  label: string; // e.g. "R32-3"
   status: "scheduled" | "live" | "completed";
   teamA: TeamNode | null;
   teamB: TeamNode | null;
-  aFrom: string | null; // predecessor label for the teamA slot (null in round 1)
+  aFrom: string | null;
   bFrom: string | null;
   venue?: string;
   date?: string;
@@ -28,9 +28,6 @@ interface Round {
   shortName: string;
   matches: MatchNode[];
 }
-// ── How many teams this bracket holds. Drop this to 8 or 4 and the page
-// automatically falls back to the simple one-directional layout instead of
-// the mirrored "two funnels into a Final" layout — see TEAM_COUNT usage below.
 const TEAM_COUNT = 32;
 const PALETTE = [
   "#3B8BD4", "#2A9D5C", "#E45D35", "#FFB000", "#7C3AED", "#EC4899", "#0F172A", "#DC2626",
@@ -353,6 +350,8 @@ function BracketColumn({
   growWeight = 1,
   bleedLeft,
   bleedRight,
+  innerBleedLeft,
+  innerBleedRight,
 }: {
   roundName: string;
   matches: MatchNode[];
@@ -368,6 +367,8 @@ function BracketColumn({
   growWeight?: number;
   bleedLeft?: string;
   bleedRight?: string;
+  innerBleedLeft?: string;
+  innerBleedRight?: string;
 }) {
   return (
     <div
@@ -402,6 +403,7 @@ function BracketColumn({
             return (
               <div
                 key={match.id}
+                ref={getRef(match.id)}
                 className="absolute px-0.5 lg:px-1 pointer-events-auto"
                 style={{ 
                   top: centerY, 
@@ -410,14 +412,17 @@ function BracketColumn({
                   right: bleedRight || '0'
                 }}
               >
-                <MatchCard
-                  match={match}
-                  hoveredTeamCode={hoveredTeamCode}
-                  setHoveredTeamCode={setHoveredTeamCode}
-                  onFromClick={onFromClick}
-                  getRef={getRef}
-                  compact={compact}
-                />
+                {/* ── Visual card wrapped in the margins ── */}
+                <div style={{ marginLeft: innerBleedLeft, marginRight: innerBleedRight }}>
+                  <MatchCard
+                    match={match}
+                    hoveredTeamCode={hoveredTeamCode}
+                    setHoveredTeamCode={setHoveredTeamCode}
+                    onFromClick={onFromClick}
+                    getRef={(key) => key === match.id ? () => {} : getRef(key)}
+                    compact={compact}
+                  />
+                </div>
               </div>
             );
           })}
@@ -441,7 +446,9 @@ export default function TournamentBracketPage() {
   const refCache = useRef<Record<string, RefSetter>>({});
   const mobileVerticalRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [connectors, setConnectors] = useState<Connector[]>([]);
+  
   const [matchCenterY, setMatchCenterY] = useState<Record<string, number>>({});
+  const [finalCenter, setFinalCenter] = useState<{ x: number; y: number } | null>(null);
   const [columnHeight, setColumnHeight] = useState(1200);
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
@@ -519,6 +526,13 @@ export default function TournamentBracketPage() {
     setMatchCenterY(nextCenters);
     const leafH = leafColumnRef.current?.scrollHeight;
     if (leafH && Math.abs(leafH - columnHeight) > 1) setColumnHeight(leafH);
+    // PERFECTLY CALCULATE THE X and Y POSITION OF THE FINAL MATCH FOR THE WATERMARK
+    const finalCardEl = cardEls.current[finalRound.matches[0].id];
+    if (finalCardEl) {
+      const rect = finalCardEl.getBoundingClientRect();
+      const x = rect.left + rect.width / 2 - containerRect.left;
+      setFinalCenter({ x, y: nextCenters[finalRound.matches[0].id] });
+    }
   }
   function recomputeConnectors() {
     const containerEl = desktopContainerRef.current;
@@ -661,10 +675,29 @@ export default function TournamentBracketPage() {
         <div className="w-full overflow-x-hidden">
           {USE_MIRRORED_LAYOUT ? (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+              
+              {/* ── WATERMARK: Placed safely behind ALL columns completely independently ── */}
+              {finalCenter && (
+                <div 
+                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  style={{ 
+                    left: finalCenter.x,
+                    top: finalCenter.y,
+                    transform: "translate(-50%, -50%)" 
+                  }}
+                >
+                  <img 
+                    src="/moon-knight-logo.png" 
+                    alt="Tournament Logo" 
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10" 
+                  />
+                </div>
+              )}
               {nonFinalRounds.map((round, i) => {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'left');
                 const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
+                const innerBleedLeft = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
                 
                 return (
                   <BracketColumn
@@ -681,6 +714,7 @@ export default function TournamentBracketPage() {
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                     growWeight={growWeight}
                     bleedLeft={bleedLeft}
+                    innerBleedLeft={innerBleedLeft}
                   />
                 );
               })}
@@ -699,6 +733,7 @@ export default function TournamentBracketPage() {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'right');
                 const bleedRight = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
+                const innerBleedRight = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
                 
                 return (
                   <BracketColumn
@@ -714,6 +749,7 @@ export default function TournamentBracketPage() {
                     isLeaf={i === 0}
                     growWeight={growWeight}
                     bleedRight={bleedRight}
+                    innerBleedRight={innerBleedRight}
                   />
                 );
               })}
@@ -735,10 +771,29 @@ export default function TournamentBracketPage() {
             </div>
           ) : (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+              
+              {/* ── WATERMARK: Placed safely behind ALL columns completely independently ── */}
+              {finalCenter && (
+                <div 
+                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  style={{ 
+                    left: finalCenter.x,
+                    top: finalCenter.y,
+                    transform: "translate(-50%, -50%)" 
+                  }}
+                >
+                  <img 
+                    src="/moon-knight-logo.png" 
+                    alt="Tournament Logo" 
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10" 
+                  />
+                </div>
+              )}
               {ROUNDS.map((round, i) => {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'left');
                 const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
+                const innerBleedLeft = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
                 
                 return (
                   <BracketColumn
@@ -755,6 +810,7 @@ export default function TournamentBracketPage() {
                     growWeight={growWeight}
                     compact={isCompact}
                     bleedLeft={bleedLeft}
+                    innerBleedLeft={innerBleedLeft}
                   />
                 );
               })}
@@ -832,13 +888,25 @@ export default function TournamentBracketPage() {
               >
                 <div className="min-h-full flex flex-col justify-center gap-3 py-2 px-1">
                   {round.matches.map((match) => (
-                    <MatchCard
-                      key={match.id}
-                      match={match}
-                      hoveredTeamCode={hoveredTeamCode}
-                      setHoveredTeamCode={setHoveredTeamCode}
-                      onFromClick={goToLabel}
-                    />
+                    <div key={match.id} className="w-full relative">
+                      
+                      {/* Logo watermark behind Final Card (Mobile) */}
+                      {round.name === "Final" && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none -z-10 w-full flex justify-center items-center">
+                          <img 
+                            src="/moon-knight-logo.png" 
+                            alt="Tournament Logo" 
+                            className="w-[250px] md:w-[350px] max-w-none h-auto object-contain opacity-10" 
+                          />
+                        </div>
+                      )}
+                      <MatchCard
+                        match={match}
+                        hoveredTeamCode={hoveredTeamCode}
+                        setHoveredTeamCode={setHoveredTeamCode}
+                        onFromClick={goToLabel}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
