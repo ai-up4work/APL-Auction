@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight } from "lucide-react";
+
 interface TeamNode {
   id: string;
   code: string;
@@ -10,9 +11,10 @@ interface TeamNode {
   score?: number;
   isWinner?: boolean;
 }
+
 interface MatchNode {
   id: string;
-  label: string; // e.g. "R32-3"
+  label: string;
   status: "scheduled" | "live" | "completed";
   teamA: TeamNode | null;
   teamB: TeamNode | null;
@@ -22,18 +24,22 @@ interface MatchNode {
   date?: string;
   time?: string;
 }
+
 interface Round {
   id: number;
   name: string;
   shortName: string;
   matches: MatchNode[];
 }
+
 const TEAM_COUNT = 32;
 const PALETTE = [
   "#3B8BD4", "#2A9D5C", "#E45D35", "#FFB000", "#7C3AED", "#EC4899", "#0F172A", "#DC2626",
   "#0EA5E9", "#059669", "#D97706", "#9333EA", "#DB2777", "#475569", "#65A30D", "#B91C1C",
 ];
+
 const VENUES = ["Meridian Stadium", "Galle International", "R. Premadasa", "Pallekele Grounds"];
+
 const TEAM_NAMES: { name: string; code: string }[] = [
   { name: "Coastal Sharks", code: "CS" }, { name: "Desert Falcons", code: "DF" },
   { name: "Moon Knights", code: "MK" }, { name: "Viper Titans", code: "VT" },
@@ -52,10 +58,12 @@ const TEAM_NAMES: { name: string; code: string }[] = [
   { name: "Harbor Hammers", code: "HB" }, { name: "Delta Dragons", code: "DD" },
   { name: "Plains Panthers", code: "PP" }, { name: "Arena Adders", code: "AA" },
 ];
+
 const LOGOS: Record<string, string> = {
   CS: "/Franchises/CSK.png", DF: "/Franchises/RCB.png", MK: "/Franchises/MI.png", VT: "/Franchises/SRH.png",
   KK: "/Franchises/KKR.png", BR: "/Franchises/RR.png", JG: "/Franchises/GT.png", GC: "/Franchises/DC.png",
 };
+
 function roundMeta(teamsEntering: number): { name: string; shortName: string } {
   switch (teamsEntering) {
     case 2: return { name: "Final", shortName: "F" };
@@ -66,19 +74,29 @@ function roundMeta(teamsEntering: number): { name: string; shortName: string } {
     default: return { name: `Round of ${teamsEntering}`, shortName: `R${teamsEntering}` };
   }
 }
+
 function buildBracket(teamCount: number): Round[] {
   const rounds: Round[] = [];
+
+  const shuffledTeams = [...TEAM_NAMES];
+  for (let i = shuffledTeams.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledTeams[i], shuffledTeams[j]] = [shuffledTeams[j], shuffledTeams[i]];
+  }
+
   const round1Meta = roundMeta(teamCount);
   const round1Matches: MatchNode[] = [];
+
   for (let i = 0; i < teamCount / 2; i++) {
-    const a = TEAM_NAMES[(i * 2) % TEAM_NAMES.length];
-    const b = TEAM_NAMES[(i * 2 + 1) % TEAM_NAMES.length];
+    const a = shuffledTeams[i * 2];
+    const b = shuffledTeams[i * 2 + 1];
     const color = (idx: number) => PALETTE[idx % PALETTE.length];
     const pattern = i % 5;
     let status: MatchNode["status"] = "scheduled";
     let scoreA: number | undefined;
     let scoreB: number | undefined;
     let winnerSlot: 0 | 1 | null = null;
+
     if (pattern === 0) {
       status = "completed";
       scoreA = 140 + ((i * 7) % 50);
@@ -94,12 +112,29 @@ function buildBracket(teamCount: number): Round[] {
       scoreA = 62 + ((i * 2) % 20);
       scoreB = 58 + ((i * 3) % 22);
     }
+
     round1Matches.push({
       id: `${round1Meta.shortName}-${i + 1}`,
       label: `${round1Meta.shortName}-${i + 1}`,
       status,
-      teamA: { id: `t${i * 2}`, code: a.code, name: a.name, logo: LOGOS[a.code], color: color(i * 2), score: scoreA, isWinner: winnerSlot === 0 },
-      teamB: { id: `t${i * 2 + 1}`, code: b.code, name: b.name, logo: LOGOS[b.code], color: color(i * 2 + 1), score: scoreB, isWinner: winnerSlot === 1 },
+      teamA: {
+        id: `t${i * 2}`,
+        code: a.code,
+        name: a.name,
+        logo: LOGOS[a.code],
+        color: color(i * 2),
+        score: scoreA,
+        isWinner: winnerSlot === 0
+      },
+      teamB: {
+        id: `t${i * 2 + 1}`,
+        code: b.code,
+        name: b.name,
+        logo: LOGOS[b.code],
+        color: color(i * 2 + 1),
+        score: scoreB,
+        isWinner: winnerSlot === 1
+      },
       aFrom: null,
       bFrom: null,
       venue: VENUES[i % VENUES.length],
@@ -107,41 +142,116 @@ function buildBracket(teamCount: number): Round[] {
       time: i % 2 === 0 ? "15:30" : "19:30",
     });
   }
+
   rounds.push({ id: 1, name: round1Meta.name, shortName: round1Meta.shortName, matches: round1Matches });
+
   let prev = round1Matches;
   let roundId = 2;
-  while (prev.length >= 2) {
-    const meta = roundMeta(prev.length);
+  let currentTeamCount = teamCount / 2;
+
+  while (currentTeamCount > 1) {
+    const nextTeamCount = currentTeamCount / 2;
+    const meta = roundMeta(currentTeamCount);
     const matches: MatchNode[] = [];
-    for (let i = 0; i < prev.length / 2; i++) {
+
+    for (let i = 0; i < currentTeamCount / 2; i++) {
       const mA = prev[i * 2];
       const mB = prev[i * 2 + 1];
-      const winnerA = mA.status === "completed" ? (mA.teamA?.isWinner ? mA.teamA : mA.teamB) : null;
-      const winnerB = mB.status === "completed" ? (mB.teamA?.isWinner ? mB.teamA : mB.teamB) : null;
-      matches.push({
+
+      let winnerA: TeamNode | null = null;
+      let winnerB: TeamNode | null = null;
+
+      if (mA.status === "completed" && mA.teamA && mA.teamB) {
+        winnerA = mA.teamA.isWinner ? mA.teamA : mA.teamB;
+      } else if (mA.status === "live") {
+        if (mA.teamA && mA.teamB && mA.teamA.score !== undefined && mA.teamB.score !== undefined) {
+          winnerA = mA.teamA.score > mA.teamB.score ? mA.teamA : mA.teamB;
+        } else {
+          winnerA = Math.random() > 0.5 ? mA.teamA : mA.teamB;
+        }
+      } else {
+        winnerA = Math.random() > 0.5 ? mA.teamA : mA.teamB;
+      }
+
+      if (mB.status === "completed" && mB.teamA && mB.teamB) {
+        winnerB = mB.teamA.isWinner ? mB.teamA : mB.teamB;
+      } else if (mB.status === "live") {
+        if (mB.teamA && mB.teamB && mB.teamA.score !== undefined && mB.teamB.score !== undefined) {
+          winnerB = mB.teamA.score > mB.teamB.score ? mB.teamA : mB.teamB;
+        } else {
+          winnerB = Math.random() > 0.5 ? mB.teamA : mB.teamB;
+        }
+      } else {
+        winnerB = Math.random() > 0.5 ? mB.teamA : mB.teamB;
+      }
+
+      let matchStatus: MatchNode["status"] = "scheduled";
+      let finalWinner: TeamNode | null = null;
+
+      if (currentTeamCount === 2) {
+        matchStatus = "completed";
+        const winner = Math.random() > 0.5 ? winnerA : winnerB;
+        if (winner) {
+          finalWinner = {
+            ...winner,
+            score: 180 + Math.floor(Math.random() * 50),
+            isWinner: true
+          };
+        }
+      }
+
+      const newMatch: MatchNode = {
         id: `${meta.shortName}-${i + 1}`,
         label: `${meta.shortName}-${i + 1}`,
-        status: "scheduled",
+        status: matchStatus,
         teamA: winnerA ? { ...winnerA, score: undefined, isWinner: false } : null,
         teamB: winnerB ? { ...winnerB, score: undefined, isWinner: false } : null,
         aFrom: mA.label,
         bFrom: mB.label,
-      });
+      };
+
+      if (currentTeamCount === 2 && finalWinner) {
+        if (finalWinner.code === winnerA?.code) {
+          newMatch.teamA = finalWinner;
+        } else if (finalWinner.code === winnerB?.code) {
+          newMatch.teamB = finalWinner;
+        }
+      }
+
+      matches.push(newMatch);
     }
+
     rounds.push({ id: roundId, name: meta.name, shortName: meta.shortName, matches });
     prev = matches;
     roundId++;
+    currentTeamCount = currentTeamCount / 2;
   }
+
+  const finalRound = rounds[rounds.length - 1];
+  if (finalRound && finalRound.matches.length === 1) {
+    const finalMatch = finalRound.matches[0];
+    if (!finalMatch.teamA?.isWinner && !finalMatch.teamB?.isWinner) {
+      const winner = Math.random() > 0.5 ? finalMatch.teamA : finalMatch.teamB;
+      if (winner) {
+        winner.isWinner = true;
+        winner.score = 180 + Math.floor(Math.random() * 50);
+        finalMatch.status = "completed";
+      }
+    }
+  }
+
   return rounds;
 }
+
 const ROUNDS = buildBracket(TEAM_COUNT);
-const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16; 
+const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16;
 const GROW_WEIGHT = {
-  full: 2,       
-  semi: 1.2,     
-  quarter: 1.1,  
-  compact: 0.9,  
+  full: 2,
+  semi: 1.2,
+  quarter: 1.1,
+  compact: 0.9,
 };
+
 function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12): string {
   const midX = (x1 + x2) / 2;
   if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -151,6 +261,7 @@ function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12):
     y2 - r * dir
   } Q ${midX} ${y2} ${midX + r} ${y2} L ${x2} ${y2}`;
 }
+
 function topEntryPath(x1: number, y1: number, x2: number, y2: number, radius = 10): string {
   if (Math.abs(x2 - x1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
   const dir = y2 > y1 ? 1 : -1;
@@ -158,6 +269,7 @@ function topEntryPath(x1: number, y1: number, x2: number, y2: number, radius = 1
   const r = Math.max(0, Math.min(radius, Math.abs(x2 - x1), Math.abs(y2 - y1)));
   return `M ${x1} ${y1} L ${x2 - r * sign} ${y1} Q ${x2} ${y1} ${x2} ${y1 + r * dir} L ${x2} ${y2}`;
 }
+
 function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: number[]): number[][] {
   const centers: number[][] = [leafCentersPx];
   for (let r = 1; r < matchCountsPerRound.length; r++) {
@@ -169,12 +281,15 @@ function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: 
   }
   return centers;
 }
+
 function roundIndexForLabel(label: string | null): number {
   if (!label) return -1;
   const shortName = label.split("-")[0];
   return ROUNDS.findIndex((r) => r.shortName === shortName);
 }
+
 type RefSetter = (el: HTMLDivElement | null) => void;
+
 function TeamRow({
   team,
   status,
@@ -206,7 +321,7 @@ function TeamRow({
         isTBD ? "bg-background/40 border-dashed border-border-overlay text-outline" : "bg-surface-container border-border-overlay"
       } ${
         isHovered
-          ? "scale-[1.02] border-theme-orange/40 bg-surface-container-high"
+          ? "scale-[1.02] border-theme-orange/40 bg-surface-container-high shadow-[0_0_20px_rgba(201,151,31,0.15)]"
           : isAnyHovered && !isHovered
           ? "opacity-30 blur-[0.5px]"
           : ""
@@ -238,7 +353,7 @@ function TeamRow({
               type="button"
               onClick={onFromClick}
               disabled={!onFromClick}
-              className="text-[9px] font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1 disabled:cursor-default"
+              className="text-[9px] font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1 disabled:cursor-default hover:text-theme-orange transition-colors"
             >
               {fromLabel ? (
                 <>
@@ -261,6 +376,7 @@ function TeamRow({
     </div>
   );
 }
+
 function MatchCard({
   match,
   hoveredTeamCode,
@@ -335,6 +451,7 @@ function MatchCard({
     </div>
   );
 }
+
 function BracketColumn({
   roundName,
   matches,
@@ -405,14 +522,13 @@ function BracketColumn({
                 key={match.id}
                 ref={getRef(match.id)}
                 className="absolute px-0.5 lg:px-1 pointer-events-auto"
-                style={{ 
-                  top: centerY, 
+                style={{
+                  top: centerY,
                   transform: "translateY(-50%)",
                   left: bleedLeft || '0',
                   right: bleedRight || '0'
                 }}
               >
-                {/* ── Visual card wrapped in the margins ── */}
                 <div style={{ marginLeft: innerBleedLeft, marginRight: innerBleedRight }}>
                   <MatchCard
                     match={match}
@@ -431,13 +547,17 @@ function BracketColumn({
     </div>
   );
 }
+
 interface Connector {
   id: string;
   d: string;
   teamCode?: string;
+  sourceCode?: string;
 }
+
 export default function TournamentBracketPage() {
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
+  const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
   const [mobileRound, setMobileRound] = useState(0);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const desktopContainerRef = useRef<HTMLDivElement>(null);
@@ -446,10 +566,11 @@ export default function TournamentBracketPage() {
   const refCache = useRef<Record<string, RefSetter>>({});
   const mobileVerticalRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [connectors, setConnectors] = useState<Connector[]>([]);
-  
+
   const [matchCenterY, setMatchCenterY] = useState<Record<string, number>>({});
   const [finalCenter, setFinalCenter] = useState<{ x: number; y: number } | null>(null);
   const [columnHeight, setColumnHeight] = useState(1200);
+
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
       refCache.current[key] = (el: HTMLDivElement | null) => {
@@ -458,25 +579,21 @@ export default function TournamentBracketPage() {
     }
     return refCache.current[key];
   }
+
   const finalRound = ROUNDS[ROUNDS.length - 1];
   const nonFinalRounds = ROUNDS.slice(0, -1);
   const leftSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(0, r.matches.length / 2)) : [];
   const rightSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(r.matches.length / 2)) : [];
-  const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
-  
+
   function getRoundGrowWeight(roundIndex: number, side: 'left' | 'right' | 'final'): number {
-    if (side === 'final') return GROW_WEIGHT.full * 1.3; // 30% wider
-    
+    if (side === 'final') return GROW_WEIGHT.full * 1.3;
     const totalRounds = nonFinalRounds.length;
     if (roundIndex <= 1) return GROW_WEIGHT.full;
-    
-    // Push semi-finals apart by reducing their weight slightly
     if (roundIndex === 2 && totalRounds >= 4) return GROW_WEIGHT.quarter * 0.85;
     if (roundIndex === totalRounds - 1) return GROW_WEIGHT.semi * 0.85;
-    
     return GROW_WEIGHT.compact;
   }
-  
+
   function shouldBeCompact(roundIndex: number): boolean {
     return false;
   }
@@ -486,14 +603,15 @@ export default function TournamentBracketPage() {
     if (!containerEl) return;
     const containerRect = containerEl.getBoundingClientRect();
     if (containerRect.width === 0) return;
+
     function measuredCenter(matchId: string): number | null {
       const el = cardEls.current[matchId];
       if (!el) return null;
       const r = el.getBoundingClientRect();
       if (r.height === 0) return null;
-      
       return r.top + r.height / 2 - containerRect.top;
     }
+
     const nextCenters: Record<string, number> = {};
     if (USE_MIRRORED_LAYOUT) {
       const leftLeafY = leftSideMatches[0].map((m) => measuredCenter(m.id));
@@ -529,7 +647,7 @@ export default function TournamentBracketPage() {
     setMatchCenterY(nextCenters);
     const leafH = leafColumnRef.current?.scrollHeight;
     if (leafH && Math.abs(leafH - columnHeight) > 1) setColumnHeight(leafH);
-    // PERFECTLY CALCULATE THE X and Y POSITION OF THE FINAL MATCH FOR THE WATERMARK
+
     const finalCardEl = cardEls.current[finalRound.matches[0].id];
     if (finalCardEl) {
       const rect = finalCardEl.getBoundingClientRect();
@@ -537,6 +655,7 @@ export default function TournamentBracketPage() {
       setFinalCenter({ x, y: nextCenters[finalRound.matches[0].id] });
     }
   }
+
   function recomputeConnectors() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
@@ -560,7 +679,10 @@ export default function TournamentBracketPage() {
           const flowsRight = sCenterX < tCenterX;
           const startX = (flowsRight ? sRect.right : sRect.left) - containerRect.left;
           const startY = sRect.top + sRect.height / 2 - containerRect.top;
-          const teamCode = slotIdx === 0 ? match.teamA?.code : match.teamB?.code;
+
+          const team = slotIdx === 0 ? match.teamA : match.teamB;
+          const teamCode = team?.code || null;
+
           if (isFinal) {
             const targetRowEl = cardEls.current[`${match.id}:${slotIdx === 0 ? "A" : "B"}`] || targetEl;
             const trRect = targetRowEl.getBoundingClientRect();
@@ -569,7 +691,8 @@ export default function TournamentBracketPage() {
             next.push({
               id: `${match.id}-${slotIdx === 0 ? "A" : "B"}`,
               d: elbowPath(startX, startY, endX, endY),
-              teamCode,
+              teamCode: teamCode || undefined,
+              sourceCode: teamCode || undefined,
             });
             return;
           }
@@ -578,13 +701,15 @@ export default function TournamentBracketPage() {
           next.push({
             id: `${match.id}-${slotIdx === 0 ? "A" : "B"}`,
             d: topEntryPath(startX, startY, endX, endY),
-            teamCode,
+            teamCode: teamCode || undefined,
+            sourceCode: teamCode || undefined,
           });
         });
       }
     }
     setConnectors(next);
   }
+
   useLayoutEffect(() => {
     recomputeLayout();
     const raf = requestAnimationFrame(recomputeLayout);
@@ -597,19 +722,32 @@ export default function TournamentBracketPage() {
       window.removeEventListener("resize", recomputeLayout);
     };
   }, []);
+
   useLayoutEffect(() => {
     recomputeConnectors();
   }, [matchCenterY, columnHeight]);
+
   function goToRound(idx: number) {
     const clamped = Math.max(0, Math.min(ROUNDS.length - 1, idx));
     setMobileRound(clamped);
     const el = mobileScrollRef.current;
     if (el) el.scrollTo({ left: clamped * el.clientWidth, behavior: "smooth" });
   }
+
   function goToLabel(label: string | null) {
     const idx = roundIndexForLabel(label);
     if (idx >= 0) goToRound(idx);
   }
+
+  // Handle click on a team to select it and highlight its path
+  function handleTeamClick(teamCode: string | null) {
+    if (selectedTeamCode === teamCode) {
+      setSelectedTeamCode(null);
+    } else {
+      setSelectedTeamCode(teamCode);
+    }
+  }
+
   useEffect(() => {
     const el = mobileScrollRef.current;
     if (!el) return;
@@ -620,11 +758,16 @@ export default function TournamentBracketPage() {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+
   useEffect(() => {
     const roundId = ROUNDS[mobileRound]?.id;
     const el = roundId !== undefined ? mobileVerticalRefs.current[roundId] : null;
     if (el) el.scrollTop = 0;
   }, [mobileRound]);
+
+  // Determine which team code to use for highlighting (hover takes priority over selection)
+  const activeTeamCode = hoveredTeamCode || selectedTeamCode;
+
   return (
     <div className="min-h-screen w-full bg-background text-on-surface p-2 md:p-2">
       <style>{`
@@ -654,8 +797,7 @@ export default function TournamentBracketPage() {
         .bracket-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--color-theme-orange); }
         .bracket-scrollbar { scrollbar-width: thin; scrollbar-color: var(--color-border-overlay) transparent; }
       `}</style>
-      
-      {/* ── Header ── */}
+
       <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
         <div>
           <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
@@ -670,29 +812,27 @@ export default function TournamentBracketPage() {
             <span className="font-label-mono text-[10px] uppercase tracking-widest text-on-surface-variant">Live Matches</span>
           </div>
           <div className="w-px h-4 bg-border-overlay hidden md:block" />
-          <p className="font-body-md text-[11px] text-outline hidden md:block">Hover a team to trace their path.</p>
+          <p className="font-body-md text-[11px] text-outline hidden md:block">Hover or click a team to trace their path.</p>
         </div>
       </div>
-      {/* ══════════════════ DESKTOP / TABLET ══════════════════ */}
+
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="w-full overflow-x-hidden">
           {USE_MIRRORED_LAYOUT ? (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
-              
-              {/* ── WATERMARK: Placed safely behind ALL columns completely independently ── */}
               {finalCenter && (
-                <div 
+                <div
                   className="absolute pointer-events-none z-0 flex justify-center items-center"
-                  style={{ 
+                  style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
-                    transform: "translate(-50%, -50%)" 
+                    transform: "translate(-50%, -50%)"
                   }}
                 >
-                  <img 
-                    src="/moon-knight-logo.png" 
-                    alt="Tournament Logo" 
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10" 
+                  <img
+                    src="/moon-knight-logo.png"
+                    alt="Tournament Logo"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
                   />
                 </div>
               )}
@@ -701,7 +841,7 @@ export default function TournamentBracketPage() {
                 const growWeight = getRoundGrowWeight(i, 'left');
                 const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
                 const innerBleedLeft = i === 2 ? '-60%' : i === 3 ? '-60%' : undefined;
-                
+
                 return (
                   <BracketColumn
                     key={`L-${round.id}`}
@@ -710,7 +850,7 @@ export default function TournamentBracketPage() {
                     centerYByMatchId={matchCenterY}
                     columnHeight={columnHeight}
                     getRef={getRef}
-                    hoveredTeamCode={hoveredTeamCode}
+                    hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
                     compact={isCompact}
                     isLeaf={i === 0}
@@ -727,7 +867,7 @@ export default function TournamentBracketPage() {
                 centerYByMatchId={matchCenterY}
                 columnHeight={columnHeight}
                 getRef={getRef}
-                hoveredTeamCode={hoveredTeamCode}
+                hoveredTeamCode={activeTeamCode}
                 setHoveredTeamCode={setHoveredTeamCode}
                 growWeight={getRoundGrowWeight(nonFinalRounds.length, 'final')}
               />
@@ -737,7 +877,7 @@ export default function TournamentBracketPage() {
                 const growWeight = getRoundGrowWeight(i, 'right');
                 const bleedRight = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
                 const innerBleedRight = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
-                
+
                 return (
                   <BracketColumn
                     key={`R-${round.id}`}
@@ -746,7 +886,7 @@ export default function TournamentBracketPage() {
                     centerYByMatchId={matchCenterY}
                     columnHeight={columnHeight}
                     getRef={getRef}
-                    hoveredTeamCode={hoveredTeamCode}
+                    hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
                     compact={isCompact}
                     isLeaf={i === 0}
@@ -758,15 +898,19 @@ export default function TournamentBracketPage() {
               })}
               <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
                 {connectors.map((c) => {
-                  const active = c.teamCode && c.teamCode === hoveredTeamCode;
+                  const active = c.teamCode && c.teamCode === activeTeamCode;
                   return (
                     <path
                       key={c.id}
                       d={c.d}
                       fill="none"
                       stroke={active ? "var(--color-theme-orange)" : "var(--color-border-overlay)"}
-                      strokeWidth={active ? 2.5 : 2}
-                      style={{ transition: "stroke 0.2s, stroke-width 0.2s" }}
+                      strokeWidth={active ? 3 : 1.5}
+                      strokeOpacity={active ? 1 : 0.6}
+                      style={{
+                        transition: "stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out, stroke-opacity 0.3s ease-in-out",
+                        filter: active ? "drop-shadow(0 0 8px rgba(201, 151, 31, 0.6))" : "none"
+                      }}
                     />
                   );
                 })}
@@ -774,21 +918,19 @@ export default function TournamentBracketPage() {
             </div>
           ) : (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
-              
-              {/* ── WATERMARK: Placed safely behind ALL columns completely independently ── */}
               {finalCenter && (
-                <div 
+                <div
                   className="absolute pointer-events-none z-0 flex justify-center items-center"
-                  style={{ 
+                  style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
-                    transform: "translate(-50%, -50%)" 
+                    transform: "translate(-50%, -50%)"
                   }}
                 >
-                  <img 
-                    src="/moon-knight-logo.png" 
-                    alt="Tournament Logo" 
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10" 
+                  <img
+                    src="/moon-knight-logo.png"
+                    alt="Tournament Logo"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
                   />
                 </div>
               )}
@@ -797,7 +939,7 @@ export default function TournamentBracketPage() {
                 const growWeight = getRoundGrowWeight(i, 'left');
                 const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
                 const innerBleedLeft = i === 2 ? '-20%' : i === 3 ? '-20%' : undefined;
-                
+
                 return (
                   <BracketColumn
                     key={round.id}
@@ -806,7 +948,7 @@ export default function TournamentBracketPage() {
                     centerYByMatchId={matchCenterY}
                     columnHeight={columnHeight}
                     getRef={getRef}
-                    hoveredTeamCode={hoveredTeamCode}
+                    hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
                     isLeaf={i === 0}
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
@@ -819,15 +961,19 @@ export default function TournamentBracketPage() {
               })}
               <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
                 {connectors.map((c) => {
-                  const active = c.teamCode && c.teamCode === hoveredTeamCode;
+                  const active = c.teamCode && c.teamCode === activeTeamCode;
                   return (
                     <path
                       key={c.id}
                       d={c.d}
                       fill="none"
                       stroke={active ? "var(--color-theme-orange)" : "var(--color-border-overlay)"}
-                      strokeWidth={active ? 2.5 : 2}
-                      style={{ transition: "stroke 0.2s, stroke-width 0.2s" }}
+                      strokeWidth={active ? 3 : 1.5}
+                      strokeOpacity={active ? 1 : 0.6}
+                      style={{
+                        transition: "stroke 0.3s ease-in-out, stroke-width 0.3s ease-in-out, stroke-opacity 0.3s ease-in-out",
+                        filter: active ? "drop-shadow(0 0 8px rgba(201, 151, 31, 0.6))" : "none"
+                      }}
                     />
                   );
                 })}
@@ -836,7 +982,7 @@ export default function TournamentBracketPage() {
           )}
         </div>
       </div>
-      {/* ══════════════════ MOBILE ══════════════════ */}
+
       <div className="md:hidden max-w-xl mx-auto flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <button
@@ -884,7 +1030,7 @@ export default function TournamentBracketPage() {
               <h2 className="font-label-mono text-[11px] font-black uppercase tracking-widest text-on-surface-variant text-center mb-3">
                 {round.name}
               </h2>
-                <div
+              <div
                 ref={(el) => { mobileVerticalRefs.current[round.id] = el; }}
                 className="h-[65vh] overflow-y-auto bracket-scrollbar"
                 style={{ touchAction: "pan-y", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
@@ -892,20 +1038,18 @@ export default function TournamentBracketPage() {
                 <div className="min-h-full flex flex-col justify-center gap-3 py-2 px-1">
                   {round.matches.map((match) => (
                     <div key={match.id} className="w-full relative">
-                      
-                      {/* Logo watermark behind Final Card (Mobile) */}
                       {round.name === "Final" && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none -z-10 w-full flex justify-center items-center">
-                          <img 
-                            src="/moon-knight-logo.png" 
-                            alt="Tournament Logo" 
-                            className="w-[250px] md:w-[350px] max-w-none h-auto object-contain opacity-10" 
+                          <img
+                            src="/moon-knight-logo.png"
+                            alt="Tournament Logo"
+                            className="w-[250px] md:w-[350px] max-w-none h-auto object-contain opacity-10"
                           />
                         </div>
                       )}
                       <MatchCard
                         match={match}
-                        hoveredTeamCode={hoveredTeamCode}
+                        hoveredTeamCode={activeTeamCode}
                         setHoveredTeamCode={setHoveredTeamCode}
                         onFromClick={goToLabel}
                       />
