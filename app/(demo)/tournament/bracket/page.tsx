@@ -1,4 +1,3 @@
-// app/(demo)/tournament/bracket/page.tsx
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -178,19 +177,18 @@ const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16; // below a Round of 16, one side i
 //
 // Every round always gets its OWN column, same as reference bracket UIs
 // (ESPN / Bing / FIFA) — rounds are never merged or overlapped into each
-// other's space. Round of 32 and Round of 16 both keep full-width, full-
-// detail columns; inner rounds (QF/SF/Final) naturally need less width
-// since their cards carry less text (mostly "TBD" until a feeder
-// completes), and `compact` mode trims their footer/caption once columns
-// get tight — but the columns themselves stay fully separate.
+// other's space. Round of 32 and Round of 16 always keep full-width, full-
+// detail cards; inner rounds (QF/SF/Final) have increased width but may
+// show compact footers once space gets tight.
 //
-// Column WIDTH is now weighted rather than split evenly nine ways: full-
-// detail rounds (R32 / R16 / Final) get a heavier `flexGrow` share than the
-// compact inner rounds (QF / SF), which mostly show "TBD" placeholders and
-// need far less room. See GROW_WEIGHT below and its use in growWeight props.
+// Column WIDTH is now weighted rather than split evenly: full-detail
+// rounds (R32 / R16) get a heavier `flexGrow` share, while inner rounds
+// (QF / SF / Final) get moderate shares that still allow them to breathe.
 const GROW_WEIGHT = {
-  full: 1.3,    // R32, R16, Final — real names, logos, footers
-  compact: 0.7, // QF, SF — mostly TBD until a feeder resolves
+  full: 1.4,     // R32, R16 — real names, logos, full footers
+  semi: 1.2,     // Semifinals — more width
+  quarter: 1.1,  // Quarterfinals — moderate width
+  compact: 0.9,  // Fallback for very crowded layouts
 };
 
 // Stepped "elbow" connector for SIDE-entry connections: out → straight
@@ -247,10 +245,6 @@ function roundIndexForLabel(label: string | null): number {
   const shortName = label.split("-")[0];
   return ROUNDS.findIndex((r) => r.shortName === shortName);
 }
-
-// (findMatchByLabel removed — no longer needed now that connectors always
-// anchor to the whole feeder/target card rather than looking up which team
-// won a specific row.)
 
 type RefSetter = (el: HTMLDivElement | null) => void;
 
@@ -469,10 +463,9 @@ function BracketColumn({
 }) {
   return (
     <div
-      className="flex flex-col items-center min-w-0 relative h-full" // Added 'relative h-full'
+      className="flex flex-col items-center min-w-0 relative h-full"
       style={{ flexGrow: growWeight, flexShrink: 1, flexBasis: 0 }}
     >
-      {/* Added z-10 to keep headers interactive and layered cleanly */}
       <div className="w-full text-center mb-2 md:mb-3 lg:mb-4 relative z-10">
         <span className="inline-block px-2.5 py-1 lg:px-4 lg:py-1.5 rounded-full text-[9px] lg:text-[10px] font-black uppercase tracking-widest font-label-mono bg-surface-container-low border border-border-overlay text-on-surface-variant shadow-lg truncate max-w-full">
           {roundName}
@@ -483,7 +476,7 @@ function BracketColumn({
       {isLeaf ? (
         <div ref={leafColumnRef} className="w-full flex flex-col gap-8 lg:gap-10 items-stretch">
           {matches.map((match) => (
-            <div key={match.id} className="w-full px-0.5 lg:px-1">
+            <div key={match.id} className="w-full px-2">
               <MatchCard
                 match={match}
                 hoveredTeamCode={hoveredTeamCode}
@@ -496,17 +489,13 @@ function BracketColumn({
           ))}
         </div>
       ) : (
-        /* Changing this container to absolute inset-0 syncs its coordinate origin 
-          directly with your main desktop container top. 
-          pointer-events-none prevents the wrapper overlay from blocking clicks below it.
-        */
         <div className="absolute inset-0 pointer-events-none">
           {matches.map((match) => {
             const centerY = centerYByMatchId?.[match.id] ?? 0;
             return (
               <div
                 key={match.id}
-                className="absolute left-0 right-0 px-0.5 lg:px-1 pointer-events-auto" // Added pointer-events-auto to keep cards clickable
+                className="absolute left-0 right-0 px-0.5 lg:px-1 pointer-events-auto"
                 style={{ top: centerY, transform: "translateY(-50%)" }}
               >
                 <MatchCard
@@ -537,7 +526,6 @@ export default function TournamentBracketPage() {
   const [mobileRound, setMobileRound] = useState(0);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
 
-  // ── connector + layout plumbing ──────────────────────────────────────
   const desktopContainerRef = useRef<HTMLDivElement>(null);
   const leafColumnRef = useRef<HTMLDivElement | null>(null);
   const cardEls = useRef<Record<string, HTMLDivElement | null>>({});
@@ -561,21 +549,34 @@ export default function TournamentBracketPage() {
   const leftSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(0, r.matches.length / 2)) : [];
   const rightSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(r.matches.length / 2)) : [];
 
-  // Middle rounds (everything except Round of 32 AND Round of 16 on each
-  // side) get the compact card treatment once we're past a certain total
-  // column count, since QF/SF/Final are the columns squeezed hardest when
-  // everything has to fit in one viewport width and they carry the least
-  // information anyway (mostly "TBD" until a feeder completes). Round of 32
-  // and Round of 16 are never compacted — matching the reference bracket,
-  // they always keep full team names, scores, and venue/date footers.
+  // Determine which rounds should be compact and their grow weights
   const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
-  const compactMiddle = totalColumns > 5;
+  
+  function getRoundGrowWeight(roundIndex: number, side: 'left' | 'right' | 'final'): number {
+    if (side === 'final') return GROW_WEIGHT.semi;
+    
+    const totalRounds = nonFinalRounds.length;
+    // Round of 32 (index 0) and Round of 16 (index 1) get full width
+    if (roundIndex <= 1) return GROW_WEIGHT.full;
+    
+    // Quarterfinals (index 2 when totalRounds >= 4)
+    if (roundIndex === 2 && totalRounds >= 4) return GROW_WEIGHT.quarter;
+    
+    // Semifinals (last round before final)
+    if (roundIndex === totalRounds - 1) return GROW_WEIGHT.semi;
+    
+    // Everything else gets a moderate weight
+    return GROW_WEIGHT.compact;
+  }
 
-  // Step 1: measure the REAL rendered center of every leaf (Round-of-32)
-  // card, then derive every later round's center purely from those real
-  // numbers (see computeCentersFromLeaves). This replaces guessed pixel
-  // constants entirely — a Quarterfinal card lands exactly between its two
-  // real Round-of-16 cards no matter how tall those cards actually rendered.
+  function shouldBeCompact(roundIndex: number): boolean {
+    const totalRounds = nonFinalRounds.length;
+    // Only compact if we have more than 6 columns and this is a very inner round
+    if (totalColumns <= 6) return false;
+    // Compact Quarterfinals and Semifinals when space is tight
+    return roundIndex >= totalRounds - 2;
+  }
+
   function recomputeLayout() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
@@ -588,7 +589,6 @@ export default function TournamentBracketPage() {
       const r = el.getBoundingClientRect();
       if (r.height === 0) return null;
       
-      // Measure directly relative to the outer container top to completely sidestep header offset issues
       return r.top + r.height / 2 - containerRect.top;
     }
 
@@ -635,16 +635,6 @@ export default function TournamentBracketPage() {
     if (leafH && Math.abs(leafH - columnHeight) > 1) setColumnHeight(leafH);
   }
 
-  // Connector geometry: two flavours.
-  //  - Side entry (elbowPath): used ONLY for the Final's two feeders, which
-  //    sit immediately left/right of the single Final card — a genuine
-  //    side approach, not a stacked column needing a top notch.
-  //  - Top entry (topEntryPath): used for every other match. The line exits
-  //    the winning team row as before, but instead of diving into the
-  //    target row's side, it bends once and drops into the TOP EDGE of the
-  //    whole target card. That leaves the target card's left/right/bottom
-  //    completely free of connector geometry, which is what lets column
-  //    widths (growWeight) be redistributed without breaking the lines.
   function recomputeConnectors() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
@@ -661,18 +651,7 @@ export default function TournamentBracketPage() {
           const feederLabel = match[key];
           if (!feederLabel) return;
 
-          // Source anchor is always the WHOLE feeder card (not the
-          // specific winning row). The row-specific anchor used to nudge
-          // the exit point up/down by half a row's height depending on
-          // whether the winner sat in the top or bottom slot — which broke
-          // symmetry, since a card's true vertical center (used to place
-          // it via centerYByMatchId) is exactly the midpoint of ITS two
-          // feeders. Anchoring here to the same center every parent match
-          // is built from keeps the whole chain — and therefore every
-          // connector's shape — symmetric top-to-bottom.
           const sourceEl = cardEls.current[feederLabel];
-          // Target anchor is always the WHOLE card too (match.id), not a
-          // specific row — that's the top/bottom-entry change.
           const targetEl = cardEls.current[match.id];
           if (!sourceEl || !targetEl) return;
 
@@ -690,8 +669,6 @@ export default function TournamentBracketPage() {
           const teamCode = slotIdx === 0 ? match.teamA?.code : match.teamB?.code;
 
           if (isFinal) {
-            // Final's feeders sit directly to its side — keep the classic
-            // side-entry elbow, landing on the specific row (A/B) as before.
             const targetRowEl = cardEls.current[`${match.id}:${slotIdx === 0 ? "A" : "B"}`] || targetEl;
             const trRect = targetRowEl.getBoundingClientRect();
             const endX = (flowsRight ? trRect.left : trRect.right) - containerRect.left;
@@ -704,11 +681,6 @@ export default function TournamentBracketPage() {
             return;
           }
 
-          // Top/bottom entry, symmetric: the upper feeder (slot A) always
-          // enters the target's TOP-middle, the lower feeder (slot B)
-          // always enters the target's BOTTOM-middle. Both land dead-
-          // center on the x-axis — since they enter on opposite edges,
-          // they never overlap, so no left/right nudge is needed anymore.
           const endX = tCenterX - containerRect.left;
           const endY = (slotIdx === 0 ? tRect.top : tRect.bottom) - containerRect.top;
 
@@ -724,8 +696,6 @@ export default function TournamentBracketPage() {
     setConnectors(next);
   }
 
-  // Stage 1: measure the real leaf cards and derive every later round's
-  // position from them, on mount / resize.
   useLayoutEffect(() => {
     recomputeLayout();
     const raf = requestAnimationFrame(recomputeLayout);
@@ -739,17 +709,10 @@ export default function TournamentBracketPage() {
       ro.disconnect();
       window.removeEventListener("resize", recomputeLayout);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stage 2: once the DOM has actually reflected the positions computed in
-  // stage 1 (matchCenterY/columnHeight changed → re-render happened), the
-  // cards are in their real final spots — only now do we measure them again
-  // to draw the connector lines, so lines never lag a frame behind the cards
-  // they're supposed to be touching.
   useLayoutEffect(() => {
     recomputeConnectors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchCenterY, columnHeight]);
 
   function goToRound(idx: number) {
@@ -775,10 +738,6 @@ export default function TournamentBracketPage() {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Every round's vertical list scrolls independently, so without this a
-  // round you'd scrolled halfway down earlier would still be mid-scroll the
-  // next time you swiped back to it — always land at the top instead, same
-  // as the first time you ever see that round.
   useEffect(() => {
     const roundId = ROUNDS[mobileRound]?.id;
     const el = roundId !== undefined ? mobileVerticalRefs.current[roundId] : null;
@@ -787,15 +746,6 @@ export default function TournamentBracketPage() {
 
   return (
     <div className="min-h-screen w-full bg-background text-on-surface p-4 md:p-8">
-      {/* `no-scrollbar` was never actually defined anywhere in the project,
-         so every "hidden" scrollbar was silently falling back to the plain
-         browser default — including the outer page scroll itself, which is
-         what the `html` rule below covers, since this whole layout is
-         taller than the viewport and always native-scrolls vertically.
-         The two classes after it replace `no-scrollbar` everywhere else in
-         this file: one truly hides the bar (for swipe-driven carousels
-         where a scrollbar doesn't belong), the other gives genuinely
-         scrollable lists a slim, on-theme bar instead of the OS default. */}
       <style>{`
         html {
           scrollbar-width: thin;
@@ -825,6 +775,7 @@ export default function TournamentBracketPage() {
         .bracket-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--color-theme-orange); }
         .bracket-scrollbar { scrollbar-width: thin; scrollbar-color: var(--color-border-overlay) transparent; }
       `}</style>
+      
       {/* ── Header ── */}
       <div className="max-w-[1600px] mx-auto mb-8 md:mb-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
         <div>
@@ -845,23 +796,15 @@ export default function TournamentBracketPage() {
         </div>
       </div>
 
-      {/* ══════════════════ DESKTOP / TABLET ══════════════════
-          Every round gets its own true flex column, same as ESPN/Bing/FIFA
-          reference brackets — Round of 32 through Final and back out, never
-          merged or overlapped. Middle rounds switch to `compact` cards (no
-          "From X" caption, no venue/date footer) once there are enough
-          columns that space gets tight, but Round of 32 and Round of 16
-          stay full detail since those are the columns with real content.
-          Column WIDTH is weighted (growWeight) rather than split evenly:
-          full-detail rounds get more of the row's total width than the
-          compact inner rounds — connectors now enter cards from the TOP,
-          so this redistribution never breaks a connector's landing spot. */}
+      {/* ══════════════════ DESKTOP / TABLET ══════════════════ */}
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="w-full overflow-x-hidden">
           {USE_MIRRORED_LAYOUT ? (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
               {nonFinalRounds.map((round, i) => {
-                const isCompact = compactMiddle && i > 1;
+                const isCompact = shouldBeCompact(i);
+                const growWeight = getRoundGrowWeight(i, 'left');
+                
                 return (
                   <BracketColumn
                     key={`L-${round.id}`}
@@ -875,7 +818,7 @@ export default function TournamentBracketPage() {
                     compact={isCompact}
                     isLeaf={i === 0}
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
-                    growWeight={isCompact ? GROW_WEIGHT.compact : GROW_WEIGHT.full}
+                    growWeight={growWeight}
                   />
                 );
               })}
@@ -888,12 +831,14 @@ export default function TournamentBracketPage() {
                 getRef={getRef}
                 hoveredTeamCode={hoveredTeamCode}
                 setHoveredTeamCode={setHoveredTeamCode}
-                growWeight={GROW_WEIGHT.full}
+                growWeight={GROW_WEIGHT.semi}
               />
 
               {[...nonFinalRounds].reverse().map((round, revIdx) => {
                 const i = nonFinalRounds.length - 1 - revIdx;
-                const isCompact = compactMiddle && i > 1;
+                const isCompact = shouldBeCompact(i);
+                const growWeight = getRoundGrowWeight(i, 'right');
+                
                 return (
                   <BracketColumn
                     key={`R-${round.id}`}
@@ -906,7 +851,7 @@ export default function TournamentBracketPage() {
                     setHoveredTeamCode={setHoveredTeamCode}
                     compact={isCompact}
                     isLeaf={i === 0}
-                    growWeight={isCompact ? GROW_WEIGHT.compact : GROW_WEIGHT.full}
+                    growWeight={growWeight}
                   />
                 );
               })}
@@ -964,7 +909,7 @@ export default function TournamentBracketPage() {
         </div>
       </div>
 
-      {/* ══════════════════ MOBILE: one stage at a time, swipe/tap to swap ══════════════════ */}
+      {/* ══════════════════ MOBILE ══════════════════ */}
       <div className="md:hidden max-w-xl mx-auto flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <button
@@ -1005,11 +950,6 @@ export default function TournamentBracketPage() {
           </button>
         </div>
 
-        {/* Swipeable stage pages — horizontal swipe only, scrollbar hidden.
-           Plain overflow-x-auto with full-width pages: no negative-margin
-           bleed trick, so there's nothing for the container to clip except
-           its own contents — cards render full size and the next round
-           never peeks through. */}
         <div
           ref={mobileScrollRef}
           className="flex overflow-x-auto snap-x snap-mandatory bracket-scrollbar-hidden"
@@ -1021,9 +961,6 @@ export default function TournamentBracketPage() {
                 {round.name}
               </h2>
 
-              {/* Vertical match list — fixed height so short stages (Final, Semis)
-                 center their cards instead of collapsing, and long stages
-                 (Round of 32) scroll. Scrollbar hidden, vertical swipe still works. */}
               <div
                 ref={(el) => (mobileVerticalRefs.current[round.id] = el)}
                 className="h-[65vh] overflow-y-auto bracket-scrollbar"
