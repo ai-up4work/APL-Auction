@@ -1,8 +1,6 @@
 "use client";
-
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight } from "lucide-react";
-
 interface TeamNode {
   id: string;
   code: string;
@@ -12,7 +10,6 @@ interface TeamNode {
   score?: number;
   isWinner?: boolean;
 }
-
 interface MatchNode {
   id: string;
   label: string; // e.g. "R32-3" — used both as this match's own id and as the tag shown on whatever it feeds into
@@ -25,26 +22,21 @@ interface MatchNode {
   date?: string;
   time?: string;
 }
-
 interface Round {
   id: number;
   name: string;
   shortName: string;
   matches: MatchNode[];
 }
-
 // ── How many teams this bracket holds. Drop this to 8 or 4 and the page
 // automatically falls back to the simple one-directional layout instead of
 // the mirrored "two funnels into a Final" layout — see TEAM_COUNT usage below.
 const TEAM_COUNT = 32;
-
 const PALETTE = [
   "#3B8BD4", "#2A9D5C", "#E45D35", "#FFB000", "#7C3AED", "#EC4899", "#0F172A", "#DC2626",
   "#0EA5E9", "#059669", "#D97706", "#9333EA", "#DB2777", "#475569", "#65A30D", "#B91C1C",
 ];
-
 const VENUES = ["Meridian Stadium", "Galle International", "R. Premadasa", "Pallekele Grounds"];
-
 const TEAM_NAMES: { name: string; code: string }[] = [
   { name: "Coastal Sharks", code: "CS" }, { name: "Desert Falcons", code: "DF" },
   { name: "Moon Knights", code: "MK" }, { name: "Viper Titans", code: "VT" },
@@ -63,12 +55,10 @@ const TEAM_NAMES: { name: string; code: string }[] = [
   { name: "Harbor Hammers", code: "HB" }, { name: "Delta Dragons", code: "DD" },
   { name: "Plains Panthers", code: "PP" }, { name: "Arena Adders", code: "AA" },
 ];
-
 const LOGOS: Record<string, string> = {
   CS: "/Franchises/CSK.png", DF: "/Franchises/RCB.png", MK: "/Franchises/MI.png", VT: "/Franchises/SRH.png",
   KK: "/Franchises/KKR.png", BR: "/Franchises/RR.png", JG: "/Franchises/GT.png", GC: "/Franchises/DC.png",
 };
-
 function roundMeta(teamsEntering: number): { name: string; shortName: string } {
   switch (teamsEntering) {
     case 2: return { name: "Final", shortName: "F" };
@@ -79,28 +69,19 @@ function roundMeta(teamsEntering: number): { name: string; shortName: string } {
     default: return { name: `Round of ${teamsEntering}`, shortName: `R${teamsEntering}` };
   }
 }
-
-// Builds every round from just the raw team list: round 1 is real fixtures,
-// every later round is *derived* — a slot only fills in once its feeder
-// match is marked "completed", otherwise it stays a labelled TBD. This is
-// what makes the "winner flows into the next match" connection real instead
-// of hand-authored per round.
 function buildBracket(teamCount: number): Round[] {
   const rounds: Round[] = [];
   const round1Meta = roundMeta(teamCount);
   const round1Matches: MatchNode[] = [];
-
   for (let i = 0; i < teamCount / 2; i++) {
     const a = TEAM_NAMES[(i * 2) % TEAM_NAMES.length];
     const b = TEAM_NAMES[(i * 2 + 1) % TEAM_NAMES.length];
     const color = (idx: number) => PALETTE[idx % PALETTE.length];
     const pattern = i % 5;
-
     let status: MatchNode["status"] = "scheduled";
     let scoreA: number | undefined;
     let scoreB: number | undefined;
     let winnerSlot: 0 | 1 | null = null;
-
     if (pattern === 0) {
       status = "completed";
       scoreA = 140 + ((i * 7) % 50);
@@ -116,7 +97,6 @@ function buildBracket(teamCount: number): Round[] {
       scoreA = 62 + ((i * 2) % 20);
       scoreB = 58 + ((i * 3) % 22);
     }
-
     round1Matches.push({
       id: `${round1Meta.shortName}-${i + 1}`,
       label: `${round1Meta.shortName}-${i + 1}`,
@@ -130,21 +110,17 @@ function buildBracket(teamCount: number): Round[] {
       time: i % 2 === 0 ? "15:30" : "19:30",
     });
   }
-
   rounds.push({ id: 1, name: round1Meta.name, shortName: round1Meta.shortName, matches: round1Matches });
-
   let prev = round1Matches;
   let roundId = 2;
   while (prev.length >= 2) {
     const meta = roundMeta(prev.length);
     const matches: MatchNode[] = [];
-
     for (let i = 0; i < prev.length / 2; i++) {
       const mA = prev[i * 2];
       const mB = prev[i * 2 + 1];
       const winnerA = mA.status === "completed" ? (mA.teamA?.isWinner ? mA.teamA : mA.teamB) : null;
       const winnerB = mB.status === "completed" ? (mB.teamA?.isWinner ? mB.teamA : mB.teamB) : null;
-
       matches.push({
         id: `${meta.shortName}-${i + 1}`,
         label: `${meta.shortName}-${i + 1}`,
@@ -155,46 +131,20 @@ function buildBracket(teamCount: number): Round[] {
         bFrom: mB.label,
       });
     }
-
     rounds.push({ id: roundId, name: meta.name, shortName: meta.shortName, matches });
     prev = matches;
     roundId++;
   }
-
   return rounds;
 }
-
 const ROUNDS = buildBracket(TEAM_COUNT);
-const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16; // below a Round of 16, one side is plenty
-
-// Card positions are no longer guessed from fixed pixel constants — they're
-// derived from the *real* rendered position of the leaf (Round-of-32) cards,
-// measured from the DOM after mount (see recomputeLayout in the page
-// component). Every later round's card is then just the midpoint of its two
-// feeders' real measured centers, recursively — see computeCentersFromLeaves
-// below — so positioning is correct regardless of actual card height,
-// wrapped text, compact vs normal styling, logos, etc.
-//
-// Every round always gets its OWN column, same as reference bracket UIs
-// (ESPN / Bing / FIFA) — rounds are never merged or overlapped into each
-// other's space. Round of 32 and Round of 16 always keep full-width, full-
-// detail cards; inner rounds (QF/SF/Final) have increased width but may
-// show compact footers once space gets tight.
-//
-// Column WIDTH is now weighted rather than split evenly: full-detail
-// rounds (R32 / R16) get a heavier `flexGrow` share, while inner rounds
-// (QF / SF / Final) get moderate shares that still allow them to breathe.
+const USE_MIRRORED_LAYOUT = TEAM_COUNT >= 16; 
 const GROW_WEIGHT = {
-  full: 1.4,     // R32, R16 — real names, logos, full footers
-  semi: 1.2,     // Semifinals — more width
-  quarter: 1.1,  // Quarterfinals — moderate width
-  compact: 0.9,  // Fallback for very crowded layouts
+  full: 2,       
+  semi: 1.2,     
+  quarter: 1.1,  
+  compact: 0.9,  
 };
-
-// Stepped "elbow" connector for SIDE-entry connections: out → straight
-// down/up in the middle → in. Still used for the Final, whose two feeders
-// sit to its immediate left and right (a genuine side entry, no top notch
-// needed since the Final has only one card in its column).
 function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12): string {
   const midX = (x1 + x2) / 2;
   if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -204,16 +154,6 @@ function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12):
     y2 - r * dir
   } Q ${midX} ${y2} ${midX + r} ${y2} L ${x2} ${y2}`;
 }
-
-// TOP/BOTTOM-entry connector: travels horizontally out from the winning
-// team row, then bends ONCE and drops straight into an edge of the next
-// match's card — the upper feeder always lands on the card's TOP-middle,
-// the lower feeder always lands on its BOTTOM-middle. Symmetric, and since
-// the two feeders enter on opposite edges they never need a left/right
-// offset to avoid overlapping. This also frees the card's left/right sides
-// entirely from connector geometry — a card's width can grow into the
-// column without ever needing to recalculate where a side-entry line would
-// land.
 function topEntryPath(x1: number, y1: number, x2: number, y2: number, radius = 10): string {
   if (Math.abs(x2 - x1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
   const dir = y2 > y1 ? 1 : -1;
@@ -221,13 +161,6 @@ function topEntryPath(x1: number, y1: number, x2: number, y2: number, radius = 1
   const r = Math.max(0, Math.min(radius, Math.abs(x2 - x1), Math.abs(y2 - y1)));
   return `M ${x1} ${y1} L ${x2 - r * sign} ${y1} Q ${x2} ${y1} ${x2} ${y1 + r * dir} L ${x2} ${y2}`;
 }
-
-// Given the REAL measured Y-center (px, relative to the container) of every
-// leaf-round match, and how many matches each subsequent round has, computes
-// every later round's Y-center purely by averaging its two feeders' centers.
-// Because the leaf values are real DOM measurements (not assumed spacing),
-// every later round lands exactly between its two real feeder cards no
-// matter how tall any card actually rendered.
 function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: number[]): number[][] {
   const centers: number[][] = [leafCentersPx];
   for (let r = 1; r < matchCountsPerRound.length; r++) {
@@ -239,15 +172,12 @@ function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: 
   }
   return centers;
 }
-
 function roundIndexForLabel(label: string | null): number {
   if (!label) return -1;
   const shortName = label.split("-")[0];
   return ROUNDS.findIndex((r) => r.shortName === shortName);
 }
-
 type RefSetter = (el: HTMLDivElement | null) => void;
-
 function TeamRow({
   team,
   status,
@@ -270,7 +200,6 @@ function TeamRow({
   const isTBD = !team;
   const isHovered = team && hoveredTeamCode === team.code;
   const isAnyHovered = hoveredTeamCode !== null;
-
   return (
     <div
       ref={rowRef}
@@ -287,7 +216,6 @@ function TeamRow({
       }`}
     >
       {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
-
       <div className="flex items-center gap-2 lg:gap-3 pl-1.5 lg:pl-2 min-w-0">
         <span
           className={`w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
@@ -304,7 +232,6 @@ function TeamRow({
             <span className="text-outline">?</span>
           )}
         </span>
-
         <div className="leading-none min-w-0">
           <p className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate ${isTBD ? "text-outline font-medium" : "text-on-surface"}`}>
             {isTBD ? "To Be Determined" : team.name}
@@ -328,7 +255,6 @@ function TeamRow({
           )}
         </div>
       </div>
-
       {!isTBD && status !== "scheduled" && (
         <div className="flex items-center gap-2 font-label-mono font-black text-sm pr-1 shrink-0">
           {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
@@ -338,7 +264,6 @@ function TeamRow({
     </div>
   );
 }
-
 function MatchCard({
   match,
   hoveredTeamCode,
@@ -354,13 +279,7 @@ function MatchCard({
   getRef?: (key: string) => RefSetter;
   compact?: boolean;
 }) {
-  // Cards with no teams decided yet (both slots still TBD) have nothing
-  // useful to say in a footer, so we drop the venue/date row for them and
-  // for any card once the column has been squeezed below a comfortable
-  // width. This mirrors how reference bracket UIs collapse mid-round cards
-  // to just the two team rows once space gets tight.
   const showFooter = !compact && (match.teamA || match.teamB);
-
   return (
     <div
       ref={getRef ? getRef(match.id) : undefined}
@@ -371,7 +290,6 @@ function MatchCard({
       {match.status === "live" && (
         <div className="absolute inset-0 bg-gradient-to-r from-status-live/5 to-theme-orange/5 pointer-events-none animate-pulse" />
       )}
-
       <div className="relative flex flex-col gap-1 lg:gap-1.5 p-1.5 lg:p-2">
         <TeamRow
           team={match.teamA}
@@ -393,7 +311,6 @@ function MatchCard({
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
         />
-
         {showFooter && (
           <div className="flex items-center justify-between border-t border-border-overlay pt-1 lg:pt-1.5 mt-0 text-[9px] lg:text-[10px] font-label-mono font-bold uppercase tracking-wider text-outline">
             <span className="hidden lg:flex items-center gap-1.5 max-w-[65%] truncate">
@@ -404,7 +321,6 @@ function MatchCard({
               <MapPin className="w-2.5 h-2.5 shrink-0" />
               <span className="truncate">{match.venue ? match.venue.split(" ")[0] : "TBD"}</span>
             </span>
-
             {match.status === "live" ? (
               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-status-live/10 text-status-live border border-status-live/30 text-[9px] font-black tracking-widest">
                 <Radio className="w-2.5 h-2.5 animate-pulse" />
@@ -422,18 +338,6 @@ function MatchCard({
     </div>
   );
 }
-
-// One column of stacked match cards. Every column across the whole bracket
-// shares the same fixed `columnHeight` and uses absolute positioning past
-// the leaf round, so no matter how many matches a round has — 8 down to a
-// single Final card — the stack is centered on the exact same vertical
-// axis. Every round always gets its own full column (never merged or
-// overlapped with a neighbouring round) — this is what keeps Round of 16
-// legible and separate from Round of 32, matching reference bracket UIs.
-//
-// `growWeight` replaces a flat `flex-1`: full-detail rounds get a heavier
-// share of the row's total width, compact rounds get a lighter share — the
-// NINE columns still divide up the SAME total width, just unevenly now.
 function BracketColumn({
   roundName,
   matches,
@@ -447,6 +351,8 @@ function BracketColumn({
   isLeaf,
   leafColumnRef,
   growWeight = 1,
+  bleedLeft,
+  bleedRight,
 }: {
   roundName: string;
   matches: MatchNode[];
@@ -460,6 +366,8 @@ function BracketColumn({
   isLeaf?: boolean;
   leafColumnRef?: RefSetter;
   growWeight?: number;
+  bleedLeft?: string;
+  bleedRight?: string;
 }) {
   return (
     <div
@@ -472,7 +380,6 @@ function BracketColumn({
         </span>
         <div className="absolute left-0 right-0 top-1/2 -z-10 h-px bg-gradient-to-r from-transparent via-border-overlay to-transparent" />
       </div>
-
       {isLeaf ? (
         <div ref={leafColumnRef} className="w-full flex flex-col gap-8 lg:gap-10 items-stretch">
           {matches.map((match) => (
@@ -489,14 +396,19 @@ function BracketColumn({
           ))}
         </div>
       ) : (
-        <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 pointer-events-none z-10">
           {matches.map((match) => {
             const centerY = centerYByMatchId?.[match.id] ?? 0;
             return (
               <div
                 key={match.id}
-                className="absolute left-0 right-0 px-0.5 lg:px-1 pointer-events-auto"
-                style={{ top: centerY, transform: "translateY(-50%)" }}
+                className="absolute px-0.5 lg:px-1 pointer-events-auto"
+                style={{ 
+                  top: centerY, 
+                  transform: "translateY(-50%)",
+                  left: bleedLeft || '0',
+                  right: bleedRight || '0'
+                }}
               >
                 <MatchCard
                   match={match}
@@ -514,18 +426,15 @@ function BracketColumn({
     </div>
   );
 }
-
 interface Connector {
   id: string;
   d: string;
   teamCode?: string;
 }
-
 export default function TournamentBracketPage() {
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
   const [mobileRound, setMobileRound] = useState(0);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
-
   const desktopContainerRef = useRef<HTMLDivElement>(null);
   const leafColumnRef = useRef<HTMLDivElement | null>(null);
   const cardEls = useRef<Record<string, HTMLDivElement | null>>({});
@@ -534,7 +443,6 @@ export default function TournamentBracketPage() {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [matchCenterY, setMatchCenterY] = useState<Record<string, number>>({});
   const [columnHeight, setColumnHeight] = useState(1200);
-
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
       refCache.current[key] = (el: HTMLDivElement | null) => {
@@ -543,46 +451,31 @@ export default function TournamentBracketPage() {
     }
     return refCache.current[key];
   }
-
   const finalRound = ROUNDS[ROUNDS.length - 1];
   const nonFinalRounds = ROUNDS.slice(0, -1);
   const leftSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(0, r.matches.length / 2)) : [];
   const rightSideMatches = USE_MIRRORED_LAYOUT ? nonFinalRounds.map((r) => r.matches.slice(r.matches.length / 2)) : [];
-
-  // Determine which rounds should be compact and their grow weights
   const totalColumns = USE_MIRRORED_LAYOUT ? nonFinalRounds.length * 2 + 1 : ROUNDS.length;
   
   function getRoundGrowWeight(roundIndex: number, side: 'left' | 'right' | 'final'): number {
-    if (side === 'final') return GROW_WEIGHT.semi;
+    if (side === 'final') return GROW_WEIGHT.full;
     
     const totalRounds = nonFinalRounds.length;
-    // Round of 32 (index 0) and Round of 16 (index 1) get full width
     if (roundIndex <= 1) return GROW_WEIGHT.full;
     
-    // Quarterfinals (index 2 when totalRounds >= 4)
     if (roundIndex === 2 && totalRounds >= 4) return GROW_WEIGHT.quarter;
-    
-    // Semifinals (last round before final)
     if (roundIndex === totalRounds - 1) return GROW_WEIGHT.semi;
     
-    // Everything else gets a moderate weight
     return GROW_WEIGHT.compact;
   }
-
   function shouldBeCompact(roundIndex: number): boolean {
-    const totalRounds = nonFinalRounds.length;
-    // Only compact if we have more than 6 columns and this is a very inner round
-    if (totalColumns <= 6) return false;
-    // Compact Quarterfinals and Semifinals when space is tight
-    return roundIndex >= totalRounds - 2;
+    return false;
   }
-
   function recomputeLayout() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
     const containerRect = containerEl.getBoundingClientRect();
     if (containerRect.width === 0) return;
-
     function measuredCenter(matchId: string): number | null {
       const el = cardEls.current[matchId];
       if (!el) return null;
@@ -591,19 +484,15 @@ export default function TournamentBracketPage() {
       
       return r.top + r.height / 2 - containerRect.top;
     }
-
     const nextCenters: Record<string, number> = {};
-
     if (USE_MIRRORED_LAYOUT) {
       const leftLeafY = leftSideMatches[0].map((m) => measuredCenter(m.id));
       const rightLeafY = rightSideMatches[0].map((m) => measuredCenter(m.id));
       if (leftLeafY.some((v) => v === null) || rightLeafY.some((v) => v === null)) return;
-
       const leftCounts = leftSideMatches.map((r) => r.length);
       const rightCounts = rightSideMatches.map((r) => r.length);
       const leftPix = computeCentersFromLeaves(leftLeafY as number[], leftCounts);
       const rightPix = computeCentersFromLeaves(rightLeafY as number[], rightCounts);
-
       nonFinalRounds.forEach((_, r) => {
         leftSideMatches[r].forEach((m, i) => {
           nextCenters[m.id] = leftPix[r][i];
@@ -612,7 +501,6 @@ export default function TournamentBracketPage() {
           nextCenters[m.id] = rightPix[r][i];
         });
       });
-
       const lastLeft = leftPix[leftPix.length - 1][0];
       const lastRight = rightPix[rightPix.length - 1][0];
       nextCenters[finalRound.matches[0].id] = (lastLeft + lastRight) / 2;
@@ -628,46 +516,34 @@ export default function TournamentBracketPage() {
         });
       });
     }
-
     setMatchCenterY(nextCenters);
-
     const leafH = leafColumnRef.current?.scrollHeight;
     if (leafH && Math.abs(leafH - columnHeight) > 1) setColumnHeight(leafH);
   }
-
   function recomputeConnectors() {
     const containerEl = desktopContainerRef.current;
     if (!containerEl) return;
     const containerRect = containerEl.getBoundingClientRect();
     if (containerRect.width === 0 || containerRect.height === 0) return;
-
     const next: Connector[] = [];
-
     for (const round of ROUNDS) {
       const isFinal = round.id === finalRound.id;
-
       for (const match of round.matches) {
         (["aFrom", "bFrom"] as const).forEach((key, slotIdx) => {
           const feederLabel = match[key];
           if (!feederLabel) return;
-
           const sourceEl = cardEls.current[feederLabel];
           const targetEl = cardEls.current[match.id];
           if (!sourceEl || !targetEl) return;
-
           const sRect = sourceEl.getBoundingClientRect();
           const tRect = targetEl.getBoundingClientRect();
           if (sRect.width === 0 || tRect.width === 0) return;
-
           const sCenterX = sRect.left + sRect.width / 2;
           const tCenterX = tRect.left + tRect.width / 2;
           const flowsRight = sCenterX < tCenterX;
-
           const startX = (flowsRight ? sRect.right : sRect.left) - containerRect.left;
           const startY = sRect.top + sRect.height / 2 - containerRect.top;
-
           const teamCode = slotIdx === 0 ? match.teamA?.code : match.teamB?.code;
-
           if (isFinal) {
             const targetRowEl = cardEls.current[`${match.id}:${slotIdx === 0 ? "A" : "B"}`] || targetEl;
             const trRect = targetRowEl.getBoundingClientRect();
@@ -680,10 +556,8 @@ export default function TournamentBracketPage() {
             });
             return;
           }
-
           const endX = tCenterX - containerRect.left;
           const endY = (slotIdx === 0 ? tRect.top : tRect.bottom) - containerRect.top;
-
           next.push({
             id: `${match.id}-${slotIdx === 0 ? "A" : "B"}`,
             d: topEntryPath(startX, startY, endX, endY),
@@ -692,41 +566,33 @@ export default function TournamentBracketPage() {
         });
       }
     }
-
     setConnectors(next);
   }
-
   useLayoutEffect(() => {
     recomputeLayout();
     const raf = requestAnimationFrame(recomputeLayout);
-
     const ro = new ResizeObserver(() => recomputeLayout());
     if (desktopContainerRef.current) ro.observe(desktopContainerRef.current);
     window.addEventListener("resize", recomputeLayout);
-
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
       window.removeEventListener("resize", recomputeLayout);
     };
   }, []);
-
   useLayoutEffect(() => {
     recomputeConnectors();
   }, [matchCenterY, columnHeight]);
-
   function goToRound(idx: number) {
     const clamped = Math.max(0, Math.min(ROUNDS.length - 1, idx));
     setMobileRound(clamped);
     const el = mobileScrollRef.current;
     if (el) el.scrollTo({ left: clamped * el.clientWidth, behavior: "smooth" });
   }
-
   function goToLabel(label: string | null) {
     const idx = roundIndexForLabel(label);
     if (idx >= 0) goToRound(idx);
   }
-
   useEffect(() => {
     const el = mobileScrollRef.current;
     if (!el) return;
@@ -737,13 +603,11 @@ export default function TournamentBracketPage() {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
-
   useEffect(() => {
     const roundId = ROUNDS[mobileRound]?.id;
     const el = roundId !== undefined ? mobileVerticalRefs.current[roundId] : null;
     if (el) el.scrollTop = 0;
   }, [mobileRound]);
-
   return (
     <div className="min-h-screen w-full bg-background text-on-surface p-2 md:p-2">
       <style>{`
@@ -760,10 +624,8 @@ export default function TournamentBracketPage() {
           background-clip: padding-box;
         }
         html::-webkit-scrollbar-thumb:hover { background: var(--color-theme-orange); }
-
         .bracket-scrollbar-hidden::-webkit-scrollbar { display: none; }
         .bracket-scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
-
         .bracket-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .bracket-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .bracket-scrollbar::-webkit-scrollbar-thumb {
@@ -785,7 +647,6 @@ export default function TournamentBracketPage() {
           </span>
           <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">Championship Bracket</h1>
         </div>
-
         <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
           <div className="flex items-center gap-2">
             <span className="tally bg-[radial-gradient(circle_at_35%_30%,#ff9d94,var(--color-status-live)_65%)] shadow-[0_0_6px_1px_rgba(255,180,171,0.55)] animate-[connPulse_1.4s_ease-in-out_infinite]" />
@@ -795,7 +656,6 @@ export default function TournamentBracketPage() {
           <p className="font-body-md text-[11px] text-outline hidden md:block">Hover a team to trace their path.</p>
         </div>
       </div>
-
       {/* ══════════════════ DESKTOP / TABLET ══════════════════ */}
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="w-full overflow-x-hidden">
@@ -804,6 +664,7 @@ export default function TournamentBracketPage() {
               {nonFinalRounds.map((round, i) => {
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'left');
+                const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
                 
                 return (
                   <BracketColumn
@@ -819,10 +680,10 @@ export default function TournamentBracketPage() {
                     isLeaf={i === 0}
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                     growWeight={growWeight}
+                    bleedLeft={bleedLeft}
                   />
                 );
               })}
-
               <BracketColumn
                 roundName={finalRound.name}
                 matches={finalRound.matches}
@@ -831,13 +692,13 @@ export default function TournamentBracketPage() {
                 getRef={getRef}
                 hoveredTeamCode={hoveredTeamCode}
                 setHoveredTeamCode={setHoveredTeamCode}
-                growWeight={GROW_WEIGHT.semi}
+                growWeight={getRoundGrowWeight(nonFinalRounds.length, 'final')}
               />
-
               {[...nonFinalRounds].reverse().map((round, revIdx) => {
                 const i = nonFinalRounds.length - 1 - revIdx;
                 const isCompact = shouldBeCompact(i);
                 const growWeight = getRoundGrowWeight(i, 'right');
+                const bleedRight = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
                 
                 return (
                   <BracketColumn
@@ -852,11 +713,11 @@ export default function TournamentBracketPage() {
                     compact={isCompact}
                     isLeaf={i === 0}
                     growWeight={growWeight}
+                    bleedRight={bleedRight}
                   />
                 );
               })}
-
-              <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+              <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
                 {connectors.map((c) => {
                   const active = c.teamCode && c.teamCode === hoveredTeamCode;
                   return (
@@ -874,22 +735,30 @@ export default function TournamentBracketPage() {
             </div>
           ) : (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
-              {ROUNDS.map((round, i) => (
-                <BracketColumn
-                  key={round.id}
-                  roundName={round.name}
-                  matches={round.matches}
-                  centerYByMatchId={matchCenterY}
-                  columnHeight={columnHeight}
-                  getRef={getRef}
-                  hoveredTeamCode={hoveredTeamCode}
-                  setHoveredTeamCode={setHoveredTeamCode}
-                  isLeaf={i === 0}
-                  leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
-                />
-              ))}
-
-              <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+              {ROUNDS.map((round, i) => {
+                const isCompact = shouldBeCompact(i);
+                const growWeight = getRoundGrowWeight(i, 'left');
+                const bleedLeft = i === 2 ? '-85%' : i === 3 ? '-65%' : undefined;
+                
+                return (
+                  <BracketColumn
+                    key={round.id}
+                    roundName={round.name}
+                    matches={round.matches}
+                    centerYByMatchId={matchCenterY}
+                    columnHeight={columnHeight}
+                    getRef={getRef}
+                    hoveredTeamCode={hoveredTeamCode}
+                    setHoveredTeamCode={setHoveredTeamCode}
+                    isLeaf={i === 0}
+                    leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
+                    growWeight={growWeight}
+                    compact={isCompact}
+                    bleedLeft={bleedLeft}
+                  />
+                );
+              })}
+              <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
                 {connectors.map((c) => {
                   const active = c.teamCode && c.teamCode === hoveredTeamCode;
                   return (
@@ -908,7 +777,6 @@ export default function TournamentBracketPage() {
           )}
         </div>
       </div>
-
       {/* ══════════════════ MOBILE ══════════════════ */}
       <div className="md:hidden max-w-xl mx-auto flex flex-col gap-4">
         <div className="flex items-center gap-2">
@@ -921,7 +789,6 @@ export default function TournamentBracketPage() {
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-
           <div className="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto bracket-scrollbar-hidden">
             {ROUNDS.map((round, i) => (
               <button
@@ -938,7 +805,6 @@ export default function TournamentBracketPage() {
               </button>
             ))}
           </div>
-
           <button
             type="button"
             onClick={() => goToRound(mobileRound + 1)}
@@ -949,7 +815,6 @@ export default function TournamentBracketPage() {
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
-
         <div
           ref={mobileScrollRef}
           className="flex overflow-x-auto snap-x snap-mandatory bracket-scrollbar-hidden"
@@ -960,7 +825,6 @@ export default function TournamentBracketPage() {
               <h2 className="font-label-mono text-[11px] font-black uppercase tracking-widest text-on-surface-variant text-center mb-3">
                 {round.name}
               </h2>
-
                 <div
                 ref={(el) => { mobileVerticalRefs.current[round.id] = el; }}
                 className="h-[65vh] overflow-y-auto bracket-scrollbar"
