@@ -16,8 +16,24 @@ export interface DoubleElimData {
 /**
  * Builds a full double-elimination bracket for any team count (padded to
  * the next power of 2, top seeds get byes in the winners bracket exactly
- * like single elimination — byes never drop a "loser" into the losers
- * bracket).
+ * like single elimination).
+ *
+ * BYES AND THE LOSERS BRACKET
+ * ----------------------------
+ * A bye produces no loser, so it can't feed a losers-bracket slot the way
+ * a normal match does. Every losers-bracket "slot" that might end up with
+ * zero or one real incoming team (because one or both of its WB feeders
+ * were byes) is built using the same BYE_TEAM placeholder + immediate
+ * resolution pattern already used for WB1 byes:
+ *   - one real feeder + one permanently-empty (bye) feeder -> the slot
+ *     stays open until the real feeder's match is played, then auto-
+ *     resolves as a bye win for whoever that is (see resolveByeIfNeeded).
+ *   - two permanently-empty (bye) feeders -> the slot resolves to a BYE
+ *     "winner" immediately, at generation time, which then flows forward
+ *     and gets transparently swapped out for whichever real team drops
+ *     in during the next round.
+ * advanceDoubleElim recurses whenever a slot auto-resolves this way, so
+ * bye chains of any depth cascade correctly instead of stalling out.
  *
  * Internally every match's aFrom/bFrom is prefixed "W:" (winner of that
  * match feeds this slot) or "L:" (loser of that match feeds this slot) —
@@ -85,7 +101,30 @@ export function generateDoubleElimination(teamsBySeed: AdminTeam[]): DoubleElimD
     for (let i = 0; i < Math.floor(wb1.length / 2); i++) {
       const fa = wb1[i * 2], fb = wb1[i * 2 + 1];
       const id = `LB-${lbCounter}-${i + 1}`;
-      matches.push({ id, label: id, status: "scheduled", teamA: null, teamB: null, aFrom: `L:${fa.id}`, bFrom: `L:${fb.id}` });
+
+      // A bye WB1 match (fa/fb) produced no loser — that side of this
+      // LB1 slot will never be filled by advanceDoubleElim, so treat it
+      // as a permanent BYE placeholder instead of a live "L:" reference.
+      const aIsByeMatch = fa.teamB?.code === "BYE";
+      const bIsByeMatch = fb.teamB?.code === "BYE";
+
+      const match: MatchNode = {
+        id, label: id, status: "scheduled",
+        teamA: aIsByeMatch ? { ...BYE_TEAM } : null,
+        teamB: bIsByeMatch ? { ...BYE_TEAM } : null,
+        aFrom: aIsByeMatch ? null : `L:${fa.id}`,
+        bFrom: bIsByeMatch ? null : `L:${fb.id}`,
+      };
+
+      // Both feeders were byes -> no real contender at all for this slot.
+      // Resolve it now so a (placeholder) "winner" can still flow forward
+      // and later be swapped out for whichever real team drops in.
+      if (aIsByeMatch && bIsByeMatch) {
+        match.status = "completed";
+        match.teamA = { ...BYE_TEAM, isWinner: true };
+      }
+
+      matches.push(match);
     }
     if (matches.length) {
       losers.push({ id: 100 + lbCounter, name: "Losers — Round 1", shortName: "LB1", matches });
@@ -142,8 +181,11 @@ export function generateDoubleElimination(teamsBySeed: AdminTeam[]): DoubleElimD
 
   const data: DoubleElimData = { winners, losers, grandFinal, bracketReset: null };
 
-  // propagate any Round-1 byes forward through the whole structure
-  for (const m of wb1) if (m.status === "completed") advanceDoubleElim(data, m);
+  // Propagate any bye already resolved at generation time — WB1 byes,
+  // and any double-bye LB1 slots — through the whole structure.
+  for (const m of allMatches(data)) {
+    if (m.status === "completed") advanceDoubleElim(data, m);
+  }
 
   return data;
 }
@@ -166,17 +208,50 @@ function allMatches(data: DoubleElimData): MatchNode[] {
   ];
 }
 
+/** If a match has one permanent BYE placeholder side and a real (non-BYE)
+ *  team now sitting in the other side, it's effectively already decided —
+ *  complete it as a bye win, same as a WB1 bye. Returns true if it just
+ *  resolved a match (so the caller knows to cascade the result onward). */
+function resolveByeIfNeeded(match: MatchNode): boolean {
+  if (match.status === "completed") return false;
+  const aIsBye = match.teamA?.code === "BYE";
+  const bIsBye = match.teamB?.code === "BYE";
+  if (aIsBye && match.teamB && match.teamB.code !== "BYE") {
+    match.status = "completed";
+    match.teamB = { ...match.teamB, isWinner: true };
+    return true;
+  }
+  if (bIsBye && match.teamA && match.teamA.code !== "BYE") {
+    match.status = "completed";
+    match.teamA = { ...match.teamA, isWinner: true };
+    return true;
+  }
+  return false;
+}
+
 /** Scans every match for an aFrom/bFrom that references `sourceMatch` (as
- *  a winner-feed "W:id" or loser-feed "L:id") and fills that slot in. */
+ *  a winner-feed "W:id" or loser-feed "L:id") and fills that slot in.
+ *  If filling a slot completes a bye (see resolveByeIfNeeded), recurses
+ *  so the auto-resolved result keeps propagating forward too. */
 export function advanceDoubleElim(data: DoubleElimData, sourceMatch: MatchNode) {
   for (const target of allMatches(data)) {
+    let touched = false;
     if (target.aFrom === `W:${sourceMatch.id}` || target.aFrom === `L:${sourceMatch.id}`) {
       const team = teamFromResult(sourceMatch, target.aFrom.startsWith("L:"));
-      if (team) target.teamA = { ...team, score: undefined, isWinner: undefined };
+      if (team) {
+        target.teamA = { ...team, score: undefined, isWinner: undefined };
+        touched = true;
+      }
     }
     if (target.bFrom === `W:${sourceMatch.id}` || target.bFrom === `L:${sourceMatch.id}`) {
       const team = teamFromResult(sourceMatch, target.bFrom.startsWith("L:"));
-      if (team) target.teamB = { ...team, score: undefined, isWinner: undefined };
+      if (team) {
+        target.teamB = { ...team, score: undefined, isWinner: undefined };
+        touched = true;
+      }
+    }
+    if (touched && resolveByeIfNeeded(target)) {
+      advanceDoubleElim(data, target);
     }
   }
 }
