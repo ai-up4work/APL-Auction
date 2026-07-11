@@ -1,7 +1,8 @@
-// File: components/admin/MatchResultCard.tsx
+// File: components/tournament/MatchResultCard.tsx
 "use client";
 import { useState } from "react";
-import type { MatchNode } from "@/components/tournament/TournamentBracket";
+import { CheckCircle2, Radio } from "lucide-react";
+import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 
 export default function MatchResultCard({
   match,
@@ -17,9 +18,9 @@ export default function MatchResultCard({
 
   if (!playable) {
     return (
-      <div className="rounded-lg border border-dashed border-border-overlay bg-background/40 px-3 py-2.5 text-[11px] font-label-mono text-outline">
-        <p className="font-bold uppercase tracking-wide">{match.label}</p>
-        <p className="mt-0.5">
+      <div className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5">
+        <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+        <p className="mt-1 text-[11px] font-label-mono text-outline">
           {match.teamB?.code === "BYE" ? `${match.teamA?.name} — Bye` : "Waiting for teams"}
         </p>
       </div>
@@ -27,47 +28,91 @@ export default function MatchResultCard({
   }
 
   function submit() {
-    const a = Number(scoreA), b = Number(scoreB);
+    const a = Number(scoreA);
+    const b = Number(scoreB);
     if (Number.isNaN(a) || Number.isNaN(b) || a === b) return;
     onRecordResult(match.id, a > b ? "A" : "B", a, b);
   }
 
   return (
-    <div className={`rounded-lg border px-3 py-2.5 ${locked ? "border-theme-orange/30 bg-theme-orange/5" : "border-border-overlay bg-surface-container"}`}>
-      <p className="text-[10px] font-label-mono font-bold uppercase tracking-wide text-outline mb-1.5">{match.label}</p>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className={`text-xs font-label-mono truncate ${match.teamA?.isWinner ? "text-theme-orange font-bold" : "text-on-surface"}`}>
-          {match.teamA?.name}
-        </span>
-        <input
-          type="number"
-          value={scoreA}
-          disabled={locked}
-          onChange={(e) => setScoreA(e.target.value)}
-          className="w-12 text-center text-xs rounded border border-border-overlay bg-background py-0.5 disabled:opacity-60"
-        />
-      </div>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className={`text-xs font-label-mono truncate ${match.teamB?.isWinner ? "text-theme-orange font-bold" : "text-on-surface"}`}>
-          {match.teamB?.name}
-        </span>
-        <input
-          type="number"
-          value={scoreB}
-          disabled={locked}
-          onChange={(e) => setScoreB(e.target.value)}
-          className="w-12 text-center text-xs rounded border border-border-overlay bg-background py-0.5 disabled:opacity-60"
-        />
-      </div>
-      {!locked && (
-        <button
-          type="button"
-          onClick={submit}
-          className="w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded bg-theme-orange text-on-primary py-1 hover:opacity-90 transition-opacity"
-        >
-          Save result
-        </button>
+    <div
+      className={`w-full rounded-xl relative overflow-hidden bg-surface-container-low border transition-colors duration-200 ${
+        match.status === "live"
+          ? "border-status-live/40 shadow-[0_0_24px_rgba(255,180,171,0.12)]"
+          : "border-border-overlay shadow-2xl"
+      }`}
+    >
+      {match.status === "live" && (
+        <div className="absolute inset-0 bg-gradient-to-r from-status-live/5 to-theme-orange/5 pointer-events-none animate-pulse" />
       )}
+
+      <div className="relative flex flex-col gap-1.5 p-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+          {match.status === "live" && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-status-live/10 text-status-live border border-status-live/30 text-[9px] font-black tracking-widest font-label-mono">
+              <Radio className="w-2.5 h-2.5 animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
+
+        <TeamResultRow team={match.teamA} score={scoreA} onScoreChange={setScoreA} locked={locked} />
+        <TeamResultRow team={match.teamB} score={scoreB} onScoreChange={setScoreB} locked={locked} />
+
+        {!locked && (
+          <button
+            type="button"
+            onClick={submit}
+            className="mt-0.5 w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all"
+          >
+            Save result
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TeamResultRow({
+  team,
+  score,
+  onScoreChange,
+  locked,
+}: {
+  team: TeamNode | null;
+  score: string;
+  onScoreChange: (v: string) => void;
+  locked: boolean;
+}) {
+  if (!team) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 p-1 lg:p-1.5 rounded-lg relative bg-surface-container border border-border-overlay">
+      <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />
+      <div className="flex items-center gap-2 pl-1.5 min-w-0">
+        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px]">
+          {team.logo ? (
+            <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
+          ) : (
+            <span style={{ color: team.color }}>{team.code}</span>
+          )}
+        </span>
+        <span
+          className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate ${
+            team.isWinner ? "text-theme-orange" : "text-on-surface"
+          }`}
+        >
+          {team.name}
+        </span>
+        {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange shrink-0" strokeWidth={3} />}
+      </div>
+      <input
+        type="number"
+        value={score}
+        disabled={locked}
+        onChange={(e) => onScoreChange(e.target.value)}
+        className="w-10 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-0.5 disabled:opacity-60"
+      />
     </div>
   );
 }
