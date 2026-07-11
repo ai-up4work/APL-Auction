@@ -115,6 +115,8 @@ function TeamRow({
   hoveredTeamCode,
   setHoveredTeamCode,
   onFromClick,
+  onTeamClick,
+  isPinned,
   rowRef,
   compact,
 }: {
@@ -124,6 +126,12 @@ function TeamRow({
   hoveredTeamCode: string | null;
   setHoveredTeamCode: (c: string | null) => void;
   onFromClick?: () => void;
+  /** Click a team to pin the highlight on it, so it stays lit while you
+   *  move the mouse away or scroll — same mechanism as the double-elim
+   *  board's MatchResultCard. */
+  onTeamClick?: (code: string) => void;
+  /** Whether this row's team is the currently pinned team. */
+  isPinned?: boolean;
   rowRef?: RefSetter;
   compact?: boolean;
 }) {
@@ -135,6 +143,7 @@ function TeamRow({
       ref={rowRef}
       onMouseEnter={() => team && setHoveredTeamCode(team.code)}
       onMouseLeave={() => setHoveredTeamCode(null)}
+      onClick={() => team && onTeamClick?.(team.code)}
       className={`flex items-center justify-between p-1 lg:p-1.5 rounded-lg relative transition-all duration-200 border ${
         isTBD ? "bg-background/40 border-dashed border-border-overlay text-outline" : "bg-surface-container border-border-overlay"
       } ${
@@ -142,8 +151,10 @@ function TeamRow({
           ? "scale-[1.02] border-theme-orange/40 bg-surface-container-high shadow-[0_0_20px_rgba(201,151,31,0.15)]"
           : isAnyHovered && !isHovered
           ? "opacity-30 blur-[0.5px]"
+          : isPinned
+          ? "border-theme-orange/50 bg-surface-container-high"
           : ""
-      }`}
+      } ${!isTBD && onTeamClick ? "cursor-pointer" : ""}`}
     >
       {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
       <div className="flex items-center gap-2 lg:gap-3 pl-1.5 lg:pl-2 min-w-0">
@@ -169,7 +180,10 @@ function TeamRow({
           {!compact && (isTBD || fromLabel) && (
             <button
               type="button"
-              onClick={onFromClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                onFromClick?.();
+              }}
               disabled={!onFromClick}
               className="text-[9px] font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1 disabled:cursor-default hover:text-theme-orange transition-colors"
             >
@@ -185,10 +199,19 @@ function TeamRow({
           )}
         </div>
       </div>
-      {!isTBD && status !== "scheduled" && (
-        <div className="flex items-center gap-2 font-label-mono font-black text-sm pr-1 shrink-0">
-          {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
-          <span className={team.isWinner ? "text-theme-orange" : "text-outline"}>{team.score}</span>
+      {!isTBD && (
+        <div className="flex items-center gap-1.5 pr-1 shrink-0">
+          {isPinned && (
+            <span className="hidden lg:inline-block text-[8px] font-label-mono font-black uppercase tracking-widest text-theme-orange border border-theme-orange/40 rounded px-1 py-0.5">
+              Pinned
+            </span>
+          )}
+          {status !== "scheduled" && (
+            <div className="flex items-center gap-2 font-label-mono font-black text-sm">
+              {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
+              <span className={team.isWinner ? "text-theme-orange" : "text-outline"}>{team.score}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -200,6 +223,8 @@ function MatchCard({
   hoveredTeamCode,
   setHoveredTeamCode,
   onFromClick,
+  onTeamClick,
+  pinnedTeamCode,
   getRef,
   compact,
 }: {
@@ -207,6 +232,8 @@ function MatchCard({
   hoveredTeamCode: string | null;
   setHoveredTeamCode: (c: string | null) => void;
   onFromClick?: (label: string | null) => void;
+  onTeamClick?: (code: string) => void;
+  pinnedTeamCode?: string | null;
   getRef?: (key: string) => RefSetter;
   compact?: boolean;
 }) {
@@ -229,6 +256,8 @@ function MatchCard({
           hoveredTeamCode={hoveredTeamCode}
           setHoveredTeamCode={setHoveredTeamCode}
           onFromClick={onFromClick ? () => onFromClick(match.aFrom) : undefined}
+          onTeamClick={onTeamClick}
+          isPinned={!!match.teamA && pinnedTeamCode === match.teamA.code}
           rowRef={getRef ? getRef(`${match.id}:A`) : undefined}
           compact={compact}
         />
@@ -239,6 +268,8 @@ function MatchCard({
           hoveredTeamCode={hoveredTeamCode}
           setHoveredTeamCode={setHoveredTeamCode}
           onFromClick={onFromClick ? () => onFromClick(match.bFrom) : undefined}
+          onTeamClick={onTeamClick}
+          isPinned={!!match.teamB && pinnedTeamCode === match.teamB.code}
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
         />
@@ -278,6 +309,8 @@ function BracketColumn({
   hoveredTeamCode,
   setHoveredTeamCode,
   onFromClick,
+  onTeamClick,
+  pinnedTeamCode,
   compact,
   isLeaf,
   leafColumnRef,
@@ -294,6 +327,8 @@ function BracketColumn({
   hoveredTeamCode: string | null;
   setHoveredTeamCode: (c: string | null) => void;
   onFromClick?: (label: string | null) => void;
+  onTeamClick?: (code: string) => void;
+  pinnedTeamCode?: string | null;
   compact?: boolean;
   isLeaf?: boolean;
   leafColumnRef?: RefSetter;
@@ -323,6 +358,8 @@ function BracketColumn({
                 hoveredTeamCode={hoveredTeamCode}
                 setHoveredTeamCode={setHoveredTeamCode}
                 onFromClick={onFromClick}
+                onTeamClick={onTeamClick}
+                pinnedTeamCode={pinnedTeamCode}
                 getRef={getRef}
                 compact={compact}
               />
@@ -351,6 +388,8 @@ function BracketColumn({
                     hoveredTeamCode={hoveredTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
                     onFromClick={onFromClick}
+                    onTeamClick={onTeamClick}
+                    pinnedTeamCode={pinnedTeamCode}
                     getRef={(key) => (key === match.id ? () => {} : getRef(key))}
                     compact={compact}
                   />
@@ -582,7 +621,7 @@ export default function TournamentBracket({
     if (idx >= 0) goToRound(idx);
   }
 
-  function handleTeamClick(teamCode: string | null) {
+  function handleTeamClick(teamCode: string) {
     setSelectedTeamCode((prev) => (prev === teamCode ? null : teamCode));
   }
 
@@ -662,7 +701,17 @@ export default function TournamentBracket({
             <span className="font-label-mono text-[10px] uppercase tracking-widest text-on-surface-variant">{liveLabel}</span>
           </div>
           <div className="w-px h-4 bg-border-overlay hidden md:block" />
-          <p className="font-body-md text-[11px] text-outline hidden md:block">{helperText}</p>
+          {selectedTeamCode ? (
+            <button
+              type="button"
+              onClick={() => setSelectedTeamCode(null)}
+              className="font-label-mono text-[11px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80 hidden md:block"
+            >
+              Tracing {selectedTeamCode} · click to release
+            </button>
+          ) : (
+            <p className="font-body-md text-[11px] text-outline hidden md:block">{helperText}</p>
+          )}
         </div>
       </div>
 
@@ -701,6 +750,8 @@ export default function TournamentBracket({
                     getRef={getRef}
                     hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
+                    onTeamClick={handleTeamClick}
+                    pinnedTeamCode={selectedTeamCode}
                     compact={isCompact}
                     isLeaf={i === 0}
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
@@ -717,6 +768,8 @@ export default function TournamentBracket({
                 getRef={getRef}
                 hoveredTeamCode={activeTeamCode}
                 setHoveredTeamCode={setHoveredTeamCode}
+                onTeamClick={handleTeamClick}
+                pinnedTeamCode={selectedTeamCode}
                 growWeight={getRoundGrowWeight(nonFinalRounds.length, "final")}
               />
               {[...nonFinalRounds].reverse().map((round, revIdx) => {
@@ -735,6 +788,8 @@ export default function TournamentBracket({
                     getRef={getRef}
                     hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
+                    onTeamClick={handleTeamClick}
+                    pinnedTeamCode={selectedTeamCode}
                     compact={isCompact}
                     isLeaf={i === 0}
                     growWeight={growWeight}
@@ -796,6 +851,8 @@ export default function TournamentBracket({
                     getRef={getRef}
                     hoveredTeamCode={activeTeamCode}
                     setHoveredTeamCode={setHoveredTeamCode}
+                    onTeamClick={handleTeamClick}
+                    pinnedTeamCode={selectedTeamCode}
                     isLeaf={i === 0}
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                     growWeight={growWeight}
@@ -866,6 +923,15 @@ export default function TournamentBracket({
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+        {selectedTeamCode && (
+          <button
+            type="button"
+            onClick={() => setSelectedTeamCode(null)}
+            className="self-center font-label-mono text-[10px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80"
+          >
+            Tracing {selectedTeamCode} · tap to release
+          </button>
+        )}
         <div
           ref={mobileScrollRef}
           className="flex overflow-x-auto snap-x snap-mandatory bracket-scrollbar-hidden"
@@ -900,6 +966,8 @@ export default function TournamentBracket({
                         hoveredTeamCode={activeTeamCode}
                         setHoveredTeamCode={setHoveredTeamCode}
                         onFromClick={goToLabel}
+                        onTeamClick={handleTeamClick}
+                        pinnedTeamCode={selectedTeamCode}
                       />
                     </div>
                   ))}
