@@ -600,11 +600,12 @@ function RestartMatchDialog({ onConfirm, onCancel }: { onConfirm: () => void; on
 
 // ─────────────────────────────────────────────────────────────────────────
 // MATCH OVER — full takeover screen once liveState.matchComplete is true.
-// Shows the winning team's logo both as a small ringed badge AND as a
-// large, softly breathing watermark behind the content (mirroring the
-// broadcast overlay's own watermark treatment), and hides the scoring
-// controls (crew slots, ball pad, carousel) until the admin restarts.
-// Undo stays available in case "End Match" was tapped by mistake.
+// Anchored around a trophy/logo badge with a staggered fade-in, a soft
+// diagonal shine sweep, and a large breathing watermark of the winning
+// team's logo behind the content (mirroring the broadcast overlay's own
+// watermark treatment). Hides the scoring controls (crew slots, ball pad,
+// carousel) until the admin restarts. Undo stays available in case
+// "End Match" was tapped by mistake.
 // ─────────────────────────────────────────────────────────────────────────
 function MatchOverScreen({
   winningTeamName,
@@ -628,16 +629,7 @@ function MatchOverScreen({
   return (
     <div className="match-over-screen">
       <div className="match-over-glow" aria-hidden />
-
-      {winningTeamLogo && (
-        <img
-          src={winningTeamLogo}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-          className="match-over-watermark"
-        />
-      )}
+      <div className="match-over-shine" aria-hidden />
 
       <span className="match-over-eyebrow">
         <span className="match-over-eyebrow-icon">
@@ -646,12 +638,21 @@ function MatchOverScreen({
         Match Complete
       </span>
 
+      <div className="match-over-badge">
+        {winningTeamLogo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={winningTeamLogo} alt="" className="match-over-logo-img" />
+        ) : (
+          <span className="match-over-logo-fallback">
+            {isTie ? "🤝" : <Trophy size={36} strokeWidth={1.8} />}
+          </span>
+        )}
+      </div>
 
       <h2 className="match-over-title">
         {isTie ? "It's a Tie" : winningTeamName ? `${winningTeamName} Win` : "Match Complete"}
       </h2>
       {!isTie && margin && <p className="match-over-margin">{margin}</p>}
-
 
       <div className="match-over-actions">
         {canUndo && (
@@ -868,13 +869,32 @@ export default function LiveStatePanel({
         @keyframes scorerDialogIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
         @keyframes scorerBackdropIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes freeHitPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(96,165,250,0.45); } 50% { box-shadow: 0 0 0 5px rgba(96,165,250,0); } }
-        @keyframes matchOverGlowPulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.85; transform: scale(1.06); } }
-        @keyframes matchOverIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes matchOverWatermarkFloat {
-          0%, 100% { transform: translate(-50%, -50%) scale(0.94); opacity: 0.1; }
-          50% { transform: translate(-50%, -50%) scale(1); opacity: 0.16; }
-        }
         @keyframes inningsStatusGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,151,31,0.25); } 50% { box-shadow: 0 0 0 6px rgba(201,151,31,0); } }
+
+        /* ── Match Over screen animations ── */
+        @keyframes matchOverGlowPulse { 0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); } 50% { opacity: 0.85; transform: translateX(-50%) scale(1.06); } }
+        @keyframes matchOverIn { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes matchOverWatermarkFloat {
+          0%, 100% { transform: translate(-50%, -50%) scale(0.94); opacity: 0.08; }
+          50% { transform: translate(-50%, -50%) scale(1); opacity: 0.14; }
+        }
+        @keyframes matchOverShine {
+          0% { transform: translateX(-120%) rotate(8deg); }
+          100% { transform: translateX(220%) rotate(8deg); }
+        }
+        @keyframes matchOverBadgeIn {
+          0% { opacity: 0; transform: scale(0.6) rotate(-8deg); }
+          60% { transform: scale(1.08) rotate(2deg); }
+          100% { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+        @keyframes matchOverFadeUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes matchOverBadgeRing {
+          0%, 100% { box-shadow: 0 0 0 8px rgba(201,151,31,0.08), 0 12px 32px rgba(0,0,0,0.35); }
+          50% { box-shadow: 0 0 0 12px rgba(201,151,31,0.14), 0 12px 32px rgba(0,0,0,0.35); }
+        }
 
         .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; }
         .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
@@ -1103,47 +1123,62 @@ export default function LiveStatePanel({
           color: var(--color-error);
           margin-bottom: 12px;
         }
+
+        /* ── Match Over screen ── */
         .match-over-screen {
           position: relative;
           overflow: hidden;
           display: flex;
+          width: 100%;
+          box-sizing: border-box;
           flex-direction: column;
           align-items: center;
           text-align: center;
-          gap: 6px;
-          padding: 40px 48px 32px;
-          border-radius: 20px;
-          background: linear-gradient(180deg, rgba(201,151,31,0.10) 0%, rgba(201,151,31,0.03) 100%);
-          border: 1px solid rgba(201,151,31,0.28);
-          animation: matchOverIn 220ms cubic-bezier(0.2,0.8,0.3,1);
+          gap: 4px;
+          padding: 56px 48px 44px;
+          border-radius: 22px;
+          background:
+            radial-gradient(120% 100% at 50% 0%, rgba(201,151,31,0.14) 0%, rgba(201,151,31,0.03) 45%, transparent 70%),
+            linear-gradient(180deg, var(--color-surface-container-low) 0%, var(--color-surface-container-low) 100%);
+          border: 1px solid rgba(201,151,31,0.24);
+          animation: matchOverIn 260ms cubic-bezier(0.2,0.8,0.3,1);
         }
         .match-over-glow {
           position: absolute;
-          top: -60px;
+          top: -80px;
           left: 50%;
-          width: 260px;
-          height: 260px;
+          width: 320px;
+          height: 320px;
           transform: translateX(-50%);
           border-radius: 999px;
-          background: radial-gradient(circle, rgba(201,151,31,0.35) 0%, rgba(201,151,31,0) 70%);
-          animation: matchOverGlowPulse 3s ease-in-out infinite;
+          background: radial-gradient(circle, rgba(201,151,31,0.32) 0%, rgba(201,151,31,0) 70%);
+          animation: matchOverGlowPulse 3.4s ease-in-out infinite;
+          pointer-events: none;
+          z-index: 0;
+        }
+        .match-over-shine {
+          position: absolute;
+          inset: -20% -40%;
+          background: linear-gradient(100deg, transparent 42%, rgba(255,255,255,0.05) 48%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 52%, transparent 58%);
+          animation: matchOverShine 3.2s ease-in-out infinite;
+          animation-delay: 0.4s;
           pointer-events: none;
           z-index: 0;
         }
         .match-over-watermark {
           position: absolute;
-          top: 46%;
+          top: 50%;
           left: 50%;
-          width: 340px;
-          height: 340px;
-          max-width: 70%;
+          width: 380px;
+          height: 380px;
+          max-width: 75%;
           object-fit: contain;
           transform: translate(-50%, -50%) scale(0.94);
-          opacity: 0.12;
-          filter: grayscale(0.1) brightness(1.3);
+          opacity: 0.1;
+          filter: grayscale(0.15) brightness(1.3);
           pointer-events: none;
           user-select: none;
-          animation: matchOverWatermarkFloat 5s ease-in-out infinite;
+          animation: matchOverWatermarkFloat 5.5s ease-in-out infinite;
           z-index: 0;
         }
         .match-over-eyebrow {
@@ -1151,21 +1186,31 @@ export default function LiveStatePanel({
           z-index: 1;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 7px;
           font-family: var(--font-label-mono);
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 0.16em;
+          letter-spacing: 0.2em;
           color: var(--color-theme-orange);
-          margin-bottom: 8px;
+          margin-bottom: 22px;
+          opacity: 0;
+          animation: matchOverFadeUp 420ms ease-out 80ms forwards;
         }
+        .match-over-eyebrow::before,
+        .match-over-eyebrow::after {
+          content: "";
+          width: 20px;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(201,151,31,0.5));
+        }
+        .match-over-eyebrow::after { transform: scaleX(-1); }
         .match-over-eyebrow-icon { display: flex; align-items: center; opacity: 0.9; }
         .match-over-badge {
           position: relative;
           z-index: 1;
-          width: 96px;
-          height: 96px;
+          width: 104px;
+          height: 104px;
           border-radius: 999px;
           display: flex;
           align-items: center;
@@ -1174,60 +1219,61 @@ export default function LiveStatePanel({
           border: 3px solid rgba(201,151,31,0.5);
           box-shadow: 0 0 0 8px rgba(201,151,31,0.08), 0 12px 32px rgba(0,0,0,0.35);
           overflow: hidden;
-          margin-bottom: 16px;
+          margin-bottom: 20px;
+          opacity: 0;
+          animation:
+            matchOverBadgeIn 480ms cubic-bezier(0.2,0.8,0.3,1) 160ms forwards,
+            matchOverBadgeRing 2.6s ease-in-out 700ms infinite;
         }
         .match-over-logo-img { width: 100%; height: 100%; object-fit: cover; }
         .match-over-logo-fallback {
-          font-family: var(--font-label-mono);
-          font-size: 28px;
-          font-weight: 900;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 30px;
           color: var(--color-theme-orange);
         }
         .match-over-title {
           position: relative;
           z-index: 1;
           font-family: var(--font-label-mono);
-          font-size: 24px;
+          font-size: 26px;
           font-weight: 900;
           text-transform: uppercase;
-          letter-spacing: 0.02em;
+          letter-spacing: 0.015em;
           color: var(--color-on-surface);
           margin: 0;
+          opacity: 0;
+          animation: matchOverFadeUp 420ms ease-out 260ms forwards;
         }
         .match-over-margin {
           position: relative;
           z-index: 1;
           font-family: var(--font-label-mono);
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.06em;
+          letter-spacing: 0.08em;
           color: var(--color-theme-orange);
-          margin: 6px 0 0;
-          padding: 4px 12px;
+          margin: 14px 0 0;
+          padding: 6px 16px;
           border-radius: 999px;
-          background: rgba(201,151,31,0.12);
-          border: 1px solid rgba(201,151,31,0.3);
+          background: rgba(201,151,31,0.1);
+          border: 1px solid rgba(201,151,31,0.32);
           display: inline-block;
-        }
-        .match-over-hint {
-          position: relative;
-          z-index: 1;
-          font-family: var(--font-label-mono);
-          font-size: 10.5px;
-          color: var(--color-outline);
-          margin: 18px 0 0;
-          max-width: 320px;
-          line-height: 1.5;
+          opacity: 0;
+          animation: matchOverFadeUp 420ms ease-out 360ms forwards;
         }
         .match-over-actions {
           position: relative;
           z-index: 1;
           display: flex;
           gap: 10px;
-          margin-top: 22px;
+          margin-top: 30px;
           flex-wrap: wrap;
           justify-content: center;
+          opacity: 0;
+          animation: matchOverFadeUp 420ms ease-out 460ms forwards;
         }
         .match-over-btn {
           display: flex;
@@ -1237,9 +1283,9 @@ export default function LiveStatePanel({
           font-size: 11px;
           font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.05em;
           border-radius: 10px;
-          padding: 11px 18px;
+          padding: 11px 20px;
           cursor: pointer;
           border: none;
           transition: transform 130ms ease, box-shadow 130ms ease, filter 130ms ease;
@@ -1248,7 +1294,7 @@ export default function LiveStatePanel({
         .match-over-btn-undo {
           color: var(--color-error);
           background: rgba(217,83,79,0.1);
-          border: 1px solid rgba(217,83,79,0.35);
+          border: 1px solid rgba(217,83,79,0.32);
         }
         .match-over-btn-undo:hover {
           background: rgba(217,83,79,0.16);
@@ -1256,12 +1302,12 @@ export default function LiveStatePanel({
         }
         .match-over-btn-restart {
           color: var(--color-on-primary);
-          background: var(--color-theme-orange);
+          background: linear-gradient(135deg, var(--color-theme-orange), #b8860b);
           box-shadow: 0 4px 18px rgba(201,151,31,0.4);
         }
         .match-over-btn-restart:hover {
-          box-shadow: 0 6px 24px rgba(201,151,31,0.5);
-          filter: brightness(1.05);
+          box-shadow: 0 6px 26px rgba(201,151,31,0.5);
+          filter: brightness(1.06);
         }
       `}</style>
 
