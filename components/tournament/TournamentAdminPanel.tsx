@@ -24,13 +24,14 @@ import {
   GroupKnockoutData,
 } from "@/lib/tournament/groupKnockout";
 
-type FormatType = "single_elimination" | "double_elimination" | "round_robin" | "group_knockout";
+// type FormatType = "single_elimination" | "double_elimination" | "round_robin" | "group_knockout";
+type FormatType = "single_elimination" | "double_elimination";
 
 const FORMAT_LABELS: Record<FormatType, string> = {
   single_elimination: "Single Elimination",
   double_elimination: "Double Elimination",
-  round_robin: "Round Robin",
-  group_knockout: "Groups + Knockout",
+  // round_robin: "Round Robin",
+  // group_knockout: "Groups + Knockout",
 };
 
 export default function TournamentAdminPanel() {
@@ -76,8 +77,8 @@ export default function TournamentAdminPanel() {
     if (teams.length < 2) return;
     if (format === "single_elimination") setSingleRounds(generateSingleElimination(teams));
     else if (format === "double_elimination") setDoubleData(generateDoubleElimination(teams));
-    else if (format === "round_robin") setRrData(generateRoundRobin(teams));
-    else if (format === "group_knockout") setGkData(generateGroups(teams, groupCount, qualifiersPerGroup));
+    // else if (format === "round_robin") setRrData(generateRoundRobin(teams));
+    // else if (format === "group_knockout") setGkData(generateGroups(teams, groupCount, qualifiersPerGroup));
   }
 
   function handleSingleResult(matchId: string, winner: "A" | "B", a: number, b: number) {
