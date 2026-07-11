@@ -1,7 +1,7 @@
 "use client";
 import TournamentBracket from "@/components/tournament/TournamentBracket";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
-import { generateBracketRounds } from "@/lib/generateBracketRounds";
+import { generateBracketRounds } from "@/lib/tournament/generateBracketRounds";
 
 /* ------------------------------------------------------------------ */
 /*  Bracket resolution helpers                                         */
