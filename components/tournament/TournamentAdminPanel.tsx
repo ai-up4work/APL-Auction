@@ -219,7 +219,7 @@ export default function TournamentAdminPanel() {
         </section>
 
         {/* Format-specific options */}
-        {format === "group_knockout" && (
+        {/* {format === "group_knockout" && (
           <section className="flex gap-4 items-end">
             <label className="text-xs font-label-mono text-outline">
               Groups
@@ -242,7 +242,7 @@ export default function TournamentAdminPanel() {
               />
             </label>
           </section>
-        )}
+        )} */}
 
         <button
           type="button"
@@ -273,7 +273,7 @@ export default function TournamentAdminPanel() {
         )}
 
         {/* Round robin */}
-        {format === "round_robin" && rrData && (
+        {/* {format === "round_robin" && rrData && (
           <div className="grid md:grid-cols-2 gap-6">
             <StandingsTable title="Standings" rows={rrData.standings} qualifyCount={0} />
             <div className="flex flex-col gap-3 max-h-[600px] overflow-y-auto pr-1">
@@ -282,10 +282,10 @@ export default function TournamentAdminPanel() {
               ))}
             </div>
           </div>
-        )}
+        )} */}
 
         {/* Groups + knockout */}
-        {format === "group_knockout" && gkData && (
+        {/* {format === "group_knockout" && gkData && (
           <div className="flex flex-col gap-8">
             <div className="grid md:grid-cols-2 gap-6">
               {gkData.groups.map((g) => (
@@ -318,7 +318,7 @@ export default function TournamentAdminPanel() {
               </>
             )}
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );
