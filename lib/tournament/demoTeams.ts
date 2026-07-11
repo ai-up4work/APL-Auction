@@ -12,7 +12,7 @@ const DEMO_TEAM_DATA: Omit<AdminTeam, "id">[] = [
   { name: "Kandy Kings", code: "KK", logo: "/kandy-kings-logo.png" },
   { name: "Badulla Royals", code: "BR", logo: "/badulla-royals-logo.png" },
   { name: "Jaffna Giants", code: "JG", logo: "/jaffna-giants-logo.png" },
-  { name: "Galle Challengers", code: "GC", logo: "/galle-challengers-logo.png" },
+  { name: "Galle Challengers", code: "GC", logo: "/galle-challengers-logo.png" }, // 8
   { name: "Northern Ospreys", code: "NO", logo: "/northern-ospreys-logo.png" },
   { name: "Southern Cobras", code: "SC", logo: "/southern-cobras-logo.png" },
   { name: "Highland Hawks", code: "HH", logo: "/highland-hawks-logo.png" },
@@ -20,8 +20,8 @@ const DEMO_TEAM_DATA: Omit<AdminTeam, "id">[] = [
   { name: "Royal Lions", code: "RL", logo: "/royal-lions-logo.png" },
   { name: "Golden Eagles", code: "GE", logo: "/golden-eagles-logo.png" },
   { name: "Silver Wolves", code: "SW", logo: "/silver-wolves-logo.png" },
-  { name: "Crimson Tigers", code: "CT", logo: "/crimson-tigers-logo.png" },
-  { name: "Emerald Dragons", code: "ED", logo: "/emerald-dragons-logo.png" },
+  { name: "Crimson Tigers", code: "CT", logo: "/crimson-tigers-logo.png" }, // 16
+  { name: "Emerald Dragons", code: "ED", logo: "/emerald-dragons-logo.png" }, 
   { name: "Obsidian Ravens", code: "OR", logo: "/obsidian-ravens-logo.png" },
   { name: "Storm Chasers", code: "SC2", logo: "/storm-chasers-logo.png" },
   { name: "Thunder Riders", code: "TR", logo: "/thunder-riders-logo.png" },
