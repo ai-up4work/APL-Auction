@@ -3,7 +3,6 @@
 import { useState } from "react";
 import TournamentBracket from "@/components/tournament/TournamentBracket";
 import type { Round } from "@/components/tournament/TournamentBracket";
-import StandingsTable from "@/components/tournament/StandingsTable";
 import DoubleElimBoard from "@/components/tournament/DoubleElimBoard";
 import MatchResultCard from "@/components/tournament/MatchResultCard";
 import FormatDescription from "@/components/tournament/FormatDescription";
@@ -16,22 +15,12 @@ import {
   championOfDoubleElim,
   DoubleElimData,
 } from "@/lib/tournament/doubleElim";
-import { generateRoundRobin, recordRoundRobinResult, RoundRobinData } from "@/lib/tournament/roundRobin";
-import {
-  generateGroups,
-  buildKnockoutFromGroups,
-  allGroupMatchesComplete,
-  GroupKnockoutData,
-} from "@/lib/tournament/groupKnockout";
 
-// type FormatType = "single_elimination" | "double_elimination" | "round_robin" | "group_knockout";
 type FormatType = "single_elimination" | "double_elimination";
 
 const FORMAT_LABELS: Record<FormatType, string> = {
   single_elimination: "Single Elimination",
   double_elimination: "Double Elimination",
-  // round_robin: "Round Robin",
-  // group_knockout: "Groups + Knockout",
 };
 
 export default function TournamentAdminPanel() {
@@ -39,13 +28,9 @@ export default function TournamentAdminPanel() {
   const [nameInput, setNameInput] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [format, setFormat] = useState<FormatType>("single_elimination");
-  const [groupCount, setGroupCount] = useState(4);
-  const [qualifiersPerGroup, setQualifiersPerGroup] = useState(2);
 
   const [singleRounds, setSingleRounds] = useState<Round[] | null>(null);
   const [doubleData, setDoubleData] = useState<DoubleElimData | null>(null);
-  const [rrData, setRrData] = useState<RoundRobinData | null>(null);
-  const [gkData, setGkData] = useState<GroupKnockoutData | null>(null);
 
   function addTeam() {
     if (!nameInput.trim() || !codeInput.trim()) return;
@@ -72,13 +57,9 @@ export default function TournamentAdminPanel() {
   function generate() {
     setSingleRounds(null);
     setDoubleData(null);
-    setRrData(null);
-    setGkData(null);
     if (teams.length < 2) return;
     if (format === "single_elimination") setSingleRounds(generateSingleElimination(teams));
     else if (format === "double_elimination") setDoubleData(generateDoubleElimination(teams));
-    // else if (format === "round_robin") setRrData(generateRoundRobin(teams));
-    // else if (format === "group_knockout") setGkData(generateGroups(teams, groupCount, qualifiersPerGroup));
   }
 
   function handleSingleResult(matchId: string, winner: "A" | "B", a: number, b: number) {
@@ -95,47 +76,11 @@ export default function TournamentAdminPanel() {
     setDoubleData({ ...next });
   }
 
-  function handleRrResult(matchId: string, _winner: "A" | "B", a: number, b: number) {
-    if (!rrData) return;
-    const next = { ...rrData, matches: [...rrData.matches] };
-    recordRoundRobinResult(next, matchId, a, b);
-    setRrData(next);
-  }
-
-  function handleGroupResult(groupId: string, matchId: string, a: number, b: number) {
-    if (!gkData) return;
-    const next: GroupKnockoutData = {
-      ...gkData,
-      groups: gkData.groups.map((g) =>
-        g.id === groupId ? { ...g, roundRobin: { ...g.roundRobin, matches: [...g.roundRobin.matches] } } : g
-      ),
-    };
-    const group = next.groups.find((g) => g.id === groupId)!;
-    recordRoundRobinResult(group.roundRobin, matchId, a, b);
-    setGkData(next);
-  }
-
-  function generateKnockoutStage() {
-    if (!gkData) return;
-    const next = { ...gkData };
-    buildKnockoutFromGroups(next);
-    setGkData({ ...next });
-  }
-
-  function handleKnockoutResult(matchId: string, winner: "A" | "B", a: number, b: number) {
-    if (!gkData?.knockout) return;
-    const knockout = gkData.knockout.map((r) => ({ ...r, matches: [...r.matches] }));
-    recordSingleElimResult(knockout, matchId, winner, a, b);
-    setGkData({ ...gkData, knockout });
-  }
-
   const champion =
     format === "single_elimination"
       ? singleRounds ? championOf(singleRounds) : null
       : format === "double_elimination"
       ? doubleData ? championOfDoubleElim(doubleData) : null
-      : format === "group_knockout"
-      ? gkData?.knockout ? championOf(gkData.knockout) : null
       : null;
 
   return (
@@ -218,32 +163,6 @@ export default function TournamentAdminPanel() {
           </div>
         </section>
 
-        {/* Format-specific options */}
-        {/* {format === "group_knockout" && (
-          <section className="flex gap-4 items-end">
-            <label className="text-xs font-label-mono text-outline">
-              Groups
-              <input
-                type="number"
-                min={2}
-                value={groupCount}
-                onChange={(e) => setGroupCount(Number(e.target.value))}
-                className="block mt-1 w-24 px-3 py-1.5 rounded-lg bg-background border border-border-overlay text-sm"
-              />
-            </label>
-            <label className="text-xs font-label-mono text-outline">
-              Qualifiers per group
-              <input
-                type="number"
-                min={1}
-                value={qualifiersPerGroup}
-                onChange={(e) => setQualifiersPerGroup(Number(e.target.value))}
-                className="block mt-1 w-24 px-3 py-1.5 rounded-lg bg-background border border-border-overlay text-sm"
-              />
-            </label>
-          </section>
-        )} */}
-
         <button
           type="button"
           onClick={generate}
@@ -271,54 +190,6 @@ export default function TournamentAdminPanel() {
         {format === "double_elimination" && doubleData && (
           <DoubleElimBoard data={doubleData} onRecordResult={handleDoubleResult} />
         )}
-
-        {/* Round robin */}
-        {/* {format === "round_robin" && rrData && (
-          <div className="grid md:grid-cols-2 gap-6">
-            <StandingsTable title="Standings" rows={rrData.standings} qualifyCount={0} />
-            <div className="flex flex-col gap-3 max-h-[600px] overflow-y-auto pr-1">
-              {rrData.matches.map((m) => (
-                <MatchResultCard key={m.id} match={m} onRecordResult={(id, w, a, b) => handleRrResult(id, w, a, b)} />
-              ))}
-            </div>
-          </div>
-        )} */}
-
-        {/* Groups + knockout */}
-        {/* {format === "group_knockout" && gkData && (
-          <div className="flex flex-col gap-8">
-            <div className="grid md:grid-cols-2 gap-6">
-              {gkData.groups.map((g) => (
-                <div key={g.id} className="flex flex-col gap-3">
-                  <StandingsTable title={g.name} rows={g.roundRobin.standings} qualifyCount={gkData.qualifiersPerGroup} />
-                  <div className="flex flex-col gap-2">
-                    {g.roundRobin.matches.map((m) => (
-                      <MatchResultCard key={m.id} match={m} onRecordResult={(id, _w, a, b) => handleGroupResult(g.id, id, a, b)} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {!gkData.knockout && (
-              <button
-                type="button"
-                onClick={generateKnockoutStage}
-                disabled={!allGroupMatchesComplete(gkData)}
-                className="self-start px-6 py-2.5 rounded-lg bg-theme-orange text-on-primary text-xs font-label-mono font-black uppercase tracking-widest disabled:opacity-40"
-              >
-                Generate knockout stage
-              </button>
-            )}
-
-            {gkData.knockout && (
-              <>
-                <TournamentBracket rounds={gkData.knockout} title="Knockout Stage" />
-                <ResultsGrid rounds={gkData.knockout} onRecordResult={handleKnockoutResult} />
-              </>
-            )}
-          </div>
-        )} */}
       </div>
     </div>
   );
