@@ -11,10 +11,6 @@ import {
   Gavel,
   Trophy,
   MonitorPlay,
-  Users,
-  ShieldCheck,
-  Shuffle,
-  Layers,
   Check,
   X as XIcon,
   Minus,
@@ -26,6 +22,9 @@ import {
   Twitter,
   Menu,
   X,
+  Clock,
+  MapPin,
+  MessageCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -42,6 +41,19 @@ const pageStyles = `
 :root { --gold: #f5a623; }
 
 html { scroll-behavior: smooth; }
+
+/* ── themed scrollbar ── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb {
+  background: rgba(245,166,35,0.5);
+  border-radius: 6px;
+  border: 2px solid #000;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(245,166,35,0.8); }
+
+html { scrollbar-width: thin; scrollbar-color: rgba(245,166,35,0.5) #000; }
+
 body {
   background-color: #000;
   color: #E5E5E5;
@@ -169,6 +181,9 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 /* ── faq chevron rotate ── */
 .faq-icon { transition: transform 0.3s ease, background-color 0.3s ease; }
 
+/* ── typewriter cursor ── */
+@keyframes tw-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   .fade-in, .fade-in-up, .animate-slow-pulse, .pulse, .floating, .gold-gradient-text, .shine::after, .section-title::after, .marquee-track {
     animation: none !important;
@@ -176,6 +191,82 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
   }
 }
 `
+
+/* ─────────────────────────────────────────────────────────────────────────
+   TYPEWRITER REVEAL — plays once, when the text scrolls into view.
+   Reserves its own width/height with an invisible ghost copy so nothing
+   reflows while it types.
+──────────────────────────────────────────────────────────────────────── */
+function TypeText({
+  text,
+  className = "",
+  speed = 40,
+  delay = 0,
+}: {
+  text: string
+  className?: string
+  speed?: number
+  delay?: number
+}) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [displayed, setDisplayed] = useState("")
+  const [started, setStarted] = useState(false)
+  const [done, setDone] = useState(false)
+  const hasRun = useRef(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasRun.current) {
+          hasRun.current = true
+          setTimeout(() => {
+            setStarted(true)
+            let i = 0
+            const interval = setInterval(() => {
+              i++
+              setDisplayed(text.slice(0, i))
+              if (i >= text.length) {
+                clearInterval(interval)
+                setTimeout(() => setDone(true), 700)
+              }
+            }, speed)
+          }, delay)
+        }
+      },
+      { threshold: 0.2 }
+    )
+
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text, speed, delay])
+
+  return (
+    <span ref={ref} className={className} style={{ position: "relative", display: "inline-block" }}>
+      <span aria-hidden="true" style={{ visibility: "hidden", whiteSpace: "pre" }}>
+        {text}
+      </span>
+      <span aria-live="polite" style={{ position: "absolute", top: 0, left: 0, whiteSpace: "pre" }}>
+        {started ? displayed : ""}
+        {started && !done && (
+          <span
+            style={{
+              display: "inline-block",
+              width: "0.05em",
+              height: "0.8em",
+              backgroundColor: "currentColor",
+              marginLeft: "2px",
+              verticalAlign: "middle",
+              animation: "tw-blink 0.7s step-end infinite",
+            }}
+          />
+        )}
+      </span>
+    </span>
+  )
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    NAV LINKS — kept short deliberately; a few sections below (Trusted By,
@@ -193,39 +284,33 @@ const navLinks = [
 ]
 
 /* ─────────────────────────────────────────────────────────────────────────
-   THE THREE MODULES
+   MODULES — icon block + tag chip layout
 ──────────────────────────────────────────────────────────────────────── */
 const modules = [
   {
-    tag: "Mod. 01",
     icon: Gavel,
-    title: "Auction Room",
+    title: "Live Auction\nRoom",
     description:
-      "Live player auctions with a real shot clock, enforced purses, and a bid room every owner runs from their own phone.",
+      "A real shot clock, enforced purses, and a bid room every owner runs from their own phone.",
+    badge: "CORE",
+    accent: "#F5A623",
   },
   {
-    tag: "Mod. 02",
     icon: Trophy,
-    title: "Tournament Bracket",
+    title: "Automatic\nBrackets",
     description:
-      "Single or double-elimination knockouts, drawn from your teams and updated automatically as results come in.",
+      "Single or double-elimination knockouts, drawn from your teams and updated as results come in.",
+    badge: "LIVE",
+    accent: "#CD7F32",
   },
   {
-    tag: "Mod. 03",
     icon: MonitorPlay,
-    title: "Broadcast Overlays",
+    title: "Broadcast\nOverlays",
     description:
-      "A transparent, stream-ready layer — live score bar, scorecard, boundaries, weather — toggled from the console.",
+      "A transparent, stream-ready layer — score bar, scorecard, boundaries, weather — toggled from the console.",
+    badge: "STREAM",
+    accent: "#C0C0C0",
   },
-]
-
-const flowSteps = [
-  { icon: Users, title: "Build the roster", body: "Add teams and the player pool with base prices." },
-  { icon: ShieldCheck, title: "Set the rules", body: "Purse size, squad limits, bid increments, timer." },
-  { icon: Shuffle, title: "Shuffle the order", body: "Lock in a fair, random lot sequence before you go live." },
-  { icon: Gavel, title: "Run the sale", body: "Owners bid live, the clock locks it, you hammer it down." },
-  { icon: Layers, title: "Flip on overlays", body: "Weather, score bar and boundaries, live on the stream." },
-  { icon: Trophy, title: "Draw the bracket", body: "Move straight into a knockout with the teams you built." },
 ]
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -299,7 +384,7 @@ const knights = [
 ]
 
 /* ─────────────────────────────────────────────────────────────────────────
-   NEW: TRUSTED-BY / STATS / TESTIMONIALS / COMPARISON / SHOWCASE / FAQ
+   TRUSTED-BY / STATS / TESTIMONIALS / COMPARISON / SHOWCASE / FAQ
 ──────────────────────────────────────────────────────────────────────── */
 const trustedClubs = ["Iron Knights CC", "Royal Strikers", "Silver Hawks", "Golden Lions", "Crimson Wardens"]
 
@@ -347,26 +432,12 @@ const comparisonColumns = [
 ]
 
 const showcaseSlides = [
-  {
-    tag: "Auction",
-    title: "Iron Knights Season Opener",
-    by: "Run by The Wardens CC — 8 teams, 96 players",
-  },
-  {
-    tag: "Bracket",
-    title: "Silver Cup Knockout",
-    by: "Run by Royal Strikers — double-elimination, 16 teams",
-  },
-  {
-    tag: "Overlay",
-    title: "Golden Lions Broadcast",
-    by: "Streamed live — 12,000 viewers peak",
-  },
-  {
-    tag: "League",
-    title: "Crimson Cup Full Season",
-    by: "Run by Valiant Originals — three months, one trophy",
-  },
+  { tag: "Auction", title: "Iron Knights Season Opener", by: "Run by The Wardens CC — 8 teams, 96 players" },
+  { tag: "Bracket", title: "Silver Cup Knockout", by: "Run by Royal Strikers — double-elimination, 16 teams" },
+  { tag: "Overlay", title: "Golden Lions Broadcast", by: "Streamed live — 12,000 viewers peak" },
+  { tag: "League", title: "Crimson Cup Full Season", by: "Run by Valiant Originals — three months, one trophy" },
+  { tag: "League", title: "Bronze Trophy Series", by: "Run by Bronze Trophy Alliance — 5 teams, round robin" },
+  { tag: "Auction", title: "Wardens Winter Sale", by: "Run by The Wardens CC — 64 players moved in one night" },
 ]
 
 const faqs = [
@@ -399,22 +470,14 @@ const faqs = [
 
 function ComparisonCell({ value }: { value: CellValue }) {
   if (value === true) return <Check className="h-4 w-4 text-gold mx-auto" />
-  if (value === false) return <XIcon className="h-4 w-4 text-gray-600 mx-auto" />
-  return <Minus className="h-4 w-4 text-gray-500 mx-auto" />
+  if (value === false) return <XIcon className="h-4 w-4 text-gray-400 mx-auto" />
+  return <Minus className="h-4 w-4 text-gray-400 mx-auto" />
 }
 
 const SECTIONS = navLinks.map((l) => l.id)
 
 export default function Home() {
   const router = useRouter()
-
-  const [isMobile, setIsMobile] = useState(false)
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
-  }, [])
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" })
@@ -429,10 +492,16 @@ export default function Home() {
   // ---- FAQ accordion ----
   const [openFaq, setOpenFaq] = useState<number | null>(0)
 
-  // ---- showcase carousel ----
-  const [showcaseIndex, setShowcaseIndex] = useState(0)
-  const showcasePrev = () => setShowcaseIndex((p) => (p === 0 ? showcaseSlides.length - 1 : p - 1))
-  const showcaseNext = () => setShowcaseIndex((p) => (p === showcaseSlides.length - 1 ? 0 : p + 1))
+  // ---- showcase grid paging (3 cards per page) ----
+  const [showcasePage, setShowcasePage] = useState(0)
+  const showcasePageSize = 3
+  const showcaseTotalPages = Math.ceil(showcaseSlides.length / showcasePageSize)
+  const showcaseVisible = showcaseSlides.slice(
+    showcasePage * showcasePageSize,
+    showcasePage * showcasePageSize + showcasePageSize
+  )
+  const showcasePrev = () => setShowcasePage((p) => (p === 0 ? showcaseTotalPages - 1 : p - 1))
+  const showcaseNext = () => setShowcasePage((p) => (p === showcaseTotalPages - 1 ? 0 : p + 1))
 
   // ---- active section tracking, via IntersectionObserver ----
   // (a raw `scroll` listener reading offsetTop on every tick is what caused
@@ -512,7 +581,7 @@ export default function Home() {
               className={`w-3 h-3 rounded-full transition-all duration-300 ${
                 activeSection === section
                   ? "bg-gold w-4 h-4 shadow-lg shadow-gold/30"
-                  : "bg-gray-500 hover:bg-gold/50"
+                  : "bg-gray-400 hover:bg-gold/50"
               }`}
               aria-label={`Scroll to ${section} section`}
             />
@@ -720,7 +789,7 @@ export default function Home() {
       ═══════════════════════════════════════════════════════════ */}
       <section className="py-10 md:py-14 relative bg-black border-y border-gold/10">
         <div className="container mx-auto px-4 text-center mb-6 fade-in">
-          <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-500">
+          <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-300">
             TRUSTED BY CLUBS LIKE
           </span>
         </div>
@@ -729,7 +798,7 @@ export default function Home() {
             {[...trustedClubs, ...trustedClubs].map((club, i) => (
               <span
                 key={`${club}-${i}`}
-                className="font-cinzel font-semibold text-lg md:text-xl text-gray-600 tracking-wide whitespace-nowrap"
+                className="font-cinzel font-semibold text-lg md:text-xl text-gray-400 tracking-wide whitespace-nowrap"
               >
                 {club}
               </span>
@@ -738,13 +807,16 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Modules */}
+      {/* ═══════════════════════════════════════════════════════════
+          MODULES — icon block + description + tag chip
+      ═══════════════════════════════════════════════════════════ */}
       <section id="modules" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Core <span className="text-gold">Modules</span>
+              <TypeText text="Core " speed={45} />
+              <TypeText text="Modules" speed={45} delay={280} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               Three tools, one league. Every one of them reads and writes the
@@ -753,21 +825,30 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <div className="flex flex-col md:flex-row w-full gap-[2px] max-w-5xl mx-auto rounded-lg overflow-hidden">
             {modules.map((mod, index) => (
               <div
-                key={mod.tag}
-                className={`rounded-lg overflow-hidden glow-effect fade-in-up stagger-${index + 1} border border-gold/20 cursor-pointer`}
+                key={mod.badge}
+                className={`flex flex-col gap-5 p-8 md:p-10 md:flex-1 md:h-[340px] bg-black/70 box-hover-effect fade-in-up stagger-${index + 1}`}
+                style={{ borderColor: `${mod.accent}55` }}
               >
-                <div className="relative h-48 bg-[#0d0d0d] flex items-center justify-center">
-                  <mod.icon className="w-12 h-12 text-gold/70" />
-                  <div className="absolute top-2 right-2 bg-gold text-black text-xs font-medium px-2 py-1 rounded">
-                    {mod.tag}
-                  </div>
+                <div
+                  className="w-12 h-12 rounded-md flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: `${mod.accent}1A`, border: `1px solid ${mod.accent}` }}
+                >
+                  <mod.icon className="w-6 h-6" style={{ color: mod.accent }} />
                 </div>
-                <div className="p-6 bg-black/80 border-t border-gold/20">
-                  <h3 className="text-xl font-bold text-white mb-2 font-cinzel">{mod.title}</h3>
-                  <p className="text-gray-400 text-sm">{mod.description}</p>
+                <h3 className="text-xl font-bold text-white font-cinzel leading-tight whitespace-pre-line">
+                  {mod.title}
+                </h3>
+                <p className="text-gray-300 text-sm leading-relaxed">{mod.description}</p>
+                <div
+                  className="mt-auto flex items-center justify-center h-7 px-3 border rounded w-fit"
+                  style={{ borderColor: mod.accent, backgroundColor: "rgba(0,0,0,0.4)" }}
+                >
+                  <span className="text-[11px] font-mono tracking-[2px]" style={{ color: mod.accent }}>
+                    {mod.badge}
+                  </span>
                 </div>
               </div>
             ))}
@@ -776,7 +857,7 @@ export default function Home() {
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          STATS — gold numbers on black, diamond dividers between
+          STATS — gold numbers on black, dividers between
       ═══════════════════════════════════════════════════════════ */}
       <section className="py-16 relative section-pattern bg-black">
         <div className="container mx-auto px-4 relative z-10">
@@ -791,7 +872,7 @@ export default function Home() {
                 <span className="font-cinzel text-4xl md:text-5xl font-bold gold-gradient-text mb-2">
                   {stat.value}
                 </span>
-                <span className="text-gray-400 text-xs md:text-sm tracking-widest uppercase">
+                <span className="text-gray-300 text-xs md:text-sm tracking-widest uppercase">
                   {stat.label}
                 </span>
               </div>
@@ -806,7 +887,8 @@ export default function Home() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Knights of <span className="text-gold">Valiant League</span>
+              <TypeText text="Knights of " speed={40} />
+              <TypeText text="Valiant League" speed={40} delay={400} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               The people building Valiant League — swap these placeholder
@@ -825,7 +907,7 @@ export default function Home() {
                 </div>
                 <div className="p-6 border-t border-gold/20 text-center">
                   <h3 className="text-xl font-bold text-white font-cinzel">{k.name}</h3>
-                  <p className="text-gray-400 text-sm mb-4">{k.role}</p>
+                  <p className="text-gray-300 text-sm mb-4">{k.role}</p>
                   <Link
                     href={k.twitter}
                     target="_blank"
@@ -841,40 +923,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Flow */}
-      <section id="flow" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Six Steps, <span className="text-gold">Start To Trophy</span>
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              The whole day, walked through — from building the roster to
-              handing over the trophy.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 max-w-6xl mx-auto">
-            {flowSteps.slice(0, isMobile ? 4 : 6).map((s, index) => (
-              <div
-                key={s.title}
-                className={`rounded-lg overflow-hidden box-hover-effect fade-in-up stagger-${(index % 6) + 1} p-5 bg-black/70 text-center`}
-              >
-                <div className="flex justify-center mb-4">
-                  <div className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center">
-                    <s.icon className="h-5 w-5 text-gold" />
-                  </div>
-                </div>
-                <span className="text-[10px] font-mono text-gray-500 tracking-widest">{`0${index + 1}`}</span>
-                <h3 className="text-base font-bold text-white mt-1 mb-1 font-cinzel">{s.title}</h3>
-                <p className="text-gray-400 text-xs">{s.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ═══════════════════════════════════════════════════════════
           TESTIMONIALS
       ═══════════════════════════════════════════════════════════ */}
@@ -883,7 +931,8 @@ export default function Home() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              What <span className="text-gold">Owners Say</span>
+              <TypeText text="What " speed={45} />
+              <TypeText text="Owners Say" speed={45} delay={220} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               Real leagues, run live, by people who used to run them from a
@@ -898,11 +947,11 @@ export default function Home() {
                 className={`bg-black/50 border border-gold/20 shine hover:border-gold/80 transition-all duration-300 hover:shadow-lg hover:shadow-gold/20 fade-in-up stagger-${index + 1}`}
               >
                 <CardContent className="p-6 flex flex-col h-full">
-                  <Quote className="h-6 w-6 text-gold/50 mb-4" />
+                  <Quote className="h-6 w-6 text-gold/60 mb-4" />
                   <p className="text-gray-300 text-sm leading-relaxed flex-1">{t.quote}</p>
                   <div className="mt-6 pt-4 border-t border-gold/10">
                     <p className="font-cinzel font-bold text-white">{t.name}</p>
-                    <p className="text-gray-500 text-xs">{t.role}</p>
+                    <p className="text-gray-400 text-xs">{t.role}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -919,7 +968,9 @@ export default function Home() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Why <span className="text-gold">Valiant League</span> Wins
+              <TypeText text="Why " speed={45} />
+              <TypeText text="Valiant League" speed={45} delay={200} className="text-gold" />
+              <TypeText text=" Wins" speed={45} delay={800} />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               See how it stacks up against running your league by hand. No
@@ -931,14 +982,14 @@ export default function Home() {
           <div className="hidden md:block max-w-5xl mx-auto rounded-lg overflow-hidden border border-gold/20 fade-in-up stagger-2">
             <div className="grid grid-cols-4 bg-black/90 border-b border-gold/30">
               <div className="p-4">
-                <span className="font-cinzel text-sm text-gray-500 tracking-widest">FEATURE</span>
+                <span className="font-cinzel text-sm text-gray-300 tracking-widest">FEATURE</span>
               </div>
               <div className="p-4 bg-gold/10 border-x border-gold/20 text-center">
                 <span className="font-cinzel text-sm font-bold text-gold tracking-widest">VALIANT LEAGUE</span>
               </div>
               {comparisonColumns.map((col) => (
                 <div key={col.key} className="p-4 text-center">
-                  <span className="font-cinzel text-sm text-gray-500 tracking-widest">{col.label.toUpperCase()}</span>
+                  <span className="font-cinzel text-sm text-gray-300 tracking-widest">{col.label.toUpperCase()}</span>
                 </div>
               ))}
             </div>
@@ -976,12 +1027,12 @@ export default function Home() {
                 <div className="grid grid-cols-4 gap-2 text-center">
                   <div className="flex flex-col items-center gap-1">
                     <ComparisonCell value={row.vl} />
-                    <span className="text-[9px] text-gray-500 tracking-wide">VL</span>
+                    <span className="text-[9px] text-gray-400 tracking-wide">VL</span>
                   </div>
                   {comparisonColumns.map((col) => (
                     <div key={col.key} className="flex flex-col items-center gap-1">
                       <ComparisonCell value={row[col.key]} />
-                      <span className="text-[9px] text-gray-500 tracking-wide">{col.label.split(" ")[0].toUpperCase()}</span>
+                      <span className="text-[9px] text-gray-400 tracking-wide">{col.label.split(" ")[0].toUpperCase()}</span>
                     </div>
                   ))}
                 </div>
@@ -992,7 +1043,7 @@ export default function Home() {
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          SHOWCASE — carousel of leagues run on the platform
+          SHOWCASE — 3-up grid, paged
       ═══════════════════════════════════════════════════════════ */}
       <section id="showcase" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
@@ -1000,7 +1051,8 @@ export default function Home() {
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-16 fade-in">
             <div className="text-center md:text-left">
               <h2 className="text-3xl md:text-5xl font-bold text-white mb-4 md:mb-2 section-title inline-block">
-                Run on <span className="text-gold">Valiant League</span>
+                <TypeText text="Run on " speed={45} />
+                <TypeText text="Valiant League" speed={45} delay={280} className="text-gold" />
               </h2>
               <p className="text-lg text-gray-300 max-w-2xl mt-4">
                 A look at leagues that have gone through the auction room and out the other side with a trophy.
@@ -1024,75 +1076,95 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="max-w-4xl mx-auto">
-            <div className="rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70">
-              <div className="h-56 md:h-72 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20">
-                <span className="font-mono text-xs text-gray-600 tracking-[3px]">[ SCREENSHOT PLACEHOLDER ]</span>
-              </div>
-              <div className="p-6 md:p-8">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="bg-gold text-black text-xs font-bold px-3 py-1 rounded font-cinzel tracking-wide">
-                    {showcaseSlides[showcaseIndex].tag}
-                  </span>
-                  <span className="font-mono text-xs text-gray-500 tracking-widest">
-                    {`0${showcaseIndex + 1} / 0${showcaseSlides.length}`}
-                  </span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
+            {showcaseVisible.map((s, i) => (
+              <div
+                key={s.title}
+                className={`rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1}`}
+              >
+                <div className="h-40 md:h-48 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20">
+                  <span className="font-mono text-[10px] text-gray-400 tracking-[2px]">[ SCREENSHOT PLACEHOLDER ]</span>
                 </div>
-                <h3 className="text-2xl md:text-3xl font-bold text-white font-cinzel mb-2">
-                  {showcaseSlides[showcaseIndex].title}
-                </h3>
-                <p className="text-gray-400 text-sm">{showcaseSlides[showcaseIndex].by}</p>
+                <div className="p-5 md:p-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
+                      {s.tag}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-white font-cinzel mb-1">{s.title}</h3>
+                  <p className="text-gray-300 text-xs">{s.by}</p>
+                </div>
               </div>
-            </div>
+            ))}
+          </div>
 
-            <div className="flex items-center justify-center gap-2 mt-8">
-              {showcaseSlides.map((_, i) => (
+          <div className="flex flex-col items-center gap-4 mt-10">
+            <div className="flex items-center justify-center gap-2">
+              {Array.from({ length: showcaseTotalPages }).map((_, i) => (
                 <button
                   key={i}
-                  onClick={() => setShowcaseIndex(i)}
-                  aria-label={`Go to slide ${i + 1}`}
+                  onClick={() => setShowcasePage(i)}
+                  aria-label={`Go to page ${i + 1}`}
                   className="h-2 rounded-full transition-all duration-300"
                   style={{
-                    width: i === showcaseIndex ? "28px" : "8px",
-                    backgroundColor: i === showcaseIndex ? "#f5a623" : "rgba(245,166,35,0.25)",
+                    width: i === showcasePage ? "28px" : "8px",
+                    backgroundColor: i === showcasePage ? "#f5a623" : "rgba(245,166,35,0.25)",
                   }}
                 />
               ))}
             </div>
+            <span className="font-mono text-xs text-gray-400 tracking-widest">
+              SHOWING {showcasePage * showcasePageSize + 1}–
+              {Math.min(showcasePage * showcasePageSize + showcasePageSize, showcaseSlides.length)} OF {showcaseSlides.length} LEAGUES
+            </span>
           </div>
         </div>
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          FAQ
+          FAQ — two-column on desktop, numbered accent, gold divider
       ═══════════════════════════════════════════════════════════ */}
       <section id="faq" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Got <span className="text-gold">Questions?</span>
+              <TypeText text="Got " speed={45} />
+              <TypeText text="Questions?" speed={45} delay={200} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               Everything you need to know before your first auction.
             </p>
           </div>
 
-          <div className="max-w-3xl mx-auto flex flex-col gap-4">
+          <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-5">
             {faqs.map((faq, i) => {
               const isOpen = openFaq === i
               return (
                 <div
                   key={faq.question}
-                  className={`rounded-lg border border-gold/20 bg-black/50 overflow-hidden transition-colors duration-300 fade-in-up stagger-${(i % 6) + 1} ${
-                    isOpen ? "border-gold/70" : ""
+                  className={`group rounded-lg border bg-black/50 overflow-hidden transition-all duration-300 fade-in-up stagger-${(i % 6) + 1} ${
+                    isOpen
+                      ? "border-gold/70 shadow-[0_0_20px_rgba(245,166,35,0.15)]"
+                      : "border-gold/20 hover:border-gold/40"
                   }`}
                 >
                   <button
                     onClick={() => setOpenFaq(isOpen ? null : i)}
-                    className="w-full flex items-center justify-between gap-4 p-5 md:p-6 text-left"
+                    className="w-full flex items-start gap-4 p-5 md:p-6 text-left"
                   >
-                    <span className="font-cinzel text-base md:text-lg font-bold text-white">{faq.question}</span>
+                    <span
+                      className={`font-cinzel text-xs font-bold shrink-0 mt-1 transition-colors duration-300 ${
+                        isOpen ? "text-gold" : "text-gold/40 group-hover:text-gold/70"
+                      }`}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+
+                    <span className="flex-1 font-cinzel text-base md:text-lg font-bold text-white leading-snug">
+                      {faq.question}
+                    </span>
+
                     <div
                       className={`faq-icon h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
                         isOpen ? "bg-gold" : "bg-gold/10 border border-gold/40"
@@ -1106,12 +1178,18 @@ export default function Home() {
                       )}
                     </div>
                   </button>
+
                   <div
                     className="grid transition-all duration-300 ease-in-out"
                     style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
                   >
                     <div className="overflow-hidden">
-                      <p className="text-gray-400 text-sm leading-relaxed px-5 md:px-6 pb-5 md:pb-6">{faq.answer}</p>
+                      <div className="px-5 md:px-6 pb-5 md:pb-6 pl-[3.25rem] md:pl-[3.5rem]">
+                        <div className="h-px w-full bg-gold/10 mb-4" />
+                        <p className="text-gray-300 text-sm leading-relaxed">
+                          {faq.answer}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1120,7 +1198,7 @@ export default function Home() {
           </div>
 
           <div className="text-center mt-12 fade-in">
-            <p className="text-gray-400">
+            <p className="text-gray-300">
               Still have questions?{" "}
               <button onClick={() => scrollToSection("contact")} className="text-gold hover:underline font-medium">
                 Talk to a human →
@@ -1136,7 +1214,8 @@ export default function Home() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Choose Your <span className="text-gold">League Size</span>
+              <TypeText text="Choose Your " speed={40} />
+              <TypeText text="League Size" speed={40} delay={480} className="text-gold" />
             </h2>
             <p className="text-gray-300 max-w-3xl mx-auto mt-4">
               Every tier gets all three modules. What changes is scale and
@@ -1236,13 +1315,16 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Contact */}
+      {/* ═══════════════════════════════════════════════════════════
+          CONTACT — two-column on desktop: form/channels card + quick-info card
+      ═══════════════════════════════════════════════════════════ */}
       <section id="contact" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 bg-black/90" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Contact <span className="text-gold">Valiant League</span>
+              <TypeText text="Contact " speed={45} />
+              <TypeText text="Valiant League" speed={45} delay={280} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
               Questions about running your league, a Club or Franchise plan,
@@ -1250,14 +1332,15 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-12 max-w-3xl mx-auto">
-            <div className="fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-8 max-w-5xl mx-auto">
+            {/* Main channels card */}
+            <div className="md:col-span-3 fade-in">
               <Card className="bg-black/50 border border-gold/20 shine hover:border-gold/80 transition-all duration-300 hover:shadow-lg hover:shadow-gold/20 h-full">
-                <CardContent className="p-6">
-                  <h3 className="text-2xl font-bold text-white mb-6 font-cinzel text-center">
+                <CardContent className="p-6 md:p-8">
+                  <h3 className="text-2xl font-bold text-white mb-6 font-cinzel">
                     Get in <span className="text-gold">Touch</span>
                   </h3>
-                  <p className="text-gray-300 mb-8 text-center">
+                  <p className="text-gray-300 mb-8">
                     Have questions about our modules or interested in a Club
                     or Franchise plan? Reach out through any of the channels
                     below.
@@ -1267,14 +1350,14 @@ export default function Home() {
                     <div className="flex items-start">
                       <Link
                         href="mailto:hello@valiantleague.app"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
+                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
                         <Mail className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Email Us</h4>
-                        <p className="text-gray-400">
-                          hello@valiantleague.app <span className="text-gray-600">— placeholder, swap for your address</span>
+                        <p className="text-gray-300">
+                          hello@valiantleague.app <span className="text-gray-400">— placeholder, swap for your address</span>
                         </p>
                       </div>
                     </div>
@@ -1282,13 +1365,13 @@ export default function Home() {
                     <div className="flex items-start">
                       <Link
                         href="/admin"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
+                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
                         <Gavel className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Book a Walkthrough</h4>
-                        <p className="text-gray-400">[Link to your scheduling page]</p>
+                        <p className="text-gray-300">[Link to your scheduling page]</p>
                       </div>
                     </div>
 
@@ -1297,15 +1380,76 @@ export default function Home() {
                         href="#"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
+                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
                         <Twitter className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Follow Us</h4>
-                        <p className="text-gray-400">[@yourhandle]</p>
+                        <p className="text-gray-300">[@yourhandle]</p>
                       </div>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Quick info card */}
+            <div className="md:col-span-2 fade-in-up stagger-2">
+              <Card className="bg-black/50 border border-gold/20 h-full">
+                <CardContent className="p-6 md:p-8 flex flex-col h-full">
+                  <h3 className="text-xl font-bold text-white mb-6 font-cinzel">
+                    Quick <span className="text-gold">Info</span>
+                  </h3>
+
+                  <div className="space-y-6 flex-1">
+                    <div className="flex items-start gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                        <Clock className="h-5 w-5 text-gold" />
+                      </div>
+                      <div>
+                        <p className="text-white font-cinzel font-bold text-sm mb-1">Response Time</p>
+                        <p className="text-gray-300 text-sm">Usually within 24 hours on business days.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                        <MessageCircle className="h-5 w-5 text-gold" />
+                      </div>
+                      <div>
+                        <p className="text-white font-cinzel font-bold text-sm mb-1">Best For Quick Questions</p>
+                        <p className="text-gray-300 text-sm">
+                          Check the{" "}
+                          <button onClick={() => scrollToSection("faq")} className="text-gold hover:underline">
+                            FAQ
+                          </button>{" "}
+                          first — most match-day questions are answered there.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                        <MapPin className="h-5 w-5 text-gold" />
+                      </div>
+                      <div>
+                        <p className="text-white font-cinzel font-bold text-sm mb-1">Based Remote</p>
+                        <p className="text-gray-300 text-sm">
+                          Fully online — leagues run from anywhere, no local office required.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-gold/10">
+                    <Button
+                      variant="outline"
+                      className="w-full border-gold/50 text-gold hover:bg-gold/10 hover:border-gold bg-transparent"
+                      onClick={() => scrollToSection("tiers")}
+                    >
+                      View Pricing Tiers
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1340,7 +1484,7 @@ export default function Home() {
                   VALIANT <span className="text-gold">LEAGUE</span>
                 </span>
               </div>
-              <p className="text-gray-400">
+              <p className="text-gray-300">
                 Valiant League is the all-in-one platform for running a league —
                 live auctions, automatic brackets, and broadcast-ready overlays,
                 all reading from the same live data.
@@ -1355,7 +1499,7 @@ export default function Home() {
                   <li key={link.id}>
                     <div
                       onClick={() => scrollToSection(link.id)}
-                      className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer"
+                      className="text-gray-300 hover:text-gold transition-colors flex items-center cursor-pointer"
                     >
                       <ArrowRight className="h-4 w-4 mr-2 text-gold" />
                       {link.name.charAt(0) + link.name.slice(1).toLowerCase()}
@@ -1374,7 +1518,7 @@ export default function Home() {
                     href="#"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center"
+                    className="text-gray-300 hover:text-gold transition-colors flex items-center"
                   >
                     <Twitter className="h-4 w-4 mr-2 text-gold" />
                     Twitter
@@ -1383,7 +1527,7 @@ export default function Home() {
                 <li>
                   <Link
                     href="mailto:hello@valiantleague.app"
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center"
+                    className="text-gray-300 hover:text-gold transition-colors flex items-center"
                   >
                     <Mail className="h-4 w-4 mr-2 text-gold" />
                     Email
@@ -1392,7 +1536,7 @@ export default function Home() {
                 <li>
                   <div
                     onClick={() => handleNavigation("/admin")}
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer"
+                    className="text-gray-300 hover:text-gold transition-colors flex items-center cursor-pointer"
                   >
                     <Shield className="h-4 w-4 mr-2 text-gold" />
                     Open the Console
@@ -1404,19 +1548,19 @@ export default function Home() {
 
           <div className="mt-16 pt-8 border-t border-gold/20">
             <div className="flex flex-col md:flex-row justify-between items-center">
-              <p className="text-gray-400 text-sm">
+              <p className="text-gray-300 text-sm">
                 © {new Date().getFullYear()} Valiant League. All rights reserved.
               </p>
               <div className="flex space-x-6 mt-4 md:mt-0">
                 <div
                   onClick={() => handleNavigation("/privacy-policy")}
-                  className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer"
+                  className="text-gray-300 text-sm hover:text-gold transition-colors cursor-pointer"
                 >
                   Privacy Policy
                 </div>
                 <div
                   onClick={() => handleNavigation("/terms-of-service")}
-                  className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer"
+                  className="text-gray-300 text-sm hover:text-gold transition-colors cursor-pointer"
                 >
                   Terms of Service
                 </div>
