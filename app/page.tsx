@@ -16,6 +16,12 @@ import {
   Shuffle,
   Layers,
   Check,
+  X as XIcon,
+  Minus,
+  Plus,
+  Quote,
+  ChevronLeft,
+  ChevronRight,
   Mail,
   Twitter,
   Menu,
@@ -117,7 +123,7 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 }
 @keyframes goldShine { 0% { background-position: -100% 0; } 100% { background-position: 200% 0; } }
 
-/* ── shine sweep, for the contact card ── */
+/* ── shine sweep, for the contact card + testimonials ── */
 .shine { position: relative; overflow: hidden; }
 .shine::after {
   content: "";
@@ -155,8 +161,16 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 .stagger-5 { animation-delay: 0.5s; }
 .stagger-6 { animation-delay: 0.6s; }
 
+/* ── logo marquee ── */
+@keyframes scrollMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquee-track { animation: scrollMarquee 28s linear infinite; }
+.marquee-mask { -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); }
+
+/* ── faq chevron rotate ── */
+.faq-icon { transition: transform 0.3s ease, background-color 0.3s ease; }
+
 @media (prefers-reduced-motion: reduce) {
-  .fade-in, .fade-in-up, .animate-slow-pulse, .pulse, .floating, .gold-gradient-text, .shine::after, .section-title::after {
+  .fade-in, .fade-in-up, .animate-slow-pulse, .pulse, .floating, .gold-gradient-text, .shine::after, .section-title::after, .marquee-track {
     animation: none !important;
     opacity: 1 !important;
   }
@@ -164,13 +178,16 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 `
 
 /* ─────────────────────────────────────────────────────────────────────────
-   NAV LINKS
+   NAV LINKS — kept short deliberately; a few sections below (Trusted By,
+   Stats, Testimonials) are reachable by scroll but not given nav entries,
+   the same way a long single-page site avoids overloading its header.
 ──────────────────────────────────────────────────────────────────────── */
 const navLinks = [
   { name: "HOME", id: "home" },
   { name: "MODULES", id: "modules" },
-  { name: "CREATORS", id: "creators" },
-  { name: "HOW IT WORKS", id: "flow" },
+  { name: "COMPARE", id: "compare" },
+  { name: "SHOWCASE", id: "showcase" },
+  { name: "FAQ", id: "faq" },
   { name: "PRICING", id: "tiers" },
   { name: "CONTACT", id: "contact" },
 ]
@@ -281,6 +298,111 @@ const knights = [
   },
 ]
 
+/* ─────────────────────────────────────────────────────────────────────────
+   NEW: TRUSTED-BY / STATS / TESTIMONIALS / COMPARISON / SHOWCASE / FAQ
+──────────────────────────────────────────────────────────────────────── */
+const trustedClubs = ["Iron Knights CC", "Royal Strikers", "Silver Hawks", "Golden Lions", "Crimson Wardens"]
+
+const stats = [
+  { value: "500+", label: "Leagues Run" },
+  { value: "99.9%", label: "Uptime SLA" },
+  { value: "6s", label: "Auction Shot Clock" },
+  { value: "200+", label: "Tournaments Drawn" },
+]
+
+const testimonials = [
+  {
+    quote:
+      "Valiant League is the first platform that actually respects match day. We ran three auctions in six weeks without touching a spreadsheet.",
+    name: "KGlimited",
+    role: "Founder, The Wardens",
+  },
+  {
+    quote:
+      "Finally a system that doesn't fight us. The overlays are flawless and there's zero setup required on stream day.",
+    name: "s7uid",
+    role: "Royal Guard, The Wardens",
+  },
+  {
+    quote:
+      "We replaced four spreadsheets and a Discord bot. Owner onboarding dropped from two weeks to two days.",
+    name: "vpowerv",
+    role: "Knight, The Wardens",
+  },
+]
+
+type CellValue = true | false | "partial"
+const comparisonRows: { feature: string; vl: CellValue; sheet: CellValue; discord: CellValue; zoom: CellValue }[] = [
+  { feature: "Live bid timer", vl: true, sheet: false, discord: false, zoom: "partial" },
+  { feature: "Mobile bidding", vl: true, sheet: false, discord: "partial", zoom: false },
+  { feature: "Automatic brackets", vl: true, sheet: false, discord: false, zoom: false },
+  { feature: "Broadcast overlays", vl: true, sheet: false, discord: false, zoom: false },
+  { feature: "Purse enforcement", vl: true, sheet: "partial", discord: false, zoom: false },
+  { feature: "Free tier to start", vl: true, sheet: true, discord: true, zoom: false },
+]
+const comparisonColumns = [
+  { key: "sheet" as const, label: "Spreadsheet" },
+  { key: "discord" as const, label: "Discord Bot" },
+  { key: "zoom" as const, label: "Zoom Call" },
+]
+
+const showcaseSlides = [
+  {
+    tag: "Auction",
+    title: "Iron Knights Season Opener",
+    by: "Run by The Wardens CC — 8 teams, 96 players",
+  },
+  {
+    tag: "Bracket",
+    title: "Silver Cup Knockout",
+    by: "Run by Royal Strikers — double-elimination, 16 teams",
+  },
+  {
+    tag: "Overlay",
+    title: "Golden Lions Broadcast",
+    by: "Streamed live — 12,000 viewers peak",
+  },
+  {
+    tag: "League",
+    title: "Crimson Cup Full Season",
+    by: "Run by Valiant Originals — three months, one trophy",
+  },
+]
+
+const faqs = [
+  {
+    question: "Is Valiant League really free to start?",
+    answer:
+      "Yes. The Casual tier is free forever, no credit card required. You get one live auction, a single-elimination bracket, and a broadcast overlay page. Upgrade any time — there's no lock-in.",
+  },
+  {
+    question: "Do owners need to install anything to bid?",
+    answer:
+      "No. Owners bid from any phone or laptop browser. There's no app to download and no account setup beyond a league invite link.",
+  },
+  {
+    question: "How do the broadcast overlays work?",
+    answer:
+      "Toggle the score bar, scorecard, boundaries, or weather from the console, then add the transparent layer straight into OBS or the streaming software of your choice.",
+  },
+  {
+    question: "Can I import my existing teams and players?",
+    answer:
+      "Yes. Upload a spreadsheet of teams, owners, and your player pool with base prices, and Valiant League sets up the auction room for you.",
+  },
+  {
+    question: "What can I run after the auction?",
+    answer:
+      "Move straight into a single or double-elimination bracket, drawn from the teams you just built, with results feeding the overlay live.",
+  },
+]
+
+function ComparisonCell({ value }: { value: CellValue }) {
+  if (value === true) return <Check className="h-4 w-4 text-gold mx-auto" />
+  if (value === false) return <XIcon className="h-4 w-4 text-gray-600 mx-auto" />
+  return <Minus className="h-4 w-4 text-gray-500 mx-auto" />
+}
+
 const SECTIONS = navLinks.map((l) => l.id)
 
 export default function Home() {
@@ -303,6 +425,14 @@ export default function Home() {
 
   // ---- navbar state ----
   const [isNavOpen, setIsNavOpen] = useState(false)
+
+  // ---- FAQ accordion ----
+  const [openFaq, setOpenFaq] = useState<number | null>(0)
+
+  // ---- showcase carousel ----
+  const [showcaseIndex, setShowcaseIndex] = useState(0)
+  const showcasePrev = () => setShowcaseIndex((p) => (p === 0 ? showcaseSlides.length - 1 : p - 1))
+  const showcaseNext = () => setShowcaseIndex((p) => (p === showcaseSlides.length - 1 ? 0 : p + 1))
 
   // ---- active section tracking, via IntersectionObserver ----
   // (a raw `scroll` listener reading offsetTop on every tick is what caused
@@ -421,13 +551,14 @@ export default function Home() {
             </div>
 
             {/* Navigation */}
-            <nav className="hidden md:flex items-center justify-center space-x-4">
+            <nav className="hidden md:flex items-center justify-center flex-wrap gap-2">
               {navLinks.map((link) => (
                 <Button
                   key={link.name}
                   variant={activeSection === link.id ? "default" : "outline"}
+                  size="sm"
                   className={cn(
-                    "font-cinzel text-base transition-all",
+                    "font-cinzel text-sm xl:text-base transition-all",
                     activeSection === link.id
                       ? "bg-gold hover:bg-gold/90 text-black"
                       : "border-gold/50 text-white hover:bg-gold/10 hover:text-gold hover:border-gold"
@@ -530,7 +661,11 @@ export default function Home() {
       </header>
 
       {/* Hero */}
-      <section id="home" className="relative min-h-screen flex items-center justify-center pt-28" ref={heroRef}>
+      <section
+        id="home"
+        className="relative h-screen min-h-[560px] flex items-center justify-center overflow-hidden"
+        ref={heroRef}
+      >
         <div className="absolute inset-0 z-0">
           <Image
             src="/images/website-background.png"
@@ -550,23 +685,18 @@ export default function Home() {
           className="container mx-auto px-4 z-10 pt-20"
         >
           <div className="flex flex-col items-center text-center max-w-4xl mx-auto">
-            <div className="relative w-[20rem] h-[22rem] md:w-[24rem] md:h-[26rem] mb-8 floating">
+            <div className="relative w-[10rem] h-[11rem] sm:w-[14rem] sm:h-[15rem] md:w-[18rem] md:h-[19rem] lg:w-[20rem] lg:h-[21rem] mb-4 md:mb-6 floating">
               <Image src="/valiant-league-logo.png" alt="Valiant League Logo" fill className="object-contain" priority />
             </div>
 
-            <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 font-cinzel tracking-wider">
+            <h1 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-3 md:mb-6 font-cinzel tracking-wider">
               VALIANT <span className="gold-gradient-text">LEAGUE</span>
             </h1>
 
-            <p className="text-xl md:text-2xl text-gray-300 mb-10 max-w-3xl">
-              Draft your teams in a live auction, settle the knockout on an
-              automatic bracket, and put it all on screen with a
-              broadcast-ready overlay — one platform, one league.
-            </p>
 
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 md:gap-4 justify-center">
               <Button
-                className="bg-gold hover:bg-gold/90 text-black font-bold py-6 px-8 rounded-md text-lg animate-slow-pulse hover:scale-105 transition-all duration-500"
+                className="bg-gold hover:bg-gold/90 text-black font-bold py-4 md:py-6 px-6 md:px-8 rounded-md text-base md:text-lg animate-slow-pulse hover:scale-105 transition-all duration-500"
                 onClick={() => scrollToSection("modules")}
               >
                 Explore the Platform
@@ -574,7 +704,7 @@ export default function Home() {
               </Button>
               <Button
                 variant="outline"
-                className="border-gold text-gold hover:bg-gold/10 py-6 px-8 rounded-md text-lg animate-slow-pulse hover:scale-105 transition-all duration-500 bg-transparent"
+                className="border-gold text-gold hover:bg-gold/10 py-4 md:py-6 px-6 md:px-8 rounded-md text-base md:text-lg animate-slow-pulse hover:scale-105 transition-all duration-500 bg-transparent"
                 onClick={() => handleNavigation("/admin")}
               >
                 <Shield className="mr-2 h-5 w-5" />
@@ -583,6 +713,29 @@ export default function Home() {
             </div>
           </div>
         </motion.div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          TRUSTED BY — logo marquee
+      ═══════════════════════════════════════════════════════════ */}
+      <section className="py-10 md:py-14 relative bg-black border-y border-gold/10">
+        <div className="container mx-auto px-4 text-center mb-6 fade-in">
+          <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-500">
+            TRUSTED BY CLUBS LIKE
+          </span>
+        </div>
+        <div className="relative w-full overflow-hidden marquee-mask">
+          <div className="flex items-center gap-16 w-max marquee-track">
+            {[...trustedClubs, ...trustedClubs].map((club, i) => (
+              <span
+                key={`${club}-${i}`}
+                className="font-cinzel font-semibold text-lg md:text-xl text-gray-600 tracking-wide whitespace-nowrap"
+              >
+                {club}
+              </span>
+            ))}
+          </div>
+        </div>
       </section>
 
       {/* Modules */}
@@ -616,6 +769,31 @@ export default function Home() {
                   <h3 className="text-xl font-bold text-white mb-2 font-cinzel">{mod.title}</h3>
                   <p className="text-gray-400 text-sm">{mod.description}</p>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          STATS — gold numbers on black, diamond dividers between
+      ═══════════════════════════════════════════════════════════ */}
+      <section className="py-16 relative section-pattern bg-black">
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-y-10 max-w-5xl mx-auto">
+            {stats.map((stat, index) => (
+              <div
+                key={stat.label}
+                className={`flex flex-col items-center text-center px-4 fade-in-up stagger-${index + 1} ${
+                  index < 3 ? "md:border-r md:border-gold/20" : ""
+                }`}
+              >
+                <span className="font-cinzel text-4xl md:text-5xl font-bold gold-gradient-text mb-2">
+                  {stat.value}
+                </span>
+                <span className="text-gray-400 text-xs md:text-sm tracking-widest uppercase">
+                  {stat.label}
+                </span>
               </div>
             ))}
           </div>
@@ -693,6 +871,261 @@ export default function Home() {
                 <p className="text-gray-400 text-xs">{s.body}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          TESTIMONIALS
+      ═══════════════════════════════════════════════════════════ */}
+      <section id="testimonials" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="text-center mb-16 fade-in">
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
+              What <span className="text-gold">Owners Say</span>
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
+              Real leagues, run live, by people who used to run them from a
+              spreadsheet.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            {testimonials.map((t, index) => (
+              <Card
+                key={t.name}
+                className={`bg-black/50 border border-gold/20 shine hover:border-gold/80 transition-all duration-300 hover:shadow-lg hover:shadow-gold/20 fade-in-up stagger-${index + 1}`}
+              >
+                <CardContent className="p-6 flex flex-col h-full">
+                  <Quote className="h-6 w-6 text-gold/50 mb-4" />
+                  <p className="text-gray-300 text-sm leading-relaxed flex-1">{t.quote}</p>
+                  <div className="mt-6 pt-4 border-t border-gold/10">
+                    <p className="font-cinzel font-bold text-white">{t.name}</p>
+                    <p className="text-gray-500 text-xs">{t.role}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          COMPARISON — Valiant League vs. running it by hand
+      ═══════════════════════════════════════════════════════════ */}
+      <section id="compare" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="text-center mb-16 fade-in">
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
+              Why <span className="text-gold">Valiant League</span> Wins
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
+              See how it stacks up against running your league by hand. No
+              spin, just what each option actually does on match day.
+            </p>
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block max-w-5xl mx-auto rounded-lg overflow-hidden border border-gold/20 fade-in-up stagger-2">
+            <div className="grid grid-cols-4 bg-black/90 border-b border-gold/30">
+              <div className="p-4">
+                <span className="font-cinzel text-sm text-gray-500 tracking-widest">FEATURE</span>
+              </div>
+              <div className="p-4 bg-gold/10 border-x border-gold/20 text-center">
+                <span className="font-cinzel text-sm font-bold text-gold tracking-widest">VALIANT LEAGUE</span>
+              </div>
+              {comparisonColumns.map((col) => (
+                <div key={col.key} className="p-4 text-center">
+                  <span className="font-cinzel text-sm text-gray-500 tracking-widest">{col.label.toUpperCase()}</span>
+                </div>
+              ))}
+            </div>
+            {comparisonRows.map((row, i) => (
+              <div
+                key={row.feature}
+                className={`grid grid-cols-4 ${i % 2 === 0 ? "bg-black/60" : "bg-black/40"} ${
+                  i < comparisonRows.length - 1 ? "border-b border-gold/10" : ""
+                }`}
+              >
+                <div className="p-4 flex items-center">
+                  <span className="text-gray-300 text-sm">{row.feature}</span>
+                </div>
+                <div className="p-4 flex items-center justify-center bg-gold/5 border-x border-gold/10">
+                  <ComparisonCell value={row.vl} />
+                </div>
+                <div className="p-4 flex items-center justify-center">
+                  <ComparisonCell value={row.sheet} />
+                </div>
+                <div className="p-4 flex items-center justify-center">
+                  <ComparisonCell value={row.discord} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Mobile stacked cards */}
+          <div className="md:hidden flex flex-col gap-4 max-w-md mx-auto">
+            {comparisonRows.map((row, i) => (
+              <div
+                key={row.feature}
+                className={`rounded-lg border border-gold/20 bg-black/60 p-4 fade-in-up stagger-${(i % 6) + 1}`}
+              >
+                <p className="text-white font-cinzel text-sm mb-3">{row.feature}</p>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="flex flex-col items-center gap-1">
+                    <ComparisonCell value={row.vl} />
+                    <span className="text-[9px] text-gray-500 tracking-wide">VL</span>
+                  </div>
+                  {comparisonColumns.map((col) => (
+                    <div key={col.key} className="flex flex-col items-center gap-1">
+                      <ComparisonCell value={row[col.key]} />
+                      <span className="text-[9px] text-gray-500 tracking-wide">{col.label.split(" ")[0].toUpperCase()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SHOWCASE — carousel of leagues run on the platform
+      ═══════════════════════════════════════════════════════════ */}
+      <section id="showcase" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-16 fade-in">
+            <div className="text-center md:text-left">
+              <h2 className="text-3xl md:text-5xl font-bold text-white mb-4 md:mb-2 section-title inline-block">
+                Run on <span className="text-gold">Valiant League</span>
+              </h2>
+              <p className="text-lg text-gray-300 max-w-2xl mt-4">
+                A look at leagues that have gone through the auction room and out the other side with a trophy.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={showcasePrev}
+                aria-label="Previous"
+                className="h-11 w-11 rounded-full border border-gold/40 flex items-center justify-center text-gold hover:bg-gold/10 hover:border-gold transition-colors"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                onClick={showcaseNext}
+                aria-label="Next"
+                className="h-11 w-11 rounded-full bg-gold flex items-center justify-center text-black hover:bg-gold/90 transition-colors"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="max-w-4xl mx-auto">
+            <div className="rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70">
+              <div className="h-56 md:h-72 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20">
+                <span className="font-mono text-xs text-gray-600 tracking-[3px]">[ SCREENSHOT PLACEHOLDER ]</span>
+              </div>
+              <div className="p-6 md:p-8">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="bg-gold text-black text-xs font-bold px-3 py-1 rounded font-cinzel tracking-wide">
+                    {showcaseSlides[showcaseIndex].tag}
+                  </span>
+                  <span className="font-mono text-xs text-gray-500 tracking-widest">
+                    {`0${showcaseIndex + 1} / 0${showcaseSlides.length}`}
+                  </span>
+                </div>
+                <h3 className="text-2xl md:text-3xl font-bold text-white font-cinzel mb-2">
+                  {showcaseSlides[showcaseIndex].title}
+                </h3>
+                <p className="text-gray-400 text-sm">{showcaseSlides[showcaseIndex].by}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mt-8">
+              {showcaseSlides.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setShowcaseIndex(i)}
+                  aria-label={`Go to slide ${i + 1}`}
+                  className="h-2 rounded-full transition-all duration-300"
+                  style={{
+                    width: i === showcaseIndex ? "28px" : "8px",
+                    backgroundColor: i === showcaseIndex ? "#f5a623" : "rgba(245,166,35,0.25)",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          FAQ
+      ═══════════════════════════════════════════════════════════ */}
+      <section id="faq" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="text-center mb-16 fade-in">
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
+              Got <span className="text-gold">Questions?</span>
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
+              Everything you need to know before your first auction.
+            </p>
+          </div>
+
+          <div className="max-w-3xl mx-auto flex flex-col gap-4">
+            {faqs.map((faq, i) => {
+              const isOpen = openFaq === i
+              return (
+                <div
+                  key={faq.question}
+                  className={`rounded-lg border border-gold/20 bg-black/50 overflow-hidden transition-colors duration-300 fade-in-up stagger-${(i % 6) + 1} ${
+                    isOpen ? "border-gold/70" : ""
+                  }`}
+                >
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : i)}
+                    className="w-full flex items-center justify-between gap-4 p-5 md:p-6 text-left"
+                  >
+                    <span className="font-cinzel text-base md:text-lg font-bold text-white">{faq.question}</span>
+                    <div
+                      className={`faq-icon h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                        isOpen ? "bg-gold" : "bg-gold/10 border border-gold/40"
+                      }`}
+                      style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    >
+                      {isOpen ? (
+                        <Minus className="h-4 w-4 text-black" />
+                      ) : (
+                        <Plus className="h-4 w-4 text-gold" />
+                      )}
+                    </div>
+                  </button>
+                  <div
+                    className="grid transition-all duration-300 ease-in-out"
+                    style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+                  >
+                    <div className="overflow-hidden">
+                      <p className="text-gray-400 text-sm leading-relaxed px-5 md:px-6 pb-5 md:pb-6">{faq.answer}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="text-center mt-12 fade-in">
+            <p className="text-gray-400">
+              Still have questions?{" "}
+              <button onClick={() => scrollToSection("contact")} className="text-gold hover:underline font-medium">
+                Talk to a human →
+              </button>
+            </p>
           </div>
         </div>
       </section>
