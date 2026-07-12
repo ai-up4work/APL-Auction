@@ -1,997 +1,1093 @@
-"use client"
+"use client";
 
-import { useEffect, useRef, useState } from "react"
-import Image from "next/image"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { motion, useScroll, useTransform } from "framer-motion"
-import {
-  ArrowRight,
-  Shield,
-  Gavel,
-  Trophy,
-  MonitorPlay,
-  Users,
-  ShieldCheck,
-  Shuffle,
-  Layers,
-  Check,
-  Mail,
-  Twitter,
-  Menu,
-  X,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+import { useEffect, useRef, useState } from "react";
 
-/* ─────────────────────────────────────────────────────────────────────────
-   HARDCODED STYLE SHEET — mirrors globals.css + the font setup from
-   layout.tsx, inlined so the page is self-contained. Same weights as your
-   reference project (Cinzel 400–900, Inter 400–700). Real brand gold: #f5a623.
-──────────────────────────────────────────────────────────────────────── */
-const pageStyles = `
-@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap");
+/* ════════════════════════════════════════════════════════════════════
+   REUSED HELPERS (used more than once across the page)
+   ════════════════════════════════════════════════════════════════════ */
 
-:root { --gold: #f5a623; }
-
-html { scroll-behavior: smooth; }
-body {
-  background-color: #000;
-  color: #E5E5E5;
-  width: 100vw;
-  overflow-x: hidden;
-  font-family: "Inter", sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
-.font-cinzel { font-family: "Cinzel", serif; }
-
-.text-gold { color: var(--gold); }
-.bg-gold { background-color: var(--gold); }
-.border-gold { border-color: var(--gold); }
-
-/* ── gold text shimmer ── */
-.gold-gradient-text {
-  background: linear-gradient(to right, #f5a623, #f8d57e, #f5a623);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: goldShimmer 2.4s infinite;
-}
-@keyframes goldShimmer {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* ── hero overlay — sits directly on the hero's own bg image ── */
-.hero-gradient { background: linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.55), rgba(0,0,0,0.85)); }
-.section-gradient { background: linear-gradient(to bottom, rgba(0,0,0,0.95), rgba(0,0,0,0.85), rgba(0,0,0,0.95)); }
-
-/* ── subtle dot texture ── */
-.section-pattern { position: relative; }
-.section-pattern::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(245,166,35,0.05) 2px, transparent 2px);
-  background-size: 30px 30px;
-  pointer-events: none;
-}
-
-/* ── card hover lift + glow ── */
-.glow-effect { box-shadow: 0 0 15px rgba(245,166,35,0.25); transition: box-shadow 0.3s ease, transform 0.3s ease, border-color 0.3s ease; }
-.glow-effect:hover { box-shadow: 0 0 25px rgba(245,166,35,0.55); transform: translateY(-5px); border-color: rgba(245,166,35,0.8); }
-
-.box-hover-effect { transition: all 0.3s ease; border: 1px solid rgba(245,166,35,0.2); }
-.box-hover-effect:hover { border-color: rgba(245,166,35,0.8); box-shadow: 0 0 15px rgba(245,166,35,0.3); transform: translateY(-5px); }
-
-/* ── creator card ── */
-.creator-card { transition: all 0.3s ease; border: 1px solid rgba(245,166,35,0.15); }
-.creator-card:hover { border-color: rgba(245,166,35,0.8); box-shadow: 0 0 20px rgba(245,166,35,0.35); transform: translateY(-6px); }
-
-/* ── diamond-capped divider ── */
-.medieval-divider { position: relative; height: 2px; background-color: rgba(245,166,35,0.5); }
-.medieval-divider::before, .medieval-divider::after {
-  content: ""; position: absolute; width: 10px; height: 10px;
-  background-color: var(--gold); top: -4px; transform: rotate(45deg);
-}
-.medieval-divider::before { left: 0; }
-.medieval-divider::after { right: 0; }
-
-/* ── section title with animated shine underline ── */
-.section-title { position: relative; }
-.section-title::after {
-  content: "";
-  position: absolute;
-  bottom: -8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 80px;
-  height: 3px;
-  background: linear-gradient(90deg, transparent, #f5a623, #f8d57e, #f5a623, transparent);
-  background-size: 200% 100%;
-  animation: goldShine 4s linear infinite;
-}
-@keyframes goldShine { 0% { background-position: -100% 0; } 100% { background-position: 200% 0; } }
-
-/* ── shine sweep, for the contact card ── */
-.shine { position: relative; overflow: hidden; }
-.shine::after {
-  content: "";
-  position: absolute;
-  top: -50%; left: -50%;
-  width: 200%; height: 200%;
-  background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 100%);
-  transform: rotate(30deg);
-  animation: shine 6s infinite;
-}
-@keyframes shine { 0% { transform: rotate(30deg) translateX(-100%); } 20%, 100% { transform: rotate(30deg) translateX(100%); } }
-
-/* ── gentle bob, for the hero crest ── */
-.floating { animation: floating 3s ease-in-out infinite; }
-@keyframes floating { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
-
-/* ── two flavors of pulse: opacity (primary CTAs) vs scale (secondary) ── */
-@keyframes slow-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-.animate-slow-pulse { animation: slow-pulse 4s cubic-bezier(0.4,0,0.6,1) infinite; }
-.animate-slow-pulse:hover { animation: none; }
-
-@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
-.pulse { animation: pulse 2s infinite; }
-.pulse:hover { animation: none; }
-
-/* ── fade-in family ── */
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-.fade-in { opacity: 0; animation: fadeIn 0.8s ease-in-out forwards; }
-.fade-in-up { opacity: 0; transform: translateY(20px); animation: fadeInUp 0.8s ease-in-out forwards; }
-.stagger-1 { animation-delay: 0.1s; }
-.stagger-2 { animation-delay: 0.2s; }
-.stagger-3 { animation-delay: 0.3s; }
-.stagger-4 { animation-delay: 0.4s; }
-.stagger-5 { animation-delay: 0.5s; }
-.stagger-6 { animation-delay: 0.6s; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fade-in, .fade-in-up, .animate-slow-pulse, .pulse, .floating, .gold-gradient-text, .shine::after, .section-title::after {
-    animation: none !important;
-    opacity: 1 !important;
-  }
-}
-`
-
-/* ─────────────────────────────────────────────────────────────────────────
-   NAV LINKS
-──────────────────────────────────────────────────────────────────────── */
-const navLinks = [
-  { name: "HOME", id: "home" },
-  { name: "MODULES", id: "modules" },
-  { name: "CREATORS", id: "creators" },
-  { name: "HOW IT WORKS", id: "flow" },
-  { name: "PRICING", id: "tiers" },
-  { name: "CONTACT", id: "contact" },
-]
-
-/* ─────────────────────────────────────────────────────────────────────────
-   THE THREE MODULES
-──────────────────────────────────────────────────────────────────────── */
-const modules = [
-  {
-    tag: "Mod. 01",
-    icon: Gavel,
-    title: "Auction Room",
-    description:
-      "Live player auctions with a real shot clock, enforced purses, and a bid room every owner runs from their own phone.",
-  },
-  {
-    tag: "Mod. 02",
-    icon: Trophy,
-    title: "Tournament Bracket",
-    description:
-      "Single or double-elimination knockouts, drawn from your teams and updated automatically as results come in.",
-  },
-  {
-    tag: "Mod. 03",
-    icon: MonitorPlay,
-    title: "Broadcast Overlays",
-    description:
-      "A transparent, stream-ready layer — live score bar, scorecard, boundaries, weather — toggled from the console.",
-  },
-]
-
-const flowSteps = [
-  { icon: Users, title: "Build the roster", body: "Add teams and the player pool with base prices." },
-  { icon: ShieldCheck, title: "Set the rules", body: "Purse size, squad limits, bid increments, timer." },
-  { icon: Shuffle, title: "Shuffle the order", body: "Lock in a fair, random lot sequence before you go live." },
-  { icon: Gavel, title: "Run the sale", body: "Owners bid live, the clock locks it, you hammer it down." },
-  { icon: Layers, title: "Flip on overlays", body: "Weather, score bar and boundaries, live on the stream." },
-  { icon: Trophy, title: "Draw the bracket", body: "Move straight into a knockout with the teams you built." },
-]
-
-/* ─────────────────────────────────────────────────────────────────────────
-   CREATORS / TEAM
-──────────────────────────────────────────────────────────────────────── */
-const knights = [
-  {
-    id: 1,
-    name: "KGlimited",
-    role: "Founder",
-    image: "/images/knights/knight-1.png",
-    twitter: "#",
-    description: "Founder of The Wardens community.",
-  },
-  {
-    id: 2,
-    name: "tri__",
-    role: "Knight",
-    image: "/images/knights/knight-2.png",
-    twitter: "#",
-    description: "Dedicated knight of The Wardens.",
-  },
-  {
-    id: 3,
-    name: "vpowerv",
-    role: "Knight",
-    image: "/images/knights/knight-3.png",
-    twitter: "#",
-    description: "Loyal knight serving The Wardens community.",
-  },
-  {
-    id: 4,
-    name: "s7uid",
-    role: "Royal Guard",
-    image: "/images/knights/knight-4.png",
-    twitter: "#",
-    description: "Elite member of the Royal Guard.",
-  },
-  {
-    id: 5,
-    name: "blitz7622",
-    role: "Royal Guard",
-    image: "/images/knights/knight-5.png",
-    twitter: "#",
-    description: "Protector of The Wardens realm.",
-  },
-  {
-    id: 6,
-    name: "zappzaddy",
-    role: "Royal Guard",
-    image: "/images/knights/knight-6.png",
-    twitter: "#",
-    description: "Trusted member of the Royal Guard.",
-  },
-  {
-    id: 7,
-    name: "sashin",
-    role: "Royal Guard",
-    image: "/images/knights/knight-7.png",
-    twitter: "#",
-    description: "Dedicated guardian of The Wardens.",
-  },
-  {
-    id: 9,
-    name: "haypon",
-    role: "Royal Guard",
-    image: "/images/knights/knight-9.png",
-    twitter: "#",
-    description: "Plans and executes gaming tournaments, AMAs, and community events.",
-  },
-]
-
-const SECTIONS = navLinks.map((l) => l.id)
-
-export default function Home() {
-  const router = useRouter()
-
-  const [isMobile, setIsMobile] = useState(false)
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
-  }, [])
+/** Typewriter-style reveal with a blinking cursor, triggered on scroll into view. */
+function GlitchText({
+  text,
+  className = "",
+  delay = 0,
+  speed = 40,
+}: {
+  text: string;
+  className?: string;
+  /** ms before typing starts after entering viewport */
+  delay?: number;
+  /** ms between each character */
+  speed?: number;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [displayed, setDisplayed] = useState("");
+  const [started, setStarted] = useState(false);
+  const [done, setDone] = useState(false);
+  const hasRun = useRef(false);
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" })
-  }, [])
-
-  const [isLoaded, setIsLoaded] = useState(false)
-  useEffect(() => setIsLoaded(true), [])
-
-  // ---- navbar state ----
-  const [isNavOpen, setIsNavOpen] = useState(false)
-
-  // ---- active section tracking, via IntersectionObserver ----
-  // (a raw `scroll` listener reading offsetTop on every tick is what caused
-  // the glitchy jumps when scrolling fast — this reports async & smooth)
-  const [activeSection, setActiveSection] = useState(SECTIONS[0])
-  const activeSectionRef = useRef(activeSection)
-  activeSectionRef.current = activeSection
-
-  useEffect(() => {
-    const sections = SECTIONS
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null)
-
-    if (sections.length === 0) return
-
-    const ratios = new Map<string, number>()
+    const el = ref.current;
+    if (!el) return;
 
     const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          ratios.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0)
-        })
-
-        let bestId = activeSectionRef.current
-        let bestRatio = 0
-        ratios.forEach((ratio, id) => {
-          if (ratio > bestRatio) {
-            bestRatio = ratio
-            bestId = id
-          }
-        })
-
-        if (bestRatio > 0 && bestId !== activeSectionRef.current) {
-          setActiveSection(bestId)
+      ([entry]) => {
+        if (entry.isIntersecting && !hasRun.current) {
+          hasRun.current = true;
+          setTimeout(() => {
+            setStarted(true);
+            let i = 0;
+            const interval = setInterval(() => {
+              i++;
+              setDisplayed(text.slice(0, i));
+              if (i >= text.length) {
+                clearInterval(interval);
+                setTimeout(() => setDone(true), 800);
+              }
+            }, speed);
+          }, delay);
         }
       },
-      {
-        threshold: [0, 0.25, 0.5, 0.75, 1],
-        rootMargin: "-20% 0px -60% 0px",
-      }
-    )
+      { threshold: 0.2 }
+    );
 
-    sections.forEach((el) => observer.observe(el))
-    return () => observer.disconnect()
-  }, [])
-
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId)
-    if (element) {
-      window.scrollTo({ top: element.offsetTop - 20, behavior: "smooth" })
-      setActiveSection(sectionId)
-    }
-    setIsNavOpen(false)
-  }
-
-  const heroRef = useRef<HTMLDivElement>(null)
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] })
-  const opacity = useTransform(scrollYProgress, [0, 1], [1, 0])
-  const scale = useTransform(scrollYProgress, [0, 1], [1, 0.8])
-
-  const handleNavigation = (path: string) => {
-    router.push(path)
-    window.scrollTo(0, 0)
-  }
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, speed, delay]);
 
   return (
-    <main className="overflow-hidden">
-      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
+    // Outer span: holds the full text invisibly to reserve exact dimensions
+    <span ref={ref} className={className} style={{ position: "relative", display: "inline-block" }}>
+      {/* Ghost text — always here, reserves width + height, never visible */}
+      <span aria-hidden="true" style={{ visibility: "hidden", whiteSpace: "pre" }}>
+        {text}
+      </span>
 
-      {/* ---- fixed smooth-scroll section indicator ---- */}
-      <div className="fixed right-6 top-1/2 -translate-y-1/2 z-50 hidden lg:block">
-        <div className="flex flex-col items-center space-y-4">
-          {SECTIONS.map((section) => (
-            <button
-              key={section}
-              onClick={() => scrollToSection(section)}
-              className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                activeSection === section
-                  ? "bg-gold w-4 h-4 shadow-lg shadow-gold/30"
-                  : "bg-gray-500 hover:bg-gold/50"
-              }`}
-              aria-label={`Scroll to ${section} section`}
-            />
-          ))}
-          <div className="mt-2 text-gold">
-            <Shield className="h-5 w-5" />
-          </div>
+      {/* Animated text — absolutely overlaid, same position */}
+      <span aria-live="polite" style={{ position: "absolute", top: 0, left: 0, whiteSpace: "pre" }}>
+        {started ? displayed : ""}
+        {started && !done && (
+          <span
+            style={{
+              display: "inline-block",
+              width: "0.06em",
+              height: "0.85em",
+              backgroundColor: "currentColor",
+              marginLeft: "2px",
+              verticalAlign: "middle",
+              animation: "tw-blink 0.7s step-end infinite",
+            }}
+          />
+        )}
+      </span>
+
+      <style>{`
+        @keyframes tw-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `}</style>
+    </span>
+  );
+}
+
+function SectionHeader({
+  label,
+  title,
+  subtitle,
+  titleWidth = "w-full max-w-[700px]",
+  subtitleWidth = "w-full max-w-[600px]",
+}: {
+  label: string;
+  title: string;
+  subtitle?: string;
+  titleWidth?: string;
+  subtitleWidth?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-[16px] w-full">
+      <span className="font-ibm-mono text-[10px] md:text-[12px] font-bold text-[#FFD600] tracking-[1.5px] md:tracking-[3px]">
+        <GlitchText text={label} speed={30} />
+      </span>
+      <h2 className={`font-grotesk text-[36px] md:text-[56px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.05] whitespace-pre-line ${titleWidth}`}>
+        <GlitchText text={title} speed={40} delay={150} />
+      </h2>
+      {subtitle && (
+        <p className={`font-ibm-mono text-[10px] md:text-[13px] text-[#666666] tracking-[0.5px] md:tracking-[1px] leading-[1.6] text-pretty ${subtitleWidth}`}>
+          <GlitchText text={subtitle} speed={20} delay={350} />
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* Card renderers used 3x per section — kept as functions to avoid repeating markup */
+
+function FeatureCard({
+  iconColor, title, description, tag, tagColor, bgColor = "#111111", borderColor = "#2D2D2D",
+}: {
+  iconColor: string; title: string; description: string; tag: string; tagColor: string; bgColor?: string; borderColor?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-5 p-8 md:p-[32px] border w-full md:flex-1 md:h-[320px]" style={{ backgroundColor: bgColor, borderColor }}>
+      <div className="w-[40px] h-[40px] shrink-0" style={{ backgroundColor: iconColor }} />
+      <h3 className="font-grotesk text-[18px] font-bold text-[#F5F5F0] tracking-[1px] leading-[1.2] whitespace-pre-line">{title}</h3>
+      <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">{description}</p>
+      <div className="flex items-center justify-center h-[28px] px-[12px] bg-[#1A1A1A] border w-fit" style={{ borderColor: tagColor }}>
+        <span className="font-ibm-mono text-[11px] tracking-[2px]" style={{ color: tagColor }}>{tag}</span>
+      </div>
+    </div>
+  );
+}
+
+function StepCard({
+  number, title, description, bgColor = "#0A0A0A", borderColor = "#2D2D2D", borderWidth = 1,
+}: {
+  number: string; title: string; description: string; bgColor?: string; borderColor?: string; borderWidth?: number;
+}) {
+  return (
+    <div className="flex flex-col gap-4 p-8 md:p-[40px] border w-full md:flex-1 md:h-[260px]" style={{ backgroundColor: bgColor, borderColor, borderWidth }}>
+      <span className="font-grotesk text-[48px] font-bold text-[#FFD600] tracking-[-2px]">{number}</span>
+      <h3 className="font-grotesk text-[20px] font-bold text-[#F5F5F0] tracking-[1px] leading-[1.2] whitespace-pre-line">{title}</h3>
+      <p className="font-ibm-mono text-[11px] text-[#555555] tracking-[1px] leading-[1.5]">{description}</p>
+    </div>
+  );
+}
+
+function TestimonialCard({
+  quote, name, role, bgColor = "#111111", accentColor,
+}: {
+  quote: string; name: string; role: string; bgColor?: string; accentColor: string;
+}) {
+  return (
+    <div className="flex flex-col gap-6 p-8 md:p-[40px] border-l-4 w-full md:flex-1" style={{ backgroundColor: bgColor, borderLeftColor: accentColor }}>
+      <p className="font-ibm-mono text-[13px] text-[#CCCCCC] tracking-[1px] leading-[1.6]">&ldquo;{quote}&rdquo;</p>
+      <div className="flex items-center gap-[12px]">
+        <div className="w-[36px] h-[36px] rounded-full bg-[#333333] shrink-0" />
+        <div className="flex flex-col gap-[2px]">
+          <span className="font-grotesk text-[13px] font-bold text-[#F5F5F0] tracking-[1px]">{name}</span>
+          <span className="font-ibm-mono text-[11px] text-[#555555] tracking-[1px]">{role}</span>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* ═══════════════════════════════════════════════════════════
-          HEADER
-      ═══════════════════════════════════════════════════════════ */}
-      <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500 bg-black/90 backdrop-blur-sm border-b border-gold/20 py-2">
-        <div className="w-full max-w-[1600px] mx-auto px-4">
-          {/* Desktop Layout — grid for control */}
-          <div className="grid grid-cols-[auto_1fr_auto] items-center justify-items-center">
-            {/* Logo */}
-            <div
-              onClick={() => scrollToSection("home")}
-              className="flex items-center space-x-2 z-20 justify-self-start cursor-pointer"
-            >
-              <div className="relative w-14 h-16 md:w-16 md:h-20">
-                <Image
-                  src="/valiant-league-logo.png"
-                  alt="Valiant League Logo"
-                  fill
-                  className="object-contain"
-                  priority
-                />
-              </div>
-
-              <span className="font-cinzel font-bold text-xl md:text-2xl text-white">
-                VALIANT <span className="text-gold">LEAGUE</span>
+function PricingCard({
+  tier, tierColor = "#888888", name, nameColor = "#F5F5F0", price, priceColor = "#F5F5F0",
+  btnLabel, btnLabelColor = "#888888", bgColor = "#0F0F0F", borderColor = "#2D2D2D", borderWidth = 1,
+  btnBg = "#1A1A1A", btnBorderColor = "#3D3D3D", tierBg = "#1A1A1A", tierBorderColor = "#3D3D3D",
+  features, accentColor = "#555555",
+}: {
+  tier: string; tierColor?: string; name: string; nameColor?: string; price: string; priceColor?: string;
+  btnLabel: string; btnLabelColor?: string; bgColor?: string; borderColor?: string; borderWidth?: number;
+  btnBg?: string; btnBorderColor?: string; tierBg?: string; tierBorderColor?: string;
+  features: { label: string; included: boolean }[]; accentColor?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-8 p-8 md:p-[40px] w-full md:flex-1" style={{ backgroundColor: bgColor, border: `${borderWidth}px solid ${borderColor}` }}>
+      <div className="flex items-center justify-center h-[28px] px-[12px] w-fit" style={{ backgroundColor: tierBg, border: `1px solid ${tierBorderColor}` }}>
+        <span className="font-ibm-mono text-[11px] tracking-[2px]" style={{ color: tierColor }}>{tier}</span>
+      </div>
+      <span className="font-grotesk text-[28px] font-bold tracking-[1px]" style={{ color: nameColor }}>{name}</span>
+      <div className="flex items-end gap-[4px]">
+        <span className="font-grotesk text-[48px] font-bold tracking-[-2px] leading-none" style={{ color: priceColor }}>{price}</span>
+        <span className="font-ibm-mono text-[13px] text-[#555555] tracking-[1px] mb-[6px]">/MO</span>
+      </div>
+      <div className="flex flex-col gap-[10px]" style={{ borderTop: `1px solid ${borderColor === "#0F0F0F" ? "#2D2D2D" : borderColor}` }}>
+        <div className="pt-6 flex flex-col gap-[10px]">
+          {features.map((f, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="font-ibm-mono text-[14px] leading-none shrink-0" style={{ color: f.included ? accentColor : "#333333" }}>
+                {f.included ? "+" : "—"}
               </span>
+              <span className="font-ibm-mono text-[11px] tracking-[1px]" style={{ color: f.included ? "#A0A09A" : "#3D3D3D" }}>{f.label}</span>
             </div>
+          ))}
+        </div>
+      </div>
+      <button className="flex items-center justify-center w-full h-[48px] mt-auto" style={{ backgroundColor: btnBg, border: `2px solid ${btnBorderColor}` }}>
+        <span className="font-ibm-mono text-[12px] tracking-[2px]" style={{ color: btnLabelColor }}>{btnLabel}</span>
+      </button>
+    </div>
+  );
+}
 
-            {/* Navigation */}
-            <nav className="hidden md:flex items-center justify-center space-x-4">
-              {navLinks.map((link) => (
-                <Button
-                  key={link.name}
-                  variant={activeSection === link.id ? "default" : "outline"}
-                  className={cn(
-                    "font-cinzel text-base transition-all",
-                    activeSection === link.id
-                      ? "bg-gold hover:bg-gold/90 text-black"
-                      : "border-gold/50 text-white hover:bg-gold/10 hover:text-gold hover:border-gold"
-                  )}
-                  onClick={() => scrollToSection(link.id)}
+function cellStyle(val: string) {
+  if (val === "[✓]") return "font-bold text-[14px]";
+  if (val === "[✗]") return "text-[#3D3D3D] text-[13px]";
+  if (val === "[—]") return "text-[#444444] text-[13px]";
+  return "text-[#444444] text-[10px]";
+}
+function cellColor(val: string) {
+  return val === "[✓]" ? "text-[#444444]" : "";
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   STATIC DATA
+   ════════════════════════════════════════════════════════════════════ */
+
+const NAV_LINKS = [
+  { label: "FEATURES", section: "features" },
+  { label: "COMPARE", section: "comparison" },
+  { label: "SHOWCASE", section: "showcase" },
+  { label: "FAQ", section: "faq" },
+  { label: "PRICING", section: "pricing" },
+];
+
+const layers = [
+  { label: "FRAME / HERO", color: "#FFD600", indent: 0, active: true },
+  { label: "NAVBAR", color: "#888", indent: 12 },
+  { label: "HEADLINE", color: "#4ADE80", indent: 12 },
+  { label: "SUBTEXT", color: "#888", indent: 12 },
+  { label: "CTA GROUP", color: "#FF6B35", indent: 12 },
+  { label: "BTN / PRIMARY", color: "#FF6B35", indent: 24 },
+  { label: "BTN / GHOST", color: "#888", indent: 24 },
+  { label: "MEDIA BLOCK", color: "#60A5FA", indent: 12 },
+  { label: "FOOTER", color: "#888", indent: 0 },
+];
+
+const inspectProps = [
+  { key: "W", val: "1100px" },
+  { key: "H", val: "580px" },
+  { key: "X", val: "0" },
+  { key: "Y", val: "0" },
+  { key: "FILL", val: "#0F0F0F", swatch: "#0F0F0F" },
+  { key: "BORDER", val: "#FFD600", swatch: "#FFD600" },
+  { key: "RADIUS", val: "0px" },
+  { key: "OPACITY", val: "100%" },
+];
+
+const tokens = [
+  { name: "primary", hex: "#FFD600" },
+  { name: "accent", hex: "#FF6B35" },
+  { name: "surface", hex: "#111111" },
+  { name: "text", hex: "#F5F5F0" },
+  { name: "muted", hex: "#555555" },
+];
+
+const codeLines = [
+  { w: 80, color: "#4ADE80", x: 325 },
+  { w: 140, color: "#60A5FA", x: 345 },
+  { w: 100, color: "#888", x: 355 },
+  { w: 120, color: "#FF6B35", x: 345 },
+  { w: 90, color: "#888", x: 355 },
+  { w: 160, color: "#4ADE80", x: 355 },
+  { w: 80, color: "#888", x: 345 },
+  { w: 110, color: "#60A5FA", x: 325 },
+];
+
+const handles: [number, number][] = [
+  [280, 90], [570, 90], [860, 90],
+  [280, 280], [860, 280],
+  [280, 470], [570, 470], [860, 470],
+];
+
+const tickerItems = ["BUTTON", "INPUT", "CARD", "MODAL", "BADGE", "TOOLTIP", "TOGGLE", "SLIDER", "TABLE", "NAVBAR"];
+
+const logos = ["ACME CORP", "AXIOM INC", "FORGE LAB", "NEXUS CO.", "VORTEX SYS"];
+
+const stats = [
+  { value: "10K+", label: "ACTIVE BUILDERS", border: true },
+  { value: "99.9%", label: "UPTIME SLA", border: true },
+  { value: "4PX", label: "GRID BASE UNIT", border: true },
+  { value: "200+", label: "COMPONENTS", border: false },
+];
+
+const comparisonRows = [
+  { feature: "4PX GRID SYSTEM", pc: "[✓]", figma: "[—]", sketch: "[—]", framer: "[—]" },
+  { feature: "DARK MODE FIRST", pc: "[✓]", figma: "[✓]", sketch: "[—]", framer: "[✓]" },
+  { feature: "ZERO DEPENDENCIES", pc: "[✓]", figma: "[✗]", sketch: "[✗]", framer: "[✗]" },
+  { feature: "AI SUGGESTIONS", pc: "[✓]", figma: "[BETA]", sketch: "[✗]", framer: "[✓]" },
+  { feature: "VERSION HISTORY", pc: "[✓]", figma: "[✓]", sketch: "[✓]", framer: "[—]" },
+  { feature: "FREE PLAN AVAILABLE", pc: "[✓]", figma: "[✓]", sketch: "[✗]", framer: "[✗]" },
+];
+
+const showcaseSlides = [
+  { tag: "[DASHBOARD]", tagBg: "#FFD600", tagColor: "#0A0A0A", idx: "01 / 04", idxColor: "#444444", title: "FORGE ANALYTICS\nDASHBOARD", by: "BY FORGE LAB // BUILT IN 3 DAYS WITH PIXELCRAFT", border: "#2D2D2D", bg: "#111111", tagBorder: "" },
+  { tag: "[DESIGN SYS]", tagBg: "#111111", tagColor: "#FFD600", idx: "02 / 04", idxColor: "#FFD600", title: "AXIOM COMPONENT\nLIBRARY", by: "BY AXIOM INC // 200 COMPONENTS IN 1 WEEK", border: "#FFD600", bg: "#0F0F0F", tagBorder: "#FFD600" },
+  { tag: "[MOBILE APP]", tagBg: "#1A1A1A", tagColor: "#FF6B35", idx: "03 / 04", idxColor: "#444444", title: "NEXUS MOBILE\nSYSTEM", by: "BY NEXUS CO. // CROSS-PLATFORM, 4 DAYS", border: "#2D2D2D", bg: "#0A0A0A", tagBorder: "#FF6B35" },
+  { tag: "[LANDING PAGE]", tagBg: "#FFD600", tagColor: "#0A0A0A", idx: "04 / 04", idxColor: "#444444", title: "VORTEX MARKETING\nSITE", by: "BY VORTEX SYS // LAUNCH READY IN 2 DAYS", border: "#2D2D2D", bg: "#111111", tagBorder: "" },
+];
+
+const faqs = [
+  { question: "IS PIXELCRAFT REALLY FREE TO START?", answer: "YES. THE BUILDER PLAN IS FREE FOREVER. NO CREDIT CARD REQUIRED. 50 COMPONENTS, 1 PROJECT, AND FULL COMMUNITY ACCESS. UPGRADE ANYTIME — NO LOCK-IN, NO DARK PATTERNS." },
+  { question: "DO I NEED TO KNOW HOW TO CODE?", answer: "NO. PIXELCRAFT IS DESIGNED FOR BOTH DESIGNERS AND DEVELOPERS. OUR VISUAL EDITOR REQUIRES ZERO CODING KNOWLEDGE TO BUILD PIXEL-PERFECT UIS." },
+  { question: "HOW DOES EXPORT WORK?", answer: "SELECT ANY COMPONENT OR FRAME AND EXPORT TO REACT, VUE, FLUTTER, SVG, OR CSS WITH ONE CLICK. CODE IS CLEAN, PRODUCTION-READY, AND FOLLOWS YOUR CHOSEN FRAMEWORK CONVENTIONS." },
+  { question: "CAN I MIGRATE FROM FIGMA?", answer: "YES. USE OUR FIGMA IMPORT PLUGIN TO BRING YOUR EXISTING DESIGNS INTO PIXELCRAFT. COMPONENTS, STYLES, AND LAYOUTS ARE AUTOMATICALLY CONVERTED." },
+  { question: "WHAT FORMATS CAN I EXPORT TO?", answer: "REACT, VUE, ANGULAR, SVELTE, FLUTTER, HTML/CSS, SVG, AND TAILWIND. MORE FRAMEWORKS COMING SOON." },
+];
+
+const BUILDER_FEATURES = [
+  { label: "UP TO 3 PROJECTS", included: true },
+  { label: "1 GB STORAGE", included: true },
+  { label: "COMMUNITY SUPPORT", included: true },
+  { label: "BASIC ANALYTICS", included: true },
+  { label: "CUSTOM DOMAINS", included: false },
+  { label: "TEAM COLLABORATION", included: false },
+  { label: "PRIORITY RENDERING", included: false },
+  { label: "API ACCESS", included: false },
+];
+const ARCHITECT_FEATURES = [
+  { label: "UNLIMITED PROJECTS", included: true },
+  { label: "50 GB STORAGE", included: true },
+  { label: "PRIORITY SUPPORT", included: true },
+  { label: "ADVANCED ANALYTICS", included: true },
+  { label: "CUSTOM DOMAINS", included: true },
+  { label: "TEAM COLLABORATION", included: true },
+  { label: "PRIORITY RENDERING", included: false },
+  { label: "API ACCESS", included: false },
+];
+const SYSTEM_FEATURES = [
+  { label: "UNLIMITED PROJECTS", included: true },
+  { label: "UNLIMITED STORAGE", included: true },
+  { label: "DEDICATED SUPPORT", included: true },
+  { label: "FULL ANALYTICS SUITE", included: true },
+  { label: "CUSTOM DOMAINS", included: true },
+  { label: "TEAM COLLABORATION", included: true },
+  { label: "PRIORITY RENDERING", included: true },
+  { label: "API ACCESS", included: true },
+];
+
+const productLinks = ["FEATURES", "PRICING", "CHANGELOG", "ROADMAP"];
+const companyLinks = ["ABOUT", "BLOG", "CAREERS"];
+const resourceLinks = ["DOCS", "COMPONENTS", "COMMUNITY"];
+
+const CURSOR_DEFS = [
+  { name: "SARAH", color: "#FFD600", top: "18%", left: "8%", delay: "0s" },
+  { name: "ALEX", color: "#FF6B35", top: "62%", left: "88%", delay: "1.4s" },
+  { name: "MORGAN", color: "#60A5FA", top: "40%", left: "72%", delay: "2.6s" },
+];
+
+function scrollToId(id: string) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PAGE — everything below is one-time-use, so it's all inlined
+   directly into this single component instead of being split into
+   separate Navbar/Hero/Features/... components.
+   ════════════════════════════════════════════════════════════════════ */
+
+export default function Home() {
+  // Hero
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // Navbar
+  const [scrolled, setScrolled] = useState(false);
+  const [activeNav, setActiveNav] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const ids = NAV_LINKS.map((l) => l.section).filter(Boolean);
+    const observers: IntersectionObserver[] = [];
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const o = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) setActiveNav(id); }, { rootMargin: "-35% 0px -60% 0px" });
+      o.observe(el);
+      observers.push(o);
+    });
+    return () => observers.forEach((o) => o.disconnect());
+  }, []);
+
+  // Showcase
+  const [showcaseActive, setShowcaseActive] = useState(1);
+  const showcasePrev = () => setShowcaseActive((p) => Math.max(0, p - 1));
+  const showcaseNext = () => setShowcaseActive((p) => Math.min(showcaseSlides.length - 1, p + 1));
+  const slide = showcaseSlides[showcaseActive];
+
+  // FAQ
+  const [openFaq, setOpenFaq] = useState(0);
+
+  return (
+    <main className="flex flex-col w-full bg-[#0A0A0A] pt-[60px]">
+      {/* ── NAVBAR ── */}
+      <header
+        className="fixed top-0 left-0 right-0 z-50 transition-all duration-300"
+        style={{
+          background: scrolled ? "rgba(10,10,10,0.88)" : "transparent",
+          backdropFilter: scrolled ? "blur(14px)" : "none",
+          WebkitBackdropFilter: scrolled ? "blur(14px)" : "none",
+          borderBottom: scrolled ? "1px solid #1E1E1E" : "1px solid transparent",
+        }}
+      >
+        <div className="flex items-center justify-between h-[60px] px-6 md:px-[48px] max-w-[1400px] mx-auto">
+          <a href="#" className="flex items-center gap-[10px] shrink-0 group">
+            <span className="w-[10px] h-[10px] bg-[#FFD600] group-hover:scale-110 transition-transform" />
+            <span className="font-grotesk text-[13px] font-bold text-[#F5F5F0] tracking-[2.5px]">PIXELCRAFT</span>
+          </a>
+
+          <nav className="hidden md:flex items-center gap-[36px]">
+            {NAV_LINKS.map(({ label, section }) => {
+              const isActive = activeNav === section;
+              return (
+                <button
+                  key={label}
+                  onClick={() => scrollToId(section)}
+                  className="relative font-ibm-mono text-[10px] tracking-[1.5px] transition-colors duration-150 bg-transparent border-none cursor-pointer"
+                  style={{ color: isActive ? "#FFD600" : "#555" }}
+                  onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = "#F5F5F0"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = isActive ? "#FFD600" : "#555"; }}
                 >
-                  {link.name}
-                </Button>
-              ))}
-            </nav>
+                  {label}
+                  <span className="absolute left-0 -bottom-[3px] h-[1.5px] bg-[#FFD600] transition-all duration-300" style={{ width: isActive ? "100%" : "0%" }} />
+                </button>
+              );
+            })}
+          </nav>
 
-            {/* Right Side */}
-            <div className="flex items-center justify-end space-x-4 justify-self-end">
-              <div className="hidden md:flex items-center space-x-2">
-                <Link href="#" target="_blank" rel="noopener noreferrer">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-gold hover:text-gold/80"
-                  >
-                    <Twitter className="h-5 w-5" />
-                  </Button>
-                </Link>
-
-                <Button
-                  className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel"
-                  onClick={() => handleNavigation("/admin")}
-                >
-                  Open the Console
-                </Button>
-              </div>
-
-              {/* Mobile Menu Button */}
-              <button
-                className="md:hidden text-white hover:text-gold z-20"
-                onClick={() => setIsNavOpen((v) => !v)}
-                aria-label="Toggle menu"
-              >
-                {isNavOpen ? <X size={24} /> : <Menu size={24} />}
-              </button>
-            </div>
+          <div className="hidden md:flex items-center gap-[14px]">
+            <a href="#" className="font-ibm-mono text-[10px] text-[#555] tracking-[1.5px] hover:text-[#F5F5F0] transition-colors">LOG IN</a>
+            <a href="#" className="font-grotesk text-[11px] font-bold text-[#0A0A0A] bg-[#FFD600] tracking-[1.5px] px-[18px] py-[9px] hover:bg-[#F5F5F0] transition-colors">START FREE</a>
           </div>
+
+          <button className="md:hidden flex flex-col gap-[5px] p-2 -mr-2" onClick={() => setMenuOpen((v) => !v)} aria-label="Toggle menu">
+            <span className="block w-[20px] h-[1.5px] bg-[#F5F5F0] transition-transform duration-200 origin-center" style={{ transform: menuOpen ? "translateY(6.5px) rotate(45deg)" : "none" }} />
+            <span className="block w-[20px] h-[1.5px] bg-[#F5F5F0] transition-opacity duration-200" style={{ opacity: menuOpen ? 0 : 1 }} />
+            <span className="block w-[20px] h-[1.5px] bg-[#F5F5F0] transition-transform duration-200 origin-center" style={{ transform: menuOpen ? "translateY(-6.5px) rotate(-45deg)" : "none" }} />
+          </button>
         </div>
 
-        {/* Mobile Navigation */}
         <div
-          className={`md:hidden bg-black/95 border-t border-gold/20 fixed top-[68px] left-0 w-full z-10 transition-all duration-300 ${
-            isNavOpen
-              ? "opacity-100 translate-y-0"
-              : "opacity-0 -translate-y-4 pointer-events-none"
-          }`}
+          className="md:hidden overflow-hidden transition-all duration-300"
+          style={{ maxHeight: menuOpen ? "400px" : "0px", background: "rgba(10,10,10,0.97)", backdropFilter: "blur(14px)", borderBottom: menuOpen ? "1px solid #1E1E1E" : "none" }}
         >
-          <div className="container mx-auto px-4 py-6">
-            <nav className="flex flex-col space-y-4">
-              {navLinks.map((link) => (
-                <Button
-                  key={link.name}
-                  variant={activeSection === link.id ? "default" : "outline"}
-                  className={cn(
-                    "font-cinzel text-base w-full justify-start transition-all",
-                    activeSection === link.id
-                      ? "bg-gold hover:bg-gold/90 text-black"
-                      : "border-gold/50 text-white hover:bg-gold/10 hover:text-gold hover:border-gold"
-                  )}
-                  onClick={() => scrollToSection(link.id)}
+          <nav className="flex flex-col px-6 py-5 gap-0">
+            {NAV_LINKS.map(({ label, section }) => {
+              const isActive = activeNav === section;
+              return (
+                <button
+                  key={label}
+                  onClick={() => { scrollToId(section); setMenuOpen(false); }}
+                  className="flex items-center gap-2 w-full font-ibm-mono text-[12px] tracking-[2px] py-[14px] border-b border-[#141414] transition-colors bg-transparent border-x-0 border-t-0 cursor-pointer"
+                  style={{ color: isActive ? "#FFD600" : "#666" }}
                 >
-                  {link.name}
-                </Button>
-              ))}
-
-              <Button
-                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start mt-2"
-                onClick={() => {
-                  handleNavigation("/admin")
-                  setIsNavOpen(false)
-                }}
-              >
-                Open the Console
-              </Button>
-
-              <div className="pt-4 border-t border-gold/20 flex justify-center">
-                <Link
-                  href="#"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setIsNavOpen(false)}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-gold hover:text-gold/80"
-                  >
-                    <Twitter className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </div>
-            </nav>
-          </div>
+                  <span className="w-[4px] h-[4px] rounded-full shrink-0 transition-colors" style={{ background: isActive ? "#FFD600" : "#2D2D2D" }} />
+                  {label}
+                </button>
+              );
+            })}
+            <div className="flex flex-col gap-[10px] pt-5">
+              <a href="#" className="font-ibm-mono text-[12px] text-[#555] tracking-[1.5px]">LOG IN</a>
+              <a href="#" className="font-grotesk text-[11px] font-bold text-[#0A0A0A] bg-[#FFD600] tracking-[1.5px] px-[18px] py-[11px] text-center hover:bg-[#F5F5F0] transition-colors">START FREE</a>
+            </div>
+          </nav>
         </div>
       </header>
 
-      {/* Hero */}
-      <section id="home" className="relative min-h-screen flex items-center justify-center pt-28" ref={heroRef}>
-        <div className="absolute inset-0 z-0">
-          <Image
-            src="/images/website-background.png"
-            alt="Valiant League background"
-            fill
-            priority
-            className="object-cover object-center"
+      {/* ── HERO ── */}
+      <section className="relative flex flex-col items-center w-full bg-[#0A0A0A] py-16 px-6 md:py-[100px] md:px-[120px] overflow-hidden">
+        <div className="flex items-center justify-center gap-[8px] h-[32px] px-[12px] md:px-[16px] bg-[#1A1A1A] border-2 border-[#FFD600]">
+          <div className="w-[8px] h-[8px] bg-[#FFD600] shrink-0" />
+          <span className="font-ibm-mono text-[9px] md:text-[11px] font-bold text-[#FFD600] tracking-[1px] md:tracking-[2px] whitespace-nowrap">[NEW] // VERSION 2.0 NOW LIVE</span>
+        </div>
+
+        <div className="h-8 md:h-[32px]" />
+
+        <h1 className="font-grotesk text-[clamp(32px,10vw,96px)] font-bold text-[#F5F5F0] tracking-[-1px] leading-none text-center w-full max-w-[1100px]">
+          <GlitchText text="BUILD WITHOUT" speed={45} delay={100} />
+          <br />
+          <GlitchText text="LIMITS." speed={45} delay={400} />
+        </h1>
+        <h1 className="font-grotesk text-[clamp(32px,10vw,96px)] font-bold text-[#FFD600] tracking-[-1px] leading-none text-center w-full max-w-[1100px]">
+          <GlitchText text="PIXEL-PERFECT." speed={45} delay={700} />
+        </h1>
+
+        <div className="h-8 md:h-[32px]" />
+
+        <p className="font-ibm-mono text-[13px] md:text-[15px] text-[#888888] tracking-[1px] leading-[1.6] text-center w-full max-w-[800px]">
+          THE INDUSTRIAL-GRADE DESIGN SYSTEM FOR BUILDERS WHO DON&apos;T COMPROMISE.
+          <br />
+          FROM PIXEL 01 TO PRODUCTION DEPLOY.
+        </p>
+
+        <div className="h-10 md:h-[48px]" />
+
+        <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-[16px] w-full sm:w-auto">
+          <button className="flex items-center justify-center w-full sm:w-[220px] h-[56px] bg-[#FFD600] hover:bg-[#e6c200] transition-colors">
+            <span className="font-grotesk text-[12px] font-bold text-[#0A0A0A] tracking-[2px]">START BUILDING FREE</span>
+          </button>
+          <button className="flex items-center justify-center w-full sm:w-[200px] h-[56px] bg-[#0A0A0A] border-2 border-[#3D3D3D] hover:border-[#888888] transition-colors">
+            <span className="font-ibm-mono text-[12px] text-[#888888] tracking-[2px]">VIEW DOCS &gt;</span>
+          </button>
+        </div>
+
+        <div className="h-6 md:h-[24px]" />
+
+        <p className="font-ibm-mono text-[11px] text-[#555555] tracking-[2px] text-center">NO CREDIT CARD // FREE FOREVER PLAN // 10,000+ BUILDERS</p>
+
+        <div className="h-12 md:h-[64px]" />
+
+        <div className="w-full max-w-[1100px] bg-[#0F0F0F] overflow-hidden" style={{ border: "2px solid #2D2D2D" }}>
+          <style>{`
+            @keyframes hero-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+            @keyframes hero-scan { 0%{transform:translateY(-580px)} 100%{transform:translateY(580px)} }
+            @keyframes hero-pulse { 0%,100%{opacity:0.3} 50%{opacity:1} }
+            @keyframes hero-ticker { 0%{transform:translateX(0)} 100%{transform:translateX(-700px)} }
+            .hero-cursor { animation: hero-blink 1.1s step-end infinite; }
+            .hero-scan { animation: hero-scan 4s linear infinite; }
+            .hero-pulse { animation: hero-pulse 2s ease-in-out infinite; }
+            .hero-ticker-track { animation: hero-ticker 14s linear infinite; }
+          `}</style>
+
+          <svg viewBox="0 0 1100 580" xmlns="http://www.w3.org/2000/svg" style={{ display: "block", width: "100%", height: "auto" }}>
+            <rect width="1100" height="580" fill="#0F0F0F" />
+            <rect className="hero-scan" x="0" y="0" width="1100" height="6" fill="rgba(255,214,0,0.03)" />
+
+            {Array.from({ length: 22 }, (_, c) =>
+              Array.from({ length: 12 }, (_, r) => (
+                <circle key={`d${c}-${r}`} cx={c * 50 + 25} cy={r * 50 + 25} r="1" fill="#1A1A1A" />
+              ))
+            )}
+
+            <rect x="0" y="0" width="200" height="580" fill="#111111" />
+            <line x1="200" y1="0" x2="200" y2="580" stroke="#2D2D2D" strokeWidth="1" />
+
+            <rect x="0" y="0" width="200" height="36" fill="#161616" />
+            <text x="12" y="23" fontFamily="monospace" fontSize="9" fill="#FFD600" letterSpacing={2} fontWeight="700">LAYERS</text>
+            <text x="176" y="23" fontFamily="monospace" fontSize="12" fill="#444">+</text>
+
+            {layers.map((l, i) => {
+              const y = 36 + i * 32;
+              return (
+                <g key={i} style={{ opacity: mounted ? 1 : 0, transform: mounted ? "translateY(0)" : "translateY(6px)", transition: `opacity 0.4s ease ${i * 0.08}s, transform 0.4s ease ${i * 0.08}s` }}>
+                  {l.active && <rect x="0" y={y} width="200" height="32" fill="#1E1E1E" />}
+                  {l.active && <rect x="0" y={y} width="2" height="32" fill="#FFD600" />}
+                  <circle cx={20 + l.indent} cy={y + 16} r="3" fill={l.color} opacity="0.8" />
+                  <text x={32 + l.indent} y={y + 20} fontFamily="monospace" fontSize="9" fill={l.active ? "#F5F5F0" : "#555"} letterSpacing={0.5}>{l.label}</text>
+                </g>
+              );
+            })}
+
+            <rect x="899" y="0" width="201" height="580" fill="#111111" />
+            <line x1="899" y1="0" x2="899" y2="580" stroke="#2D2D2D" strokeWidth="1" />
+            <rect x="899" y="0" width="201" height="36" fill="#161616" />
+            <text x="912" y="23" fontFamily="monospace" fontSize="9" fill="#FFD600" letterSpacing={2} fontWeight="700">INSPECT</text>
+
+            {inspectProps.map((p, i) => {
+              const y = 56 + i * 26;
+              return (
+                <g key={i} style={{ opacity: mounted ? 1 : 0, transition: `opacity 0.4s ease ${0.1 + i * 0.06}s` }}>
+                  <text x="912" y={y} fontFamily="monospace" fontSize="8" fill="#555" letterSpacing={1}>{p.key}</text>
+                  {p.swatch && <rect x="970" y={y - 9} width="10" height="10" fill={p.swatch} rx="1" />}
+                  <text x={p.swatch ? "986" : "970"} y={y} fontFamily="monospace" fontSize="8" fill="#888" letterSpacing={0.5}>{p.val}</text>
+                </g>
+              );
+            })}
+
+            <line x1="899" y1="278" x2="1100" y2="278" stroke="#222" strokeWidth="1" />
+            <text x="912" y="300" fontFamily="monospace" fontSize="9" fill="#FFD600" letterSpacing={2} fontWeight="700">TOKENS</text>
+
+            {tokens.map((t, i) => {
+              const y = 316 + i * 28;
+              return (
+                <g key={i}>
+                  <rect x="912" y={y} width="12" height="12" fill={t.hex} rx="1" />
+                  <text x="932" y={y + 10} fontFamily="monospace" fontSize="8" fill="#666" letterSpacing={0.5}>{t.name}</text>
+                  <text x="990" y={y + 10} fontFamily="monospace" fontSize="8" fill="#444" letterSpacing={0.5}>{t.hex}</text>
+                </g>
+              );
+            })}
+
+            <rect x="200" y="0" width="700" height="36" fill="#141414" />
+            <line x1="200" y1="36" x2="900" y2="36" stroke="#2D2D2D" strokeWidth="1" />
+
+            {["V", "F", "T", "P"].map((label, t) => (
+              <g key={t}>
+                <rect x={218 + t * 28} y="9" width="18" height="18" rx="2" fill={t === 0 ? "#FFD600" : "#1E1E1E"} />
+                <text x={223 + t * 28} y="22" fontFamily="monospace" fontSize="9" fill={t === 0 ? "#0A0A0A" : "#444"}>{label}</text>
+              </g>
+            ))}
+            <line x1="340" y1="11" x2="340" y2="25" stroke="#2D2D2D" strokeWidth="1" />
+            <text x="356" y="23" fontFamily="monospace" fontSize="9" fill="#555" letterSpacing={1}>100%</text>
+
+            <rect x="200" y="36" width="700" height="16" fill="#131313" />
+            {Array.from({ length: 35 }, (_, i) => (
+              <g key={`rh${i}`}>
+                <rect x={200 + i * 20} y="36" width="1" height={i % 5 === 0 ? 8 : 4} fill="#2A2A2A" />
+                {i % 5 === 0 && <text x={202 + i * 20} y="50" fontFamily="monospace" fontSize="6" fill="#333">{i * 20}</text>}
+              </g>
+            ))}
+            <rect x="200" y="52" width="16" height="528" fill="#131313" />
+            {Array.from({ length: 26 }, (_, i) => (
+              <rect key={`rv${i}`} x="200" y={52 + i * 20} width={i % 5 === 0 ? 8 : 4} height="1" fill="#2A2A2A" />
+            ))}
+
+            <rect x="280" y="90" width="540" height="380" fill="#0A0A0A" stroke="#FFD600" strokeWidth="1.5" strokeDasharray="4 2" />
+            <text x="280" y="84" fontFamily="monospace" fontSize="8" fill="#FFD600" letterSpacing={1}>FRAME / HERO — 1100 x 580</text>
+
+            {handles.map(([hx, hy], i) => (
+              <rect key={`h${i}`} x={hx - 3} y={hy - 3} width="6" height="6" fill="#FFD600" stroke="#0A0A0A" strokeWidth="1" />
+            ))}
+
+            <rect x="280" y="90" width="540" height="36" fill="#111111" />
+            <line x1="280" y1="126" x2="820" y2="126" stroke="#2D2D2D" strokeWidth="1" />
+            <rect x="295" y="102" width="44" height="10" rx="1" fill="#FFD600" opacity="0.9" />
+            <rect x="640" y="103" width="28" height="8" rx="1" fill="#222" />
+            <rect x="676" y="103" width="28" height="8" rx="1" fill="#222" />
+            <rect x="715" y="101" width="38" height="12" fill="#FFD600" />
+
+            <rect x="310" y="148" width="300" height="18" rx="1" fill="#F5F5F0" opacity="0.9" />
+            <rect x="310" y="172" width="220" height="18" rx="1" fill="#FFD600" opacity="0.9" />
+
+            <rect x="310" y="204" width="240" height="5" rx="1" fill="#444" />
+            <rect x="310" y="215" width="200" height="5" rx="1" fill="#333" />
+
+            <rect x="310" y="236" width="100" height="24" fill="#FFD600" />
+            <text x="325" y="252" fontFamily="monospace" fontSize="7" fill="#0A0A0A" fontWeight="700" letterSpacing={0.5}>START FREE</text>
+            <rect x="418" y="236" width="90" height="24" fill="none" stroke="#3D3D3D" strokeWidth="1.5" />
+            <text x="430" y="252" fontFamily="monospace" fontSize="7" fill="#555" letterSpacing={0.5}>VIEW DOCS</text>
+
+            <rect x="310" y="280" width="490" height="168" fill="#161616" stroke="#222" strokeWidth="1" />
+            <rect x="310" y="280" width="490" height="18" fill="#1A1A1A" />
+            <circle cx="322" cy="289" r="3" fill="#FF5F57" />
+            <circle cx="332" cy="289" r="3" fill="#FEBC2E" />
+            <circle cx="342" cy="289" r="3" fill="#28C840" />
+            <text x="360" y="293" fontFamily="monospace" fontSize="7" fill="#333" letterSpacing={1}>preview.tsx — PixelCraft</text>
+
+            {codeLines.map((cl, i) => (
+              <rect key={`cl${i}`} x={cl.x} y={308 + i * 16} width={cl.w} height="5" rx="1" fill={cl.color} opacity="0.35" />
+            ))}
+
+            <rect className="hero-cursor" x="465" y="340" width="6" height="10" fill="#FFD600" opacity="0.9" />
+
+            <line x1="820" y1="148" x2="860" y2="148" stroke="#FF6B35" strokeWidth="0.75" strokeDasharray="3 2" />
+            <line x1="820" y1="190" x2="860" y2="190" stroke="#FF6B35" strokeWidth="0.75" strokeDasharray="3 2" />
+            <line x1="850" y1="148" x2="850" y2="190" stroke="#FF6B35" strokeWidth="0.75" />
+            <text x="835" y="173" fontFamily="monospace" fontSize="7" fill="#FF6B35" letterSpacing={0.5}>42px</text>
+
+            <line x1="310" y1="226" x2="310" y2="236" stroke="#60A5FA" strokeWidth="0.75" strokeDasharray="2 2" />
+            <line x1="410" y1="226" x2="410" y2="236" stroke="#60A5FA" strokeWidth="0.75" strokeDasharray="2 2" />
+            <text x="345" y="233" fontFamily="monospace" fontSize="7" fill="#60A5FA" letterSpacing={0.5}>12px</text>
+
+            <line x1="200" y1="514" x2="900" y2="514" stroke="#2D2D2D" strokeWidth="1" />
+            <rect x="200" y="515" width="700" height="32" fill="#0F0F0F" />
+            <clipPath id="tickerClip">
+              <rect x="200" y="515" width="700" height="32" />
+            </clipPath>
+            <g clipPath="url(#tickerClip)">
+              <g className="hero-ticker-track">
+                {[...tickerItems, ...tickerItems].map((name, i) => (
+                  <g key={`t${i}`}>
+                    <circle cx={220 + i * 70} cy="531" r="3" fill="#FFD600" opacity="0.5" />
+                    <text x={230 + i * 70} y="535" fontFamily="monospace" fontSize="8" fill="#444" letterSpacing={1.5}>{name}</text>
+                  </g>
+                ))}
+              </g>
+            </g>
+
+            <line x1="200" y1="547" x2="900" y2="547" stroke="#222" strokeWidth="1" />
+            <rect x="200" y="548" width="700" height="32" fill="#0D0D0D" />
+            <circle className="hero-pulse" cx="220" cy="564" r="4" fill="#4ADE80" />
+            <text x="232" y="568" fontFamily="monospace" fontSize="8" fill="#555" letterSpacing={1}>READY</text>
+            <text x="330" y="568" fontFamily="monospace" fontSize="8" fill="#333" letterSpacing={1}>9 LAYERS</text>
+            <text x="430" y="568" fontFamily="monospace" fontSize="8" fill="#333" letterSpacing={1}>AUTO-LAYOUT ON</text>
+            <text x="600" y="568" fontFamily="monospace" fontSize="8" fill="#333" letterSpacing={1}>GRID: 12 COL</text>
+            <text x="730" y="568" fontFamily="monospace" fontSize="8" fill="#333" letterSpacing={1}>v2.0.1</text>
+
+            <rect x="200" y="548" width="6" height="6" fill="#FFD600" opacity="0.5" />
+            <rect x="894" y="548" width="6" height="6" fill="#FF6B35" opacity="0.4" />
+          </svg>
+        </div>
+
+        {/* Collab cursors */}
+        <div className="pointer-events-none absolute inset-0 hidden md:block overflow-hidden">
+          <style>{`
+            @keyframes cursor-drift {
+              0%   { transform: translate(0, 0); opacity: 0; }
+              10%  { opacity: 1; }
+              50%  { transform: translate(24px, -16px); }
+              90%  { opacity: 1; }
+              100% { transform: translate(0, 0); opacity: 0; }
+            }
+            .collab-cursor { animation: cursor-drift 6s ease-in-out infinite; }
+          `}</style>
+          {CURSOR_DEFS.map((c) => (
+            <div key={c.name} className="collab-cursor absolute flex items-center gap-[6px]" style={{ top: c.top, left: c.left, animationDelay: c.delay }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M1 1L15 7L8 8.5L6.5 15L1 1Z" fill={c.color} stroke="#0A0A0A" strokeWidth="1" />
+              </svg>
+              <span className="font-ibm-mono text-[9px] font-bold text-[#0A0A0A] tracking-[1px] px-[6px] py-[2px]" style={{ backgroundColor: c.color }}>
+                {c.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── PIXEL DIVIDER ── */}
+      <div className="flex w-full">
+        <div className="flex-1 h-[4px] bg-[#FFD600]" />
+        <div className="flex-1 h-[4px] bg-[#0A0A0A]" />
+        <div className="flex-1 h-[4px] bg-[#FFD600]" />
+        <div className="flex-1 h-[4px] bg-[#0A0A0A]" />
+        <div className="flex-1 h-[4px] bg-[#FFD600]" />
+      </div>
+
+      {/* ── LOGOS ── */}
+      <section className="flex flex-col items-center w-full bg-[#0F0F0F] py-[48px] px-6 md:px-[120px] gap-[32px]">
+        <span className="font-ibm-mono text-[11px] text-[#444444] tracking-[3px]">TRUSTED BY TEAMS AT</span>
+        <div className="flex flex-wrap items-center justify-center gap-8 md:gap-[64px] w-full">
+          {logos.map((logo) => (
+            <span key={logo} className="font-grotesk text-[13px] md:text-[14px] font-bold text-[#333333] tracking-[2px]">{logo}</span>
+          ))}
+        </div>
+      </section>
+
+      {/* ── FEATURES ── */}
+      <section id="features" className="flex flex-col w-full bg-[#0A0A0A] py-16 px-6 md:py-[100px] md:px-[120px] gap-12 md:gap-[64px]">
+        <SectionHeader label="[01] // FEATURES" title={"EVERYTHING YOU NEED.\nNOTHING YOU DON'T."} subtitle="ENGINEERED FOR SPEED. BUILT FOR SCALE. DESIGNED FOR BUILDERS." />
+        <div className="flex flex-col md:flex-row w-full gap-[2px]">
+          <FeatureCard iconColor="#FFD600" title={"PIXEL-ACCURATE\nDESIGN SYSTEM"} description="EVERY COMPONENT BUILT TO A 4PX GRID. NO EXCEPTIONS. NO COMPROMISE." tag="CORE" tagColor="#FFD600" borderColor="#FFD600" />
+          <FeatureCard iconColor="#FF6B35" title={"ZERO-DEPENDENCY\nCOMPONENTS"} description="PURE VANILLA. NO BLOAT. SHIP EXACTLY WHAT YOUR USERS NEED, NOTHING MORE." tag="VANILLA" tagColor="#FF6B35" bgColor="#0F0F0F" borderColor="#FF6B35" />
+          <FeatureCard iconColor="#F5F5F0" title={"DARK MODE\nFIRST."} description="BUILT FOR THE TERMINAL GENERATION. EVERY COLOR CALIBRATED FOR LOW-LIGHT PRECISION." tag="DARK" tagColor="#888888" borderColor="#555555" />
+        </div>
+      </section>
+
+      {/* ── HOW IT WORKS ── */}
+      <section className="flex flex-col w-full bg-[#0D0D0D] py-16 px-6 md:py-[100px] md:px-[120px] gap-12 md:gap-[64px]">
+        <SectionHeader label="[02] // HOW IT WORKS" title={"THREE STEPS.\nINFINITE BUILDS."} />
+        <div className="flex flex-col md:flex-row w-full gap-[2px]">
+          <StepCard number="01" title={"INSTALL THE\nSYSTEM"} description="ONE COMMAND. EVERYTHING CONFIGURED." />
+          <StepCard number="02" title={"COMPOSE\nYOUR UI"} description="DRAG. SNAP. BUILD. EVERY COMPONENT CLICKS INTO PLACE." bgColor="#111111" borderColor="#FFD600" borderWidth={1} />
+          <StepCard number="03" title={"SHIP TO\nPRODUCTION"} description="EXPORT. DEPLOY. DONE. PIXEL-PERFECT ON EVERY SCREEN." />
+        </div>
+      </section>
+
+      {/* ── STATS ── */}
+      <section className="flex flex-col w-full bg-[#FFD600] py-12 px-6 md:py-[80px] md:px-[120px]">
+        <span className="font-ibm-mono text-[12px] font-bold text-[#0A0A0A] tracking-[3px]">[03] // BY THE NUMBERS</span>
+        <div className="h-8 md:h-[32px]" />
+        <div className="grid grid-cols-2 md:flex w-full gap-[2px] md:gap-0">
+          {stats.map((stat, i) => (
+            <div
+              key={stat.label}
+              className={`flex flex-col gap-2 items-center justify-center py-6 md:py-0 md:h-[160px] md:flex-1
+                ${stat.border ? "md:border-r-2 md:border-r-[#0A0A0A]" : ""}
+                ${i === 0 ? "md:pr-[40px]" : i === stats.length - 1 ? "md:pl-[40px]" : "md:px-[40px]"}
+                ${i % 2 === 0 ? "border-r-2 border-r-[#0A0A0A] pr-4 md:border-r-0 md:pr-0" : "pl-4 md:pl-0"}
+                ${i >= 2 ? "border-t-2 border-t-[#0A0A0A] pt-4 md:border-t-0 md:pt-0" : ""}
+              `}
+            >
+              <span className="font-grotesk text-[40px] md:text-[64px] font-bold text-[#0A0A0A] tracking-[-2px] leading-none">{stat.value}</span>
+              <span className="font-ibm-mono text-[10px] md:text-[12px] font-bold text-[#1A1A1A] tracking-[2px]">{stat.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── TESTIMONIALS ── */}
+      <section className="flex flex-col w-full bg-[#0A0A0A] py-16 px-6 md:py-[100px] md:px-[120px] gap-12 md:gap-[64px]">
+        <SectionHeader label="[04] // WHAT BUILDERS SAY" title={"REAL BUILDERS.\nREAL RESULTS."} />
+        <div className="flex flex-col md:flex-row w-full gap-[2px]">
+          <TestimonialCard quote="PIXELCRAFT IS THE FIRST TOOL THAT ACTUALLY RESPECTS MY WORKFLOW. SHIPPED 3 PRODUCTS IN 6 WEEKS." name="SARAH L." role="FOUNDER, FORGE LAB" accentColor="#FFD600" />
+          <TestimonialCard quote="FINALLY A SYSTEM THAT DOESN'T FIGHT ME. THE DARK MODE IS FLAWLESS. ZERO CONFIG." name="ALEX KIM" role="CTO, AXIOM INC" bgColor="#0D0D0D" accentColor="#FF6B35" />
+          <TestimonialCard quote="WE REPLACED 4 TOOLS WITH PIXELCRAFT. TEAM ONBOARDING DROPPED FROM 2 WEEKS TO 2 DAYS." name="MORGAN HAYES" role="VP DESIGN, NEXUS CO." accentColor="#F5F5F0" />
+        </div>
+      </section>
+
+      {/* ── BENTO ── */}
+      <section className="flex flex-col w-full bg-[#0D0D0D] py-16 px-6 md:py-[100px] md:px-[120px] gap-10 md:gap-[48px]">
+        <SectionHeader label="[05] // CAPABILITIES" title={"THE FULL STACK.\nIN ONE SYSTEM."} titleWidth="w-full max-w-[800px]" />
+        <div className="flex flex-col w-full gap-[2px]">
+          <div className="flex flex-col md:flex-row w-full gap-[2px]">
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[320px] bg-[#FFD600] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#1A1A1A] tracking-[2px]">[01]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#0A0A0A] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"REAL-TIME\nCOLLABORATION"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#1A1A1A] tracking-[1px] leading-[1.6]">MULTIPLE BUILDERS. ONE CANVAS. ZERO CONFLICTS. LIVE CURSORS, LIVE EDITS.</p>
+              <div className="flex items-center justify-center h-[28px] px-[12px] bg-[#0A0A0A] w-fit">
+                <span className="font-ibm-mono text-[10px] font-bold text-[#FFD600] tracking-[2px]">[LIVE]</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[320px] bg-[#111111] border border-[#2D2D2D] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[2px]">[02]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"VERSION\nCONTROL"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">EVERY CHANGE TRACKED. ROLL BACK ANY STATE IN &lt; 1 SECOND. BRANCH YOUR DESIGNS.</p>
+            </div>
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[320px] bg-[#0A0A0A] border border-[#2D2D2D] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[2px]">[03]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"PLUGIN\nECOSYSTEM"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">500+ OFFICIAL PLUGINS. REST API. WEBHOOKS. INTEGRATE WITH YOUR ENTIRE STACK.</p>
+              <div className="flex items-center justify-center h-[28px] px-[12px] bg-[#1A1A1A] border border-[#FF6B35] w-fit">
+                <span className="font-ibm-mono text-[10px] font-bold text-[#FF6B35] tracking-[2px]">[OPEN]</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row w-full gap-[2px]">
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[260px] bg-[#111111] border border-[#2D2D2D] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[2px]">[04]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"EXPORT\nANYWHERE"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">SVG // CSS // REACT // VUE // FLUTTER. ONE CLICK. ANY FORMAT.</p>
+            </div>
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[260px] bg-[#0F0F0F] border-2 border-[#FF6B35] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#FF6B35] tracking-[2px]">[05]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"AI-POWERED\nSUGGESTIONS"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">PIXEL-TRAINED MODEL. CONTEXT-AWARE COMPLETIONS. SHIP FASTER, THINK CLEARER.</p>
+              <div className="flex items-center justify-center h-[28px] px-[12px] bg-[#1A1A1A] border border-[#FF6B35] w-fit">
+                <span className="font-ibm-mono text-[10px] font-bold text-[#FF6B35] tracking-[2px]">[AI]</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-5 p-8 md:p-[40px] md:h-[260px] bg-[#0A0A0A] border border-[#2D2D2D] w-full md:flex-1">
+              <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[2px]">[06]</span>
+              <h3 className="font-grotesk text-[24px] md:text-[28px] font-bold text-[#F5F5F0] tracking-[-1px] leading-[1.1] whitespace-pre-line">{"ANALYTICS\nDASHBOARD"}</h3>
+              <p className="font-ibm-mono text-[12px] text-[#666666] tracking-[1px] leading-[1.6]">USAGE METRICS. COMPONENT ADOPTION. TEAM VELOCITY. ALL IN ONE PLACE.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── COMPARISON ── */}
+      <section id="comparison" className="flex flex-col w-full bg-[#050505] py-16 px-6 md:py-[100px] md:px-[120px] gap-12 md:gap-[64px]">
+        <SectionHeader label="[06] // VS. THE REST" title={"WHY PIXELCRAFT\nWINS."} subtitle="SEE HOW WE STACK UP AGAINST THE FIELD. NO SPIN. JUST PIXELS." />
+
+        <div className="hidden md:flex flex-col w-full border border-[#2D2D2D]">
+          <div className="flex w-full h-[56px] bg-[#111111] border-b-2 border-b-[#FFD600]">
+            <div className="flex items-center w-[400px] shrink-0 px-[32px] border-r border-r-[#2D2D2D]">
+              <span className="font-grotesk text-[11px] font-bold text-[#888888] tracking-[2px]">FEATURE</span>
+            </div>
+            <div className="flex items-center flex-1 px-[32px] bg-[#1A1A1A] border-r border-r-[#2D2D2D]">
+              <span className="font-grotesk text-[11px] font-bold text-[#FFD600] tracking-[2px]">PIXELCRAFT</span>
+            </div>
+            {["FIGMA", "SKETCH", "FRAMER"].map((tool, i) => (
+              <div key={tool} className={`flex items-center flex-1 px-[32px] ${i < 2 ? "border-r border-r-[#2D2D2D]" : ""}`}>
+                <span className="font-grotesk text-[11px] font-bold text-[#555555] tracking-[2px]">{tool}</span>
+              </div>
+            ))}
+          </div>
+
+          {comparisonRows.map((row, i) => (
+            <div key={row.feature} className={`flex w-full h-[56px] ${i < comparisonRows.length - 1 ? "border-b border-b-[#1D1D1D]" : ""}`}>
+              <div className="flex items-center w-[400px] shrink-0 px-[32px] border-r border-r-[#2D2D2D]">
+                <span className="font-ibm-mono text-[12px] text-[#CCCCCC] tracking-[1px]">{row.feature}</span>
+              </div>
+              <div className="flex items-center flex-1 px-[32px] bg-[#0D0D0D] border-r border-r-[#2D2D2D]">
+                <span className="font-ibm-mono tracking-[1px] text-[#FFD600] font-bold text-[14px]">{row.pc}</span>
+              </div>
+              {[row.figma, row.sketch, row.framer].map((val, j) => (
+                <div key={j} className={`flex items-center flex-1 px-[32px] ${j < 2 ? "border-r border-r-[#2D2D2D]" : ""}`}>
+                  <span className={`font-ibm-mono tracking-[1px] ${cellStyle(val)} ${cellColor(val)}`}>{val}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col md:hidden w-full gap-[2px]">
+          <div className="grid grid-cols-5 bg-[#111111] border border-[#FFD600] border-b-2">
+            <div className="col-span-2 px-3 py-3"><span className="font-grotesk text-[9px] font-bold text-[#888888] tracking-[1px]">FEATURE</span></div>
+            <div className="px-2 py-3 bg-[#1A1A1A]"><span className="font-grotesk text-[9px] font-bold text-[#FFD600] tracking-[1px]">PC</span></div>
+            <div className="px-2 py-3"><span className="font-grotesk text-[9px] font-bold text-[#555555] tracking-[1px]">FIG</span></div>
+            <div className="px-2 py-3"><span className="font-grotesk text-[9px] font-bold text-[#555555] tracking-[1px]">SKT</span></div>
+          </div>
+          {comparisonRows.map((row, i) => (
+            <div key={row.feature} className={`grid grid-cols-5 border border-[#1D1D1D] ${i % 2 === 0 ? "bg-[#0A0A0A]" : "bg-[#0D0D0D]"}`}>
+              <div className="col-span-2 flex items-center px-3 py-4"><span className="font-ibm-mono text-[9px] text-[#CCCCCC] tracking-[1px] leading-[1.4]">{row.feature}</span></div>
+              <div className="flex items-center px-2 py-4 bg-[#0D0D0D]"><span className="font-ibm-mono text-[12px] text-[#FFD600] font-bold">{row.pc}</span></div>
+              <div className="flex items-center px-2 py-4"><span className={`font-ibm-mono text-[11px] ${cellColor(row.figma)}`}>{row.figma}</span></div>
+              <div className="flex items-center px-2 py-4"><span className={`font-ibm-mono text-[11px] ${cellColor(row.sketch)}`}>{row.sketch}</span></div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── SHOWCASE ── */}
+      <section id="showcase" className="flex flex-col w-full bg-[#080808] pt-16 md:pt-[100px] pb-0 gap-8 md:gap-[48px]">
+        <div className="flex items-end justify-between px-6 md:px-[120px]">
+          <SectionHeader label="[07] // SHOWCASE" title={"BUILT WITH\nPIXELCRAFT."} titleWidth="w-full max-w-[600px]" />
+          <div className="flex items-center gap-[8px] shrink-0">
+            <button onClick={showcasePrev} className="flex items-center justify-center w-[48px] h-[48px] bg-[#111111] border-2 border-[#3D3D3D] hover:border-[#888888] transition-colors">
+              <span className="font-grotesk text-[18px] font-bold text-[#888888]">&lt;</span>
+            </button>
+            <button onClick={showcaseNext} className="flex items-center justify-center w-[48px] h-[48px] bg-[#FFD600] hover:bg-[#e6c200] transition-colors">
+              <span className="font-grotesk text-[18px] font-bold text-[#0A0A0A]">&gt;</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="md:hidden px-6">
+          <div className="flex flex-col gap-5 p-6 border-2 w-full" style={{ backgroundColor: slide.bg, borderColor: slide.border }}>
+            <div className="flex items-center justify-center h-[160px] bg-[#1A1A1A] border border-[#2D2D2D]">
+              <span className="font-ibm-mono text-[11px] text-[#333333] tracking-[2px]">[SCREENSHOT]</span>
+            </div>
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center justify-center h-[24px] px-[10px] border" style={{ backgroundColor: slide.tagBg, borderColor: slide.tagBorder || "transparent" }}>
+                <span className="font-ibm-mono text-[9px] font-bold tracking-[1px]" style={{ color: slide.tagColor }}>{slide.tag}</span>
+              </div>
+              <span className="font-ibm-mono text-[11px] tracking-[2px]" style={{ color: slide.idxColor }}>{slide.idx}</span>
+            </div>
+            <h3 className="font-grotesk text-[20px] font-bold text-[#F5F5F0] tracking-[1px] leading-[1.2] whitespace-pre-line">{slide.title}</h3>
+            <p className="font-ibm-mono text-[11px] text-[#555555] tracking-[1px]">{slide.by}</p>
+          </div>
+        </div>
+
+        <div className="hidden md:overflow-hidden h-[416px] md:block px-[120px]">
+          <div className="flex gap-[2px] transition-transform duration-500 ease-in-out" style={{ transform: `translateX(calc(-${showcaseActive} * (560px + 2px)))` }}>
+            {showcaseSlides.map((s, i) => (
+              <div key={i} className="flex flex-col gap-[24px] p-[40px] h-[412px] w-[560px] shrink-0 border-2" style={{ backgroundColor: s.bg, borderColor: s.border }}>
+                <div className="flex items-center justify-center h-[200px] bg-[#1A1A1A] border border-[#2D2D2D]">
+                  <span className="font-ibm-mono text-[11px] text-[#333333] tracking-[2px]">[SCREENSHOT]</span>
+                </div>
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center justify-center h-[24px] px-[10px] border" style={{ backgroundColor: s.tagBg, borderColor: s.tagBorder || "transparent" }}>
+                    <span className="font-ibm-mono text-[9px] font-bold tracking-[1px]" style={{ color: s.tagColor }}>{s.tag}</span>
+                  </div>
+                  <span className="font-ibm-mono text-[11px] tracking-[2px]" style={{ color: s.idxColor }}>{s.idx}</span>
+                </div>
+                <h3 className="font-grotesk text-[20px] font-bold text-[#F5F5F0] tracking-[1px] leading-[1.2] whitespace-pre-line">{s.title}</h3>
+                <p className="font-ibm-mono text-[11px] text-[#555555] tracking-[1px]">{s.by}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-[8px] px-6 md:px-[120px]">
+          {showcaseSlides.map((_, i) => (
+            <button key={i} onClick={() => setShowcaseActive(i)} className="h-[4px] transition-all" style={{ width: i === showcaseActive ? 32 : 8, backgroundColor: i === showcaseActive ? "#FFD600" : "#333333" }} />
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between px-6 md:px-[120px] pb-16 md:pb-[100px]">
+          <span className="font-ibm-mono text-[11px] text-[#444444] tracking-[2px]">SHOWING 0{showcaseActive + 1} OF 04 PROJECTS</span>
+          <span className="font-ibm-mono text-[11px] text-[#FFD600] tracking-[2px] cursor-pointer hover:underline">VIEW ALL &gt;</span>
+        </div>
+      </section>
+
+      {/* ── FAQ ── */}
+      <section id="faq" className="flex flex-col w-full bg-[#060606] py-16 px-6 md:py-[100px] md:px-[120px]">
+        <div className="w-full max-w-[480px]">
+          <SectionHeader label="[08] // FAQ" title={"GOT\nQUESTIONS?"} subtitle="EVERYTHING YOU NEED TO KNOW BEFORE SHIPPING YOUR FIRST PIXEL." titleWidth="w-full" subtitleWidth="w-full" />
+        </div>
+
+        <div className="h-10 md:h-[64px]" />
+
+        <div className="flex flex-col w-full">
+          {faqs.map((faq, i) => {
+            const isOpen = openFaq === i;
+            return (
+              <div key={i} className="flex flex-col w-full border-t border-t-[#1D1D1D]">
+                <button className="flex items-center justify-between w-full py-5 md:h-[72px] text-left gap-4" onClick={() => setOpenFaq(isOpen ? -1 : i)}>
+                  <span className="font-grotesk text-[14px] md:text-[16px] font-bold text-[#F5F5F0] tracking-[1px]">{faq.question}</span>
+                  <div className="flex items-center justify-center w-[32px] h-[32px] shrink-0" style={{ backgroundColor: isOpen ? "#FFD600" : "#1A1A1A", border: isOpen ? "none" : "1px solid #3D3D3D" }}>
+                    <span className="font-ibm-mono text-[14px] font-bold" style={{ color: isOpen ? "#0A0A0A" : "#888888" }}>{isOpen ? "—" : "+"}</span>
+                  </div>
+                </button>
+                {isOpen && faq.answer && (
+                  <div className="pb-8">
+                    <p className="font-ibm-mono text-[12px] md:text-[13px] text-[#888888] tracking-[1px] leading-[1.6]">{faq.answer}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="border-t border-t-[#1D1D1D]" />
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-[16px] pt-10 md:pt-[48px]">
+          <span className="font-ibm-mono text-[13px] text-[#555555] tracking-[1px]">STILL HAVE QUESTIONS?</span>
+          <span className="font-ibm-mono text-[13px] font-bold text-[#FFD600] tracking-[1px] cursor-pointer hover:underline">TALK TO A HUMAN &gt;</span>
+        </div>
+      </section>
+
+      {/* ── PRICING ── */}
+      <section id="pricing" className="flex flex-col w-full bg-[#080808] py-16 px-6 md:py-[100px] md:px-[120px] gap-12 md:gap-[64px]">
+        <SectionHeader label="[09] // PRICING" title={"TRANSPARENT.\nNO SURPRISES."} />
+        <div className="flex flex-col md:flex-row w-full gap-[2px]">
+          <PricingCard tier="FREE TIER" name="BUILDER" price="$0" btnLabel="GET STARTED FREE" features={BUILDER_FEATURES} accentColor="#555555" />
+          <PricingCard
+            tier="MOST POPULAR" tierColor="#0A0A0A" tierBg="#FFD600" tierBorderColor="#FFD600"
+            name="ARCHITECT" nameColor="#FFD600" price="$49" priceColor="#FFD600"
+            btnLabel="START BUILDING" btnLabelColor="#0A0A0A" bgColor="#111111" borderColor="#FFD600" borderWidth={2}
+            btnBg="#FFD600" btnBorderColor="transparent" features={ARCHITECT_FEATURES} accentColor="#FFD600"
+          />
+          <PricingCard
+            tier="ENTERPRISE" tierColor="#FF6B35" tierBorderColor="#FF6B35"
+            name="SYSTEM" price="$149" btnLabel="CONTACT SALES" btnLabelColor="#FF6B35" btnBorderColor="#FF6B35"
+            features={SYSTEM_FEATURES} accentColor="#FF6B35"
           />
         </div>
-        <div className="absolute inset-0 z-0 hero-gradient" />
-
-        <motion.div
-          style={{ opacity, scale }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: isLoaded ? 1 : 0 }}
-          transition={{ duration: 0.8 }}
-          className="container mx-auto px-4 z-10 pt-20"
-        >
-          <div className="flex flex-col items-center text-center max-w-4xl mx-auto">
-            <div className="relative w-[20rem] h-[22rem] md:w-[24rem] md:h-[26rem] mb-8 floating">
-              <Image src="/valiant-league-logo.png" alt="Valiant League Logo" fill className="object-contain" priority />
-            </div>
-
-            <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 font-cinzel tracking-wider">
-              VALIANT <span className="gold-gradient-text">LEAGUE</span>
-            </h1>
-
-            <p className="text-xl md:text-2xl text-gray-300 mb-10 max-w-3xl">
-              Draft your teams in a live auction, settle the knockout on an
-              automatic bracket, and put it all on screen with a
-              broadcast-ready overlay — one platform, one league.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button
-                className="bg-gold hover:bg-gold/90 text-black font-bold py-6 px-8 rounded-md text-lg animate-slow-pulse hover:scale-105 transition-all duration-500"
-                onClick={() => scrollToSection("modules")}
-              >
-                Explore the Platform
-                <ArrowRight className="ml-2 h-5 w-5" />
-              </Button>
-              <Button
-                variant="outline"
-                className="border-gold text-gold hover:bg-gold/10 py-6 px-8 rounded-md text-lg animate-slow-pulse hover:scale-105 transition-all duration-500 bg-transparent"
-                onClick={() => handleNavigation("/admin")}
-              >
-                <Shield className="mr-2 h-5 w-5" />
-                Open the Console
-              </Button>
-            </div>
-          </div>
-        </motion.div>
       </section>
 
-      {/* Modules */}
-      <section id="modules" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Core <span className="text-gold">Modules</span>
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              Three tools, one league. Every one of them reads and writes the
-              same live data, so a bid, a result, or a toggle shows up
-              everywhere else instantly.
-            </p>
-          </div>
+      {/* ── FINAL CTA ── */}
+      <section className="flex flex-col items-center w-full bg-[#0A0A0A] py-16 px-6 md:p-[120px] gap-10 md:gap-[48px] border-t-2 border-t-[#FFD600]">
+        <div className="flex items-center justify-center gap-[8px] h-[32px] px-[16px] bg-[#1A1A1A] border-2 border-[#FFD600]">
+          <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[2px]">
+            <GlitchText text="[READY TO BUILD?]" speed={30} />
+          </span>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {modules.map((mod, index) => (
-              <div
-                key={mod.tag}
-                className={`rounded-lg overflow-hidden glow-effect fade-in-up stagger-${index + 1} border border-gold/20 cursor-pointer`}
-              >
-                <div className="relative h-48 bg-[#0d0d0d] flex items-center justify-center">
-                  <mod.icon className="w-12 h-12 text-gold/70" />
-                  <div className="absolute top-2 right-2 bg-gold text-black text-xs font-medium px-2 py-1 rounded">
-                    {mod.tag}
-                  </div>
-                </div>
-                <div className="p-6 bg-black/80 border-t border-gold/20">
-                  <h3 className="text-xl font-bold text-white mb-2 font-cinzel">{mod.title}</h3>
-                  <p className="text-gray-400 text-sm">{mod.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+        <h2 className="font-grotesk text-[44px] md:text-[80px] font-bold text-[#F5F5F0] tracking-[-2px] leading-none text-center w-full max-w-[1000px] whitespace-pre-line">
+          <GlitchText text={"STOP DESIGNING.\nSTART SHIPPING."} speed={40} delay={200} />
+        </h2>
+
+        <p className="font-ibm-mono text-[10px] md:text-[14px] text-[#666666] tracking-[0.5px] md:tracking-[2px] text-center text-pretty w-full max-w-[700px] px-2">
+          <GlitchText text="JOIN 10,000+ BUILDERS WHO SHIP PIXEL-PERFECT PRODUCTS, FASTER." speed={20} delay={450} />
+        </p>
+
+        <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-[16px] w-full sm:w-auto">
+          <button className="flex items-center justify-center w-full sm:w-[260px] h-[64px] bg-[#FFD600] hover:bg-[#e6c200] transition-colors">
+            <span className="font-grotesk text-[13px] font-bold text-[#0A0A0A] tracking-[2px]">GET STARTED — FREE</span>
+          </button>
+          <button className="flex items-center justify-center w-full sm:w-[220px] h-[64px] bg-[#0A0A0A] border-2 border-[#3D3D3D] hover:border-[#888888] transition-colors">
+            <span className="font-ibm-mono text-[12px] text-[#666666] tracking-[2px]">SCHEDULE A DEMO</span>
+          </button>
         </div>
       </section>
 
-      {/* Creators */}
-      <section id="creators" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Knights of <span className="text-gold">Valiant League</span>
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              The people building Valiant League — swap these placeholder
-              profiles for your real team before launch.
+      {/* ── FOOTER ── */}
+      <footer className="flex flex-col w-full bg-[#050505]">
+        <div className="flex flex-col md:flex-row gap-12 md:gap-[80px] px-6 md:px-[120px] py-12 md:py-[64px]">
+          <div className="flex flex-col gap-6 md:w-[280px] md:shrink-0">
+            <div className="flex items-center gap-[12px]">
+              <div className="w-[32px] h-[32px] bg-[#FFD600] shrink-0" />
+              <span className="font-grotesk text-[16px] font-bold text-[#FFD600] tracking-[3px]">PIXELCRAFT</span>
+            </div>
+            <p className="font-ibm-mono text-[11px] text-[#888888] tracking-[1px] leading-[1.6] max-w-[260px]">
+              THE INDUSTRIAL-GRADE DESIGN SYSTEM. BUILT FOR BUILDERS WHO DON&apos;T COMPROMISE.
             </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 max-w-6xl mx-auto">
-            {knights.map((k, index) => (
-              <div
-                key={k.name}
-                className={`rounded-lg overflow-hidden creator-card fade-in-up stagger-${index + 1} bg-black/70`}
-              >
-                <div className="relative h-64 bg-[#0d0d0d]">
-                  <Image src={k.image} alt={k.name} fill className="object-cover" />
-                </div>
-                <div className="p-6 border-t border-gold/20 text-center">
-                  <h3 className="text-xl font-bold text-white font-cinzel">{k.name}</h3>
-                  <p className="text-gray-400 text-sm mb-4">{k.role}</p>
-                  <Link
-                    href={k.twitter}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center h-9 w-9 rounded-full bg-gold/10 hover:bg-gold/20 transition-colors"
-                  >
-                    <Twitter className="h-4 w-4 text-gold" />
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Flow */}
-      <section id="flow" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Six Steps, <span className="text-gold">Start To Trophy</span>
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              The whole day, walked through — from building the roster to
-              handing over the trophy.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 max-w-6xl mx-auto">
-            {flowSteps.slice(0, isMobile ? 4 : 6).map((s, index) => (
-              <div
-                key={s.title}
-                className={`rounded-lg overflow-hidden box-hover-effect fade-in-up stagger-${(index % 6) + 1} p-5 bg-black/70 text-center`}
-              >
-                <div className="flex justify-center mb-4">
-                  <div className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center">
-                    <s.icon className="h-5 w-5 text-gold" />
-                  </div>
-                </div>
-                <span className="text-[10px] font-mono text-gray-500 tracking-widest">{`0${index + 1}`}</span>
-                <h3 className="text-base font-bold text-white mt-1 mb-1 font-cinzel">{s.title}</h3>
-                <p className="text-gray-400 text-xs">{s.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Tiers */}
-      <section id="tiers" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Choose Your <span className="text-gold">League Size</span>
-            </h2>
-            <p className="text-gray-300 max-w-3xl mx-auto mt-4">
-              Every tier gets all three modules. What changes is scale and
-              support, not which tools you're allowed to use.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {/* Casual */}
-            <div className="bg-gradient-to-b from-[#cd7f32]/30 to-black border-2 border-[#cd7f32] rounded-lg overflow-hidden shadow-[0_0_15px_5px_rgba(205,127,50,0.3)] hover:shadow-[0_0_25px_8px_rgba(205,127,50,0.5)] transition-all duration-300 transform hover:scale-[1.02] fade-in-up stagger-1">
-              <div className="bg-[#cd7f32] p-4 text-center">
-                <h3 className="text-2xl font-bold text-black">CASUAL</h3>
-                <p className="text-lg font-bold text-black mt-2">Free to run</p>
-              </div>
-              <div className="p-6">
-                <ul className="space-y-2">
-                  {["One live auction at a time", "Single-elimination bracket", "Broadcast overlay page"].map((f, i) => (
-                    <li key={i} className="flex items-center text-gray-300">
-                      <Check className="h-4 w-4 text-[#cd7f32] mr-2 flex-shrink-0" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-8">
-                  <Button
-                    className="w-full bg-[#cd7f32] hover:bg-[#cd7f32]/80 text-black font-bold pulse"
-                    onClick={() => handleNavigation("/admin")}
-                  >
-                    Get Started
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Club */}
-            <div className="bg-gradient-to-b from-[#C0C0C0]/30 to-black border-2 border-[#C0C0C0] rounded-lg overflow-hidden shadow-[0_0_15px_5px_rgba(192,192,192,0.3)] hover:shadow-[0_0_25px_8px_rgba(192,192,192,0.5)] transition-all duration-300 transform hover:scale-[1.02] scale-105 fade-in-up stagger-2">
-              <div className="bg-[#C0C0C0] p-4 text-center">
-                <h3 className="text-2xl font-bold text-black">CLUB</h3>
-                <p className="text-lg font-bold text-black mt-2">Contact for pricing</p>
-              </div>
-              <div className="p-6">
-                <ul className="space-y-2">
-                  {[
-                    "Everything in Casual",
-                    "Unlimited concurrent auctions",
-                    "Double-elimination brackets",
-                    "Unsold-player re-entry rounds",
-                  ].map((f, i) => (
-                    <li key={i} className="flex items-center text-gray-300">
-                      <Check className="h-4 w-4 text-[#C0C0C0] mr-2 flex-shrink-0" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-8">
-                  <Button
-                    className="w-full bg-[#C0C0C0] hover:bg-[#C0C0C0]/80 text-black font-bold pulse"
-                    onClick={() => scrollToSection("contact")}
-                  >
-                    Get Started
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Franchise */}
-            <div className="bg-gradient-to-b from-gold/30 to-black border-2 border-gold rounded-lg overflow-hidden shadow-[0_0_15px_5px_rgba(245,166,35,0.3)] hover:shadow-[0_0_25px_8px_rgba(245,166,35,0.5)] transition-all duration-300 transform hover:scale-[1.02] fade-in-up stagger-3">
-              <div className="bg-gold p-4 text-center">
-                <h3 className="text-2xl font-bold text-black">FRANCHISE</h3>
-                <p className="text-lg font-bold text-black mt-2">Contact for pricing</p>
-              </div>
-              <div className="p-6">
-                <ul className="space-y-2">
-                  {[
-                    "Everything in Club",
-                    "Custom overlay branding",
-                    "Priority support on match day",
-                    "Multi-tournament season tracking",
-                  ].map((f, i) => (
-                    <li key={i} className="flex items-center text-gray-300">
-                      <Check className="h-4 w-4 text-gold mr-2 flex-shrink-0" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-8">
-                  <Button
-                    className="w-full bg-gold hover:bg-gold/80 text-black font-bold pulse"
-                    onClick={() => scrollToSection("contact")}
-                  >
-                    Get Started
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Contact */}
-      <section id="contact" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 bg-black/90" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              Contact <span className="text-gold">Valiant League</span>
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              Questions about running your league, a Club or Franchise plan,
-              or a walkthrough before match day — reach out any time.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-12 max-w-3xl mx-auto">
-            <div className="fade-in">
-              <Card className="bg-black/50 border border-gold/20 shine hover:border-gold/80 transition-all duration-300 hover:shadow-lg hover:shadow-gold/20 h-full">
-                <CardContent className="p-6">
-                  <h3 className="text-2xl font-bold text-white mb-6 font-cinzel text-center">
-                    Get in <span className="text-gold">Touch</span>
-                  </h3>
-                  <p className="text-gray-300 mb-8 text-center">
-                    Have questions about our modules or interested in a Club
-                    or Franchise plan? Reach out through any of the channels
-                    below.
-                  </p>
-
-                  <div className="space-y-6">
-                    <div className="flex items-start">
-                      <Link
-                        href="mailto:hello@valiantleague.app"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
-                      >
-                        <Mail className="h-6 w-6 text-gold" />
-                      </Link>
-                      <div>
-                        <h4 className="text-xl font-bold text-white mb-1">Email Us</h4>
-                        <p className="text-gray-400">
-                          hello@valiantleague.app <span className="text-gray-600">— placeholder, swap for your address</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start">
-                      <Link
-                        href="/admin"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
-                      >
-                        <Gavel className="h-6 w-6 text-gold" />
-                      </Link>
-                      <div>
-                        <h4 className="text-xl font-bold text-white mb-1">Book a Walkthrough</h4>
-                        <p className="text-gray-400">[Link to your scheduling page]</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start">
-                      <Link
-                        href="#"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors"
-                      >
-                        <Twitter className="h-6 w-6 text-gold" />
-                      </Link>
-                      <div>
-                        <h4 className="text-xl font-bold text-white mb-1">Follow Us</h4>
-                        <p className="text-gray-400">[@yourhandle]</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="flex gap-[12px]">
+              {[{ label: "X" }, { label: "GH" }, { label: "LI" }].map((s) => (
+                <button key={s.label} className="flex items-center justify-center w-[36px] h-[36px] bg-[#111111] border border-[#2D2D2D] hover:border-[#888888] transition-colors">
+                  <span className="font-grotesk text-[10px] font-bold text-[#AAAAAA]">{s.label}</span>
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="text-center mt-12 fade-in-up stagger-4">
-            <Button
-              className="pulse inline-flex items-center bg-gold hover:bg-gold/90 text-black font-bold py-6 px-8 rounded-md text-lg"
-              onClick={() => handleNavigation("/admin")}
-            >
-              Start Your League
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════════
-          FOOTER — expanded 3-column layout (brand / navigation / social)
-      ═══════════════════════════════════════════════════════════ */}
-      <footer className="bg-black border-t border-gold/20">
-        <div className="container mx-auto px-4 py-16">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-            {/* Brand */}
-            <div className="space-y-6">
-              <div className="flex items-center space-x-3">
-                <div className="relative w-12 h-12">
-                  <Image src="/valiant-league-logo.png" alt="Valiant League Logo" fill className="object-contain" />
-                </div>
-                <span className="font-cinzel font-bold text-2xl text-white">
-                  VALIANT <span className="text-gold">LEAGUE</span>
-                </span>
-              </div>
-              <p className="text-gray-400">
-                Valiant League is the all-in-one platform for running a league —
-                live auctions, automatic brackets, and broadcast-ready overlays,
-                all reading from the same live data.
-              </p>
-            </div>
-
-            {/* Navigation */}
-            <div>
-              <h3 className="font-cinzel font-bold text-xl text-white mb-6">NAVIGATION</h3>
-              <ul className="space-y-4">
-                {navLinks.map((link) => (
-                  <li key={link.id}>
-                    <div
-                      onClick={() => scrollToSection(link.id)}
-                      className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer"
-                    >
-                      <ArrowRight className="h-4 w-4 mr-2 text-gold" />
-                      {link.name.charAt(0) + link.name.slice(1).toLowerCase()}
-                    </div>
-                  </li>
+          <div className="grid grid-cols-3 md:flex md:flex-1 gap-8 md:gap-[80px]">
+            {[
+              { heading: "PRODUCT", links: productLinks },
+              { heading: "COMPANY", links: companyLinks },
+              { heading: "RESOURCES", links: resourceLinks },
+            ].map((col) => (
+              <div key={col.heading} className="flex flex-col gap-4 md:gap-[20px]">
+                <span className="font-grotesk text-[11px] font-bold text-[#F5F5F0] tracking-[2px]">{col.heading}</span>
+                {col.links.map((link) => (
+                  <a key={link} href="#" className="font-ibm-mono text-[12px] text-[#888888] tracking-[1px] hover:text-[#CCCCCC] transition-colors">{link}</a>
                 ))}
-              </ul>
-            </div>
-
-            {/* Social + Console */}
-            <div>
-              <h3 className="font-cinzel font-bold text-xl text-white mb-6">SOCIAL LINKS</h3>
-              <ul className="space-y-4">
-                <li>
-                  <Link
-                    href="#"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center"
-                  >
-                    <Twitter className="h-4 w-4 mr-2 text-gold" />
-                    Twitter
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href="mailto:hello@valiantleague.app"
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center"
-                  >
-                    <Mail className="h-4 w-4 mr-2 text-gold" />
-                    Email
-                  </Link>
-                </li>
-                <li>
-                  <div
-                    onClick={() => handleNavigation("/admin")}
-                    className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer"
-                  >
-                    <Shield className="h-4 w-4 mr-2 text-gold" />
-                    Open the Console
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-16 pt-8 border-t border-gold/20">
-            <div className="flex flex-col md:flex-row justify-between items-center">
-              <p className="text-gray-400 text-sm">
-                © {new Date().getFullYear()} Valiant League. All rights reserved.
-              </p>
-              <div className="flex space-x-6 mt-4 md:mt-0">
-                <div
-                  onClick={() => handleNavigation("/privacy-policy")}
-                  className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer"
-                >
-                  Privacy Policy
-                </div>
-                <div
-                  onClick={() => handleNavigation("/terms-of-service")}
-                  className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer"
-                >
-                  Terms of Service
-                </div>
               </div>
-            </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full px-6 md:px-[120px] py-4 md:h-[56px] border-t border-t-[#1D1D1D] gap-3 sm:gap-0">
+          <span className="font-ibm-mono text-[11px] text-[#666666] tracking-[1px]">© 2025 PIXELCRAFT SYSTEMS. ALL RIGHTS RESERVED.</span>
+          <div className="flex items-center gap-6 md:gap-[32px]">
+            <a href="#" className="font-ibm-mono text-[11px] text-[#666666] tracking-[1px] hover:text-[#AAAAAA] transition-colors">PRIVACY</a>
+            <a href="#" className="font-ibm-mono text-[11px] text-[#666666] tracking-[1px] hover:text-[#AAAAAA] transition-colors">TERMS</a>
+            <span className="font-ibm-mono text-[11px] font-bold text-[#FFD600] tracking-[1px]">V2.0.1</span>
           </div>
         </div>
       </footer>
     </main>
-  )
+  );
 }
