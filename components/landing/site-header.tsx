@@ -22,6 +22,11 @@ export function SiteHeader({
   scrollToSection,
   handleNavigation,
 }: SiteHeaderProps) {
+  const handleMobileNav = (id: string) => {
+    scrollToSection(id)
+    setIsNavOpen(false)
+  }
+
   return (
     <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500 bg-black/90 backdrop-blur-sm border-b border-gold/20 py-2">
       <div className="w-full max-w-[1600px] mx-auto px-4">
@@ -86,9 +91,11 @@ export function SiteHeader({
 
             {/* Mobile Menu Button */}
             <button
-              className="md:hidden text-white hover:text-gold z-20"
+              type="button"
+              className="md:hidden text-white hover:text-gold z-20 relative"
               onClick={() => setIsNavOpen((v) => !v)}
               aria-label="Toggle menu"
+              aria-expanded={isNavOpen}
             >
               {isNavOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
@@ -96,10 +103,11 @@ export function SiteHeader({
         </div>
       </div>
 
-      {/* Mobile Navigation */}
+      {/* Mobile Navigation — anchored to header itself, so it always
+          sits right below it no matter how tall the header is */}
       <div
-        className={`md:hidden bg-black/95 border-t border-gold/20 fixed top-[68px] left-0 w-full z-10 transition-all duration-300 ${
-          isNavOpen ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none"
+        className={`md:hidden absolute top-full left-0 w-full bg-black/95 border-t border-gold/20 transition-all duration-300 ${
+          isNavOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 -translate-y-4 pointer-events-none"
         }`}
       >
         <div className="container mx-auto px-4 py-6">
@@ -114,7 +122,7 @@ export function SiteHeader({
                     ? "bg-gold hover:bg-gold/90 text-black"
                     : "border-gold/50 text-white hover:bg-gold/10 hover:text-gold hover:border-gold"
                 )}
-                onClick={() => scrollToSection(link.id)}
+                onClick={() => handleMobileNav(link.id)}
               >
                 {link.name}
               </Button>

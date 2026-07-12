@@ -102,7 +102,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           className="container mx-auto px-4 z-10 pt-20"
         >
           <div className="flex flex-col items-center text-center max-w-4xl mx-auto">
-            <div className="relative w-[10rem] h-[11rem] sm:w-[14rem] sm:h-[15rem] md:w-[18rem] md:h-[19rem] lg:w-[20rem] lg:h-[21rem] mb-4 md:mb-6 floating">
+            <div className="relative w-[18rem] h-[20rem] sm:w-[20rem] sm:h-[22rem] md:w-[18rem] md:h-[19rem] lg:w-[20rem] lg:h-[21rem] mb-4 md:mb-6 floating">
               <Image src="/valiant-league-logo.png" alt="Valiant League Logo" fill className="object-contain" priority />
             </div>
 
