@@ -15,8 +15,8 @@ export default function DemoCursor({ cursor }: { cursor: CursorState | undefined
       style={{ left: 0, top: 0 }}
     >
       <div className="relative -translate-x-1 -translate-y-1">
-        <svg width="22" height="22" viewBox="0 0 22 22" style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.5))" }}>
-          <path d="M2 2 L2 18 L7 14 L10 20 L13 18.5 L10 12.5 L16 12.5 Z" fill={cursor.color} stroke="#0d1117" strokeWidth="1" />
+        <svg width="22" height="22" viewBox="0 0 22 22" style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.6))" }}>
+          <path d="M2 2 L2 18 L7 14 L10 20 L13 18.5 L10 12.5 L16 12.5 Z" fill={cursor.color} stroke="#000000" strokeWidth="1" />
         </svg>
 
         <AnimatePresence>
@@ -32,13 +32,16 @@ export default function DemoCursor({ cursor }: { cursor: CursorState | undefined
           )}
         </AnimatePresence>
 
+        {/* label uses the same mono/uppercase/tracked treatment as the
+            landing page's badges (MODULE tag, SHOWING x–y OF z) */}
         <div
-          className="absolute left-5 top-4 whitespace-nowrap px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide"
+          className="absolute left-5 top-4 whitespace-nowrap px-2 py-1 rounded-md text-[10px] font-bold uppercase font-mono"
           style={{
-            fontFamily: "'Geist Mono', monospace",
-            background: "rgba(13,17,23,0.92)",
+            letterSpacing: "0.1em",
+            background: "rgba(0,0,0,0.9)",
             color: cursor.color,
             border: `1px solid ${cursor.color}55`,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
           }}
         >
           {cursor.label}

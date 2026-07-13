@@ -68,6 +68,7 @@ function Spotlight({
 
 const DESKTOP_W = 1280;
 const DESKTOP_H = 800;
+const DESKTOP_CHROME_H = 26; // height of the traffic-light bar added to DesktopFrame
 const MOBILE_W = 390;
 const MOBILE_H = 844;
 
@@ -79,8 +80,8 @@ const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
 export default function SandboxPage() {
   const { activePanel, syncPanels } = useSpotlight();
 
-  const auctioneerCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + 12);
-  const watchCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + 12);
+  const auctioneerCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
+  const watchCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
   const ownerACell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
   const ownerBCell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
 
@@ -111,16 +112,26 @@ export default function SandboxPage() {
     <div className="h-screen w-screen bg-black overflow-hidden relative flex flex-col">
       <style jsx global>{`
         @keyframes panel-sync-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(201,151,31,0.6); }
-          70% { box-shadow: 0 0 0 14px rgba(201,151,31,0); }
-          100% { box-shadow: 0 0 0 0 rgba(201,151,31,0); }
+          0% { box-shadow: 0 0 0 0 rgba(245,166,35,0.6); }
+          70% { box-shadow: 0 0 0 14px rgba(245,166,35,0); }
+          100% { box-shadow: 0 0 0 0 rgba(245,166,35,0); }
         }
         .panel-sync-ring { animation: panel-sync-pulse 0.9s ease-out; }
       `}</style>
 
+      {/* ambient gold vignette, same restrained accent language as the
+          landing page's section-gradient / hero-gradient washes */}
+      <div
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          background:
+            "radial-gradient(1200px 500px at 50% 0%, rgba(245,166,35,0.08), transparent 60%), radial-gradient(1000px 500px at 50% 100%, rgba(245,166,35,0.05), transparent 60%)",
+        }}
+      />
+
       {/* TOP BAND: mobile pair. Height and per-phone size respond to activePanel. */}
       <div
-        className="min-h-0 flex items-center justify-center bg-black relative gap-10 overflow-hidden"
+        className="min-h-0 flex items-center justify-center bg-black relative z-10 gap-10 overflow-hidden"
         style={{ height: `${topBandPct}%`, transition: `height ${ZOOM_TRANSITION}` }}
       >
         <div
@@ -133,7 +144,7 @@ export default function SandboxPage() {
           }}
         >
           <Spotlight panelKey="ownerA" activePanel={activePanel} syncPanels={syncPanels}>
-            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale}>
+            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale} label="TEAM A · OWNER">
               <DemoOwnerBidPage teamId="tA" cursorKey="ownerA" />
             </MobileFrame>
           </Spotlight>
@@ -150,10 +161,12 @@ export default function SandboxPage() {
           }}
         >
           <Shield className="w-5 h-5 text-gold mb-2" />
-          <p className="font-cinzel font-bold uppercase tracking-wide text-white text-lg leading-none text-center whitespace-nowrap">
+          <p className="font-cinzel font-bold uppercase tracking-wider text-white text-lg leading-none text-center whitespace-nowrap">
             Valiant <span className="text-gold">League</span>
           </p>
-          <p className="font-mono uppercase tracking-[0.3em] text-white/40 text-[9px] mt-1.5 whitespace-nowrap">Live Auction Room</p>
+          <p className="font-mono uppercase tracking-[0.3em] text-gold/50 text-[9px] mt-2 whitespace-nowrap">
+            Live Auction Room
+          </p>
         </div>
 
         <div
@@ -166,18 +179,18 @@ export default function SandboxPage() {
           }}
         >
           <Spotlight panelKey="ownerB" activePanel={activePanel} syncPanels={syncPanels}>
-            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerBCell.scale}>
+            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerBCell.scale} label="TEAM B · OWNER">
               <DemoOwnerBidPage teamId="tB" cursorKey="ownerB" />
             </MobileFrame>
           </Spotlight>
         </div>
       </div>
 
-      <div className="h-px bg-white/5 shrink-0" />
+      <div className="h-px bg-gold/10 shrink-0 relative z-10" />
 
       {/* BOTTOM BAND: desktop pair. Height and per-panel flex-grow respond to activePanel. */}
       <div
-        className="min-h-0 flex gap-px bg-white/5 overflow-hidden"
+        className="min-h-0 flex gap-px bg-gold/10 overflow-hidden relative z-10"
         style={{ height: `${bottomBandPct}%`, transition: `height ${ZOOM_TRANSITION}` }}
       >
         <div
@@ -186,7 +199,7 @@ export default function SandboxPage() {
           style={{ flexGrow: auctioneerGrow, flexBasis: 0, transition: `flex-grow ${ZOOM_TRANSITION}` }}
         >
           <Spotlight panelKey="auctioneer" activePanel={activePanel} syncPanels={syncPanels}>
-            <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={auctioneerCell.scale}>
+            <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={auctioneerCell.scale} label="Auctioneer Console">
               <DemoAuctioneerPage />
             </DesktopFrame>
           </Spotlight>
@@ -198,7 +211,7 @@ export default function SandboxPage() {
           style={{ flexGrow: watchGrow, flexBasis: 0, transition: `flex-grow ${ZOOM_TRANSITION}` }}
         >
           <Spotlight panelKey="watch" activePanel={activePanel} syncPanels={syncPanels}>
-            <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={watchCell.scale}>
+            <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={watchCell.scale} label="Broadcast Overlay">
               <DemoWatchPage />
             </DesktopFrame>
           </Spotlight>

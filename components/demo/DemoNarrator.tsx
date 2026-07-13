@@ -26,13 +26,16 @@ export default function DemoNarrator() {
         className="flex items-center gap-2.5 px-4 py-1.5 rounded-full border transition-all duration-200 max-w-[90vw]"
         style={{
           borderColor: `${GOLD}40`,
-          background: `${GOLD}0F`,
+          background: "rgba(0,0,0,0.6)",
+          boxShadow: `0 0 24px -10px ${GOLD}66`,
           opacity: fading ? 0 : 1,
           transform: fading ? "translateY(-3px)" : "translateY(0)",
         }}
       >
         <span className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse" style={{ background: GOLD }} />
-        <span className="font-mono text-[11px] text-white/80 tracking-wide whitespace-nowrap overflow-hidden text-ellipsis">
+        <span
+          className="font-mono text-[11px] text-white/80 tracking-wide whitespace-nowrap overflow-hidden text-ellipsis"
+        >
           {displayText}
         </span>
       </div>
