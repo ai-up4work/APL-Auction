@@ -189,6 +189,7 @@ export const moduleData = [
     badge: "CORE",
     accent: "#F5A623",
     iconKey: "gavel" as const,
+    link: "sandbox/auction",
   },
   {
     title: "Automatic\nBrackets",
@@ -197,6 +198,7 @@ export const moduleData = [
     badge: "LIVE",
     accent: "#CD7F32",
     iconKey: "trophy" as const,
+    link: "sandbox/brackets",
   },
   {
     title: "Broadcast\nOverlays",
@@ -205,6 +207,7 @@ export const moduleData = [
     badge: "STREAM",
     accent: "#C0C0C0",
     iconKey: "monitor" as const,
+    link: "sandbox/overlay",
   },
 ]
 

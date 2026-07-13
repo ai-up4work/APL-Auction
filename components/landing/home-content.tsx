@@ -190,11 +190,20 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                   <p className="text-gray-300 text-sm leading-relaxed">{mod.description}</p>
                   <div
                     className="mt-auto flex items-center justify-center h-7 px-3 border rounded w-fit"
-                    style={{ borderColor: mod.accent, backgroundColor: "rgba(0,0,0,0.4)" }}
+                    style={{
+                      borderColor: mod.accent,
+                      backgroundColor: "rgba(0,0,0,0.4)",
+                    }}
                   >
-                    <span className="text-[11px] font-mono tracking-[2px]" style={{ color: mod.accent }}>
+                    <a
+                      href={mod.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-mono tracking-[2px]"
+                      style={{ color: mod.accent }}
+                    >
                       {mod.badge}
-                    </span>
+                    </a>
                   </div>
                 </div>
               )
