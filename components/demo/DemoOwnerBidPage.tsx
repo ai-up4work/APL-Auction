@@ -128,41 +128,6 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
           <span className="material-symbols-outlined text-[20px] text-white">gavel</span>
           <span className="f-display text-[15px] text-white not-italic tracking-[0.04em]">{bidLabel}</span>
         </button>
-
-        {/* Bid history */}
-        <div className="flex-1 min-h-0 glass rounded-xl overflow-hidden flex flex-col">
-          <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex justify-between items-center">
-            <p className="f-label text-[10px] text-[#c6c6cd]">BID HISTORY</p>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-white/[0.04]">
-            {bidHistory.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-2 py-8">
-                <span className="material-symbols-outlined text-[#2a3a44]" style={{ fontSize: 36 }}>gavel</span>
-                <p className="f-label text-[9px] text-[#3a4a54]">NO BIDS YET</p>
-              </div>
-            ) : (
-              bidHistory.map((bid, i) => {
-                const isMe = bid.teamId === teamId;
-                return (
-                  <div key={bid.id} className={`px-4 py-3 flex items-center justify-between ${isMe ? "bg-theme-orange/5" : ""}`}>
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: isMe ? "rgba(201,151,31,0.10)" : "rgba(255,255,255,0.05)", border: isMe ? "1px solid rgba(201,151,31,0.35)" : "1px solid rgba(255,255,255,0.07)" }}>
-                        <span className={`f-display text-[11px] not-italic ${isMe ? "text-theme-orange" : "text-[#c6c6cd]"}`} style={{ color: isMe ? BID_COLOR : undefined }}>{bid.teamCode.slice(0, 2)}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className={`f-body text-[13px] font-semibold truncate ${isMe ? "text-white" : "text-[#c6c6cd]"}`}>{bid.teamName}</p>
-                          {isMe && <span className="f-label text-[8px] px-1.5 py-0.5 rounded" style={{ background: "rgba(201,151,31,0.18)", color: BID_COLOR }}>YOU</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`f-num text-[15px] shrink-0 ${i === 0 ? "text-theme-orange" : "text-[#e0e3e4]"}`} style={{ color: i === 0 ? BID_COLOR : undefined }}>{fmtPts(bid.amount)}</span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

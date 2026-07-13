@@ -81,7 +81,7 @@ export function DesktopFrame({
 export function MobileFrame({
   children,
   width = 390,
-  height = 844,
+  height = 700,   // was 844 — trimmed to match actual content height, not full iPhone chrome
   scale,
   label,
 }: {
@@ -102,7 +102,6 @@ export function MobileFrame({
         boxShadow: `0 0 0 1px rgba(245,166,35,0.05), 0 0 32px -16px ${GOLD}55`,
       }}
     >
-      {/* Small rectangular camera bar — keeps corners square so nothing clips */}
       <div
         className="absolute left-1/2 top-[3px] -translate-x-1/2 bg-black z-10 rounded-full"
         style={{ width: width * scale * 0.22, height: 5 }}

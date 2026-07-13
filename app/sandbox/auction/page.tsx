@@ -70,7 +70,7 @@ const DESKTOP_W = 1280;
 const DESKTOP_H = 800;
 const DESKTOP_CHROME_H = 26; // height of the traffic-light bar added to DesktopFrame
 const MOBILE_W = 390;
-const MOBILE_H = 844;
+const MOBILE_H = 650;
 
 // Shared timing for every size/opacity change driven by spotlight state,
 // so the whole layout reflows as one coordinated "zoom" rather than
@@ -144,7 +144,7 @@ export default function SandboxPage() {
           }}
         >
           <Spotlight panelKey="ownerA" activePanel={activePanel} syncPanels={syncPanels}>
-            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale} label="TEAM A · OWNER">
+            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale}>
               <DemoOwnerBidPage teamId="tA" cursorKey="ownerA" />
             </MobileFrame>
           </Spotlight>
@@ -179,7 +179,7 @@ export default function SandboxPage() {
           }}
         >
           <Spotlight panelKey="ownerB" activePanel={activePanel} syncPanels={syncPanels}>
-            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerBCell.scale} label="TEAM B · OWNER">
+            <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale} >
               <DemoOwnerBidPage teamId="tB" cursorKey="ownerB" />
             </MobileFrame>
           </Spotlight>
