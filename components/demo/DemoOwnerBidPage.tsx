@@ -2,13 +2,17 @@
 "use client";
 
 import React, { useSyncExternalStore } from "react";
-import { demoModel, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
+import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
 import DemoCursor from "./DemoCursor";
 
 const BID_COLOR = "#c9971f";
 
 export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string; cursorKey: string }) {
-  const snap = useSyncExternalStore(demoModel.subscribe.bind(demoModel), demoModel.getSnapshot.bind(demoModel));
+  const snap = useSyncExternalStore(
+    demoModel.subscribe.bind(demoModel),
+    getDemoSnapshot,
+    getDemoSnapshot
+  );
   const { auction, currentLot, bidHistory, teamPurses, clockPct, isLocked } = snap;
 
   const team = auction.teams.find((t) => t.supabaseId === teamId)!;
@@ -41,7 +45,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         .glass-hot { background: rgba(201,151,31,0.06); backdrop-filter: blur(24px); border: 1px solid rgba(201,151,31,0.22); }
       `}</style>
 
-      <DemoCursor cursor={snap.cursors[cursorKey]} />
+      <DemoCursor cursor={snap.cursors[cursorKey] as any} />
 
       <header className="shrink-0 h-14 flex items-center justify-between px-4 bg-black/40 border-b border-white/[0.07]">
         <div className="flex items-center gap-3">

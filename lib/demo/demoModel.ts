@@ -130,7 +130,9 @@ type Snapshot = {
   isLocked: boolean;
   shuffleReady: boolean;
   cursors: Record<string, CursorState>;
-  activePanel: string | null;
+  // Zero, one, or several panels can be spotlighted at once. Empty array
+  // means "no spotlight" → caller falls back to the neutral overview grid.
+  activePanels: string[];
   syncPanels: string[];
   narratorText: string;
   shuffle: ShuffleState;
@@ -173,7 +175,7 @@ function initialSnapshot(): Snapshot {
     isLocked: false,
     shuffleReady: true,
     cursors: {},
-    activePanel: null,
+    activePanels: [],
     syncPanels: [],
     narratorText: "",
     shuffle: { active: false, pool: [], index: 0, target: null },
@@ -238,8 +240,6 @@ class DemoModelImpl {
   complete() { this.stopClock(); this.set({ auction: { ...this.snap.auction, status: "completed" } }); }
 
   // ── Shuffle reel ─────────────────────────────────────────────────────
-  // Decelerating tick loop — mirrors a real slot-reel spin, and lets
-  // <ShuffleOverlay> infer blur/speed from real elapsed time between ticks.
   private tickShuffle(delay = 65, elapsed = 0) {
     this.shuffleTicker = setTimeout(() => {
       if (!this.snap.shuffle.active || this.snap.shuffle.target) return;
@@ -279,8 +279,6 @@ class DemoModelImpl {
       startedAt: null,
     };
 
-    // Reel candidates: whole remaining pool (falls back to just the
-    // selected player if the pool is down to one).
     const reelPool = pool.length > 1 ? pool : [player];
 
     this.set({
@@ -304,8 +302,6 @@ class DemoModelImpl {
     });
     this.startClock();
 
-    // Hold the "winner locked" celebration state briefly before the
-    // overlay dismisses and normal bidding UI takes over underneath.
     if (this.shuffleHideTimer) clearTimeout(this.shuffleHideTimer);
     this.shuffleHideTimer = setTimeout(() => {
       this.set({ shuffle: { active: false, pool: [], index: 0, target: null } });
@@ -385,8 +381,15 @@ class DemoModelImpl {
     this.set({ cursors: { ...this.snap.cursors, [actorId]: { ...prev, ...patch } } });
   }
 
-  setActivePanel(panel: string | null) {
-    this.set({ activePanel: panel });
+  /**
+   * Sets which panel(s) are spotlighted. Accepts:
+   *  - a single panel key (spotlight just that one)
+   *  - an array of panel keys (spotlight a combo — e.g. auctioneer + owner)
+   *  - null / undefined / [] to clear the spotlight entirely
+   */
+  setActivePanel(panel: string | string[] | null | undefined) {
+    const panels = panel == null ? [] : Array.isArray(panel) ? panel : [panel];
+    this.set({ activePanels: panels });
   }
 
   pulsePanels(panels: string[], durationMs = 900) {
@@ -420,3 +423,9 @@ class DemoModelImpl {
 }
 
 export const demoModel = new DemoModelImpl();
+
+// Stable reference for useSyncExternalStore's getSnapshot / getServerSnapshot.
+// Using the same function for both avoids hydration mismatches, since the
+// model's initial state is identical on server and first client render
+// (nothing mutates it until demoOrchestrator.start() runs client-side).
+export const getDemoSnapshot = () => demoModel.getSnapshot();

@@ -17,9 +17,17 @@ type Step =
   | { at: number; type: "bid"; teamId: string }
   | { at: number; type: "sold" }
   // ── Director steps ──────────────────────────────────────────────────
-  | { at: number; type: "focus"; panel: string | null }
+  // `panels` supports zero, one, or several panel keys at once, so beats
+  // can spotlight combos (e.g. Auctioneer + the bidding owner, 75/25)
+  // instead of only ever a single panel.
+  | { at: number; type: "focus"; panels: string[] }
   | { at: number; type: "sync"; panels: string[] }
   | { at: number; type: "narrator"; text: () => string };
+
+/** Convenience so call sites can still write a single panel key inline. */
+function focusStep(at: number, panels: string | string[]): Step {
+  return { at, type: "focus", panels: Array.isArray(panels) ? panels : [panels] };
+}
 
 // Remembers the last real DOM element each actor's cursor was sent to,
 // so `click()` can fire a genuine `el.click()` on it.
@@ -86,7 +94,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
 
   return [
     { at: 0, type: "narrator", text: () => "Auctioneer opens the next lot" },
-    { at: 0, type: "focus", panel: AUCTIONEER },
+    focusStep(0, AUCTIONEER),
     { at: 0, type: "cursor", actor: AUCTIONEER, panel: "auctioneer", targetId: "demo-start-btn", label: "Auctioneer", color: "#c9971f" },
     { at: 1600, type: "click", actor: AUCTIONEER },
 
@@ -98,7 +106,10 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
     { at: 3720, type: "narrator", text: () => `${demoModel.getSnapshot().currentLot?.playerName ?? "Player"} steps up — bidding is open` },
     { at: 3720, type: "sync", panels: ALL_PANELS },
 
-    { at: 4400, type: "focus", panel: first },
+    // Spotlight the bidding owner together with the Auctioneer console
+    // (75/25) so the bid and the console reacting to it are visible at
+    // once, instead of falling back to the owner+Watch combo.
+    focusStep(4400, [AUCTIONEER, first]),
     { at: 4400, type: "cursor", actor: first, panel: first, targetId: "demo-bid-btn", label: nameOf(first), color: colorOf(first) },
     { at: 4400, type: "narrator", text: () => `${nameOf(first)} places the opening bid` },
     { at: 5800, type: "click", actor: first },
@@ -109,7 +120,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
       return lot ? `${teamNameFor(firstTeam)} bids ${fmtPts(lot.currentBid)} pts — live on every screen` : "";
     } },
 
-    { at: 7400, type: "focus", panel: second },
+    focusStep(7400, [AUCTIONEER, second]),
     { at: 7400, type: "cursor", actor: second, panel: second, targetId: "demo-bid-btn", label: nameOf(second), color: colorOf(second) },
     { at: 7400, type: "narrator", text: () => `${nameOf(second)} counters instantly` },
     { at: 8800, type: "click", actor: second },
@@ -120,7 +131,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
       return lot ? `${teamNameFor(secondTeam)} counters with ${fmtPts(lot.currentBid)} pts` : "";
     } },
 
-    { at: 10400, type: "focus", panel: first },
+    focusStep(10400, [AUCTIONEER, first]),
     { at: 10400, type: "cursor", actor: first, panel: first, targetId: "demo-bid-btn", label: nameOf(first), color: colorOf(first) },
     { at: 10400, type: "narrator", text: () => `${nameOf(first)} raises again` },
     { at: 11800, type: "click", actor: first },
@@ -131,7 +142,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
       return lot ? `${teamNameFor(firstTeam)} pushes to ${fmtPts(lot.currentBid)} pts` : "";
     } },
 
-    { at: 13400, type: "focus", panel: AUCTIONEER },
+    focusStep(13400, AUCTIONEER),
     { at: 13400, type: "cursor", actor: AUCTIONEER, panel: "auctioneer", targetId: "demo-hammer-btn", label: "Auctioneer", color: "#c9971f" },
     { at: 13400, type: "narrator", text: () => "Auctioneer calls it — going once, going twice…" },
     { at: 14800, type: "click", actor: AUCTIONEER },
@@ -142,7 +153,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
       return lot ? `SOLD — ${lot.playerName} to ${lot.winningTeamCode} for ${fmtPts(lot.currentBid)} pts!` : "Sold!";
     } },
 
-    { at: 16400, type: "focus", panel: null },
+    focusStep(16400, []),
     { at: 16400, type: "hide", actor: AUCTIONEER },
     { at: 16400, type: "hide", actor: OWNER_A },
     { at: 16400, type: "hide", actor: OWNER_B },
@@ -187,7 +198,7 @@ export class DemoOrchestrator {
       case "reveal": demoModel.revealLot(); break;
       case "bid": demoModel.placeBid(step.teamId); break;
       case "sold": demoModel.hammerSold(); break;
-      case "focus": demoModel.setActivePanel(step.panel); break;
+      case "focus": demoModel.setActivePanel(step.panels); break;
       case "sync": demoModel.pulsePanels(step.panels); break;
       case "narrator": demoModel.setNarrator(step.text()); break;
     }

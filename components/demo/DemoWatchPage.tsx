@@ -2,10 +2,14 @@
 "use client";
 
 import React, { useSyncExternalStore } from "react";
-import { demoModel, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
+import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
 
 export default function DemoWatchPage() {
-  const snap = useSyncExternalStore(demoModel.subscribe.bind(demoModel), demoModel.getSnapshot.bind(demoModel));
+  const snap = useSyncExternalStore(
+    demoModel.subscribe.bind(demoModel),
+    getDemoSnapshot,
+    getDemoSnapshot
+  );
   const { auction, currentLot, completedLots, teamPurses, lotNumber, clockPct, isLocked } = snap;
 
   const isSold = currentLot?.status === "sold";

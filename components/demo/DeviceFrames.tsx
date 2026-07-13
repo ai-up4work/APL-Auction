@@ -81,7 +81,7 @@ export function DesktopFrame({
 export function MobileFrame({
   children,
   width = 390,
-  height = 700,   // was 844 — trimmed to match actual content height, not full iPhone chrome
+  height = 650,
   scale,
   label,
 }: {
@@ -93,28 +93,35 @@ export function MobileFrame({
 }) {
   return (
     <div
-      className="relative rounded-[20px] overflow-hidden shrink-0 border border-gold/20"
+      className="relative rounded-[28px] overflow-hidden shrink-0"
       style={{
-        width: width * scale + 12,
-        height: height * scale + 12,
-        padding: 6,
-        background: "linear-gradient(180deg, #141414, #000000)",
-        boxShadow: `0 0 0 1px rgba(245,166,35,0.05), 0 0 32px -16px ${GOLD}55`,
+        width: width * scale + 16,
+        height: height * scale + 16,
+        padding: 8,
+        background: "linear-gradient(180deg, #1c1c1c, #050505)",
+        border: "1px solid rgba(245,166,35,0.35)",
+        boxShadow: `0 0 0 1px rgba(0,0,0,0.6), 0 8px 32px -8px rgba(0,0,0,0.8), 0 0 40px -16px ${GOLD}66`,
       }}
     >
+      {/* camera notch — bumped up in size/contrast so it's actually visible */}
       <div
-        className="absolute left-1/2 top-[3px] -translate-x-1/2 bg-black z-10 rounded-full"
-        style={{ width: width * scale * 0.22, height: 5 }}
+        className="absolute left-1/2 top-[6px] -translate-x-1/2 z-10 rounded-full"
+        style={{
+          width: width * scale * 0.24,
+          height: 6,
+          background: "#000",
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}
       />
 
       {label && (
-        <div className="absolute left-1/2 top-[13px] -translate-x-1/2 z-10">
+        <div className="absolute left-1/2 top-[16px] -translate-x-1/2 z-10">
           <ChromeLabel label={label} />
         </div>
       )}
 
       <div
-        className="overflow-hidden"
+        className="overflow-hidden rounded-[20px]"
         style={{ width: width * scale, height: height * scale, background: "#000" }}
       >
         <div style={{ width, height, transform: `scale(${scale})`, transformOrigin: "top left" }}>

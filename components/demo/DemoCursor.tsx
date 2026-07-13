@@ -1,11 +1,19 @@
-// components/demo/DemoCursor.tsx
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
 import type { CursorState } from "@/lib/demo/demoStore";
 
+// Frame dimensions the cursor coordinates are expressed in — used only to
+// decide which side to flip the label toward near edges.
+const FRAME_W = 390;
+const FRAME_H = 650;
+const LABEL_FLIP_MARGIN = 90; // roughly the label's rendered width/height
+
 export default function DemoCursor({ cursor }: { cursor: CursorState | undefined }) {
   if (!cursor || !cursor.visible) return null;
+
+  const flipX = cursor.x > FRAME_W - LABEL_FLIP_MARGIN;
+  const flipY = cursor.y > FRAME_H - LABEL_FLIP_MARGIN;
 
   return (
     <motion.div
@@ -32,18 +40,26 @@ export default function DemoCursor({ cursor }: { cursor: CursorState | undefined
           )}
         </AnimatePresence>
 
-        {/* label uses the same mono/uppercase/tracked treatment as the
-            landing page's badges (MODULE tag, SHOWING x–y OF z) */}
+        {/* label — anchored near the cursor tip, flipped to whichever side
+            keeps it inside the frame instead of covering nearby UI */}
         <div
-          className="absolute left-5 top-4 whitespace-nowrap px-2 py-1 rounded-md text-[10px] font-bold uppercase font-mono"
+          className="absolute whitespace-nowrap px-2 py-1 rounded-md text-[10px] font-bold uppercase font-mono flex items-center gap-1"
           style={{
             letterSpacing: "0.1em",
-            background: "rgba(0,0,0,0.9)",
+            background: "rgba(0,0,0,0.92)",
             color: cursor.color,
-            border: `1px solid ${cursor.color}55`,
+            border: `1px solid ${cursor.color}66`,
             boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
+            left: flipX ? "auto" : 20,
+            right: flipX ? 20 : "auto",
+            top: flipY ? "auto" : 16,
+            bottom: flipY ? 16 : "auto",
+            flexDirection: flipX ? "row-reverse" : "row",
           }}
         >
+          {/* small dot ties the label visually back to the cursor, since
+              the flip means it's no longer always adjacent to the tip */}
+          <span className="w-1 h-1 rounded-full shrink-0" style={{ background: cursor.color }} />
           {cursor.label}
         </div>
       </div>

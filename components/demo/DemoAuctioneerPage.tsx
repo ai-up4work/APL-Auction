@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useSyncExternalStore, useState } from "react";
-import { demoModel, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
+import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
 import DemoCursor from "./DemoCursor";
 
 type Particle = { id: number; tx: number; ty: number; color: string; duration: number };
@@ -10,9 +10,6 @@ const SOLD_COLORS = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
 const UNSOLD_COLORS = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
 let pid = 0;
 
-// Faithful re-creation of your embedded sold/unsold stamp styling from
-// AuctioneerContent's own <style jsx global> block — same class names,
-// same animation curves.
 function AuctionStamp({ state }: { state: "sold" | "unsold" }) {
   const isSold = state === "sold";
   return (
@@ -35,7 +32,11 @@ function AuctionStamp({ state }: { state: "sold" | "unsold" }) {
 }
 
 export default function DemoAuctioneerPage() {
-  const snap = useSyncExternalStore(demoModel.subscribe.bind(demoModel), demoModel.getSnapshot.bind(demoModel));
+  const snap = useSyncExternalStore(
+    demoModel.subscribe.bind(demoModel),
+    getDemoSnapshot,
+    getDemoSnapshot
+  );
   const { auction, currentLot, bidHistory, teamPurses, lotNumber, clockPct, isLocked } = snap;
 
   const [particles, setParticles] = useState<Particle[]>([]);
@@ -119,7 +120,7 @@ export default function DemoAuctioneerPage() {
         .unsold-sub { display: block; text-align: center; font-family: 'Geist Mono', monospace; font-size: 8px; font-weight: 500; letter-spacing: 0.35em; text-transform: uppercase; color: rgba(160,174,192,0.55); margin-top: 6px; position: relative; z-index: 2; }
       `}</style>
 
-      <DemoCursor cursor={snap.cursors["auctioneer"]} />
+      <DemoCursor cursor={snap.cursors["auctioneer"] as React.ComponentProps<typeof DemoCursor>["cursor"]} />
 
       {particles.map((p) => (
         <span key={p.id} className="auction-particle" style={{ left: "50%", top: "50%", backgroundColor: p.color, "--tx": `${p.tx}px`, "--ty": `${p.ty}px`, animationDuration: `${p.duration}s` } as React.CSSProperties} />
