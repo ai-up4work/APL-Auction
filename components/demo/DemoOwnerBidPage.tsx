@@ -46,7 +46,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
 
       <DemoCursor cursor={snap.cursors[cursorKey] as any} />
 
-      <header className="shrink-0 h-14 flex items-center justify-between px-4 my-8 bg-black/40 border-b border-white/[0.07]">
+      <header className="shrink-0 h-14 flex items-center justify-between px-4 py-12 my-8 bg-black/40 border-b border-white/[0.07]">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: team.color }}>
             <span className="f-display text-[13px] text-white not-italic">{team.code}</span>

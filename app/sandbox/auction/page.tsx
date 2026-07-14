@@ -16,11 +16,11 @@ const MOBILE: PanelKey[] = ["ownerA", "ownerB"];
 // appear/disappear — only their width changes.
 const PANEL_ORDER: PanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"];
 
-const DESKTOP_W = 1280;
+const DESKTOP_W = 1350;
 const DESKTOP_H = 800;
 const DESKTOP_CHROME_H = 26;
-const MOBILE_W = 390;
-const MOBILE_H = 650;
+const MOBILE_W = 400;
+const MOBILE_H = 750;
 const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
 
 // ── Multiview tally bar meta — numbers + labels for the four feeds ────────
