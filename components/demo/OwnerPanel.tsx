@@ -24,6 +24,10 @@ export default function OwnerPanel({ teamId, cursorKey, label }: { teamId: strin
   const purgePct = purse ? Math.min((purse.remaining / totalPurse) * 100, 100) : 0;
   const nextBid = lot ? getNextBidAmount(lot.currentBid, snap.auction.rules.tiers) : 0;
 
+  const isShuffling = lot?.status === "shuffling";
+  const isSold = lot?.status === "sold";
+  const isUnsold = lot?.status === "unsold";
+
   const canBid = !!lot && lot.status === "pending" && !snap.isLocked && !isLeading && nextBid <= (purse?.remaining ?? 0);
 
   function handleBid() {
@@ -39,7 +43,7 @@ export default function OwnerPanel({ teamId, cursorKey, label }: { teamId: strin
     >
       <DemoCursor cursor={snap.cursors[cursorKey]} />
 
-      <header className="flex items-center gap-3 px-5 py-3 border-b border-white/10">
+      <header className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-white/10">
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white"
           style={{ background: team?.color }}
@@ -52,18 +56,54 @@ export default function OwnerPanel({ teamId, cursorKey, label }: { teamId: strin
         </div>
       </header>
 
-      <div className="flex-1 p-5 flex flex-col gap-4">
-        <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-center">
+      {/* min-h-0 on this flex column is required alongside the flex-1
+          player card below — without it, a flex child's default
+          min-height:auto keeps this column from shrinking below its
+          content size, which can push the fixed-height cards/button out
+          past the parent's bottom edge instead of letting the player
+          card absorb the slack. */}
+      <div className="flex-1 min-h-0 p-5 flex flex-col gap-4">
+        {/* Player card — flex-1 so it grows to soak up whatever height is
+            left over after the fixed-size cards below it. This is the
+            piece that was missing: without something in this column set
+            to grow, the panel's content sits shrink-wrapped at the top
+            and leaves a dead gap in the middle, making the whole panel
+            look shorter than the desktop column beside it. */}
+        <div className="flex-1 min-h-[140px] rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden relative flex items-center justify-center">
+          <span className="material-symbols-outlined text-white/10" style={{ fontSize: 72 }}>
+            {isShuffling ? "casino" : "person"}
+          </span>
+
+          <div className="absolute top-3 left-3">
+            <span
+              className="font-mono text-[9px] px-3 py-1 rounded-full uppercase tracking-widest"
+              style={{ background: "#c9971f", color: "#000" }}
+            >
+              {lot ? `LOT #${lot.lotNumber} • ${isShuffling ? "REVEALING" : isSold ? "SOLD" : isUnsold ? "UNSOLD" : "ON THE BLOCK"}` : "AWAITING LOT"}
+            </span>
+          </div>
+
+          <div className="absolute bottom-3 left-3 right-3">
+            <h2 className="text-2xl font-black text-white leading-none mb-1">
+              {isShuffling ? "???" : lot?.playerName ?? "—"}
+            </h2>
+            <p className="font-mono text-[9px] text-white/50 uppercase tracking-wide">
+              {isShuffling ? "—" : lot ? `${lot.playerRole} · ${lot.playerCountry}` : "Auctioneer hasn't started yet"}
+            </p>
+          </div>
+        </div>
+
+        <div className="shrink-0 rounded-xl border border-white/10 bg-black/25 p-4 text-center">
           <p className="font-mono text-[9px] uppercase tracking-widest text-white/40 mb-1">Current High Bid</p>
           <p className="text-4xl font-black" style={{ color: "#c9971f" }}>
-            {lot ? fmtPts(lot.currentBid) : "—"}
+            {lot && !isShuffling ? fmtPts(lot.currentBid) : "—"}
           </p>
           <p className="font-mono text-[10px] text-white/40 mt-1">
             {lot?.winningTeamCode ? `Leading: ${lot.winningTeamCode}` : "No bids yet"}
           </p>
         </div>
 
-        <div className="rounded-lg border border-white/10 p-3">
+        <div className="shrink-0 rounded-lg border border-white/10 p-3">
           <div className="flex justify-between text-[10px] font-mono text-white/50 mb-1.5">
             <span>PURSE REMAINING</span>
             <span>{fmtPts(purse?.remaining)} / {fmtPts(totalPurse)}</span>
@@ -77,7 +117,7 @@ export default function OwnerPanel({ teamId, cursorKey, label }: { teamId: strin
           id="demo-bid-btn"
           onClick={handleBid}
           disabled={!canBid}
-          className="py-3.5 rounded-xl font-bold uppercase tracking-wide text-sm text-white disabled:opacity-40"
+          className="shrink-0 py-3.5 rounded-xl font-bold uppercase tracking-wide text-sm text-white disabled:opacity-40"
           style={{ background: isLeading ? "#14351f" : "#c9971f", border: isLeading ? "1px solid #22c55e55" : "none" }}
         >
           {isLeading ? "You're Leading" : lot && lot.status === "pending" ? `Bid ${fmtPts(nextBid)}` : "Awaiting Lot"}

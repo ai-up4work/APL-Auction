@@ -99,6 +99,13 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
     { at: 1600, type: "click", actor: AUCTIONEER },
 
     { at: 1700, type: "shuffle" },
+    // Shuffle/reveal only ever renders on the Watch broadcast screen (the
+    // reel lives in DemoWatchPage). Spotlight both desktop feeds
+    // (Auctioneer + Watch) together for this whole beat so computeLayout
+    // resolves to a clean 50/50 two-desktop split instead of pairing a
+    // single desktop panel with an owner's phone (which pulls a mobile
+    // panel on screen even though no bidder has anything to show yet).
+    focusStep(1700, [AUCTIONEER, WATCH]),
     { at: 1720, type: "narrator", text: () => "Shuffling the pool — revealing next player…" },
     { at: 1720, type: "sync", panels: ALL_PANELS },
 
