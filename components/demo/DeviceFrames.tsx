@@ -1,13 +1,11 @@
 "use client";
-
 import { ReactNode } from "react";
 
-const GOLD = "#f5a623";
+const ACCENT = "var(--color-theme-orange)";
+const BORDER_OVERLAY = "var(--color-border-overlay)";
+const SURFACE_LOW = "var(--color-surface-container-low)";
+const SURFACE_DIM = "var(--color-surface-dim)";
 
-/**
- * Small macOS-style traffic light cluster, dimmed to sit quietly in the
- * gold/black chrome rather than reading as a literal browser screenshot.
- */
 function TrafficLights() {
   return (
     <div className="flex items-center gap-1.5 shrink-0">
@@ -18,12 +16,15 @@ function TrafficLights() {
   );
 }
 
-/** Uppercase mono badge, same visual language as the landing page's MODULE tags. */
 function ChromeLabel({ label }: { label: string }) {
   return (
     <span
-      className="font-mono text-[9px] tracking-[2px] text-gold/70 uppercase truncate"
-      style={{ letterSpacing: "0.15em" }}
+      className="text-[9px] uppercase truncate"
+      style={{
+        fontFamily: "var(--font-label-mono)",
+        letterSpacing: "0.15em",
+        color: `color-mix(in srgb, ${ACCENT} 70%, transparent)`,
+      }}
     >
       {label}
     </span>
@@ -47,19 +48,17 @@ export function DesktopFrame({
 
   return (
     <div
-      className="relative rounded-lg overflow-hidden shrink-0 border border-gold/20"
+      className="relative overflow-hidden shrink-0 rounded-lg"
       style={{
-        width: width * scale + 12,
-        height: height * scale + chromeH + 12,
-        padding: "6px 6px 6px 6px",
-        background: "linear-gradient(180deg, #141414, #000000)",
-        boxShadow: `0 0 0 1px rgba(245,166,35,0.05), 0 0 32px -14px ${GOLD}55`,
+        width: width * scale,
+        height: height * scale + chromeH,
+        background: `linear-gradient(180deg, ${SURFACE_LOW}, ${SURFACE_DIM})`,
+        boxShadow: `inset 0 0 0 1px ${BORDER_OVERLAY}, 0 0 32px -14px color-mix(in srgb, ${ACCENT} 45%, transparent)`,
       }}
     >
-      {/* chrome bar */}
       <div
-        className="flex items-center justify-between px-3 border-b border-gold/10"
-        style={{ height: chromeH }}
+        className="flex items-center justify-between px-3 border-b"
+        style={{ height: chromeH, borderColor: BORDER_OVERLAY }}
       >
         <TrafficLights />
         {label ? <ChromeLabel label={label} /> : <span />}
@@ -80,8 +79,8 @@ export function DesktopFrame({
 
 export function MobileFrame({
   children,
-  width = 390,
-  height = 650,
+  width = 450,
+  height = 750,
   scale,
   label,
 }: {
@@ -91,41 +90,24 @@ export function MobileFrame({
   scale: number;
   label?: string;
 }) {
+  // Mobile frames define strict visual bounds so the inner app will
+  // stretch to match these exactly.
   return (
     <div
-      className="relative rounded-[28px] overflow-hidden shrink-0"
+      className="relative shrink-0 overflow-hidden flex"
       style={{
-        width: width * scale + 16,
-        height: height * scale + 16,
-        padding: 8,
-        background: "linear-gradient(180deg, #1c1c1c, #050505)",
-        border: "1px solid rgba(245,166,35,0.35)",
-        boxShadow: `0 0 0 1px rgba(0,0,0,0.6), 0 8px 32px -8px rgba(0,0,0,0.8), 0 0 40px -16px ${GOLD}66`,
+        width: width * scale,
+        height: height * scale,
+        borderRadius: (width * scale) * 0.13, 
+        border: `${Math.max(3, (width * scale) * 0.022)}px solid #18181b`,  // navy blue
+        boxShadow: `0 0 32px -14px color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+        background: `linear-gradient(180deg, ${SURFACE_LOW}, ${SURFACE_DIM})`,
       }}
     >
-      {/* camera notch — bumped up in size/contrast so it's actually visible */}
-      <div
-        className="absolute left-1/2 top-[6px] -translate-x-1/2 z-10 rounded-full"
-        style={{
-          width: width * scale * 0.24,
-          height: 6,
-          background: "#000",
-          border: "1px solid rgba(255,255,255,0.06)",
-        }}
-      />
-
-      {label && (
-        <div className="absolute left-1/2 top-[16px] -translate-x-1/2 z-10">
-          <ChromeLabel label={label} />
-        </div>
-      )}
-
-      <div
-        className="overflow-hidden rounded-[20px]"
-        style={{ width: width * scale, height: height * scale, background: "#000" }}
-      >
+      {/* w-full h-full guarantees child components fill the entire remaining frame real estate */}
+      <div className="w-full h-full overflow-hidden relative">
         <div style={{ width, height, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-          {children}
+           {children}
         </div>
       </div>
     </div>

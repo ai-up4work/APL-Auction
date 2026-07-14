@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
-import { Shield } from "lucide-react";
 import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
 import { demoModel, getDemoSnapshot } from "@/lib/demo/demoModel";
 import { DesktopFrame, MobileFrame } from "@/components/demo/DeviceFrames";
@@ -12,97 +11,59 @@ import DemoWatchPage from "@/components/demo/DemoWatchPage";
 type PanelKey = "auctioneer" | "watch" | "ownerA" | "ownerB";
 const DESKTOP: PanelKey[] = ["auctioneer", "watch"];
 const MOBILE: PanelKey[] = ["ownerA", "ownerB"];
-// Fixed left-to-right render order so panels never swap sides when they
-// appear/disappear — only their width changes.
 const PANEL_ORDER: PanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"];
 
-const DESKTOP_W = 1280;
+const DESKTOP_W = 1350;
 const DESKTOP_H = 800;
 const DESKTOP_CHROME_H = 26;
-const MOBILE_W = 390;
-const MOBILE_H = 650;
+const MOBILE_W = 400;
+const MOBILE_H = 750;
 const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
 
-/**
- * Given the set of currently-highlighted panels, returns each panel's
- * share of screen width (0–100). Panels not present in the result get 0
- * (collapsed, not just dimmed) so whatever IS highlighted can use every
- * spare pixel.
- *
- * Returns {} when nothing is highlighted — caller should fall back to the
- * neutral overview grid in that case.
- */
-function computeSpotlightLayout(highlighted: PanelKey[]): Partial<Record<PanelKey, number>> {
+const PANEL_META: Record<PanelKey, { num: string; label: string }> = {
+  auctioneer: { num: "01", label: "Auctioneer" },
+  watch: { num: "02", label: "Broadcast" },
+  ownerA: { num: "03", label: "Owner A" },
+  ownerB: { num: "04", label: "Owner B" },
+};
+
+function computeLayout(highlighted: PanelKey[]): Record<PanelKey, number> {
+  const base: Record<PanelKey, number> = { auctioneer: 0, watch: 0, ownerA: 0, ownerB: 0 };
   const desktopHi = highlighted.filter((p) => DESKTOP.includes(p));
   const mobileHi = highlighted.filter((p) => MOBILE.includes(p));
 
-  if (desktopHi.length === 0 && mobileHi.length === 0) return {};
+  if (desktopHi.length === 0 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
+  if (desktopHi.length === 1 && mobileHi.length === 0) return { ...base, [desktopHi[0]]: 75, ownerA: 25 };
+  if (desktopHi.length === 1 && mobileHi.length === 1) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 25 };
+  if (desktopHi.length === 1 && mobileHi.length === 2) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 12.5, [mobileHi[1]]: 12.5 };
+  if (desktopHi.length === 0 && mobileHi.length === 2) return { ...base, [mobileHi[0]]: 50, [mobileHi[1]]: 50 };
+  if (desktopHi.length === 0 && mobileHi.length === 1) return { ...base, [mobileHi[0]]: 25, watch: 75 };
+  if (desktopHi.length === 2 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
+  if (desktopHi.length === 2 && mobileHi.length === 1) return { ...base, auctioneer: 37.5, watch: 37.5, [mobileHi[0]]: 25 };
+  if (desktopHi.length === 2 && mobileHi.length === 2) return { ...base, auctioneer: 25, watch: 25, ownerA: 25, ownerB: 25 };
 
-  // One desktop alone -> fill the screen.
-  if (desktopHi.length === 1 && mobileHi.length === 0) {
-    return { [desktopHi[0]]: 100 };
-  }
-
-  // One desktop + one mobile -> 75 / 25.
-  if (desktopHi.length === 1 && mobileHi.length === 1) {
-    return { [desktopHi[0]]: 75, [mobileHi[0]]: 25 };
-  }
-
-  // One desktop + two mobiles -> 75 / 12.5 / 12.5.
-  if (desktopHi.length === 1 && mobileHi.length === 2) {
-    return { [desktopHi[0]]: 75, [mobileHi[0]]: 12.5, [mobileHi[1]]: 12.5 };
-  }
-
-  // Two mobiles, no desktop -> side by side, 50 / 50.
-  if (desktopHi.length === 0 && mobileHi.length === 2) {
-    return { [mobileHi[0]]: 50, [mobileHi[1]]: 50 };
-  }
-
-  // One mobile, no desktop highlighted -> mobile gets a quarter, Watch
-  // (the always-on spectator screen) takes the rest. Auctioneer stays
-  // hidden here since it isn't part of this beat.
-  if (desktopHi.length === 0 && mobileHi.length === 1) {
-    return { [mobileHi[0]]: 25, watch: 75 };
-  }
-
-  // Two desktops highlighted together — not produced by the orchestrator
-  // today, kept here so the function is ready if that ever changes.
-  if (desktopHi.length === 2 && mobileHi.length === 0) return { auctioneer: 50, watch: 50 };
-  if (desktopHi.length === 2 && mobileHi.length === 1) return { auctioneer: 37.5, watch: 37.5, [mobileHi[0]]: 25 };
-  if (desktopHi.length === 2 && mobileHi.length === 2) return { auctioneer: 25, watch: 25, ownerA: 25, ownerB: 25 };
-
-  return {};
+  return { ...base, auctioneer: 50, watch: 50 };
 }
 
-/**
- * Measures the available box for a panel and returns both the scale
- * factor AND the exact pixel width/height that scaled content should
- * occupy (naturalWidth * scale, naturalHeight * scale).
- *
- * IMPORTANT: this returns a *callback ref*, not a RefObject. The panel
- * this hook backs gets mounted onto structurally different DOM elements
- * depending on layout mode (neutral overview grid vs. spotlight row), so
- * the underlying node identity changes across renders. A plain
- * `useRef` + `useEffect(..., [naturalWidth, naturalHeight])` would set
- * up a ResizeObserver once and never notice the swap, leaving it
- * watching a detached node forever and freezing `scale` at a stale,
- * usually-too-small value (this was the "tiny floating box" bug — the
- * observer kept watching a removed node from the neutral layout after
- * the app switched into the spotlight layout). A callback ref re-fires
- * on every attach/detach, so the observer always tracks the node that's
- * actually on screen.
- */
-function useCellFit(naturalWidth: number, naturalHeight: number) {
-  const [scale, setScale] = useState(0.3);
+function useCellFit(naturalWidth: number, naturalHeight: number, fit: "contain" | "height" = "contain") {
+  const [scale, setScale] = useState(0);
+  const [ready, setReady] = useState(false);
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
 
   const recompute = useCallback(() => {
     const el = nodeRef.current;
     if (!el) return;
-    const s = Math.min(el.clientWidth / naturalWidth, el.clientHeight / naturalHeight) * 0.995;
-    setScale(Math.max(Math.min(s, 1), 0.05));
-  }, [naturalWidth, naturalHeight]);
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    if (cw < 2 || ch < 2) return;
+    const widthRatio = cw / naturalWidth;
+    const heightRatio = ch / naturalHeight;
+    const raw = fit === "height" ? heightRatio : Math.min(widthRatio, heightRatio);
+    const s = raw * 0.998;
+    setScale(Math.max(s, 0.05));
+    setReady(true);
+  }, [naturalWidth, naturalHeight, fit]);
 
   const setRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -114,14 +75,28 @@ function useCellFit(naturalWidth: number, naturalHeight: number) {
         const ro = new ResizeObserver(recompute);
         ro.observe(el);
         observerRef.current = ro;
+      } else {
+        setReady(false);
       }
     },
     [recompute]
   );
 
+  useEffect(() => {
+    window.addEventListener("resize", recompute);
+    const raf1 = requestAnimationFrame(() => {
+      recompute();
+      requestAnimationFrame(recompute);
+    });
+    return () => {
+      window.removeEventListener("resize", recompute);
+      cancelAnimationFrame(raf1);
+    };
+  }, [recompute]);
+
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  return { ref: setRef, scale, boxW: naturalWidth * scale, boxH: naturalHeight * scale };
+  return { ref: setRef, scale, ready, boxW: naturalWidth * scale, boxH: naturalHeight * scale };
 }
 
 function useSpotlight() {
@@ -136,25 +111,30 @@ function useSpotlight() {
   };
 }
 
-/** One column in the row layout. Collapses to 0 width + opacity 0 rather
- * than unmounting, so cursor state / component state survives being
- * hidden and reappearing. */
-function Cell({
-  pct,
-  isSyncing,
-  children,
-}: {
-  pct: number;
-  isSyncing: boolean;
-  children: React.ReactNode;
-}) {
+function useTimecode() {
+  const [deci, setDeci] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setDeci((d) => d + 1), 100);
+    return () => clearInterval(id);
+  }, []);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const totalSec = Math.floor(deci / 10);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor(totalSec / 60) % 60;
+  const s = totalSec % 60;
+  const cs = (deci % 10) * 10;
+  return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(cs)}`;
+}
+
+function Cell({ pct, ready, isSyncing, children }: { pct: number; ready: boolean; isSyncing: boolean; children: React.ReactNode }) {
+  const visible = pct > 0 && ready;
   return (
     <div
       className={`min-w-0 h-full flex items-center justify-center overflow-hidden ${isSyncing ? "panel-sync-ring" : ""}`}
       style={{
         flex: `0 0 ${pct}%`,
-        opacity: pct > 0 ? 1 : 0,
-        pointerEvents: pct > 0 ? "auto" : "none",
+        opacity: visible ? 1 : 0,
+        pointerEvents: visible ? "auto" : "none",
         transition: `flex-basis ${ZOOM_TRANSITION}, opacity ${ZOOM_TRANSITION}`,
       }}
     >
@@ -163,13 +143,98 @@ function Cell({
   );
 }
 
+function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelKey[] }) {
+  const tc = useTimecode();
+  return (
+    <div
+      className="shrink-0 h-9 flex items-center justify-between px-4 relative z-20"
+      style={{
+        background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
+        borderBottom: "1px solid var(--color-border-overlay)",
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <span
+          className="w-1.5 h-1.5 rounded-full bg-red-500"
+          style={{ animation: "feedPulse 1.6s ease-in-out infinite" }}
+        />
+        <span
+          className="text-[9px] uppercase"
+          style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.22em", color: "var(--color-outline)" }}
+        >
+          Multiview
+        </span>
+        <span
+          className="text-[11px] tabular-nums"
+          style={{
+            fontFamily: "var(--font-headline-lg)",
+            fontStyle: "italic",
+            fontWeight: 700,
+            color: "var(--color-on-surface)",
+            letterSpacing: "0.02em",
+          }}
+        >
+          {tc}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {PANEL_ORDER.map((key) => {
+          const isLive = active.includes(key);
+          const isSync = syncing.includes(key);
+          return (
+            <div
+              key={key}
+              className="flex items-center gap-1.5 px-2 py-1 rounded"
+              style={{
+                background: isLive
+                  ? "color-mix(in srgb, var(--color-success-green) 12%, transparent)"
+                  : "rgba(255,255,255,0.02)",
+                border: `1px solid ${
+                  isLive
+                    ? "color-mix(in srgb, var(--color-success-green) 45%, transparent)"
+                    : "var(--color-border-overlay)"
+                }`,
+                animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
+              }}
+            >
+              <span
+                className="w-[6px] h-[6px] rounded-full shrink-0"
+                style={{ background: isLive ? "var(--color-success-green)" : "var(--color-outline)" }}
+              />
+              <span
+                className="text-[8px] uppercase"
+                style={{
+                  fontFamily: "var(--font-label-mono)",
+                  letterSpacing: "0.1em",
+                  color: isLive ? "var(--color-on-surface)" : "var(--color-outline)",
+                }}
+              >
+                {PANEL_META[key].num} {PANEL_META[key].label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function SandboxPage() {
   const { activePanels, syncPanels } = useSpotlight();
 
-  const auctioneerCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
-  const watchCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
-  const ownerACell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
-  const ownerBCell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
+  const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
+  const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
+  // Fit by height to allow proper stretching in the cell constraints
+  const ownerACell = useCellFit(MOBILE_W, MOBILE_H, "height");
+  const ownerBCell = useCellFit(MOBILE_W, MOBILE_H, "height");
+
+  const cellReady: Record<PanelKey, boolean> = {
+    auctioneer: auctioneerCell.ready,
+    watch: watchCell.ready,
+    ownerA: ownerACell.ready,
+    ownerB: ownerBCell.ready,
+  };
 
   useEffect(() => {
     demoOrchestrator.start();
@@ -177,8 +242,7 @@ export default function SandboxPage() {
   }, []);
 
   const highlighted: PanelKey[] = activePanels;
-  const layout = computeSpotlightLayout(highlighted);
-  const isDefault = Object.keys(layout).length === 0;
+  const layout = computeLayout(highlighted);
 
   const pctOf = (key: PanelKey) => layout[key] ?? 0;
 
@@ -205,8 +269,6 @@ export default function SandboxPage() {
     ),
   };
 
-  // Callback refs — same function identity reused across renders (stable
-  // from useCallback inside useCellFit), safe to hand straight to `ref`.
   const cellRefs: Record<PanelKey, (el: HTMLDivElement | null) => void> = {
     auctioneer: auctioneerCell.ref,
     watch: watchCell.ref,
@@ -214,9 +276,6 @@ export default function SandboxPage() {
     ownerB: ownerBCell.ref,
   };
 
-  // Exact pixel box each panel's scaled content should occupy — reserved
-  // by an inner wrapper so layout space always matches visual scaled
-  // size (see useCellFit doc comment above).
   const cellDims: Record<PanelKey, { w: number; h: number }> = {
     auctioneer: { w: auctioneerCell.boxW, h: auctioneerCell.boxH },
     watch: { w: watchCell.boxW, h: watchCell.boxH },
@@ -225,80 +284,56 @@ export default function SandboxPage() {
   };
 
   return (
-    <div className="h-screen w-screen bg-black overflow-hidden relative flex flex-col">
+    <div className="h-screen w-screen overflow-hidden relative flex flex-col">
       <style jsx global>{`
         @keyframes panel-sync-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(245,166,35,0.6); }
-          70% { box-shadow: 0 0 0 14px rgba(245,166,35,0); }
-          100% { box-shadow: 0 0 0 0 rgba(245,166,35,0); }
+          0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 55%, transparent); }
+          70% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
+          100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
         }
-        .panel-sync-ring { animation: panel-sync-pulse 0.9s ease-out; }
+
+        @keyframes feedPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.45; }
+        }
+
+        .sandbox-scanlines {
+          background-image: repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.012) 0px,
+            rgba(255, 255, 255, 0.012) 1px,
+            transparent 1px,
+            transparent 3px
+          );
+        }
       `}</style>
 
+      <MultiviewBar active={highlighted} syncing={syncPanels} />
+
       <div
-        className="pointer-events-none absolute inset-0 z-0"
+        className="pointer-events-none absolute inset-0 z-0 sandbox-scanlines"
         style={{
           background:
-            "radial-gradient(1200px 500px at 50% 0%, rgba(245,166,35,0.08), transparent 60%), radial-gradient(1000px 500px at 50% 100%, rgba(245,166,35,0.05), transparent 60%)",
+            "radial-gradient(900px 380px at 50% 0%, color-mix(in srgb, var(--color-theme-orange) 7%, transparent), transparent 65%), " +
+            "linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)",
+          backgroundSize: "auto, 48px 48px, 48px 48px",
         }}
       />
 
-      {isDefault ? (
-        // ── Neutral state: nothing highlighted ── two balanced bands,
-        // mobiles on top, desktops on bottom — same as the original.
-        <>
-          <div
-            className="min-h-0 flex items-center justify-center bg-black relative z-10 gap-10 overflow-hidden"
-            style={{ flex: "42 1 0%" }}
-          >
-            <div ref={ownerACell.ref} className="flex items-center justify-center overflow-hidden h-full" style={{ aspectRatio: `${MOBILE_W} / ${MOBILE_H}` }}>
-              {frames.ownerA}
-            </div>
-            <div className="shrink-0 flex flex-col items-center justify-center px-6">
-              <Shield className="w-5 h-5 text-gold mb-2" />
-              <p className="font-cinzel font-bold uppercase tracking-wider text-white text-lg leading-none text-center whitespace-nowrap">
-                Valiant <span className="text-gold">League</span>
-              </p>
-              <p className="font-mono uppercase tracking-[0.3em] text-gold/50 text-[9px] mt-2 whitespace-nowrap">
-                Live Auction Room
-              </p>
-            </div>
-            <div ref={ownerBCell.ref} className="flex items-center justify-center overflow-hidden h-full" style={{ aspectRatio: `${MOBILE_W} / ${MOBILE_H}` }}>
-              {frames.ownerB}
-            </div>
-          </div>
-          <div className="h-px bg-gold/10 shrink-0 relative z-10" />
-          <div
-            className="min-h-0 flex gap-px bg-gold/10 overflow-hidden relative z-10"
-            style={{ flex: "58 1 0%" }}
-          >
-            <div ref={auctioneerCell.ref} className="bg-black flex-1 flex items-center justify-center overflow-hidden">
-              {frames.auctioneer}
-            </div>
-            <div ref={watchCell.ref} className="bg-black flex-1 flex items-center justify-center overflow-hidden">
-              {frames.watch}
-            </div>
-          </div>
-        </>
-      ) : (
-        // ── Spotlight state: single full-bleed row, panels sized by
-        // computeSpotlightLayout(). Hidden panels collapse to 0 instead
-        // of unmounting so cursor state survives.
-        <div className="flex-1 min-h-0 flex relative z-10">
-          {PANEL_ORDER.map((key) => (
-            <Cell key={key} pct={pctOf(key)} isSyncing={syncPanels.includes(key)}>
-              <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
-                <div
-                  style={{ width: cellDims[key].w, height: cellDims[key].h }}
-                  className="overflow-hidden flex items-center justify-center"
-                >
-                  {frames[key]}
-                </div>
+      <div className="flex-1 min-h-0 flex relative z-10">
+        {PANEL_ORDER.map((key) => (
+          <Cell key={key} pct={pctOf(key)} ready={cellReady[key]} isSyncing={syncPanels.includes(key)}>
+            <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
+              <div
+                style={{ width: cellDims[key].w, height: cellDims[key].h }}
+                className="overflow-hidden flex items-center justify-center shrink-0"
+              >
+                {frames[key]}
               </div>
-            </Cell>
-          ))}
-        </div>
-      )}
+            </div>
+          </Cell>
+        ))}
+      </div>
     </div>
   );
 }
