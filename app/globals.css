@@ -2,9 +2,9 @@
 @import "../styles/overlay-theme.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "../styles/medivel-theme.css"
+@import "../styles/medivel-theme.css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark(&:is(.dark) *);
 
 @theme {
   --color-theme-orange: #c9971f;
