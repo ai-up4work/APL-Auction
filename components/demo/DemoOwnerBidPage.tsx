@@ -12,7 +12,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
     getDemoSnapshot,
     getDemoSnapshot
   );
-  const { auction, currentLot, bidHistory, teamPurses, clockPct, isLocked } = snap;
+  const { auction, currentLot, teamPurses, isLocked } = snap;
 
   const team = auction.teams.find((t) => t.supabaseId === teamId)!;
   const purse = teamPurses[teamId];
@@ -33,7 +33,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
   const bidLabel = isRevealing ? "AWAITING REVEAL" : isSold ? "LOT CLOSED" : isUnsold ? "LOT UNSOLD" : isLocked ? "TIME'S UP" : isLeading ? "YOU'RE LEADING" : !currentLot ? "AWAITING LOT" : `PLACE BID — ${fmtPts(nextBid)}`;
 
   return (
-    <div data-demo-panel={cursorKey} className="bg-background mb-8 text-white h-full flex flex-col overflow-hidden font-inter relative" style={{ background: "#0b0d0e" }}>
+    <div data-demo-panel={cursorKey} className="bg-background text-white w-full h-full flex flex-col overflow-hidden font-inter relative" style={{ background: "#0b0d0e" }}>
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,400;1,700&family=Geist+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
         .f-display { font-family: 'Archivo Narrow', sans-serif; font-style: italic; font-weight: 700; text-transform: uppercase; letter-spacing: -0.02em; }
@@ -46,7 +46,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
 
       <DemoCursor cursor={snap.cursors[cursorKey] as any} />
 
-      <header className="shrink-0 h-14 flex items-center justify-between px-4 py-12 my-8 bg-black/40 border-b border-white/[0.07]">
+      <header className="shrink-0 h-16 flex items-center justify-between pl-4 pr-8 bg-black/40 border-b border-white/[0.07]">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: team.color }}>
             <span className="f-display text-[13px] text-white not-italic">{team.code}</span>
@@ -62,11 +62,9 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-hidden pl-6 flex flex-col gap-3 h-full">
-        {/* Player card — flex-1 so it absorbs whatever height is left over
-            below the fixed-height cards, instead of leaving empty space
-            under a hard-coded height. */}
-        <section className="glass rounded-xl overflow-hidden relative flex-1 h-full">
+      <div className="flex-1 min-h-0 overflow-y-auto pl-3 pr-8 pt-5 p-10 flex flex-col gap-3 w-full">
+        {/* Player card - flex-1 allows it to fill dynamic empty space */}
+        <section className="glass rounded-xl overflow-hidden relative flex-1 min-h-[150px]">
           <div className="w-full h-full bg-white/[0.03] flex items-center justify-center relative">
             <span className="material-symbols-outlined text-white/10" style={{ fontSize: 90 }}>person</span>
             <div className="absolute top-3 left-3">
@@ -127,7 +125,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
           id="demo-bid-btn"
           onClick={handleBid}
           disabled={!canBid}
-          className="shrink-0 w-full py-4 mb-4 rounded-xl flex items-center justify-center gap-3 disabled:opacity-40"
+          className="shrink-0 w-full py-4 rounded-xl flex items-center justify-center gap-3 disabled:opacity-40"
           style={{ background: isLeading ? "#0f1f0f" : canBid ? BID_COLOR : "#1a1e1f", border: isLeading ? "1px solid rgba(34,197,94,0.3)" : "none" }}
         >
           <span className="material-symbols-outlined text-[20px] text-white">gavel</span>
