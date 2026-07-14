@@ -432,7 +432,6 @@ export default function SandboxPage() {
           70% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
           100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
         }
-        .panel-sync-ring { animation: panel-sync-pulse 0.9s ease-out; }
 
         @keyframes feedPulse {
           0%, 100% { opacity: 1; }
