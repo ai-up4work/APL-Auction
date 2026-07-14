@@ -38,9 +38,12 @@ function computeSpotlightLayout(highlighted: PanelKey[]): Partial<Record<PanelKe
 
   if (desktopHi.length === 0 && mobileHi.length === 0) return {};
 
-  // One desktop alone -> fill the screen.
+  // One desktop alone -> pair it with a bidder panel instead of letting
+  // the desktop fill the whole screen. A bid page should always be
+  // visible alongside the auctioneer/broadcast view, even during beats
+  // (shuffle, reveal) where no owner has been focused yet.
   if (desktopHi.length === 1 && mobileHi.length === 0) {
-    return { [desktopHi[0]]: 100 };
+    return { [desktopHi[0]]: 75, ownerA: 25 };
   }
 
   // One desktop + one mobile -> 75 / 25.
@@ -66,8 +69,9 @@ function computeSpotlightLayout(highlighted: PanelKey[]): Partial<Record<PanelKe
   }
 
   // Two desktops highlighted together — not produced by the orchestrator
-  // today, kept here so the function is ready if that ever changes.
-  if (desktopHi.length === 2 && mobileHi.length === 0) return { auctioneer: 50, watch: 50 };
+  // today, kept here so the function is ready if that ever changes. Still
+  // pair in a bidder panel so a bid page is never left off-screen.
+  if (desktopHi.length === 2 && mobileHi.length === 0) return { auctioneer: 37.5, watch: 37.5, ownerA: 25 };
   if (desktopHi.length === 2 && mobileHi.length === 1) return { auctioneer: 37.5, watch: 37.5, [mobileHi[0]]: 25 };
   if (desktopHi.length === 2 && mobileHi.length === 2) return { auctioneer: 25, watch: 25, ownerA: 25, ownerB: 25 };
 
@@ -91,8 +95,22 @@ function computeSpotlightLayout(highlighted: PanelKey[]): Partial<Record<PanelKe
  * the app switched into the spotlight layout). A callback ref re-fires
  * on every attach/detach, so the observer always tracks the node that's
  * actually on screen.
+ *
+ * `fit` controls how the scale is derived from the available box:
+ *  - "contain" (default): scale = min(widthRatio, heightRatio) — the
+ *    whole natural box is guaranteed to fit inside the container, but
+ *    if the container's aspect ratio doesn't match the natural aspect
+ *    ratio, you get empty letterboxing on one axis. This is what
+ *    desktop frames use, since we never want the browser chrome cut off.
+ *  - "height": scale = heightRatio only — the panel fills the container
+ *    top-to-bottom, growing width along with it even if that means the
+ *    frame is wider than its cell (the parent Cell has overflow-hidden
+ *    and centers the content, so the overflow is clipped symmetrically
+ *    left/right rather than leaving dead space above/below). This is
+ *    what phone panels use: a phone mockup is meant to look like a
+ *    full-height device, not a shrunken thumbnail with letterboxing.
  */
-function useCellFit(naturalWidth: number, naturalHeight: number) {
+function useCellFit(naturalWidth: number, naturalHeight: number, fit: "contain" | "height" = "contain") {
   const [scale, setScale] = useState(0.3);
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -100,9 +118,12 @@ function useCellFit(naturalWidth: number, naturalHeight: number) {
   const recompute = useCallback(() => {
     const el = nodeRef.current;
     if (!el) return;
-    const s = Math.min(el.clientWidth / naturalWidth, el.clientHeight / naturalHeight) * 0.995;
+    const widthRatio = el.clientWidth / naturalWidth;
+    const heightRatio = el.clientHeight / naturalHeight;
+    const raw = fit === "height" ? heightRatio : Math.min(widthRatio, heightRatio);
+    const s = raw * 0.995;
     setScale(Math.max(Math.min(s, 1), 0.05));
-  }, [naturalWidth, naturalHeight]);
+  }, [naturalWidth, naturalHeight, fit]);
 
   const setRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -168,8 +189,11 @@ export default function SandboxPage() {
 
   const auctioneerCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
   const watchCell = useCellFit(DESKTOP_W + 12, DESKTOP_H + DESKTOP_CHROME_H + 12);
-  const ownerACell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
-  const ownerBCell = useCellFit(MOBILE_W + 12, MOBILE_H + 12);
+  // Phone panels: fit by height so the device mockup always spans the
+  // full available height of its cell instead of shrinking to whichever
+  // axis (usually width, in a narrow spotlight column) is tighter.
+  const ownerACell = useCellFit(MOBILE_W + 12, MOBILE_H + 12, "height");
+  const ownerBCell = useCellFit(MOBILE_W + 12, MOBILE_H + 12, "height");
 
   useEffect(() => {
     demoOrchestrator.start();
@@ -251,7 +275,7 @@ export default function SandboxPage() {
             className="min-h-0 flex items-center justify-center bg-black relative z-10 gap-10 overflow-hidden"
             style={{ flex: "42 1 0%" }}
           >
-            <div ref={ownerACell.ref} className="flex items-center justify-center overflow-hidden h-full" style={{ aspectRatio: `${MOBILE_W} / ${MOBILE_H}` }}>
+            <div ref={ownerACell.ref} className="flex items-center justify-center overflow-hidden h-full">
               {frames.ownerA}
             </div>
             <div className="shrink-0 flex flex-col items-center justify-center px-6">
@@ -263,7 +287,7 @@ export default function SandboxPage() {
                 Live Auction Room
               </p>
             </div>
-            <div ref={ownerBCell.ref} className="flex items-center justify-center overflow-hidden h-full" style={{ aspectRatio: `${MOBILE_W} / ${MOBILE_H}` }}>
+            <div ref={ownerBCell.ref} className="flex items-center justify-center overflow-hidden h-full">
               {frames.ownerB}
             </div>
           </div>
@@ -290,7 +314,7 @@ export default function SandboxPage() {
               <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
                 <div
                   style={{ width: cellDims[key].w, height: cellDims[key].h }}
-                  className="overflow-hidden flex items-center justify-center"
+                  className="overflow-hidden flex items-center justify-center shrink-0"
                 >
                   {frames[key]}
                 </div>

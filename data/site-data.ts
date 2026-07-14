@@ -269,13 +269,52 @@ export const comparisonColumns = [
   { key: "zoom" as const, label: "Zoom Call" },
 ]
 
-export const showcaseSlides = [
-  { tag: "Auction", title: "Iron Knights Season Opener", by: "Run by The Wardens CC — 8 teams, 96 players" },
-  { tag: "Bracket", title: "Silver Cup Knockout", by: "Run by Royal Strikers — double-elimination, 16 teams" },
-  { tag: "Overlay", title: "Golden Lions Broadcast", by: "Streamed live — 12,000 viewers peak" },
-  { tag: "League", title: "Crimson Cup Full Season", by: "Run by Valiant Originals — three months, one trophy" },
-  { tag: "League", title: "Bronze Trophy Series", by: "Run by Bronze Trophy Alliance — 5 teams, round robin" },
-  { tag: "Auction", title: "Wardens Winter Sale", by: "Run by The Wardens CC — 64 players moved in one night" },
+
+
+export type ShowcaseSlide = {
+  tag: string
+  title: string
+  by: string
+  image: string
+}
+
+export const showcaseSlides: ShowcaseSlide[] = [
+  {
+    tag: "Auction",
+    title: "Iron Knights Season Opener",
+    by: "Run by The Wardens CC — 8 teams, 96 players",
+    image: "https://images.pexels.com/photos/9071736/pexels-photo-9071736.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
+  {
+    tag: "Bracket",
+    title: "Silver Cup Knockout",
+    by: "Run by Royal Strikers — double-elimination, 16 teams",
+    image: "https://images.pexels.com/photos/9072212/pexels-photo-9072212.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
+  {
+    tag: "Overlay",
+    title: "Golden Lions Broadcast",
+    by: "Streamed live — 12,000 viewers peak",
+    image: "https://images.pexels.com/photos/7862505/pexels-photo-7862505.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
+  {
+    tag: "League",
+    title: "Crimson Cup Full Season",
+    by: "Run by Valiant Originals — three months, one trophy",
+    image: "https://images.pexels.com/photos/6532362/pexels-photo-6532362.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
+  {
+    tag: "League",
+    title: "Bronze Trophy Series",
+    by: "Run by Bronze Trophy Alliance — 5 teams, round robin",
+    image: "https://images.pexels.com/photos/34412339/pexels-photo-34412339.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
+  {
+    tag: "Auction",
+    title: "Wardens Winter Sale",
+    by: "Run by The Wardens CC — 64 players moved in one night",
+    image: "https://images.pexels.com/photos/9072205/pexels-photo-9072205.jpeg?auto=compress&cs=tinysrgb&w=1200",
+  },
 ]
 
 export const faqs = [
@@ -305,3 +344,4 @@ export const faqs = [
       "Move straight into a single or double-elimination bracket, drawn from the teams you just built, with results feeding the overlay live.",
   },
 ]
+

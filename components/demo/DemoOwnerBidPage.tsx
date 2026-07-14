@@ -1,4 +1,3 @@
-// components/demo/DemoOwnerBidPage.tsx
 "use client";
 
 import React, { useSyncExternalStore } from "react";
@@ -63,9 +62,11 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
-        {/* Player card */}
-        <section className="glass rounded-xl overflow-hidden relative shrink-0" style={{ height: 220 }}>
+      <div className="flex-1 min-h-0 overflow-hidden p-3 flex flex-col gap-3">
+        {/* Player card — flex-1 so it absorbs whatever height is left over
+            below the fixed-height cards, instead of leaving empty space
+            under a hard-coded height. */}
+        <section className="glass rounded-xl overflow-hidden relative flex-1 min-h-[160px]">
           <div className="w-full h-full bg-white/[0.03] flex items-center justify-center relative">
             <span className="material-symbols-outlined text-white/10" style={{ fontSize: 90 }}>person</span>
             <div className="absolute top-3 left-3">
