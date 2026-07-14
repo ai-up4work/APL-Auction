@@ -74,6 +74,15 @@ export type ShuffleState = {
 const TIMER_SECONDS = 12;
 const TICK_MS = 100;
 
+// How long to hold on the settled player (status still "shuffling") before
+// flipping the lot to "pending" and letting bidding / the watch panel go
+// live. Gives owners + spectators a clean beat to actually see who got
+// revealed instead of snapping straight into bid mode.
+const REVEAL_HOLD_MS = 1000;
+// Shuffle overlay itself stays mounted a little past the hold so the
+// crossfade out doesn't feel abrupt.
+const SHUFFLE_HIDE_MS = REVEAL_HOLD_MS + 300;
+
 const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUnsoldFinal">[] = [
   { name: "Marcus Vane", role: "All-rounder", origin: "Overseas", country: "Australia", img: "", price: 1500, capped: true },
   { name: "Elena Rodas", role: "Batsman", origin: "Overseas", country: "South Africa", img: "", price: 1200, capped: false },
@@ -200,6 +209,8 @@ class DemoModelImpl {
   private syncTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   private shuffleTicker: ReturnType<typeof setTimeout> | null = null;
   private shuffleHideTimer: ReturnType<typeof setTimeout> | null = null;
+  // Holds the "settled but not yet live" pause after the shuffle stops.
+  private revealDelayTimer: ReturnType<typeof setTimeout> | null = null;
 
   private emit() {
     this.listeners.forEach((l) => l());
@@ -259,6 +270,7 @@ class DemoModelImpl {
     this.stopClock();
     this.stopShuffleTicker();
     if (this.shuffleHideTimer) clearTimeout(this.shuffleHideTimer);
+    if (this.revealDelayTimer) clearTimeout(this.revealDelayTimer);
 
     const pool = this.snap.auction.players;
     if (pool.length === 0) return;
@@ -290,22 +302,44 @@ class DemoModelImpl {
     this.tickShuffle();
   }
 
+  /**
+   * Called once the shuffle reel has landed on the target player.
+   *
+   * Sequence:
+   *  1. Stop the ticker and set shuffle.target so the reel visually settles
+   *     on the right card, but keep lot.status === "shuffling" — panels
+   *     (owner bid screen, watch panel) still treat this as "not revealed"
+   *     and show their shuffling / "???" state.
+   *  2. After REVEAL_HOLD_MS (1s), flip lot.status to "pending", set
+   *     startedAt, and start the bidding clock. This is the moment the
+   *     watch panel / owner panel actually shows the real player + opens
+   *     bidding — giving everyone a clean 1s beat to see who was revealed
+   *     before things go live.
+   *  3. Slightly after that, fade out the shuffle overlay itself.
+   */
   revealLot() {
     if (!this.snap.currentLot) return;
-    const lot = { ...this.snap.currentLot, status: "pending" as const, startedAt: Date.now() };
-    const target = this.snap.auction.players.find((p) => p.supabaseId === lot.playerId) ?? null;
+    const lotId = this.snap.currentLot.id;
+    const target = this.snap.auction.players.find((p) => p.supabaseId === this.snap.currentLot!.playerId) ?? null;
 
     this.stopShuffleTicker();
     this.set({
-      currentLot: lot,
       shuffle: { ...this.snap.shuffle, active: true, target },
     });
-    this.startClock();
+
+    if (this.revealDelayTimer) clearTimeout(this.revealDelayTimer);
+    this.revealDelayTimer = setTimeout(() => {
+      // Guard: bail if the lot changed / was reset during the hold.
+      if (!this.snap.currentLot || this.snap.currentLot.id !== lotId) return;
+      const lot = { ...this.snap.currentLot, status: "pending" as const, startedAt: Date.now() };
+      this.set({ currentLot: lot });
+      this.startClock();
+    }, REVEAL_HOLD_MS);
 
     if (this.shuffleHideTimer) clearTimeout(this.shuffleHideTimer);
     this.shuffleHideTimer = setTimeout(() => {
       this.set({ shuffle: { active: false, pool: [], index: 0, target: null } });
-    }, 900);
+    }, SHUFFLE_HIDE_MS);
   }
 
   placeBid(teamId: string) {
@@ -313,6 +347,21 @@ class DemoModelImpl {
     const team = this.snap.auction.teams.find((t) => t.supabaseId === teamId);
     const purse = this.snap.teamPurses[teamId];
     if (!lot || !team || !purse || lot.status !== "pending" || this.snap.isLocked) return;
+
+    // Guard against the same bid firing twice in quick succession (e.g. a
+    // simulated cursor click AND a direct model call both triggering for
+    // the same click). Without this, a single "bid" visually doubles the
+    // increment and creates a duplicate entry in bidHistory.
+    const lastBid = this.snap.bidHistory[0];
+    if (
+      lastBid &&
+      lastBid.lotId === lot.id &&
+      lastBid.teamId === teamId &&
+      Date.now() - lastBid.placedAt < 200
+    ) {
+      return;
+    }
+
     const amount = getNextBidAmount(lot.currentBid, this.snap.auction.rules.tiers);
     if (amount > purse.remaining) return;
 
@@ -415,6 +464,8 @@ class DemoModelImpl {
     this.stopShuffleTicker();
     if (this.shuffleHideTimer) clearTimeout(this.shuffleHideTimer);
     this.shuffleHideTimer = null;
+    if (this.revealDelayTimer) clearTimeout(this.revealDelayTimer);
+    this.revealDelayTimer = null;
     Object.values(this.syncTimers).forEach(clearTimeout);
     this.syncTimers = {};
     this.snap = initialSnapshot();
