@@ -42,6 +42,10 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         .f-num { font-family: 'Archivo Narrow', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
         .glass { background: rgba(16,20,21,0.70); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.08); }
         .glass-hot { background: rgba(201,151,31,0.06); backdrop-filter: blur(24px); border: 1px solid rgba(201,151,31,0.22); }
+        @keyframes demo-shuffle-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes demo-shuffle-fade { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+        .demo-shuffle-spin { animation: demo-shuffle-spin 900ms linear infinite; }
+        .demo-shuffle-fade { animation: demo-shuffle-fade 1.4s ease-in-out infinite; }
       `}</style>
 
       <DemoCursor cursor={snap.cursors[cursorKey] as any} />
@@ -76,6 +80,30 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
               <h1 className="f-display text-[26px] text-white leading-none mb-1">{isRevealing ? "???" : currentLot?.playerName ?? "—"}</h1>
               <p className="f-label-sm text-[9px] text-white/50">{isRevealing ? "—" : currentLot ? `${currentLot.playerRole} · ${currentLot.playerCountry}` : "Auctioneer hasn't started yet"}</p>
             </div>
+
+            {/* ── Shuffling overlay ──────────────────────────────────────────
+                Mirrors the "revealing" treatment on the broadcast screen so
+                owners see the same shuffle beat instead of a blank/frozen
+                card while the next lot is being picked. Scoped to this
+                section (not a fixed full-viewport overlay) since this panel
+                is a small embedded phone frame, not the whole demo stage. */}
+            {isRevealing && (
+              <div
+                className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3"
+                style={{ background: "rgba(11,13,14,0.86)", backdropFilter: "blur(6px)" }}
+              >
+                <span
+                  className="material-symbols-outlined demo-shuffle-spin"
+                  style={{ fontSize: 44, color: BID_COLOR }}
+                >
+                  autorenew
+                </span>
+                <p className="f-label text-[11px] demo-shuffle-fade" style={{ color: BID_COLOR }}>
+                  Shuffling next lot…
+                </p>
+                <p className="f-label-sm text-[9px] text-white/40">Revealing on broadcast shortly</p>
+              </div>
+            )}
           </div>
         </section>
 
