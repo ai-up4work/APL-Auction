@@ -15,6 +15,7 @@ export type DemoTeam = {
   code: string;
   name: string;
   color: string;
+  logo: string;
   totalPurse: number;
   remaining: number;
   roster: number;
@@ -75,19 +76,42 @@ export type DemoState = {
 const TIMER_SECONDS = 12;
 const TICK_MS = 100;
 
+// Headshots via pravatar.cc (stable per-number, photo-realistic placeholders —
+// fine for demo/sandbox use, not meant for production player photos).
+const avatar = (n: number) => `https://i.pravatar.cc/300?img=${n}`;
+
 const PLAYER_POOL: DemoPlayer[] = [
-  { id: "p1", name: "Marcus Vane", role: "All-rounder", country: "Australia", img: "", basePrice: 1500 },
-  { id: "p2", name: "Elena Rodas", role: "Batsman", country: "South Africa", img: "", basePrice: 1200 },
-  { id: "p3", name: "Rohan Sharma", role: "Bowler", country: "India", img: "", basePrice: 2000 },
-  { id: "p4", name: "Jaxon Kade", role: "Wicket Keeper", country: "England", img: "", basePrice: 900 },
-  { id: "p5", name: "Li Wei", role: "Batsman", country: "Sri Lanka", img: "", basePrice: 1100 },
+  { id: "p1",  name: "Marcus Vane",      role: "All-rounder",  country: "Australia",     img: avatar(12), basePrice: 1500 },
+  { id: "p2",  name: "Elena Rodas",      role: "Batsman",      country: "South Africa",  img: avatar(45), basePrice: 1200 },
+  { id: "p3",  name: "Rohan Sharma",     role: "Bowler",       country: "India",         img: avatar(33), basePrice: 2000 },
+  { id: "p4",  name: "Jaxon Kade",       role: "Wicket Keeper",country: "England",       img: avatar(8),  basePrice: 900  },
+  { id: "p5",  name: "Li Wei",           role: "Batsman",      country: "Sri Lanka",     img: avatar(21), basePrice: 1100 },
+  { id: "p6",  name: "Devon Marsh",      role: "Bowler",       country: "New Zealand",   img: avatar(15), basePrice: 1800 },
+  { id: "p7",  name: "Arjun Nair",       role: "All-rounder",  country: "India",         img: avatar(52), basePrice: 2500 },
+  { id: "p8",  name: "Kieran Bolt",      role: "Bowler",       country: "West Indies",   img: avatar(4),  basePrice: 1600 },
+  { id: "p9",  name: "Priya Deshmukh",   role: "Batsman",      country: "India",         img: avatar(47), basePrice: 1300 },
+  { id: "p10", name: "Tariq Al-Farsi",   role: "Wicket Keeper",country: "Pakistan",      img: avatar(29), basePrice: 1000 },
+  { id: "p11", name: "Connor Blake",     role: "All-rounder",  country: "England",       img: avatar(18), basePrice: 2200 },
+  { id: "p12", name: "Naveed Iqbal",     role: "Bowler",       country: "Pakistan",      img: avatar(11), basePrice: 1700 },
+  { id: "p13", name: "Sanjay Rathore",   role: "Batsman",      country: "India",         img: avatar(60), basePrice: 3000 },
+  { id: "p14", name: "Ollie Trent",      role: "Bowler",       country: "Australia",     img: avatar(23), basePrice: 1400 },
+  { id: "p15", name: "Farhan Malik",     role: "Wicket Keeper",country: "Bangladesh",    img: avatar(36), basePrice: 950  },
+  { id: "p16", name: "Ben Coetzee",      role: "All-rounder",  country: "South Africa",  img: avatar(7),  basePrice: 2100 },
+  { id: "p17", name: "Ishaan Kapoor",    role: "Batsman",      country: "India",         img: avatar(50), basePrice: 1250 },
+  { id: "p18", name: "Ryan Fernando",    role: "Bowler",       country: "Sri Lanka",     img: avatar(41), basePrice: 1150 },
 ];
+
+// Simple, license-free geometric crests via DiceBear's "shapes" set,
+// seeded per team so each logo is stable across reloads.
+const teamLogo = (seed: string) => `https://api.dicebear.com/7.x/shapes/svg?seed=${seed}&backgroundColor=transparent`;
 
 function makeTeams(): DemoTeam[] {
   return [
-    { id: "tA", code: "CSK", name: "Chennai Sabers", color: "#f5a623", totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
-    { id: "tB", code: "MI", name: "Mumbai Marauders", color: "#3b8bd4", totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
-    { id: "tC", code: "RCB", name: "Bengaluru Bulls", color: "#e2685a", totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
+    { id: "tA", code: "CSK", name: "Chennai Sabers",   color: "#f5a623", logo: teamLogo("Chennai-Sabers"),   totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
+    { id: "tB", code: "MI",  name: "Mumbai Marauders", color: "#3b8bd4", logo: teamLogo("Mumbai-Marauders"), totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
+    { id: "tC", code: "RCB", name: "Bengaluru Bulls",  color: "#e2685a", logo: teamLogo("Bengaluru-Bulls"),  totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
+    { id: "tD", code: "KKR", name: "Kolkata Krakens",  color: "#8b5cf6", logo: teamLogo("Kolkata-Krakens"),  totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
+    { id: "tE", code: "DC",  name: "Delhi Dragons",    color: "#22c55e", logo: teamLogo("Delhi-Dragons"),    totalPurse: 50000, remaining: 50000, roster: 0, teamSize: 16 },
   ];
 }
 

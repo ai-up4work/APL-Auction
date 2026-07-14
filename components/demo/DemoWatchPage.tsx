@@ -2,7 +2,22 @@
 "use client";
 
 import React, { useSyncExternalStore } from "react";
-import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
+import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts, type DemoPlayer } from "@/lib/demo/demoModel";
+import { ShuffleOverlay } from "@/components/ShuffleOverlay";
+
+// ShuffleOverlay (shared with the real /watch page) expects FlowPlayer-shaped
+// objects — id, name, img, price as a formatted string, status. The demo
+// model tracks its own lighter DemoPlayer shape, so translate here rather
+// than reshaping demoModel just to satisfy this one overlay.
+function toReelPlayer(p: DemoPlayer) {
+  return {
+    id: p.supabaseId,
+    name: p.name,
+    img: p.img,
+    price: `${p.price.toLocaleString()} PTS`,
+    status: "locked",
+  } as any;
+}
 
 export default function DemoWatchPage() {
   const snap = useSyncExternalStore(
@@ -10,7 +25,7 @@ export default function DemoWatchPage() {
     getDemoSnapshot,
     getDemoSnapshot
   );
-  const { auction, currentLot, completedLots, teamPurses, lotNumber, clockPct, isLocked } = snap;
+  const { auction, currentLot, completedLots, teamPurses, lotNumber, clockPct, isLocked, shuffle } = snap;
 
   const isSold = currentLot?.status === "sold";
   const isUnsold = currentLot?.status === "unsold";
@@ -38,6 +53,13 @@ export default function DemoWatchPage() {
         @keyframes dot-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
         .dot-pulse { animation: dot-pulse 1.5s ease-in-out infinite; }
       `}</style>
+
+      <ShuffleOverlay
+        isShuffling={shuffle.active}
+        shuffleTarget={shuffle.target ? toReelPlayer(shuffle.target) : null}
+        players={shuffle.pool.map(toReelPlayer)}
+        shuffleIndex={shuffle.index}
+      />
 
       <header className="shrink-0 h-14 flex items-center justify-between px-6 bg-black/40 border-b border-white/5">
         <div>
