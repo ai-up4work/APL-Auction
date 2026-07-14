@@ -156,12 +156,9 @@ function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) 
   )
 }
 
-interface PageProps {
-  params: { tournamentId: string }
-}
 
-export default function TournamentPage({ params }: PageProps) {
-  const { tournamentId } = params
+export default function TournamentPage() {
+  const tournamentId = '123'
   const [tab, setTab] = useState<"runs" | "wickets">("runs")
   const activeBoard = tab === "runs" ? runsLeaderboard : wicketsLeaderboard
 
