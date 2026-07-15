@@ -188,11 +188,11 @@ function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelK
               className="flex items-center gap-1.5 px-2 py-1 rounded"
               style={{
                 background: isLive
-                  ? "color-mix(in srgb, var(--color-success-green) 12%, transparent)"
+                  ? "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)"
                   : "rgba(255,255,255,0.02)",
                 border: `1px solid ${
                   isLive
-                    ? "color-mix(in srgb, var(--color-success-green) 45%, transparent)"
+                    ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
                     : "var(--color-border-overlay)"
                 }`,
                 animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
@@ -200,7 +200,7 @@ function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelK
             >
               <span
                 className="w-[6px] h-[6px] rounded-full shrink-0"
-                style={{ background: isLive ? "var(--color-success-green)" : "var(--color-outline)" }}
+                style={{ background: isLive ? "var(--color-theme-orange)" : "var(--color-outline)" }}
               />
               <span
                 className="text-[8px] uppercase"
@@ -239,6 +239,22 @@ export default function SandboxPage() {
   useEffect(() => {
     demoOrchestrator.start();
     return () => demoOrchestrator.stop();
+  }, []);
+
+  // globals.css forces `html { overflow-y: scroll }` site-wide so the
+  // marketing pages never jump-shift. This page is a fixed single
+  // viewport, so we suppress that just while mounted and put it back
+  // on unmount rather than touching the global rule.
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevHtmlOverflow = html.style.overflowY;
+    const prevBodyOverflow = document.body.style.overflow;
+    html.style.overflowY = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflowY = prevHtmlOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+    };
   }, []);
 
   const highlighted: PanelKey[] = activePanels;
