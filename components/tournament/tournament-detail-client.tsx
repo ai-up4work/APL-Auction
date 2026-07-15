@@ -19,87 +19,39 @@ import {
   CalendarClock,
   Network,
   MapPin,
+  Award,
+  Shield,
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
 import RelatedTournaments from "@/components/tournament/related-tournaments"
-import { pageStyles, type ShowcaseSlide } from "@/data/site-data"
-
-// ─────────────────────────────────────────────────────────────
-// Cricket-specific types. If you've added these to site-data.ts
-// already, delete this block and import them from there instead.
-// ─────────────────────────────────────────────────────────────
-interface BallEvent {
-  runs: number
-  label: string
-}
-interface LiveMatch {
-  matchStatus: "live" | "upcoming" | "completed"
-  team1: { name: string; short: string }
-  team2: { name: string; short: string }
-  inningsTeam: string
-  score1: string
-  overs1: string
-  score2?: string
-  overs2?: string
-  target?: number
-  crr: string
-  rrr?: string
-  batsmen: { name: string; runs: number; balls: number; onStrike: boolean }[]
-  bowler: { name: string; overs: string; runs: number; wickets: number }
-  recentBalls: BallEvent[]
-  venue: string
-  toss: string
-  matchNote?: string
-}
-interface PointsRow {
-  team: string
-  short: string
-  played: number
-  won: number
-  lost: number
-  nrr: string
-  points: number
-  form?: ("W" | "L" | "NR")[]
-}
-interface Fixture {
-  id: string
-  team1: string
-  team2: string
-  date: string
-  time: string
-  venue: string
-  status: "upcoming" | "live" | "completed"
-  result?: string
-}
-interface BracketTeam {
-  name: string
-  short: string
-  score?: string
-}
-interface BracketMatch {
-  id: string
-  label: string
-  team1: BracketTeam
-  team2: BracketTeam
-  winner?: string
-  date?: string
-}
-
-// Extend ShowcaseSlide loosely so this compiles even before you've
-// updated the shared type — swap for a proper import once you have.
-type CricketTournament = ShowcaseSlide & {
-  liveMatch?: LiveMatch
-  pointsTable?: PointsRow[]
-  fixtures?: Fixture[]
-  bracket?: BracketMatch[]
-}
+import { pageStyles } from "@/data/site-data"
+import type {
+  Tournament,
+  LiveMatch,
+  PointsRow,
+  Fixture,
+  BracketMatch,
+  BracketTeam,
+  Squad,
+  LeaderboardRow,
+  AwardEntry,
+} from "@/data/tournament-data"
 
 interface TournamentDetailClientProps {
-  tournament: CricketTournament
+  tournament: Tournament
   slug: string
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
 }
 
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
@@ -120,12 +72,19 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
   const status = tournament.status || "Upcoming"
   const statusColor =
-    status === "Live" ? "bg-red-600 hover:bg-red-700" : status === "Completed" ? "bg-gray-600 hover:bg-gray-700" : "bg-green-600 hover:bg-green-700"
+    status === "Live"
+      ? "bg-red-600 hover:bg-red-700"
+      : status === "Completed"
+        ? "bg-gray-600 hover:bg-gray-700"
+        : "bg-green-600 hover:bg-green-700"
 
   const hasLive = !!tournament.liveMatch
   const hasPoints = !!tournament.pointsTable?.length
   const hasFixtures = !!tournament.fixtures?.length
   const hasBracket = !!tournament.bracket?.length
+  const hasSquads = !!tournament.squads?.length
+  const hasLeaderboard = !!(tournament.runsLeaderboard?.length || tournament.wicketsLeaderboard?.length)
+  const hasAwards = !!tournament.awards?.length
 
   return (
     <main className="overflow-hidden">
@@ -210,6 +169,22 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                       Bracket
                     </TabsTrigger>
                   )}
+                  {hasSquads && (
+                    <TabsTrigger
+                      value="squads"
+                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
+                    >
+                      Squads
+                    </TabsTrigger>
+                  )}
+                  {hasLeaderboard && (
+                    <TabsTrigger
+                      value="stats"
+                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
+                    >
+                      Stats
+                    </TabsTrigger>
+                  )}
                   <TabsTrigger
                     value="rules"
                     className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
@@ -245,6 +220,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                       <li>• Broadcast overlay layer ready for OBS or any streaming setup</li>
                     </ul>
                   </div>
+                  {hasAwards && <AwardsPanel awards={tournament.awards!} />}
                 </TabsContent>
 
                 {/* POINTS TABLE */}
@@ -265,6 +241,23 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 {hasBracket && (
                   <TabsContent value="bracket" className="mt-0">
                     <BracketPanel matches={tournament.bracket!} />
+                  </TabsContent>
+                )}
+
+                {/* SQUADS */}
+                {hasSquads && (
+                  <TabsContent value="squads" className="mt-0">
+                    <SquadsPanel squads={tournament.squads!} />
+                  </TabsContent>
+                )}
+
+                {/* STATS / LEADERBOARD */}
+                {hasLeaderboard && (
+                  <TabsContent value="stats" className="mt-0">
+                    <LeaderboardPanel
+                      runs={tournament.runsLeaderboard || []}
+                      wickets={tournament.wicketsLeaderboard || []}
+                    />
                   </TabsContent>
                 )}
 
@@ -575,9 +568,7 @@ function TeamScoreBlock({
   batting: boolean
 }) {
   return (
-    <div
-      className={`rounded-lg p-4 border ${batting ? "border-gold bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}
-    >
+    <div className={`rounded-lg p-4 border ${batting ? "border-gold bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-white font-bold font-cinzel">{short}</span>
         {batting && <span className="text-[10px] text-gold font-bold tracking-wide">BATTING</span>}
@@ -621,10 +612,7 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
         </thead>
         <tbody>
           {sorted.map((row, i) => (
-            <tr
-              key={row.short}
-              className={`border-b border-gold/5 ${i < 4 ? "bg-gold/[0.04]" : ""}`}
-            >
+            <tr key={row.short} className={`border-b border-gold/5 ${i < 4 ? "bg-gold/[0.04]" : ""}`}>
               <td className="py-3 pr-2 text-gray-400">{i + 1}</td>
               <td className="py-3 pr-2 text-white font-semibold whitespace-nowrap">{row.team}</td>
               <td className="py-3 pr-2 text-center text-gray-300">{row.played}</td>
@@ -732,6 +720,121 @@ function BracketTeamRow({ team, isWinner }: { team: BracketTeam; isWinner: boole
         {team.name}
       </span>
       {team.score && <span className="text-gray-400 text-xs">{team.score}</span>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// SQUADS PANEL
+// ─────────────────────────────────────────────────────────────
+function SquadsPanel({ squads }: { squads: Squad[] }) {
+  return (
+    <div className="space-y-4 mb-8">
+      {squads.map((s) => (
+        <div key={s.team} className="bg-black/50 border border-gold/20 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-gold" />
+              <h3 className="text-white font-bold font-cinzel">{s.team}</h3>
+            </div>
+            <p className="text-gray-400 text-xs flex items-center gap-1.5">
+              <Users className="h-3 w-3" /> {s.players.length} players · Capt. {s.captain}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {s.players.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 bg-white/[0.03] border border-gold/10 rounded-full pl-1 pr-3 py-1">
+                <span className="h-6 w-6 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
+                  {initials(p.name)}
+                </span>
+                <span className="text-gray-300 text-xs">
+                  {p.name}
+                  {p.isCaptain && <span className="text-gold ml-1">(C)</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEADERBOARD PANEL
+// ─────────────────────────────────────────────────────────────
+function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: LeaderboardRow[] }) {
+  const [tab, setTab] = useState<"runs" | "wickets">(runs.length ? "runs" : "wickets")
+  const active = tab === "runs" ? runs : wickets
+
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
+      <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">TOURNAMENT LEADERBOARD</h2>
+      <div className="flex gap-2 mb-6">
+        {runs.length > 0 && (
+          <button
+            onClick={() => setTab("runs")}
+            className={`font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md border transition-all ${
+              tab === "runs" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
+            }`}
+          >
+            Most Runs
+          </button>
+        )}
+        {wickets.length > 0 && (
+          <button
+            onClick={() => setTab("wickets")}
+            className={`font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md border transition-all ${
+              tab === "wickets" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
+            }`}
+          >
+            Most Wickets
+          </button>
+        )}
+      </div>
+      <div className="space-y-2.5">
+        {active.map((row) => (
+          <div key={row.player} className="flex items-center justify-between border border-gold/10 rounded-md p-3 bg-white/[0.02]">
+            <div className="flex items-center gap-3">
+              <span className="text-gold font-bold font-cinzel w-5 text-center">{row.rank}</span>
+              <span className="h-8 w-8 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
+                {initials(row.player)}
+              </span>
+              <div>
+                <p className="text-white text-sm font-semibold">{row.player}</p>
+                <p className="text-gray-400 text-xs">{row.team}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-gold font-bold font-cinzel text-lg leading-none">{row.value}</p>
+              <p className="text-gray-400 text-xs mt-1">{row.meta}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// AWARDS PANEL
+// ─────────────────────────────────────────────────────────────
+function AwardsPanel({ awards }: { awards: AwardEntry[] }) {
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
+      <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
+        <Award className="h-5 w-5 text-gold" />
+        AWARDS & MILESTONES
+      </h2>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {awards.map((a) => (
+          <div key={a.label} className="border border-gold/10 rounded-md p-4 bg-white/[0.02] text-center">
+            <p className="text-gray-400 text-[10px] uppercase tracking-widest mb-2">{a.label}</p>
+            <p className="text-white font-bold font-cinzel">{a.name}</p>
+            <p className="text-gray-400 text-xs mt-1">{a.note}</p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

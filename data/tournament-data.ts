@@ -1,35 +1,38 @@
-// ─────────────────────────────────────────────────────────────
-// ADD to your existing @/data/tournament-data.ts
-// These extend ShowcaseSlide with cricket-specific fields and
-// provide one fully-populated mock tournament as an example.
-// Merge the interface fields into your existing ShowcaseSlide type,
-// and merge `cricketMockTournament` into your showcaseSlides array
-// (or use it standalone via getTournamentBySlug for testing).
-// ─────────────────────────────────────────────────────────────
+// data/tournament-data.ts
+// Cricket-specific tournament data. Base tournament info (title, image, tag,
+// slug, description, format, prizes, socials) lives in `site-data.ts` as
+// `showcaseSlides` — this file only adds the richer cricket data (live
+// scores, points tables, fixtures, brackets, squads, leaderboards, awards)
+// and merges it in by slug.
 
+import { showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
+
+// ─────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────
 export interface BallEvent {
-  runs: number // 0-6, or -1 for wicket, -2 for wide/no-ball
-  label: string // "4", "6", "W", "•", "wd"
+  runs: number
+  label: string
 }
 
 export interface LiveMatch {
   matchStatus: "live" | "upcoming" | "completed"
-  team1: { name: string; short: string; logo?: string }
-  team2: { name: string; short: string; logo?: string }
-  inningsTeam: string // which team is currently batting (short name)
-  score1: string // "184/6"
-  overs1: string // "18.4"
+  team1: { name: string; short: string }
+  team2: { name: string; short: string }
+  inningsTeam: string
+  score1: string
+  overs1: string
   score2?: string
   overs2?: string
   target?: number
-  crr: string // current run rate e.g. "9.85"
-  rrr?: string // required run rate if chasing
+  crr: string
+  rrr?: string
   batsmen: { name: string; runs: number; balls: number; onStrike: boolean }[]
   bowler: { name: string; overs: string; runs: number; wickets: number }
   recentBalls: BallEvent[]
   venue: string
-  toss: string // "Wardens FC won the toss, elected to bowl"
-  matchNote?: string // "2nd Innings" / "Match ends in a Super Over" etc
+  toss: string
+  matchNote?: string
 }
 
 export interface PointsRow {
@@ -38,196 +41,314 @@ export interface PointsRow {
   played: number
   won: number
   lost: number
-  nrr: string // "+1.245"
+  nrr: string
   points: number
-  form?: ("W" | "L" | "NR")[] // last 5 results, most recent last
+  form?: ("W" | "L" | "NR")[]
 }
 
 export interface Fixture {
   id: string
   team1: string
   team2: string
-  date: string // "12 Aug 2026"
-  time: string // "7:00 PM IST"
+  date: string
+  time: string
   venue: string
   status: "upcoming" | "live" | "completed"
-  result?: string // "Wardens FC won by 24 runs"
+  result?: string
 }
 
 export interface BracketTeam {
   name: string
   short: string
-  score?: string // filled in once the match is played
+  score?: string
 }
 
 export interface BracketMatch {
   id: string
-  label: string // "Qualifier 1", "Eliminator", "Qualifier 2", "Final"
+  label: string
   team1: BracketTeam
   team2: BracketTeam
-  winner?: string // short name of winner, undefined if not yet played
+  winner?: string
   date?: string
 }
 
-// Add these optional fields onto your existing ShowcaseSlide interface:
-//
-// export interface ShowcaseSlide {
-//   ...existing fields...
-//   liveMatch?: LiveMatch
-//   pointsTable?: PointsRow[]
-//   fixtures?: Fixture[]
-//   bracket?: BracketMatch[]
-// }
+export interface SquadMember {
+  name: string
+  isCaptain?: boolean
+}
 
-export const cricketMockTournament = {
-  title: "Valiant Premier League 2026",
-  slug: "valiant-premier-league-2026",
-  tag: "T20 Cricket",
-  by: "Valiant League Cricket",
-  status: "Live",
-  startDate: "01 Aug 2026",
-  image: "/placeholder.svg",
-  description:
-    "An 8-team T20 franchise tournament run entirely on Valiant League — live auctions to build every squad, automatic league-stage scheduling, and a broadcast-grade scoring console feeding real-time scorecards straight to this page.",
-  format:
-    "Round-robin league stage (8 teams, 14 matches), followed by a 4-team playoff stage (Qualifier 1, Eliminator, Qualifier 2, Final).",
-  prizePool: "LKR 5,000,000",
-  prizes: [
-    { place: "Champions", reward: "LKR 2,500,000 + Trophy" },
-    { place: "Runners-up", reward: "LKR 1,200,000" },
-    { place: "Most Valuable Player", reward: "LKR 300,000" },
-    { place: "Best Bowler", reward: "LKR 200,000" },
-  ],
-  rules: [
-    "Each team fields 11 players from a 15-player auctioned squad",
-    "Standard T20 rules — 20 overs per innings, DLS method applies for rain-affected matches",
-    "Maximum 4 overseas players in a starting XI",
-    "Points: 2 for a win, 1 for a no-result, 0 for a loss — ties decided by Super Over",
-    "Net Run Rate (NRR) used as the primary tiebreaker for league-stage standings",
-  ],
-  website: "https://valiantleague.example.com",
-  twitter: "https://twitter.com/thewardensgc",
-  discord: "https://discord.gg/example",
+export interface Squad {
+  team: string
+  captain: string
+  players: SquadMember[]
+}
 
-  liveMatch: {
-    matchStatus: "live",
-    team1: { name: "Colombo Kings", short: "CK" },
-    team2: { name: "Kandy Warriors", short: "KW" },
-    inningsTeam: "KW",
-    score1: "186/5",
-    overs1: "20.0",
-    score2: "142/4",
-    overs2: "16.2",
-    target: 187,
-    crr: "8.69",
-    rrr: "12.16",
-    batsmen: [
-      { name: "D. Fernando", runs: 58, balls: 34, onStrike: true },
-      { name: "R. Jayasuriya", runs: 41, balls: 28, onStrike: false },
+export interface LeaderboardRow {
+  rank: number
+  player: string
+  team: string
+  value: number
+  meta: string
+}
+
+export interface AwardEntry {
+  label: string
+  name: string
+  note: string
+}
+
+// Extras layered onto a ShowcaseSlide to make the full tournament detail page.
+export interface TournamentExtras {
+  liveMatch?: LiveMatch
+  pointsTable?: PointsRow[]
+  fixtures?: Fixture[]
+  bracket?: BracketMatch[]
+  squads?: Squad[]
+  runsLeaderboard?: LeaderboardRow[]
+  wicketsLeaderboard?: LeaderboardRow[]
+  awards?: AwardEntry[]
+}
+
+export type Tournament = ShowcaseSlide & TournamentExtras
+
+// ─────────────────────────────────────────────────────────────
+// EXTRAS — keyed by the `slug` field already on each ShowcaseSlide
+// ─────────────────────────────────────────────────────────────
+const tournamentExtras: Record<string, TournamentExtras> = {
+  // ───────────────────────────── Auction ─────────────────────
+  "iron-knights-season-opener": {
+    squads: [
+      {
+        team: "Iron Knights CC",
+        captain: "R. Fernando",
+        players: [
+          { name: "R. Fernando", isCaptain: true },
+          { name: "T. Rathnayake" },
+          { name: "N. Silva" },
+          { name: "P. Jayawardena" },
+        ],
+      },
+      {
+        team: "Silver Hawks",
+        captain: "D. Silva",
+        players: [
+          { name: "D. Silva", isCaptain: true },
+          { name: "M. Gunasekara" },
+          { name: "R. Kariyawasam" },
+        ],
+      },
+      {
+        team: "Golden Lions",
+        captain: "K. Perera",
+        players: [
+          { name: "K. Perera", isCaptain: true },
+          { name: "A. Wickramasinghe" },
+          { name: "D. Mendis" },
+        ],
+      },
     ],
-    bowler: { name: "M. Perera", overs: "3.2", runs: 29, wickets: 2 },
-    recentBalls: [
-      { runs: 1, label: "1" },
-      { runs: 4, label: "4" },
-      { runs: 0, label: "•" },
-      { runs: 6, label: "6" },
-      { runs: -1, label: "W" },
-      { runs: 2, label: "2" },
+    fixtures: [
+      { id: "opener-1", team1: "Iron Knights CC", team2: "Silver Hawks", date: "18 Jul", time: "3:00 PM", venue: "Ground 1", status: "upcoming" },
+      { id: "opener-2", team1: "Golden Lions", team2: "Iron Knights CC", date: "20 Jul", time: "7:00 PM", venue: "Ground 2", status: "upcoming" },
     ],
-    venue: "R. Premadasa Stadium, Colombo",
-    toss: "Kandy Warriors won the toss, elected to field",
-    matchNote: "2nd Innings — KW need 45 runs off 22 balls",
-  } as LiveMatch,
+    awards: [
+      { label: "Highest Bid", name: "T. Rathnayake", note: "LKR 85,000 to Iron Knights CC" },
+      { label: "Most Players Bought", name: "Iron Knights CC", note: "14 players secured" },
+    ],
+  },
 
-  pointsTable: [
-    { team: "Colombo Kings", short: "CK", played: 9, won: 7, lost: 2, nrr: "+1.245", points: 14, form: ["W", "W", "L", "W", "W"] },
-    { team: "Galle Gladiators", short: "GG", played: 9, won: 6, lost: 3, nrr: "+0.812", points: 12, form: ["L", "W", "W", "W", "L"] },
-    { team: "Kandy Warriors", short: "KW", played: 9, won: 5, lost: 4, nrr: "+0.203", points: 10, form: ["W", "L", "W", "L", "W"] },
-    { team: "Jaffna Stallions", short: "JS", played: 9, won: 5, lost: 4, nrr: "-0.058", points: 10, form: ["L", "L", "W", "W", "W"] },
-    { team: "Negombo Titans", short: "NT", played: 9, won: 4, lost: 5, nrr: "-0.312", points: 8, form: ["W", "L", "L", "W", "L"] },
-    { team: "Matara Marauders", short: "MM", played: 9, won: 3, lost: 6, nrr: "-0.541", points: 6, form: ["L", "L", "W", "L", "L"] },
-    { team: "Kurunegala Royals", short: "KR", played: 9, won: 2, lost: 7, nrr: "-0.890", points: 4, form: ["L", "L", "L", "W", "L"] },
-    { team: "Trinco Blasters", short: "TB", played: 9, won: 2, lost: 7, nrr: "-1.104", points: 4, form: ["L", "L", "L", "L", "W"] },
-  ] as PointsRow[],
+  // ───────────────────────────── Bracket ─────────────────────
+  "silver-cup-knockout": {
+    bracket: [
+      { id: "r16-1", label: "Round of 16", team1: { name: "Royal Strikers", short: "RS", score: "156/7" }, team2: { name: "Iron Wolves", short: "IW", score: "142/9" }, winner: "RS", date: "10 Jul" },
+      { id: "r16-2", label: "Round of 16", team1: { name: "Crimson Blades", short: "CB", score: "178/4" }, team2: { name: "Silver Hawks", short: "SH", score: "160/6" }, winner: "CB", date: "10 Jul" },
+      { id: "qf-1", label: "Quarterfinal", team1: { name: "Royal Strikers", short: "RS", score: "165/5" }, team2: { name: "Crimson Blades", short: "CB", score: "150/8" }, winner: "RS", date: "13 Jul" },
+      { id: "qf-2", label: "Quarterfinal", team1: { name: "TBD", short: "TBD" }, team2: { name: "TBD", short: "TBD" }, date: "13 Jul" },
+      { id: "sf-1", label: "Semifinal", team1: { name: "Royal Strikers", short: "RS" }, team2: { name: "TBD", short: "TBD" }, date: "17 Jul" },
+      { id: "final", label: "Final", team1: { name: "TBD", short: "TBD" }, team2: { name: "TBD", short: "TBD" }, date: "20 Jul" },
+    ],
+    fixtures: [
+      { id: "qf-2-fx", team1: "Northside Knights", team2: "Storm Chargers", date: "13 Jul", time: "4:00 PM", venue: "Ground 1", status: "upcoming" },
+      { id: "sf-1-fx", team1: "Royal Strikers", team2: "Winner QF2", date: "17 Jul", time: "6:00 PM", venue: "Ground 1", status: "upcoming" },
+    ],
+    squads: [
+      { team: "Royal Strikers", captain: "M. Jayasuriya", players: [{ name: "M. Jayasuriya", isCaptain: true }, { name: "L. Fonseka" }, { name: "H. de Silva" }] },
+      { team: "Crimson Blades", captain: "S. Bandara", players: [{ name: "S. Bandara", isCaptain: true }, { name: "N. Gunaratne" }] },
+    ],
+    awards: [
+      { label: "Best Bowling Figures (so far)", name: "M. Jayasuriya", note: "5/18 vs Iron Wolves" },
+    ],
+  },
 
-  fixtures: [
-    {
-      id: "m10",
-      team1: "Colombo Kings",
-      team2: "Kandy Warriors",
-      date: "15 Aug 2026",
-      time: "7:00 PM IST",
-      venue: "R. Premadasa Stadium, Colombo",
-      status: "live",
+  // ───────────────────────────── Overlay (live stream) ────────
+  "golden-lions-broadcast": {
+    liveMatch: {
+      matchStatus: "live",
+      team1: { name: "Golden Lions", short: "GL" },
+      team2: { name: "Falcon Riders", short: "FR" },
+      inningsTeam: "FR",
+      score1: "184/5",
+      overs1: "20.0",
+      score2: "151/4",
+      overs2: "17.4",
+      target: 185,
+      crr: "8.55",
+      rrr: "14.35",
+      batsmen: [
+        { name: "K. Perera", runs: 64, balls: 38, onStrike: true },
+        { name: "A. Wickramasinghe", runs: 29, balls: 19, onStrike: false },
+      ],
+      bowler: { name: "T. Rathnayake", overs: "2.4", runs: 24, wickets: 1 },
+      recentBalls: [
+        { runs: 4, label: "4" },
+        { runs: 1, label: "1" },
+        { runs: 6, label: "6" },
+        { runs: 0, label: "W" },
+        { runs: 2, label: "2" },
+        { runs: 0, label: "0" },
+      ],
+      venue: "Negombo Cricket Grounds",
+      toss: "Falcon Riders won the toss, elected to bowl",
+      matchNote: "FR need 34 runs from 14 balls",
     },
-    {
-      id: "m11",
-      team1: "Galle Gladiators",
-      team2: "Jaffna Stallions",
-      date: "16 Aug 2026",
-      time: "7:00 PM IST",
-      venue: "Galle International Stadium",
-      status: "upcoming",
-    },
-    {
-      id: "m12",
-      team1: "Negombo Titans",
-      team2: "Matara Marauders",
-      date: "17 Aug 2026",
-      time: "3:30 PM IST",
-      venue: "Negombo Cricket Ground",
-      status: "upcoming",
-    },
-    {
-      id: "m9",
-      team1: "Kurunegala Royals",
-      team2: "Trinco Blasters",
-      date: "13 Aug 2026",
-      time: "7:00 PM IST",
-      venue: "Kurunegala Stadium",
-      status: "completed",
-      result: "Kurunegala Royals won by 24 runs",
-    },
-    {
-      id: "m8",
-      team1: "Colombo Kings",
-      team2: "Galle Gladiators",
-      date: "11 Aug 2026",
-      time: "7:00 PM IST",
-      venue: "R. Premadasa Stadium, Colombo",
-      status: "completed",
-      result: "Colombo Kings won by 6 wickets",
-    },
-  ] as Fixture[],
+    awards: [
+      { label: "Peak Concurrent Viewers", name: "12,000", note: "Reached during the 16th over" },
+    ],
+  },
 
-  bracket: [
-    {
-      id: "q1",
-      label: "Qualifier 1",
-      team1: { name: "Colombo Kings", short: "CK" },
-      team2: { name: "Galle Gladiators", short: "GG" },
-      date: "20 Aug 2026",
+  // ───────────────────────────── League (flagship) ────────────
+  "crimson-cup-full-season": {
+    liveMatch: {
+      matchStatus: "live",
+      team1: { name: "Valiant Originals", short: "VO" },
+      team2: { name: "Desert Hawks", short: "DH" },
+      inningsTeam: "DH",
+      score1: "168/6",
+      overs1: "20.0",
+      score2: "142/6",
+      overs2: "18.2",
+      target: 169,
+      crr: "7.74",
+      rrr: "16.20",
+      batsmen: [
+        { name: "D. Silva", runs: 58, balls: 34, onStrike: true },
+        { name: "M. Gunasekara", runs: 21, balls: 14, onStrike: false },
+      ],
+      bowler: { name: "N. Silva", overs: "3.2", runs: 28, wickets: 2 },
+      recentBalls: [
+        { runs: 1, label: "1" },
+        { runs: 4, label: "4" },
+        { runs: 0, label: "W" },
+        { runs: 6, label: "6" },
+        { runs: 2, label: "2" },
+        { runs: 0, label: "0" },
+      ],
+      venue: "Negombo Cricket Grounds",
+      toss: "Desert Hawks won the toss, elected to bowl",
+      matchNote: "DH need 27 runs from 10 balls · Final",
     },
-    {
-      id: "elim",
-      label: "Eliminator",
-      team1: { name: "Kandy Warriors", short: "KW" },
-      team2: { name: "Jaffna Stallions", short: "JS" },
-      date: "21 Aug 2026",
-    },
-    {
-      id: "q2",
-      label: "Qualifier 2",
-      team1: { name: "TBD", short: "TBD" },
-      team2: { name: "TBD", short: "TBD" },
-      date: "23 Aug 2026",
-    },
-    {
-      id: "final",
-      label: "Final",
-      team1: { name: "TBD", short: "TBD" },
-      team2: { name: "TBD", short: "TBD" },
-      date: "26 Aug 2026",
-    },
-  ] as BracketMatch[],
+    pointsTable: [
+      { team: "Valiant Originals", short: "VO", played: 8, won: 6, lost: 2, nrr: "+1.42", points: 12, form: ["W", "W", "L", "W", "W"] },
+      { team: "Desert Hawks", short: "DH", played: 8, won: 5, lost: 3, nrr: "+0.87", points: 10, form: ["W", "L", "W", "W", "L"] },
+      { team: "Coastal Titans", short: "CT", played: 8, won: 5, lost: 3, nrr: "+0.31", points: 10, form: ["L", "W", "W", "L", "W"] },
+      { team: "Northside Knights", short: "NK", played: 8, won: 4, lost: 4, nrr: "-0.05", points: 8, form: ["W", "L", "L", "W", "L"] },
+      { team: "Storm Chargers", short: "SC", played: 8, won: 2, lost: 6, nrr: "-0.71", points: 4, form: ["L", "L", "W", "L", "L"] },
+      { team: "Bronze Trophy Alliance", short: "BTA", played: 8, won: 2, lost: 6, nrr: "-1.68", points: 4, form: ["L", "L", "L", "W", "L"] },
+    ],
+    fixtures: [
+      { id: "sf1-hawks-titans", team1: "Desert Hawks", team2: "Coastal Titans", date: "16 Jul", time: "3:00 PM", venue: "Ground 1", status: "upcoming" },
+      { id: "sf1-knights-chargers", team1: "Northside Knights", team2: "Storm Chargers", date: "17 Jul", time: "3:00 PM", venue: "Ground 2", status: "upcoming" },
+      { id: "grp-originals-hawks", team1: "Valiant Originals", team2: "Desert Hawks", date: "19 Jul", time: "7:00 PM", venue: "Ground 1", status: "upcoming" },
+    ],
+    bracket: [
+      { id: "q1", label: "Qualifier 1", team1: { name: "Valiant Originals", short: "VO", score: "168/6" }, team2: { name: "Desert Hawks", short: "DH", score: "142/6" }, winner: "VO", date: "12 Jul" },
+      { id: "elim", label: "Eliminator", team1: { name: "Coastal Titans", short: "CT" }, team2: { name: "Northside Knights", short: "NK" }, date: "16 Jul" },
+      { id: "final", label: "Final", team1: { name: "Valiant Originals", short: "VO" }, team2: { name: "TBD", short: "TBD" }, date: "28 Jul" },
+    ],
+    squads: [
+      { team: "Valiant Originals", captain: "R. Fernando", players: [{ name: "R. Fernando", isCaptain: true }, { name: "T. Rathnayake" }, { name: "N. Silva" }] },
+      { team: "Desert Hawks", captain: "D. Silva", players: [{ name: "D. Silva", isCaptain: true }, { name: "M. Gunasekara" }, { name: "R. Kariyawasam" }] },
+    ],
+    runsLeaderboard: [
+      { rank: 1, player: "R. Fernando", team: "Valiant Originals", value: 412, meta: "SR 148.2" },
+      { rank: 2, player: "D. Silva", team: "Desert Hawks", value: 389, meta: "SR 136.9" },
+      { rank: 3, player: "M. Gunasekara", team: "Desert Hawks", value: 351, meta: "SR 141.5" },
+    ],
+    wicketsLeaderboard: [
+      { rank: 1, player: "N. Silva", team: "Valiant Originals", value: 18, meta: "Econ 6.8" },
+      { rank: 2, player: "T. Rathnayake", team: "Valiant Originals", value: 16, meta: "Econ 7.1" },
+      { rank: 3, player: "S. Kumara", team: "Storm Chargers", value: 15, meta: "Econ 7.4" },
+    ],
+    awards: [
+      { label: "Player of the Tournament (so far)", name: "R. Fernando", note: "412 runs · 3 fifties" },
+      { label: "Best Bowling Figures", name: "N. Silva", note: "5/18 vs Storm Chargers" },
+      { label: "Fastest Fifty", name: "D. Silva", note: "21 balls vs Northside Knights" },
+    ],
+  },
+
+  // ───────────────────────────── League (round robin) ────────
+  "bronze-trophy-series": {
+    pointsTable: [
+      { team: "Bronze Trophy Alliance", short: "BTA", played: 4, won: 4, lost: 0, nrr: "+1.85", points: 8, form: ["W", "W", "W", "W"] },
+      { team: "Silver Hawks", short: "SH", played: 4, won: 3, lost: 1, nrr: "+0.62", points: 6, form: ["W", "W", "L", "W"] },
+      { team: "Iron Wolves", short: "IW", played: 4, won: 2, lost: 2, nrr: "-0.11", points: 4, form: ["L", "W", "W", "L"] },
+      { team: "Crimson Blades", short: "CB", played: 4, won: 1, lost: 3, nrr: "-0.74", points: 2, form: ["L", "L", "W", "L"] },
+      { team: "Northside Knights", short: "NK", played: 4, won: 0, lost: 4, nrr: "-1.52", points: 0, form: ["L", "L", "L", "L"] },
+    ],
+    fixtures: [
+      { id: "bts-1", team1: "Silver Hawks", team2: "Iron Wolves", date: "16 Jul", time: "2:00 PM", venue: "Ground 3", status: "upcoming" },
+      { id: "bts-2", team1: "Bronze Trophy Alliance", team2: "Crimson Blades", date: "17 Jul", time: "2:00 PM", venue: "Ground 3", status: "upcoming" },
+      { id: "bts-3", team1: "Northside Knights", team2: "Silver Hawks", date: "18 Jul", time: "5:00 PM", venue: "Ground 3", status: "upcoming", result: "" },
+    ],
+    awards: [
+      { label: "Unbeaten Run", name: "Bronze Trophy Alliance", note: "4 wins from 4 matches" },
+    ],
+  },
+
+  // ───────────────────────────── Auction (winter sale) ────────
+  "wardens-winter-sale": {
+    squads: [
+      {
+        team: "The Wardens CC",
+        captain: "K. Perera",
+        players: [
+          { name: "K. Perera", isCaptain: true },
+          { name: "A. Wickramasinghe" },
+          { name: "D. Mendis" },
+          { name: "S. Bandara" },
+          { name: "N. Gunaratne" },
+        ],
+      },
+      {
+        team: "Golden Lions",
+        captain: "R. Fernando",
+        players: [
+          { name: "R. Fernando", isCaptain: true },
+          { name: "T. Rathnayake" },
+          { name: "N. Silva" },
+        ],
+      },
+    ],
+    awards: [
+      { label: "Highest Bid of the Night", name: "K. Perera", note: "LKR 120,000 to The Wardens CC" },
+      { label: "Players Moved", name: "64", note: "Across one auction session" },
+    ],
+  },
+}
+
+// ─────────────────────────────────────────────────────────────
+// DERIVED LIST — merges showcaseSlides (base info) with the extras above
+// ─────────────────────────────────────────────────────────────
+export const tournaments: Tournament[] = showcaseSlides.map((base) => ({
+  ...base,
+  ...(tournamentExtras[base.slug] || {}),
+}))
+
+// ─────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────
+export { slugify }
+
+export function getTournamentBySlug(slug: string): Tournament | undefined {
+  return tournaments.find((t) => slugify(t.slug) === slug)
 }

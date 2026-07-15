@@ -2,14 +2,14 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import TournamentDetailClient from "@/components/tournament/tournament-detail-client"
-import { showcaseSlides, slugify, getTournamentBySlug } from "@/data/site-data"
+import { tournaments, slugify, getTournamentBySlug } from "@/data/tournament-data"
 
 interface TournamentPageProps {
   params: Promise<{ slug: string }>
 }
 
 export function generateStaticParams() {
-  return showcaseSlides.map((t) => ({ slug: slugify(t.title) }))
+  return tournaments.map((t) => ({ slug: slugify(t.title) }))
 }
 
 export async function generateMetadata({ params }: TournamentPageProps): Promise<Metadata> {
