@@ -106,7 +106,16 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
   return (
     <main className="overflow-hidden">
-      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
+       <style
+        dangerouslySetInnerHTML={{
+          __html: `${pageStyles}
+          html, body {
+            overflow-x: hidden;
+            max-width: 100%;
+          }`,
+        }}
+      />
+
 
       <SiteHeader
         activeSection="tournament"
