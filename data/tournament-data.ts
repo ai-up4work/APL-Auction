@@ -103,6 +103,12 @@ export interface TournamentExtras {
   pointsTable?: PointsRow[]
   fixtures?: Fixture[]
   bracket?: BracketMatch[]
+  /** Which bracket chart to preview in the Bracket tab (renders a
+   *  generated 32-team demo bracket via BracketPreviewPanel — see that
+   *  component for why it doesn't read real per-tournament match data).
+   *  Leave unset to keep using the legacy flat `bracket` array via
+   *  BracketPanel instead. */
+  bracketFormat?: "single" | "double"
   squads?: Squad[]
   runsLeaderboard?: LeaderboardRow[]
   wicketsLeaderboard?: LeaderboardRow[]
@@ -159,6 +165,7 @@ const tournamentExtras: Record<string, TournamentExtras> = {
 
   // ───────────────────────────── Bracket ─────────────────────
   "silver-cup-knockout": {
+    bracketFormat: "single",
     bracket: [
       { id: "r16-1", label: "Round of 16", team1: { name: "Royal Strikers", short: "RS", score: "156/7" }, team2: { name: "Iron Wolves", short: "IW", score: "142/9" }, winner: "RS", date: "10 Jul" },
       { id: "r16-2", label: "Round of 16", team1: { name: "Crimson Blades", short: "CB", score: "178/4" }, team2: { name: "Silver Hawks", short: "SH", score: "160/6" }, winner: "CB", date: "10 Jul" },
@@ -218,6 +225,7 @@ const tournamentExtras: Record<string, TournamentExtras> = {
 
   // ───────────────────────────── League (flagship) ────────────
   "crimson-cup-full-season": {
+    bracketFormat: "single",
     liveMatch: {
       matchStatus: "live",
       team1: { name: "Valiant Originals", short: "VO" },

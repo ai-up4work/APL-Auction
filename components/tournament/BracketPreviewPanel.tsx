@@ -3,20 +3,29 @@
 
 import Link from "next/link"
 import { ArrowRight, Network, Trophy, RotateCcw, Award, Radio } from "lucide-react"
-import type { MatchNode, Round } from "@/components/tournament/TournamentBracket"
-import type { DoubleElimData } from "@/lib/tournament/doubleElim"
+import type { MatchNode, Round, TeamNode } from "@/components/tournament/TournamentBracket"
+import { generateBracketRounds } from "@/lib/tournament/generateBracketRounds"
+import { getDemoTeams } from "@/lib/tournament/demoTeams"
+import {
+  generateDoubleElimination,
+  recordDoubleElimResult,
+  type DoubleElimData,
+} from "@/lib/tournament/doubleElim"
 
 /* ------------------------------------------------------------------ */
-/*  This panel is intentionally NOT a shrunk-down TournamentBracket / */
-/*  DoubleElimBoard. Those two are built around measured DOM geometry */
-/*  across many columns — that only works with real width. This panel */
-/*  renders plain static mini-cards for just the "current" round(s),  */
-/*  and links out to the full interactive chart page.                 */
+/*  This panel generates its own full 32-team demo bracket — the same  */
+/*  shape the full-page chart (TournamentBracket / DoubleElimBoard)    */
+/*  renders — and previews a slice of it. It intentionally does NOT    */
+/*  read per-tournament data from tournament-data: that data is much   */
+/*  smaller/differently-shaped than a real bracket, which made the     */
+/*  preview look like a thin, half-empty stub. The `format` prop only  */
+/*  says which chart TYPE to preview; `slug` is only used to build the */
+/*  "Full bracket" link.                                                */
 /* ------------------------------------------------------------------ */
 
 type BracketPreviewProps =
-  | { format: "single"; rounds: Round[]; slug: string }
-  | { format: "double"; data: DoubleElimData; slug: string }
+  | { format: "single"; slug: string }
+  | { format: "double"; slug: string }
 
 function isDone(m: MatchNode) {
   return m.status === "completed"
@@ -28,6 +37,101 @@ function findCurrentRoundIndex(rounds: Round[]): number {
   const idx = rounds.findIndex((r) => r.matches.some((m) => !isDone(m)))
   return idx === -1 ? rounds.length - 1 : idx
 }
+
+/* ------------------------------------------------------------------ */
+/*  Demo data generation — mirrors the singleElimination /              */
+/*  doubleElimination full-chart pages exactly, so the preview is a    */
+/*  slice of the same bracket shape (32 teams), not a separate one.    */
+/*  Cached at module scope so re-renders of this panel (or multiple    */
+/*  tabs on the same tournament page) don't regenerate/re-randomize.   */
+/* ------------------------------------------------------------------ */
+
+function setResult(match: MatchNode, winner: "A" | "B", scoreA: number, scoreB: number) {
+  match.status = "completed"
+  if (match.teamA) {
+    match.teamA.score = scoreA
+    match.teamA.isWinner = winner === "A"
+  }
+  if (match.teamB) {
+    match.teamB.score = scoreB
+    match.teamB.isWinner = winner === "B"
+  }
+}
+
+function advanceWinner(match: MatchNode, nextMatches: MatchNode[]) {
+  const winner = match.teamA?.isWinner ? match.teamA : match.teamB?.isWinner ? match.teamB : null
+  if (!winner) return
+  const next = nextMatches.find((m) => m.aFrom === match.id || m.bFrom === match.id)
+  if (!next) return
+  const slot: TeamNode = { ...winner, score: undefined, isWinner: undefined }
+  if (next.aFrom === match.id) next.teamA = slot
+  else next.teamB = slot
+}
+
+function resolveSingleElim(rounds: Round[]) {
+  for (let r = 0; r < rounds.length; r++) {
+    const round = rounds[r]
+    for (const match of round.matches) {
+      if (match.teamA && match.teamB && match.status !== "completed") {
+        const scoreA = 60 + Math.floor(Math.random() * 60)
+        const scoreB = 60 + Math.floor(Math.random() * 60)
+        setResult(match, scoreA >= scoreB ? "A" : "B", scoreA, scoreB)
+      }
+    }
+    const next = rounds[r + 1]
+    if (next) {
+      for (const match of round.matches) advanceWinner(match, next.matches)
+    }
+  }
+}
+
+function resolveDoubleElim(data: DoubleElimData) {
+  let changed = true
+  while (changed) {
+    changed = false
+    const all = [
+      ...data.winners.flatMap((r) => r.matches),
+      ...data.losers.flatMap((r) => r.matches),
+      data.grandFinal,
+      ...(data.bracketReset ? [data.bracketReset] : []),
+    ]
+    for (const match of all) {
+      const playable =
+        match.teamA && match.teamB && match.teamB.code !== "BYE" && match.status !== "completed"
+      if (!playable) continue
+      let scoreA = 60 + Math.floor(Math.random() * 60)
+      let scoreB = 60 + Math.floor(Math.random() * 60)
+      if (scoreA === scoreB) scoreB += 1
+      recordDoubleElimResult(data, match.id, scoreA > scoreB ? "A" : "B", scoreA, scoreB)
+      changed = true
+    }
+  }
+}
+
+let cachedSingleElimRounds: Round[] | null = null
+let cachedDoubleElimData: DoubleElimData | null = null
+
+function getSingleElimDemoRounds(): Round[] {
+  if (cachedSingleElimRounds) return cachedSingleElimRounds
+  const teams = getDemoTeams(32)
+  const rounds = generateBracketRounds(teams)
+  resolveSingleElim(rounds)
+  cachedSingleElimRounds = rounds
+  return rounds
+}
+
+function getDoubleElimDemoData(): DoubleElimData {
+  if (cachedDoubleElimData) return cachedDoubleElimData
+  const teams = getDemoTeams(32)
+  const data = generateDoubleElimination(teams)
+  resolveDoubleElim(data)
+  cachedDoubleElimData = data
+  return data
+}
+
+/* ------------------------------------------------------------------ */
+/*  Presentation                                                        */
+/* ------------------------------------------------------------------ */
 
 function MiniTeamRow({ team, isWinner }: { team: MatchNode["teamA"]; isWinner: boolean }) {
   const tbd = !team
@@ -74,11 +178,9 @@ function MiniColumn({ round }: { round: Round }) {
 }
 
 function PanelShell({
-  slug,
   fullBracketHref,
   children,
 }: {
-  slug: string
   fullBracketHref: string
   children: React.ReactNode
 }) {
@@ -104,12 +206,14 @@ function PanelShell({
 
 export default function BracketPreviewPanel(props: BracketPreviewProps) {
   if (props.format === "single") {
-    const { rounds, slug } = props
+    const { slug } = props
+    const rounds = getSingleElimDemoRounds()
     const curIdx = findCurrentRoundIndex(rounds)
     const visible = curIdx === -1 ? [] : rounds.slice(curIdx, curIdx + 2)
+    const fullBracketHref = `/tournament/${slug}/bracket/singleElimination`
 
     return (
-      <PanelShell slug={slug} fullBracketHref={`/tournament/bracket/singleElimination?slug=${slug}`}>
+      <PanelShell fullBracketHref={fullBracketHref}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-[440px] sm:min-w-0">
           {visible.map((round) => (
             <MiniColumn key={round.id} round={round} />
@@ -122,15 +226,16 @@ export default function BracketPreviewPanel(props: BracketPreviewProps) {
   // Double elimination: show current WB round + current LB round in
   // parallel (they progress independently), and the Grand Final once
   // both finals have been reached.
-  const { data, slug } = props
+  const { slug } = props
+  const data = getDoubleElimDemoData()
   const wbIdx = findCurrentRoundIndex(data.winners)
   const lbIdx = data.losers.length ? findCurrentRoundIndex(data.losers) : -1
   const wbAtFinal = wbIdx === data.winners.length - 1
   const lbAtFinal = lbIdx === -1 || lbIdx === data.losers.length - 1
-  const gfReached = wbAtFinal && lbAtFinal && isDone(data.winners[wbIdx]?.matches[0]) 
+  const gfReached = wbAtFinal && lbAtFinal && isDone(data.winners[wbIdx]?.matches[0])
 
   return (
-    <PanelShell slug={slug} fullBracketHref={`/tournament/bracket/doubleElimination?slug=${slug}`}>
+    <PanelShell fullBracketHref={`/tournament/${slug}/bracket/doubleElimination`}>
       <div className="space-y-6 min-w-[280px]">
         {wbIdx !== -1 && (
           <div>

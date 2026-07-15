@@ -1,4 +1,4 @@
-// Suggested location: app/tournament/bracket/doubleElimination/page.tsx
+// Suggested location: app/tournament/bracket/[slug]/doubleElimination/page.tsx
 // (mirrors your single-elimination demo page — same pattern, double-elim data + board)
 "use client";
 import DoubleElimBoard from "@/components/tournament/DoubleElimBoard";

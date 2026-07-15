@@ -1,4 +1,4 @@
-// app/tournament/bracket/singleElimination/page.tsx
+// app/tournament/[slug]/bracket/singleElimination/page.tsx
 "use client";
 import TournamentBracket from "@/components/tournament/TournamentBracket";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
