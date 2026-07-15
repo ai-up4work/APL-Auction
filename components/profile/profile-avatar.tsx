@@ -32,12 +32,11 @@ export default function ProfileAvatar({ imageUrl, username, isOwnProfile = false
     }, 1000)
   }
 
-  const handleUpdateProfile = async (url: string) => {
+  const handleUpdateProfile = async (url: string): Promise<void> => {
     const success = await updateProfileImage(url)
     if (!success && updateError) {
       setError(updateError)
     }
-    return success
   }
 
   return (
