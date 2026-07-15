@@ -6,26 +6,11 @@ import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-import {
   Calendar,
   MapPin,
   Radio,
   Shield,
-  Swords,
-  Target,
-  Trophy,
-  Users,
+  CloudSun,
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
@@ -40,6 +25,7 @@ import type {
   MatchSquad,
   LiveScriptStep,
 } from "@/data/tournament-data"
+import MatchGraphs, { type OverRow } from "./match-graphs"
 
 interface MatchDetailClientProps {
   match: MatchDetail
@@ -55,7 +41,9 @@ function initials(name: string) {
     .toUpperCase()
 }
 
-type Tab = "scorecard" | "info" | "squads" | "stats"
+type Tab = "scorecard" | "info" | "squads" | "overs" | "graphs" | "stats"
+
+const TABS: Tab[] = ["scorecard", "info", "squads", "overs", "graphs"]
 
 export default function MatchDetailClient({ match, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
@@ -81,7 +69,9 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
   const [stepIndex, setStepIndex] = useState(0)
   const [winProb, setWinProb] = useState({ a: 42, b: 58 })
   const [commentary, setCommentary] = useState<LiveScriptStep[]>([])
-  const [overRunsB, setOverRunsB] = useState<number[]>(match.innings2Partial.overRunsAtStart.concat(match.innings2Partial.over19ExtraRuns))
+  const [overRunsB, setOverRunsB] = useState<number[]>(
+    match.innings2Partial.overRunsAtStart.concat(match.innings2Partial.over19ExtraRuns)
+  )
   const [partnership, setPartnership] = useState({ runs: 4, balls: 7 })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -131,25 +121,53 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
   const crr = (runs / (ballsBowled / 6)).toFixed(2)
   const rrr = live && ballsLeft > 0 ? (need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : "0.00") : null
 
-  const manhattanData = match.innings1.overRuns.map((v, i) => ({
-    over: i + 1,
-    [match.teamA.short]: v,
-    [match.teamB.short]: (live ? overRunsB : match.innings2Final.overRuns)[i] ?? null,
-  }))
-  const wormData = (() => {
-    let a = 0
-    let b = 0
-    return match.innings1.overRuns.map((v, i) => {
-      a += v
-      const bOver = (live ? overRunsB : match.innings2Final.overRuns)[i]
-      b += bOver ?? 0
-      return {
-        over: i + 1,
-        [match.teamA.short]: a,
-        [match.teamB.short]: bOver !== undefined ? b : null,
+  // Generate over-by-over list data for a given innings. Accepts an explicit
+  // innings arg (defaulting to the currently selected tab-innings) so callers
+  // like MatchGraphs can request both innings regardless of what's on screen.
+  const getOverByOverData = (inn: 1 | 2 = innings): OverRow[] => {
+    if (inn === 1) {
+      return [
+        { num: 20, score: `${match.innings1.total}-${match.innings1.wkts}`, matchUp: "D. Fernando to K. Perera & D. de Silva", balls: ["1", "4", "W", "1", "6", "1"], totalRuns: 13 },
+        { num: 19, score: "168-5", matchUp: "S. Jayasinghe to K. Perera & P. Nissanka", balls: ["•", "1", "4", "•", "1", "2"], totalRuns: 8 },
+        { num: 18, score: "160-5", matchUp: "D. Fernando to P. Nissanka", balls: ["1", "W", "1", "•", "6", "1"], totalRuns: 9 },
+        { num: 17, score: "151-4", matchUp: "M. Theekshana to K. Mendis & P. Nissanka", balls: ["1", "1", "1", "4", "1", "•"], totalRuns: 8 },
+        { num: 16, score: "143-4", matchUp: "C. Asalanka to K. Mendis", balls: ["6", "1", "W", "•", "1", "1"], totalRuns: 9 },
+      ]
+    }
+
+    // Compiled live list array generated out of the active live simulation arrays
+    const list: OverRow[] = []
+    const tempRuns = match.innings2Partial.runsAtStart
+    const tempWkts = match.innings2Partial.wktsAtStart
+
+    // Over 19 mapping logic loop
+    const o19Steps = match.liveScript.filter((s) => s.over === 19)
+    if (o19Steps.length > 0 && stepIndex > 0) {
+      const o19F = o19Steps.filter((_, idx) => match.liveScript.indexOf(o19Steps[idx]) < stepIndex)
+      if (o19F.length > 0) {
+        const rScored = o19F.reduce((acc, s) => acc + s.runs, 0)
+        const wTaken = o19F.filter((s) => s.wkt).length
+        const currentTotalRuns = match.innings2Partial.runsAtStart + rScored
+        const currentTotalWkts = match.innings2Partial.wktsAtStart + wTaken
+        list.push({
+          num: 19,
+          score: `${currentTotalRuns}-${currentTotalWkts}`,
+          matchUp: "B. Kumar to J. Fonseka & M. Jayasuriya",
+          balls: o19F.map((s) => (s.wkt ? "W" : s.runs === 0 ? "•" : String(s.runs))),
+          totalRuns: rScored,
+        })
       }
-    })
-  })()
+    }
+
+    // Preloaded complete historical overs sequence setup lists
+    list.push(
+      { num: 18, score: `${tempRuns}-${tempWkts}`, matchUp: "M. Siraj to J. Fonseka & R. Silva", balls: ["1", "•", "4", "1", "W", "1"], totalRuns: 7 },
+      { num: 17, score: `${tempRuns - 7}-${tempWkts - 1}`, matchUp: "B. Kumar to R. Silva & K. Mendis", balls: ["6", "1", "6", "•", "1", "2"], totalRuns: 16 },
+      { num: 16, score: `${tempRuns - 23}-${tempWkts - 1}`, matchUp: "A. Patel to K. Mendis", balls: ["1", "1", "•", "1", "W", "•"], totalRuns: 3 },
+      { num: 15, score: `${tempRuns - 26}-${tempWkts}`, matchUp: "J. Bumrah to J. Fonseka & K. Mendis", balls: ["1", "•", "4", "1", "1", "1"], totalRuns: 8 }
+    )
+    return list
+  }
 
   return (
     <main className="overflow-hidden">
@@ -164,38 +182,83 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       />
 
       {/* ═══════════════════════════════════════════
-          HERO
+          HERO (FULL WIDTH ICC STYLE)
       ═══════════════════════════════════════════ */}
-      <section className="pt-32 sm:pt-40 pb-10 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 text-center fade-in">
-          <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-3">
+      <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
+        <div
+            className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30"
+            style={{ backgroundImage: `url('https://www.hindustantimes.com/ht-img/img/2024/09/30/1600x900/Cricket_3_1727677442716_1727677564058.jpg')` }}
+        >
+            <span className="sr-only">Image not available</span>
+        </div>
+
+        <div className="absolute inset-0 z-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+        <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-transparent to-transparent opacity-80" />
+
+        <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10">
+          <div className="mb-6 h-20 w-20 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)]">
+             <span className="text-[10px] text-gray-500 font-cinzel text-center leading-tight uppercase">
+                Image<br/>not<br/>available
+             </span>
+          </div>
+
+          <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-6 shadow-[0_0_10px_rgba(245,166,35,0.3)]">
             {match.round} · {match.tournamentName}
           </Badge>
-          <h1 className="text-3xl md:text-4xl font-bold text-white font-cinzel">
-            {match.teamA.name} <span className="text-gold">vs</span> {match.teamB.name}
-          </h1>
-          <div className="flex flex-wrap justify-center gap-6 mt-5 text-xs text-gray-400 font-cinzel uppercase tracking-wide">
-            <span className="flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5 text-gold" /> {match.venue}
+
+          <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
+              <div className="flex flex-col items-center flex-1">
+                  <div className="h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center">
+                       <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center">Image not available</span>
+                  </div>
+                  <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md">
+                    {match.teamA.name}
+                  </h1>
+              </div>
+
+              <div className="flex flex-col items-center justify-center">
+                  <span className="text-gold font-cinzel text-2xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
+                      VS
+                  </span>
+              </div>
+
+              <div className="flex flex-col items-center flex-1">
+                  <div className="h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center">
+                       <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center">Image not available</span>
+                  </div>
+                  <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md">
+                    {match.teamB.name}
+                  </h1>
+              </div>
+          </div>
+
+          <div className="flex flex-wrap justify-center items-center gap-6 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg">
+            <span className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-gold" /> {match.venue}
             </span>
-            <span className="flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 text-gold" /> {match.date} · {match.time}
+            <span className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-gold" /> {match.date} · {match.time}
+            </span>
+            <span className="flex items-center gap-2 border-l border-gold/20 pl-6 md:border-l md:pl-6">
+              <CloudSun className="h-4 w-4 text-gold" /> {(match as any).weather || "29°C · Clear Sky"}
             </span>
           </div>
-          <p className="text-gray-300 mt-4 text-sm">{match.toss}</p>
+
+          <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm">
+              {match.toss}
+          </p>
         </div>
       </section>
 
       {/* ═══════════════════════════════════════════
           SCORE STRIP
       ═══════════════════════════════════════════ */}
-      <section className="px-4 relative z-10">
+      <section className="px-4 relative z-10 -mt-8">
         <div className="container mx-auto max-w-3xl">
-          <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 glow-effect">
+          <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             <div className="flex justify-between items-center mb-4">
               {live ? (
-                <span className="flex items-center gap-1.5 bg-red-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
+                <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
                   <Radio className="h-3 w-3" />
                   LIVE
                 </span>
@@ -215,7 +278,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
                 </p>
               </div>
-              <div className={`rounded-lg p-4 border ${live ? "border-gold bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
+              <div className={`rounded-lg p-4 border ${live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
                 <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
                 <p className="text-2xl font-bold text-white font-cinzel mt-1">
                   {runs}/{wkts}
@@ -244,31 +307,17 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                 </div>
               )}
             </div>
-
-            {!live && (
-                <div className="mt-5 rounded-lg border border-green-600/40 bg-green-600/10 p-4 text-center">
-                    <p className="text-green-500 font-semibold text-sm">
-                    🏆 {match.resultNote}, chasing down {match.target} in 20 overs.
-                    </p>
-                    {match.innings2Final.potm && (
-                    <p className="text-gray-400 text-xs mt-2">
-                        Player of the Match: <b className="text-gold">{match.innings2Final.potm.name}</b> ({match.teamB.short}) —{" "}
-                        {match.innings2Final.potm.note}
-                    </p>
-                    )}
-                </div>
-                )}
           </div>
         </div>
       </section>
 
       {/* ═══════════════════════════════════════════
-          TABS
+          TABS NAVIGATION
       ═══════════════════════════════════════════ */}
       <section className="px-4 relative z-10">
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full flex flex-wrap gap-1 mb-8">
-            {(["scorecard", "info", "squads", "stats"] as const).map((t) => (
+            {TABS.map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -281,7 +330,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             ))}
           </div>
 
-          {/* SCORECARD */}
+          {/* SCORECARD TAB */}
           {tab === "scorecard" && (
             <div className="mb-8">
               <div className="flex gap-2 mb-6">
@@ -357,7 +406,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             </div>
           )}
 
-          {/* INFO */}
+          {/* INFO TAB */}
           {tab === "info" && (
             <div className="space-y-4 mb-8">
               <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
@@ -367,6 +416,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                     ["Series", `${match.tournamentName} — ${match.round}`],
                     ["Venue", match.venue],
                     ["Date & Time", `${match.date} · ${match.time}`],
+                    ["Weather", (match as any).weather || "29°C · Clear Sky"],
                     ["Toss", match.toss],
                     ["Umpires", match.officials.umpires],
                     ["Third Umpire", match.officials.thirdUmpire],
@@ -380,32 +430,128 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   ))}
                 </div>
               </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-xl font-bold text-white mb-3 font-cinzel">PITCH & CONDITIONS</h2>
-                <p className="text-gray-300 text-sm leading-relaxed">{match.pitch}</p>
-              </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-xl font-bold text-white mb-3 font-cinzel">SERIES CONTEXT</h2>
-                <p className="text-gray-300 text-sm leading-relaxed">{match.context}</p>
-              </div>
             </div>
           )}
 
-          {/* SQUADS */}
+          {/* SQUADS TAB */}
           {tab === "squads" && (
-            <div className="space-y-4 mb-8">
-              <p className="text-gray-500 text-xs flex items-center gap-1.5 font-cinzel uppercase tracking-wide">
-                <span className="h-2 w-2 rounded-full bg-gold inline-block" /> Highlighted = Playing XI for this match
-              </p>
+            <div className="space-y-6 mb-8">
               {match.squads.map((s) => (
                 <MatchSquadPanel key={s.team} squad={s} />
               ))}
             </div>
           )}
 
-          {/* STATS */}
+          {/* OVERS TAB (CRICBUZZ LAYOUT) */}
+          {tab === "overs" && (() => {
+            const overOverData = getOverByOverData(innings)
+            return (
+              <div className="mb-8 space-y-4 fade-in">
+                {/* Inner Innings Selector System */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setInnings(1)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                      innings === 1
+                        ? "bg-gold text-black shadow-md shadow-gold/20"
+                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {match.teamA.short} (1st Inn)
+                  </button>
+                  <button
+                    onClick={() => setInnings(2)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                      innings === 2
+                        ? "bg-gold text-black shadow-md shadow-gold/20"
+                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {match.teamB.short} (2nd Inn)
+                  </button>
+                </div>
+
+                {/* Over by Over Container Table Element */}
+                <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
+                  {/* Table Header Row Component */}
+                  <div className="grid grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
+                    <div>Overs</div>
+                    <div>Balls</div>
+                    <div className="text-right">Runs</div>
+                  </div>
+
+                  {/* Over Record Map Loops */}
+                  {overOverData.map((ov, index) => (
+                    <div
+                      key={ov.num}
+                      className={`grid grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
+                        index < overOverData.length - 1 ? "border-b border-gold/10" : ""
+                      }`}
+                    >
+                      {/* Left Column Stack Info */}
+                      <div>
+                        <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
+                        <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
+                      </div>
+
+                      {/* Middle Column Data Stack */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-gray-300">{ov.matchUp}</p>
+
+                        {/* Ball pill block clusters */}
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          {ov.balls.map((b: string, ballIdx: number) => {
+                            const isWicket = b.toUpperCase() === "W"
+                            const isSix = b === "6"
+                            const isFour = b === "4"
+
+                            return (
+                              <span
+                                key={ballIdx}
+                                className={`h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold transition-all ${
+                                  isWicket
+                                    ? "bg-red-600 text-white shadow-sm shadow-red-900/50 scale-105"
+                                    : isSix
+                                    ? "bg-purple-600/30 border border-purple-500 text-purple-400"
+                                    : isFour
+                                    ? "bg-cyan-600/30 border border-cyan-500 text-cyan-400"
+                                    : b === "•"
+                                    ? "bg-white/5 text-gray-500 border border-white/5"
+                                    : "bg-white/10 text-gray-300 border border-white/10"
+                                }`}
+                              >
+                                {b}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Right Column Total Value Stack */}
+                      <div className="text-right text-base font-bold text-white font-cinzel pr-1">
+                        {ov.totalRuns}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* GRAPHS TAB */}
+          {tab === "graphs" && (
+            <MatchGraphs
+              match={match}
+              live={live}
+              overRunsB={overRunsB}
+              winProb={winProb}
+              stepIndex={stepIndex}
+              overs1={getOverByOverData(1)}
+              overs2={getOverByOverData(2)}
+            />
+          )}
+
+          {/* STATS TAB */}
           {tab === "stats" && (
             <div className="space-y-4 mb-8">
               <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
@@ -419,94 +565,6 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   <span className="text-red-500">{match.teamB.short} {winProb.b}%</span>
                 </div>
               </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel">CURRENT PARTNERSHIP</h2>
-                <div className="flex items-center justify-between border border-gold/10 rounded-md p-3 bg-white/[0.02]">
-                  <p className="text-white text-sm">J. Fonseka &amp; M. Jayasuriya</p>
-                  <p className="text-gold font-bold font-cinzel">
-                    {partnership.runs} ({partnership.balls})
-                  </p>
-                </div>
-                <div className="flex items-center justify-between border border-gold/10 rounded-md p-3 bg-white/[0.02] mt-2 opacity-60">
-                  <p className="text-white text-sm">Best this innings — Perera &amp; Gunawardena</p>
-                  <p className="text-gray-300 font-cinzel">57 (38)</p>
-                </div>
-              </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel">
-                  OVER-BY-OVER SUMMARY — {match.teamB.short} INNINGS
-                </h2>
-                <div className="flex flex-wrap gap-1.5">
-                  {(live ? overRunsB : match.innings2Final.overRuns).map((r, i) => (
-                    <span
-                      key={i}
-                      className={`text-[11px] font-cinzel rounded-md px-2 py-1 border min-w-[2.2rem] text-center ${
-                        r >= 12 ? "border-gold text-gold font-bold" : "border-gold/10 text-gray-300"
-                      }`}
-                    >
-                      {r}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel">MANHATTAN — RUNS PER OVER</h2>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={manhattanData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(245,166,35,0.1)" />
-                      <XAxis dataKey="over" tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                      <Tooltip contentStyle={{ background: "#000", border: "1px solid rgba(245,166,35,0.3)" }} />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey={match.teamA.short} fill="#f5a623" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey={match.teamB.short} fill="#dc2626" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel">WORM — CUMULATIVE SCORE</h2>
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={wormData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(245,166,35,0.1)" />
-                      <XAxis dataKey="over" tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                      <Tooltip contentStyle={{ background: "#000", border: "1px solid rgba(245,166,35,0.3)" }} />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey={match.teamA.short} stroke="#f5a623" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey={match.teamB.short} stroke="#dc2626" strokeWidth={2} dot={false} connectNulls />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel flex items-center gap-1.5">
-                  <Radio className="h-4 w-4 text-gold" /> LIVE COMMENTARY FEED
-                </h2>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {commentary.length === 0 && (
-                    <p className="text-gray-500 text-xs">Commentary will appear here as the over unfolds.</p>
-                  )}
-                  {commentary.map((c, i) => (
-                    <div
-                      key={i}
-                      className={`text-sm rounded-md px-3 py-2 border-l-2 bg-white/[0.02] ${
-                        c.wkt ? "border-red-600 text-red-500" : "border-gold/20 text-gray-200"
-                      }`}
-                    >
-                      <span className="text-gray-500 text-xs mr-2">{c.ball}</span>
-                      {c.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
 
@@ -518,21 +576,6 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="px-4 py-16 text-center border-t border-gold/10 relative z-10">
-        <Trophy className="h-6 w-6 text-gold mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-white mb-2 font-cinzel">
-          Follow every ball of the <span className="text-gold">{match.round}</span>
-        </h3>
-        <p className="text-gray-400 text-sm mb-6">
-          Live scores, scorecards, and stats update automatically as the match unfolds.
-        </p>
-        <button className="inline-flex items-center gap-2 rounded-lg bg-gold hover:bg-gold/90 transition-colors px-5 py-3 text-xs font-cinzel tracking-widest uppercase text-black font-bold">
-          <Target className="h-4 w-4" />
-          Follow Live Scores
-        </button>
-      </section>
-
       <SectionDivider />
       <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
@@ -540,7 +583,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
 }
 
 // ─────────────────────────────────────────────────────────────
-// SHARED "TABLE" GRID
+// DATA COMPONENTS
 // ─────────────────────────────────────────────────────────────
 function DataGrid({
   columns,
@@ -581,9 +624,6 @@ function DataGrid({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// BATTING CARD
-// ─────────────────────────────────────────────────────────────
 function BattingCard({
   title,
   rows,
@@ -656,9 +696,6 @@ function BattingCard({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// BOWLING CARD
-// ─────────────────────────────────────────────────────────────
 function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[]; live?: boolean }) {
   const columns = [
     { key: "name", label: "Bowler", grow: true },
@@ -685,9 +722,6 @@ function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[];
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// FALL OF WICKETS
-// ─────────────────────────────────────────────────────────────
 function FowList({ fow }: { fow: FowEntry[] }) {
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-4">
@@ -703,43 +737,82 @@ function FowList({ fow }: { fow: FowEntry[] }) {
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// MATCH SQUAD PANEL
-// ─────────────────────────────────────────────────────────────
 function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <Shield className="h-4 w-4 text-gold" />
-          <p className="text-white font-bold font-cinzel">{squad.team}</p>
-        </div>
-        <p className="text-gray-400 text-xs flex items-center gap-1.5">
-          <Users className="h-3 w-3" /> {squad.players.length} players · Capt. {squad.captain}
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {squad.players.map((p) => (
-          <div
-            key={p.name}
-            className={`flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border ${
-              p.xi ? "bg-gold/10 border-gold/40" : "bg-white/[0.02] border-gold/10"
-            }`}
-          >
-            <span
-              className={`h-6 w-6 rounded-full text-[10px] font-bold flex items-center justify-center font-cinzel ${
-                p.xi ? "bg-gold/25 text-gold" : "bg-white/10 text-gray-400"
-              }`}
+  const playingXI = squad.players.filter((p) => p.xi)
+  const bench = squad.players.filter((p) => !p.xi)
+
+  const renderPlayerGrid = (playersList: typeof squad.players) => {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 border border-gold/10 rounded-lg overflow-hidden bg-white/[0.01]">
+        {playersList.map((p, idx) => {
+          const isEven = idx % 2 === 0
+          const isLastTwo = idx >= playersList.length - (playersList.length % 2 === 0 ? 2 : 1)
+
+          return (
+            <div
+              key={p.name}
+              className={`flex items-center gap-4 p-3.5 transition-colors hover:bg-white/[0.02] ${
+                !isLastTwo ? "border-b border-gold/10" : ""
+              } ${isEven ? "md:border-r border-gold/10" : ""}`}
             >
-              {initials(p.name)}
-            </span>
-            <div>
-              <p className={`text-xs ${p.xi ? "text-white" : "text-gray-400"}`}>{p.name}</p>
-              <p className="text-gray-500 text-[9px]">{p.role}</p>
+              <div className="relative h-12 w-12 rounded-full overflow-hidden bg-black/60 border border-gold/20 flex items-center justify-center shrink-0 shadow-[inner_0_2px_4px_rgba(0,0,0,0.6)]">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-center p-0.5 leading-none z-0">
+                  <span className="text-[5.5px] font-sans font-semibold text-gray-500 tracking-tighter uppercase">
+                    Image not available
+                  </span>
+                </div>
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-white/15 via-transparent to-transparent text-xs font-bold text-gold font-cinzel z-10">
+                  {initials(p.name)}
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white tracking-wide">{p.name}</h4>
+                <p className="text-xs text-gray-400 mt-0.5 font-medium">{p.role}</p>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
+    )
+  }
+
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-xl p-6 shadow-xl">
+      <div className="flex items-center justify-between mb-6 border-b border-gold/10 pb-4">
+        <div className="flex items-center gap-2.5">
+          <Shield className="h-5 w-5 text-gold drop-shadow-[0_0_6px_rgba(245,166,35,0.4)]" />
+          <h3 className="text-lg font-bold text-white font-cinzel tracking-wider">{squad.team}</h3>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-400 font-cinzel uppercase tracking-wider">
+            Captain: <span className="text-gold font-bold">{squad.captain}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-[11px] font-cinzel uppercase tracking-widest text-gold/70 font-semibold mb-2 px-1">
+          Playing XI
+        </p>
+        {renderPlayerGrid(playingXI)}
+      </div>
+
+      {bench.length > 0 && (
+        <div className="my-8 relative flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gold/10" />
+          </div>
+          <span className="relative px-6 py-1.5 bg-black border border-gold/25 rounded-full text-xs font-bold font-cinzel tracking-widest text-gray-400 uppercase shadow-md z-10">
+            Bench
+          </span>
+        </div>
+      )}
+
+      {bench.length > 0 && (
+        <div className="space-y-3">
+          {renderPlayerGrid(bench)}
+        </div>
+      )}
     </div>
   )
 }
