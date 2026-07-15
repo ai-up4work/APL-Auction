@@ -1,4 +1,4 @@
-// app/match/[matchId]/page.tsx
+// app/tournament/[slug]/match/[matchId]/page.tsx
 "use client"
 
 /**
