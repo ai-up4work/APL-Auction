@@ -42,12 +42,11 @@ interface MatchGraphsProps {
   overs2: OverRow[]
 }
 
-type GraphTab = "ballmap" | "winprob" | "partnerships" | "overs" | "runrate" | "worm"
+type GraphTab = "ballmap" | "winprob" | "partnerships" | "runrate" | "worm"
 
 const GRAPH_TABS: { key: GraphTab; label: string }[] = [
   { key: "winprob", label: "Win Probability" },
   { key: "partnerships", label: "Partnerships" },
-  { key: "overs", label: "Overs" },
   { key: "runrate", label: "Run Rate" },
   { key: "worm", label: "Worm" },
 ]
@@ -339,7 +338,7 @@ function WormView({ match, wormChartData }: { match: MatchDetail; wormChartData:
 // ─────────────────────────────────────────────────────────────
 
 export default function MatchGraphs({ match, live, overRunsB, winProb, stepIndex, overs1, overs2 }: MatchGraphsProps) {
-  const [graphTab, setGraphTab] = useState<GraphTab>("ballmap")
+  const [graphTab, setGraphTab] = useState<GraphTab>("winprob")
 
   const teamAOverRuns = match.innings1.overRuns
   const teamBOverRuns = live ? overRunsB : match.innings2Final.overRuns
@@ -398,7 +397,6 @@ export default function MatchGraphs({ match, live, overRunsB, winProb, stepIndex
         {graphTab === "ballmap" && <BallMapView match={match} overs1={overs1} overs2={overs2} />}
         {graphTab === "winprob" && <WinProbabilityView match={match} winProb={winProb} stepIndex={stepIndex} />}
         {graphTab === "partnerships" && <PartnershipsView match={match} />}
-        {graphTab === "overs" && <OversBarView match={match} oversChartData={oversChartData} />}
         {graphTab === "runrate" && <RunRateView match={match} runRateChartData={runRateChartData} />}
         {graphTab === "worm" && <WormView match={match} wormChartData={wormChartData} />}
       </div>

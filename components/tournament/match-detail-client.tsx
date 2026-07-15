@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +45,32 @@ function initials(name: string) {
 type Tab = "scorecard" | "info" | "squads" | "overs" | "graphs" | "stats"
 
 const TABS: Tab[] = ["scorecard", "info", "squads", "overs", "graphs"]
+
+const images = {
+  "team-a": "/Franchises/CSK.png",
+  "team-b": "/Franchises/RCB.png",
+  tournament: "/moon-knight-logo.png",
+}
+
+// Small helper so every logo slot (team A, team B, tournament) renders the
+// same way: a real <Image> when a path is supplied, and a graceful
+// "Image not available" placeholder otherwise. Keeping this in one place
+// means the three logo slots can never drift out of sync again.
+function LogoSlot({ src, alt }: { src?: string; alt: string }) {
+  return (
+    <div className="relative h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center overflow-hidden shrink-0">
+      {src ? (
+        <Image src={src} alt={alt} fill className="object-contain p-1" sizes="96px" />
+      ) : (
+        <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center px-1">
+          Image
+          <br />
+          not available
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default function MatchDetailClient({ match, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
@@ -170,7 +197,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
   }
 
   return (
-    <main className="overflow-hidden">
+    <main className="overflow-x-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
 
       <SiteHeader
@@ -195,56 +222,62 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
         <div className="absolute inset-0 z-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
         <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-transparent to-transparent opacity-80" />
 
-        <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10">
-          <div className="mb-6 h-20 w-20 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)]">
-             <span className="text-[10px] text-gray-500 font-cinzel text-center leading-tight uppercase">
-                Image<br/>not<br/>available
-             </span>
+        <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10 max-w-full">
+          <div className="relative mb-6 h-20 w-20 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)] shrink-0">
+            {images.tournament ? (
+              <Image
+                src={images.tournament}
+                alt={`${match.tournamentName} logo`}
+                fill
+                className="object-contain p-2"
+                sizes="80px"
+              />
+            ) : (
+              <span className="text-[10px] text-gray-500 font-cinzel text-center leading-tight uppercase">
+                Image<br />not<br />available
+              </span>
+            )}
           </div>
 
-          <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-6 shadow-[0_0_10px_rgba(245,166,35,0.3)]">
+          <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-6 shadow-[0_0_10px_rgba(245,166,35,0.3)] max-w-full whitespace-normal text-center">
             {match.round} · {match.tournamentName}
           </Badge>
 
           <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
-              <div className="flex flex-col items-center flex-1">
-                  <div className="h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center">
-                       <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center">Image not available</span>
-                  </div>
-                  <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md">
-                    {match.teamA.name}
-                  </h1>
+              <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
+                <LogoSlot src={images["team-a"]} alt={`${match.teamA.name} logo`} />
+                <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                  {match.teamA.name}
+                </h1>
               </div>
 
-              <div className="flex flex-col items-center justify-center">
+              <div className="flex flex-col items-center justify-center shrink-0">
                   <span className="text-gold font-cinzel text-2xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
                       VS
                   </span>
               </div>
 
-              <div className="flex flex-col items-center flex-1">
-                  <div className="h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center">
-                       <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center">Image not available</span>
-                  </div>
-                  <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md">
-                    {match.teamB.name}
-                  </h1>
+              <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
+                <LogoSlot src={images["team-b"]} alt={`${match.teamB.name} logo`} />
+                <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                  {match.teamB.name}
+                </h1>
               </div>
           </div>
 
-          <div className="flex flex-wrap justify-center items-center gap-6 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg">
+          <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-3 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg max-w-full">
             <span className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-gold" /> {match.venue}
+              <MapPin className="h-4 w-4 text-gold shrink-0" /> {match.venue}
             </span>
             <span className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-gold" /> {match.date} · {match.time}
+              <Calendar className="h-4 w-4 text-gold shrink-0" /> {match.date} · {match.time}
             </span>
-            <span className="flex items-center gap-2 border-l border-gold/20 pl-6 md:border-l md:pl-6">
-              <CloudSun className="h-4 w-4 text-gold" /> {(match as any).weather || "29°C · Clear Sky"}
+            <span className="flex items-center gap-2 md:border-l border-gold/20 md:pl-6">
+              <CloudSun className="h-4 w-4 text-gold shrink-0" /> {(match as any).weather || "29°C · Clear Sky"}
             </span>
           </div>
 
-          <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm">
+          <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm max-w-full text-center break-words">
               {match.toss}
           </p>
         </div>
@@ -256,7 +289,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       <section className="px-4 relative z-10 -mt-8">
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               {live ? (
                 <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
                   <Radio className="h-3 w-3" />
@@ -271,14 +304,14 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div className="rounded-lg p-4 border border-gold/10 bg-white/[0.02]">
+              <div className="rounded-lg p-4 border border-gold/10 bg-white/[0.02] min-w-0">
                 <span className="text-white font-bold font-cinzel">{match.teamA.short}</span>
                 <p className="text-2xl font-bold text-white font-cinzel mt-1">
                   {match.innings1.total}/{match.innings1.wkts}
                   <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
                 </p>
               </div>
-              <div className={`rounded-lg p-4 border ${live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
+              <div className={`rounded-lg p-4 border min-w-0 ${live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
                 <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
                 <p className="text-2xl font-bold text-white font-cinzel mt-1">
                   {runs}/{wkts}
@@ -289,7 +322,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
               </div>
             </div>
 
-            <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm">
+            <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
               {live
                 ? `${match.teamB.short} need ${need} runs from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`
                 : match.resultNote}
@@ -333,10 +366,10 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
           {/* SCORECARD TAB */}
           {tab === "scorecard" && (
             <div className="mb-8">
-              <div className="flex gap-2 mb-6">
+              <div className="flex flex-col sm:flex-row gap-2 mb-6">
                 <button
                   onClick={() => setInnings(1)}
-                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all ${
+                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
                     innings === 1 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
                   }`}
                 >
@@ -344,7 +377,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                 </button>
                 <button
                   onClick={() => setInnings(2)}
-                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all ${
+                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
                     innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
                   }`}
                 >
@@ -423,9 +456,9 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                     ["Match Referee", match.officials.referee],
                     ["Format", match.officials.format],
                   ].map(([label, value]) => (
-                    <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3">
+                    <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3 min-w-0">
                       <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">{label}</p>
-                      <p className="text-gray-200 text-sm mt-1">{value}</p>
+                      <p className="text-gray-200 text-sm mt-1 break-words">{value}</p>
                     </div>
                   ))}
                 </div>
@@ -448,7 +481,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             return (
               <div className="mb-8 space-y-4 fade-in">
                 {/* Inner Innings Selector System */}
-                <div className="flex gap-2 mb-4">
+                <div className="flex flex-wrap gap-2 mb-4">
                   <button
                     onClick={() => setInnings(1)}
                     className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
@@ -474,7 +507,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                 {/* Over by Over Container Table Element */}
                 <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
                   {/* Table Header Row Component */}
-                  <div className="grid grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
+                  <div className="grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
                     <div>Overs</div>
                     <div>Balls</div>
                     <div className="text-right">Runs</div>
@@ -484,19 +517,19 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   {overOverData.map((ov, index) => (
                     <div
                       key={ov.num}
-                      className={`grid grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
+                      className={`grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
                         index < overOverData.length - 1 ? "border-b border-gold/10" : ""
                       }`}
                     >
                       {/* Left Column Stack Info */}
-                      <div>
+                      <div className="min-w-0">
                         <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
                         <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
                       </div>
 
                       {/* Middle Column Data Stack */}
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-gray-300">{ov.matchUp}</p>
+                      <div className="space-y-2 min-w-0">
+                        <p className="text-xs font-medium text-gray-300 break-words">{ov.matchUp}</p>
 
                         {/* Ball pill block clusters */}
                         <div className="flex flex-wrap gap-1.5 items-center">
@@ -508,7 +541,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                             return (
                               <span
                                 key={ballIdx}
-                                className={`h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold transition-all ${
+                                className={`h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold transition-all shrink-0 ${
                                   isWicket
                                     ? "bg-red-600 text-white shadow-sm shadow-red-900/50 scale-105"
                                     : isSix
@@ -592,34 +625,39 @@ function DataGrid({
   columns: { key: string; label: string; align?: "left" | "right"; grow?: boolean }[]
   rows: Record<string, React.ReactNode>[]
 }) {
-  const template = columns.map((c) => (c.grow ? "1fr" : "3.2rem")).join(" ")
+  const template = columns.map((c) => (c.grow ? "minmax(6rem,1fr)" : "3.2rem")).join(" ")
   return (
-    <div className="border border-gold/10 rounded-md overflow-hidden">
-      <div className="grid border-b border-gold/10 bg-white/[0.02]" style={{ gridTemplateColumns: template }}>
-        {columns.map((c) => (
-          <div
-            key={c.key}
-            className={`p-2.5 text-[9.5px] tracking-widest uppercase text-gray-500 font-cinzel ${
-              c.align === "right" ? "text-right" : "text-left"
-            }`}
-          >
-            {c.label}
-          </div>
-        ))}
-      </div>
-      {rows.map((row, i) => (
-        <div
-          key={i}
-          className={`grid items-start text-xs md:text-sm ${i < rows.length - 1 ? "border-b border-gold/5" : ""}`}
-          style={{ gridTemplateColumns: template }}
-        >
+    // overflow-x-auto keeps a too-narrow viewport from ever forcing the
+    // whole page to scroll sideways — only this table scrolls internally,
+    // and only if it truly has to.
+    <div className="border border-gold/10 rounded-md overflow-x-auto">
+      <div className="min-w-[22rem]">
+        <div className="grid border-b border-gold/10 bg-white/[0.02]" style={{ gridTemplateColumns: template }}>
           {columns.map((c) => (
-            <div key={c.key} className={`p-2.5 ${c.align === "right" ? "text-right text-gray-200" : "text-left"}`}>
-              {row[c.key]}
+            <div
+              key={c.key}
+              className={`p-2.5 text-[9.5px] tracking-widest uppercase text-gray-500 font-cinzel ${
+                c.align === "right" ? "text-right" : "text-left"
+              }`}
+            >
+              {c.label}
             </div>
           ))}
         </div>
-      ))}
+        {rows.map((row, i) => (
+          <div
+            key={i}
+            className={`grid items-start text-xs md:text-sm ${i < rows.length - 1 ? "border-b border-gold/5" : ""}`}
+            style={{ gridTemplateColumns: template }}
+          >
+            {columns.map((c) => (
+              <div key={c.key} className={`p-2.5 ${c.align === "right" ? "text-right text-gray-200" : "text-left"}`}>
+                {row[c.key]}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -657,9 +695,9 @@ function BattingCard({
   ]
   const rowData = rows.map((b) => ({
     name: (
-      <div>
-        <p className="text-gray-100 font-medium">{b.name}</p>
-        <p className={`text-[10.5px] mt-0.5 ${b.notOut ? "text-green-500" : "text-gray-500"}`}>
+      <div className="min-w-0">
+        <p className="text-gray-100 font-medium truncate">{b.name}</p>
+        <p className={`text-[10.5px] mt-0.5 truncate ${b.notOut ? "text-green-500" : "text-gray-500"}`}>
           {b.notOut ? "not out" : b.how}
         </p>
       </div>
@@ -682,8 +720,8 @@ function BattingCard({
         )}
       </div>
       <DataGrid columns={columns} rows={rowData} />
-      {creaseNote && <p className="text-gray-400 text-[11px] mt-3">At the crease: {creaseNote}</p>}
-      <div className="flex items-center justify-between mt-3 text-[11px] text-gray-400">
+      {creaseNote && <p className="text-gray-400 text-[11px] mt-3 break-words">At the crease: {creaseNote}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-gray-400">
         <span>
           Extras {extras} <span className="text-gray-600">({extrasNote})</span>
         </span>
@@ -691,7 +729,7 @@ function BattingCard({
           Total {total}/{wkts} <span className="text-gray-500 font-normal">({overs} ov)</span>
         </span>
       </div>
-      {dnb && <p className="text-gray-500 text-[10px] mt-2">Did not bat: {dnb.join(", ")}</p>}
+      {dnb && <p className="text-gray-500 text-[10px] mt-2 break-words">Did not bat: {dnb.join(", ")}</p>}
     </div>
   )
 }
@@ -705,7 +743,7 @@ function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[];
     { key: "econ", label: "Econ", align: "right" as const },
   ]
   const rowData = rows.map((b) => ({
-    name: <p className="text-gray-100 font-medium">{b.name}</p>,
+    name: <p className="text-gray-100 font-medium truncate">{b.name}</p>,
     o: b.overs,
     r: b.runs,
     w: b.wkts,
@@ -751,7 +789,7 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
           return (
             <div
               key={p.name}
-              className={`flex items-center gap-4 p-3.5 transition-colors hover:bg-white/[0.02] ${
+              className={`flex items-center gap-4 p-3.5 transition-colors hover:bg-white/[0.02] min-w-0 ${
                 !isLastTwo ? "border-b border-gold/10" : ""
               } ${isEven ? "md:border-r border-gold/10" : ""}`}
             >
@@ -765,9 +803,9 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
                   {initials(p.name)}
                 </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-white tracking-wide">{p.name}</h4>
-                <p className="text-xs text-gray-400 mt-0.5 font-medium">{p.role}</p>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-white tracking-wide truncate">{p.name}</h4>
+                <p className="text-xs text-gray-400 mt-0.5 font-medium truncate">{p.role}</p>
               </div>
             </div>
           )
@@ -778,10 +816,10 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
 
   return (
     <div className="bg-black/50 border border-gold/20 rounded-xl p-6 shadow-xl">
-      <div className="flex items-center justify-between mb-6 border-b border-gold/10 pb-4">
-        <div className="flex items-center gap-2.5">
-          <Shield className="h-5 w-5 text-gold drop-shadow-[0_0_6px_rgba(245,166,35,0.4)]" />
-          <h3 className="text-lg font-bold text-white font-cinzel tracking-wider">{squad.team}</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-6 border-b border-gold/10 pb-4">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Shield className="h-5 w-5 text-gold drop-shadow-[0_0_6px_rgba(245,166,35,0.4)] shrink-0" />
+          <h3 className="text-lg font-bold text-white font-cinzel tracking-wider truncate">{squad.team}</h3>
         </div>
         <div className="text-right">
           <p className="text-xs text-gray-400 font-cinzel uppercase tracking-wider">
