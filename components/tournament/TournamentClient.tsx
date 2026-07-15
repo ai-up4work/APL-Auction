@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
+import Link from "next/link"
 import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,7 +12,7 @@ import { SiteFooter } from "@/components/landing/site-footer"
 import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import SectionDivider from "@/components/section-divider"
-import { pageStyles, showcaseSlides, type ShowcaseSlide } from "@/data/site-data"
+import { pageStyles, showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
 
 export default function TournamentClient() {
   useScrollTop()
@@ -93,11 +94,12 @@ export default function TournamentClient() {
         <div className="container mx-auto px-4 relative z-10">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
             {filteredTournaments.map((t, i) => (
-              <div
+              <Link
                 key={t.title}
-                className={`rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
+                href={`/tournament/${slugify(t.title)}`}
+                className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
                   (i % 6) + 1
-                } hover:border-gold/80 transition-all duration-300`}
+                } hover:border-gold/80 transition-all duration-300 cursor-pointer`}
               >
                 <div className="relative h-40 md:h-48 border-b border-gold/20">
                   <Image
@@ -116,7 +118,7 @@ export default function TournamentClient() {
                   <h3 className="text-lg font-bold text-white font-cinzel mb-1">{t.title}</h3>
                   <p className="text-gray-300 text-xs">{t.by}</p>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
 
