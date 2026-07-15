@@ -27,6 +27,7 @@ import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
 import RelatedTournaments from "@/components/tournament/related-tournaments"
+import BracketPreviewPanel from "@/components/tournament/BracketPreviewPanel"
 import { pageStyles } from "@/data/site-data"
 import {
   hasMatchDetail,
@@ -40,6 +41,19 @@ import {
   type LeaderboardRow,
   type AwardEntry,
 } from "@/data/tournament-data"
+import type { Round } from "@/components/tournament/TournamentBracket"
+import type { DoubleElimData } from "@/lib/tournament/doubleElim"
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON TOURNAMENT TYPE:                                          */
+/*  This assumes `Tournament` (in @/data/tournament-data) has picked  */
+/*  up three optional fields alongside the legacy `bracket`:          */
+/*    bracketFormat?: "single" | "double"                             */
+/*    bracketRounds?: Round[]           // single-elim data           */
+/*    doubleElimData?: DoubleElimData   // double-elim data           */
+/*  Tournaments that only have the old flat `bracket: BracketMatch[]` */
+/*  still render via the legacy BracketPanel below until migrated.    */
+/* ------------------------------------------------------------------ */
 
 interface TournamentDetailClientProps {
   tournament: Tournament
@@ -55,11 +69,31 @@ function initials(name: string) {
     .toUpperCase()
 }
 
+/** True if a Round[] actually contains at least one match — guards
+ *  against the case where bracketRounds is present but is just an
+ *  array of empty round shells (e.g. [{ id, name, matches: [] }]),
+ *  which would otherwise pass a naive `.length` check and render an
+ *  empty bracket tab. */
+function roundsHaveMatches(rounds?: Round[]): boolean {
+  return !!rounds?.some((r) => r.matches?.length > 0)
+}
+
+/** Same idea for double-elim data: winners/losers/grandFinal need to
+ *  actually contain match content, not just exist as objects. */
+function doubleElimHasMatches(data?: DoubleElimData): boolean {
+  if (!data) return false
+  return roundsHaveMatches(data.winners) || roundsHaveMatches(data.losers) || !!data.grandFinal
+}
+
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState(tournament.liveMatch ? "live" : "overview")
   const [isNavOpen, setIsNavOpen] = useState(false)
+  const tournamentBrackets = tournament as Tournament & {
+    bracketRounds?: Round[]
+    doubleElimData?: DoubleElimData
+  }
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -82,7 +116,19 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
   const hasLive = !!tournament.liveMatch
   const hasPoints = !!tournament.pointsTable?.length
   const hasFixtures = !!tournament.fixtures?.length
-  const hasBracket = !!tournament.bracket?.length
+
+  // FIXED: previously only checked `.length` on the outer arrays, which
+  // is true even when those arrays hold empty round shells (matches: []).
+  // That let `hasBracket` be true while the panel underneath rendered
+  // nothing, or in some data shapes, effectively meant a tournament with
+  // bracket data that never showed the tab at all if bracketRounds was
+  // e.g. undefined but bracket (legacy) had matches. Now we explicitly
+  // check for real match content across all three possible data shapes.
+  const hasBracket =
+    roundsHaveMatches(tournamentBrackets.bracketRounds) ||
+    doubleElimHasMatches(tournamentBrackets.doubleElimData) ||
+    !!tournament.bracket?.length
+
   const hasSquads = !!tournament.squads?.length
   const hasLeaderboard = !!(tournament.runsLeaderboard?.length || tournament.wicketsLeaderboard?.length)
   const hasAwards = !!tournament.awards?.length
@@ -106,7 +152,9 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
           <div className="flex flex-col lg:flex-row gap-8">
             {/* Main Content */}
             <div className="w-full lg:w-2/3 fade-in">
-              {/* Banner */}
+              {/* Banner — height now shared with the sidebar's
+                  Tournament Information card via the same h-64 md:h-80
+                  classes, so the two line up across the two columns. */}
               <div className="relative h-64 md:h-80 rounded-lg overflow-hidden mb-8 glow-effect border border-gold/20">
                 <Image
                   src={tournament.image || "/placeholder.svg"}
@@ -235,7 +283,15 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 {/* BRACKET */}
                 {hasBracket && (
                   <TabsContent value="bracket" className="mt-0">
-                    <BracketPanel matches={tournament.bracket!} slug={slug} />
+                    {doubleElimHasMatches(tournamentBrackets.doubleElimData) ? (
+                      <BracketPreviewPanel format="double" data={tournamentBrackets.doubleElimData!} slug={slug} />
+                    ) : roundsHaveMatches(tournamentBrackets.bracketRounds) ? (
+                      <BracketPreviewPanel format="single" rounds={tournamentBrackets.bracketRounds!} slug={slug} />
+                    ) : (
+                      // Legacy fallback for tournaments not yet migrated to
+                      // Round[] / DoubleElimData — remove once all data is migrated.
+                      <BracketPanel matches={tournament.bracket!} slug={slug} />
+                    )}
                   </TabsContent>
                 )}
 
@@ -255,7 +311,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                     />
                   </TabsContent>
                 )}
-                
+
                 <TabsContent value="prizes" className="mt-0">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">PRIZE POOL</h2>
@@ -287,9 +343,14 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
             {/* Sidebar */}
             <div className="w-full lg:w-1/3 fade-in-up">
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
+              {/* Tournament Information card — height now matches the
+                  banner's h-64 md:h-80 so the two align across columns.
+                  flex-col + justify-between keeps the info spread out
+                  nicely instead of leaving a big empty gap at the bottom
+                  when there are fewer fields (e.g. no startDate/venue). */}
+              <div className="h-64 md:h-80 bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 flex flex-col overflow-y-auto">
                 <h3 className="text-xl font-bold text-white mb-4 font-cinzel">Tournament Information</h3>
-                <div className="space-y-4">
+                <div className="space-y-4 flex-1 flex flex-col justify-between">
                   <div className="flex items-center gap-3">
                     <Trophy className="h-4 w-4 text-gold" />
                     <div>
@@ -657,7 +718,8 @@ function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// BRACKET PANEL (playoff stage)
+// BRACKET PANEL (legacy flat-array fallback — kept only until every
+// tournament's data is migrated to bracketRounds / doubleElimData)
 // ─────────────────────────────────────────────────────────────
 function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string }) {
   return (
