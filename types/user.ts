@@ -11,6 +11,7 @@ export interface User {
 export interface Profile {
   id: string
   userId: string
+  username: string
   displayName: string
   bio: string
   profileImage: string | null

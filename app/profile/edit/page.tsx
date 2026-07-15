@@ -18,12 +18,13 @@ const MOCK_USER_EMAIL = "user@example.com"
 
 const MOCK_PROFILE: Profile = {
   id: MOCK_USER_ID,
+  userId: MOCK_USER_ID,
   username: "User",
   displayName: "User",
   bio: "This is my bio.",
-  avatarUrl: "/images/default-avatar.png",
-  profileImage: null,
+  profileImage: "/images/default-avatar.png",
   profileBanner: null,
+  updatedAt: new Date().toISOString(),
 }
 
 export default function EditProfileClientPage() {

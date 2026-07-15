@@ -7,7 +7,7 @@ import { Upload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { v4 as uuidv4 } from "uuid"
-import { useSession } from "next-auth/react"
+import { useSession } from "@/hooks/use-mock-session"
 
 interface DirectUploadProps {
   onSuccess: (url: string) => void

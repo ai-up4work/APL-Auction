@@ -15,13 +15,18 @@ interface EditProfileFormProps {
   userId: string
 }
 
+interface Results {
+  success: boolean
+  error?: string
+}
+
 // Mocked profile updater — swap this out for the real server action
 // (updateProfileData) once it's wired back up.
 function mockUpdateProfileData(_input: {
   userId: string
   displayName: string
   bio: string
-}) {
+}): Results {
   return { success: true }
 }
 

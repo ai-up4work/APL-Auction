@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useSession } from "next-auth/react"
+import { useSession } from "@/hooks/use-mock-session"
 
 export function useProfileUpdater() {
   const [isUpdating, setIsUpdating] = useState(false)
