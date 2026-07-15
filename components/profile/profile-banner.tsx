@@ -25,12 +25,11 @@ export default function ProfileBanner({ bannerUrl, isOwnProfile = false }: Profi
     }, 1000)
   }
 
-  const handleUpdateProfile = async (url: string) => {
+  const handleUpdateProfile = async (url: string): Promise<void> => {
     const success = await updateProfileBanner(url)
     if (!success && updateError) {
       setError(updateError)
     }
-    return success
   }
 
   return (
