@@ -102,9 +102,9 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
   }
 
   return (
-    <div className="relative">
+    <div className="relative rounded-lg overflow-hidden glow-effect border border-gold/20">
       {/* Banner Image */}
-      <div className="relative h-48 md:h-64 w-full rounded-t-lg overflow-hidden">
+      <div className="relative h-48 md:h-64 w-full overflow-hidden">
         {profileBanner ? (
           <Image
             src={profileBanner || "/placeholder.svg"}
@@ -113,15 +113,16 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
             className="object-cover"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-r from-wardens-gold/20 to-wardens-gold/5"></div>
+          <div className="w-full h-full bg-gradient-to-r from-gold/20 to-gold/5" />
         )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
 
         {isOwnProfile && (
           <div className="absolute top-4 right-4">
             <ImageUpload
               onUpload={handleBannerUpload}
               buttonText="Change Banner"
-              className="bg-black/50 border-wardens-gold/50 text-white hover:bg-black/70"
+              className="bg-black/50 border-gold/50 text-white hover:bg-black/70 font-cinzel"
               size="sm"
             />
           </div>
@@ -129,7 +130,7 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
       </div>
 
       {/* Profile Image and Info */}
-      <div className="relative px-6 pb-6 bg-black/50 border-b border-wardens-gold/20">
+      <div className="relative px-6 pb-6 bg-black/50 border-t border-gold/10">
         <div className="flex flex-col md:flex-row gap-6 items-center md:items-end -mt-16 md:-mt-20">
           <div className="relative">
             <div className="h-32 w-32 md:h-40 md:w-40 rounded-full overflow-hidden border-4 border-black bg-black/50">
@@ -141,8 +142,8 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
                   className="object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-wardens-gold/10">
-                  <Shield className="h-16 w-16 text-wardens-gold/50" />
+                <div className="w-full h-full flex items-center justify-center bg-gold/10">
+                  <Shield className="h-16 w-16 text-gold/50" />
                 </div>
               )}
             </div>
@@ -151,7 +152,7 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
               <div className="absolute bottom-0 right-0">
                 <ImageUpload
                   onUpload={handleProfileImageUpload}
-                  className="bg-black/50 border-wardens-gold/50 text-white hover:bg-black/70 rounded-full h-10 w-10 p-0"
+                  className="bg-black/50 border-gold/50 text-white hover:bg-black/70 rounded-full h-10 w-10 p-0"
                   size="icon"
                   isIconOnly={true}
                 />
@@ -159,14 +160,15 @@ export default function ProfileHeader({ profile, isOwnProfile, onRefresh }: Prof
             )}
           </div>
 
-          <div className="flex-1 text-center md:text-left">
+          <div className="flex-1 text-center md:text-left pt-4 md:pt-0">
             <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel">{profile.displayName}</h1>
+            <p className="text-gray-400 text-sm mt-1">@{profile.username}</p>
           </div>
 
           {isOwnProfile && (
             <div className="md:ml-auto mt-4 md:mt-0">
               <Link href="/profile/edit">
-                <Button className="bg-wardens-gold hover:bg-wardens-gold/90 text-black">
+                <Button className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel">
                   <Edit className="h-4 w-4 mr-2" />
                   Edit Profile
                 </Button>

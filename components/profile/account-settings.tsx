@@ -63,24 +63,26 @@ export default function AccountSettings({ userId, email }: AccountSettingsProps)
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="email">Email Address</Label>
-        <Input id="email" value={email} disabled className="bg-black/50 border-wardens-gold/30 text-white" />
+        <Label htmlFor="email" className="font-cinzel text-xs uppercase tracking-wide text-gray-400">
+          Email Address
+        </Label>
+        <Input id="email" value={email} disabled className="bg-black/50 border-gold/30 text-white" />
         <p className="text-xs text-gray-400">To change your email, please contact support</p>
       </div>
 
       <div className="space-y-2">
-        <Label>Password</Label>
+        <Label className="font-cinzel text-xs uppercase tracking-wide text-gray-400">Password</Label>
         <Button
           variant="outline"
-          className="w-full border-wardens-gold/30 text-wardens-gold hover:bg-wardens-gold/10 bg-transparent"
+          className="w-full border-gold/30 text-gold hover:bg-gold/10 bg-transparent"
           onClick={() => router.push("/auth/reset-password")}
         >
           Change Password
         </Button>
       </div>
 
-      <div className="border-t border-wardens-gold/20 pt-6 mt-6">
-        <h3 className="text-xl font-bold text-white mb-4 font-cinzel">Danger Zone</h3>
+      <div className="border-t border-gold/20 pt-6 mt-6">
+        <h3 className="text-xl font-bold text-white mb-4 font-cinzel">DANGER ZONE</h3>
 
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogTrigger asChild>
@@ -90,7 +92,7 @@ export default function AccountSettings({ userId, email }: AccountSettingsProps)
           </DialogTrigger>
           <DialogContent className="bg-black border border-red-500/50">
             <DialogHeader>
-              <DialogTitle className="text-red-500">Delete Account</DialogTitle>
+              <DialogTitle className="text-red-500 font-cinzel">Delete Account</DialogTitle>
               <DialogDescription className="text-gray-400">
                 This action cannot be undone. This will permanently delete your account and remove your data from our
                 servers.

@@ -90,33 +90,37 @@ export default function EditProfileForm({ profile, userId }: EditProfileFormProp
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="displayName">Display Name</Label>
+        <Label htmlFor="displayName" className="font-cinzel text-xs uppercase tracking-wide text-gray-400">
+          Display Name
+        </Label>
         <Input
           id="displayName"
           name="displayName"
           value={formData.displayName}
           onChange={handleChange}
           required
-          className="bg-black/50 border-wardens-gold/30 text-white"
+          className="bg-black/50 border-gold/30 text-white"
         />
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="bio">Bio</Label>
+        <Label htmlFor="bio" className="font-cinzel text-xs uppercase tracking-wide text-gray-400">
+          Bio
+        </Label>
         <Textarea
           id="bio"
           name="bio"
           value={formData.bio}
           onChange={handleChange}
           rows={5}
-          className="bg-black/50 border-wardens-gold/30 text-white"
+          className="bg-black/50 border-gold/30 text-white"
           placeholder="Tell us about yourself..."
         />
       </div>
 
       <Button
         type="submit"
-        className="w-full bg-wardens-gold hover:bg-wardens-gold/90 text-black font-bold"
+        className="w-full bg-gold hover:bg-gold/90 text-black font-bold font-cinzel"
         disabled={isLoading}
       >
         {isLoading ? "Saving..." : "Save Changes"}
