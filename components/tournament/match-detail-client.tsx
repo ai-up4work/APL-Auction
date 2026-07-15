@@ -47,6 +47,7 @@ type Tab = "scorecard" | "info" | "squads" | "overs" | "graphs" | "stats"
 const TABS: Tab[] = ["scorecard", "info", "squads", "overs", "graphs"]
 
 const images = {
+  bg: "https://www.hindustantimes.com/ht-img/img/2024/09/30/1600x900/Cricket_3_1727677442716_1727677564058.jpg",
   "team-a": "/Franchises/CSK.png",
   "team-b": "/Franchises/RCB.png",
   tournament: "/moon-knight-logo.png",
@@ -56,13 +57,19 @@ const images = {
 // same way: a real <Image> when a path is supplied, and a graceful
 // "Image not available" placeholder otherwise. Keeping this in one place
 // means the three logo slots can never drift out of sync again.
+//
+// NOTE: rounded-2xl (a soft square) is used instead of a full circle.
+// Team crests are rarely perfectly square, so a circular mask + object-contain
+// leaves visible gaps of background in the corners where the logo doesn't
+// reach the edge of the circle. A rounded square is far more forgiving and
+// is what most real scorecards (Cricbuzz, ESPN, ICC) use for this reason.
 function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   return (
-    <div className="relative h-16 w-24 bg-white/5 backdrop-blur-md rounded border border-gold/20 mb-3 flex items-center justify-center overflow-hidden shrink-0">
+    <div className="relative h-20 w-20 bg-gradient-to-b from-white/10 to-black/40 backdrop-blur-md rounded-2xl border border-gold/30 mb-3 flex items-center justify-center overflow-hidden shrink-0 shadow-[0_0_20px_rgba(245,166,35,0.15)]">
       {src ? (
-        <Image src={src} alt={alt} fill className="object-contain p-1" sizes="96px" />
+        <Image src={src} alt={alt} fill className="object-cover" sizes="96px" />
       ) : (
-        <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center px-1">
+        <span className="text-[9px] text-gray-500 font-cinzel uppercase text-center px-2">
           Image
           <br />
           not available
@@ -197,8 +204,16 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
   }
 
   return (
-    <main className="overflow-x-hidden">
-      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
+    <main className="overflow-x-hidden max-w-full">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `${pageStyles}
+          html, body {
+            overflow-x: hidden;
+            max-width: 100%;
+          }`,
+        }}
+      />
 
       <SiteHeader
         activeSection="tournament"
@@ -214,7 +229,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
             className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30"
-            style={{ backgroundImage: `url('https://www.hindustantimes.com/ht-img/img/2024/09/30/1600x900/Cricket_3_1727677442716_1727677564058.jpg')` }}
+            style={{ backgroundImage: `url('${images.bg}')` }}
         >
             <span className="sr-only">Image not available</span>
         </div>
@@ -223,7 +238,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
         <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-transparent to-transparent opacity-80" />
 
         <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10 max-w-full">
-          <div className="relative mb-6 h-20 w-20 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)] shrink-0">
+          <div className="relative mb-6 h-30 w-30 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)] shrink-0">
             {images.tournament ? (
               <Image
                 src={images.tournament}
@@ -239,14 +254,10 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             )}
           </div>
 
-          <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-6 shadow-[0_0_10px_rgba(245,166,35,0.3)] max-w-full whitespace-normal text-center">
-            {match.round} · {match.tournamentName}
-          </Badge>
-
           <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
               <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
                 <LogoSlot src={images["team-a"]} alt={`${match.teamA.name} logo`} />
-                <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                   {match.teamA.name}
                 </h1>
               </div>
@@ -259,7 +270,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
 
               <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
                 <LogoSlot src={images["team-b"]} alt={`${match.teamB.name} logo`} />
-                <h1 className="text-2xl md:text-4xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                   {match.teamB.name}
                 </h1>
               </div>
