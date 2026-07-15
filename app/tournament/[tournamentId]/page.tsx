@@ -1,11 +1,11 @@
-// app/tournament/[tournamentId]/page.tsx
+// app/tournament/[slug]/page.tsx
 "use client"
 
 /**
- * TOURNAMENT PAGE — app/[tournamentId]/page.tsx
+ * TOURNAMENT PAGE — app/tournament/[tournamentId]/page.tsx
  *
  * Public-facing tournament microsite, built with the SAME design tokens and
- * utility classes already defined in your overlay-theme.css:
+ * utility classes used throughout (overlay-theme.css):
  *   - Color: var(--color-theme-orange) accent, var(--color-surface*) layers,
  *     var(--color-on-surface / on-surface-variant / outline) text
  *   - Type: font-headline-lg / font-headline-md (Archivo Narrow),
@@ -17,6 +17,9 @@
  * shell is wired correctly, but every field in the MOCK DATA block below is
  * placeholder — the same content renders for any tournamentId visited.
  *
+ * Drill-down: the live match card and every fixture link into the match
+ * center page at app/tournament/[tournamentId]/match/[matchId]/page.tsx.
+ *
  * To make it real:
  *   1. Replace MOCK DATA with a fetch keyed on `tournamentId`, hitting your
  *      own DB/API (this is your tournament's live data, not a third-party
@@ -27,6 +30,7 @@
  */
 
 import { useState } from "react"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import {
   Award,
@@ -54,11 +58,13 @@ const tournament = {
   status: "LIVE" as const, // "LIVE" | "UPCOMING" | "COMPLETED"
 }
 
+// this is the same match rendered in detail at match/[matchId] — "final" is the id
 const liveMatch = {
+  id: "final",
   isLive: true,
   teamA: { name: "Ironclad Royals", short: "ICR", score: "168/6" },
-  teamB: { name: "Falcon Riders", short: "FR", score: "142/8", overs: "20.0" },
-  status: "ICR need 0 runs from 8 balls · Match ends in a few minutes",
+  teamB: { name: "Falcon Riders", short: "FR", score: "142/6", overs: "18.2" },
+  status: "FR need 27 runs from 10 balls · Final",
 }
 
 const pointsTable = [
@@ -71,10 +77,10 @@ const pointsTable = [
 ]
 
 const fixtures = [
-  { id: 1, teamA: "Desert Hawks", teamB: "Coastal Titans", date: "16 Jul", time: "3:00 PM", venue: "Ground 1" },
-  { id: 2, teamA: "Northside Knights", teamB: "Storm Chargers", date: "17 Jul", time: "3:00 PM", venue: "Ground 2" },
-  { id: 3, teamA: "Ironclad Royals", teamB: "Desert Hawks", date: "19 Jul", time: "7:00 PM", venue: "Ground 1" },
-  { id: 4, teamA: "Falcon Riders", teamB: "Northside Knights", date: "20 Jul", time: "3:00 PM", venue: "Ground 1" },
+  { id: "sf1-hawks-titans", teamA: "Desert Hawks", teamB: "Coastal Titans", date: "16 Jul", time: "3:00 PM", venue: "Ground 1" },
+  { id: "sf1-knights-chargers", teamA: "Northside Knights", teamB: "Storm Chargers", date: "17 Jul", time: "3:00 PM", venue: "Ground 2" },
+  { id: "grp-royals-hawks", teamA: "Ironclad Royals", teamB: "Desert Hawks", date: "19 Jul", time: "7:00 PM", venue: "Ground 1" },
+  { id: "grp-riders-knights", teamA: "Falcon Riders", teamB: "Northside Knights", date: "20 Jul", time: "3:00 PM", venue: "Ground 1" },
 ]
 
 const runsLeaderboard = [
@@ -156,9 +162,8 @@ function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) 
   )
 }
 
-
-export default function TournamentPage() {
-  const tournamentId = '123'
+export default function TournamentPage({ params }: { params: { tournamentId: string } }) {
+  const tournamentId = params?.tournamentId ?? "valiant-cup"
   const [tab, setTab] = useState<"runs" | "wickets">("runs")
   const activeBoard = tab === "runs" ? runsLeaderboard : wicketsLeaderboard
 
@@ -193,11 +198,14 @@ export default function TournamentPage() {
       </section>
 
       {/* ═══════════════════════════════════════════
-          LIVE MATCH — reuses .scoreboard-strip as-is
+          LIVE MATCH — reuses .scoreboard-strip, links into the match center
       ═══════════════════════════════════════════ */}
       {liveMatch.isLive && (
         <section className="px-4 py-6">
-          <div className="max-w-3xl mx-auto scoreboard-strip">
+          <Link
+            href={`/tournament/${tournamentId}/match/${liveMatch.id}`}
+            className="max-w-3xl mx-auto scoreboard-strip block hover:border-theme-orange/40 transition-colors"
+          >
             <span className="tally pulse-live bg-status-live" />
             <div className="scoreboard-main flex items-baseline gap-2">
               <span className="scoreboard-runs">{liveMatch.teamA.score}</span>
@@ -210,8 +218,11 @@ export default function TournamentPage() {
                 {liveMatch.teamB.short} ({liveMatch.teamB.overs})
               </span>
             </div>
-            <span className="scoreboard-meta ml-auto">{liveMatch.status}</span>
-          </div>
+            <span className="scoreboard-meta ml-auto flex items-center gap-1.5">
+              {liveMatch.status}
+              <ChevronRight className="h-3.5 w-3.5 text-theme-orange/70" />
+            </span>
+          </Link>
         </section>
       )}
 
@@ -254,14 +265,14 @@ export default function TournamentPage() {
       </section>
 
       {/* ═══════════════════════════════════════════
-          FIXTURES — reuses .crew-slot
+          FIXTURES — reuses .crew-slot, links into the match center
       ═══════════════════════════════════════════ */}
       <section className="px-4 py-14">
         <SectionHeading eyebrow="Schedule" title="Upcoming Fixtures" />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
           {fixtures.map((f) => (
-            <div key={f.id} className="crew-slot flex items-center justify-between">
+            <Link key={f.id} href={`/tournament/${tournamentId}/match/${f.id}`} className="crew-slot flex items-center justify-between">
               <div>
                 <p className="crew-slot-name">
                   {f.teamA} <span className="text-theme-orange">vs</span> {f.teamB}
@@ -271,7 +282,7 @@ export default function TournamentPage() {
                 </p>
               </div>
               <ChevronRight className="h-4 w-4 text-theme-orange/60 shrink-0" />
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -298,10 +309,13 @@ export default function TournamentPage() {
         </div>
 
         <div className="text-center mt-8">
-          <button className="inline-flex items-center gap-1.5 rounded-lg border border-theme-orange/40 bg-theme-orange/10 hover:bg-theme-orange/20 transition-colors px-4 py-2 font-label-mono text-[11px] tracking-widest uppercase text-theme-orange">
+          <Link
+            href={`/tournament/${tournamentId}/match/${liveMatch.id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-theme-orange/40 bg-theme-orange/10 hover:bg-theme-orange/20 transition-colors px-4 py-2 font-label-mono text-[11px] tracking-widest uppercase text-theme-orange"
+          >
             View Full Bracket
             <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          </Link>
         </div>
       </section>
 
