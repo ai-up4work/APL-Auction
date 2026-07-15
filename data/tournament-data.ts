@@ -345,10 +345,297 @@ export const tournaments: Tournament[] = showcaseSlides.map((base) => ({
 }))
 
 // ─────────────────────────────────────────────────────────────
-// HELPERS
+// HELPERS — tournament level
 // ─────────────────────────────────────────────────────────────
 export { slugify }
 
 export function getTournamentBySlug(slug: string): Tournament | undefined {
   return tournaments.find((t) => slugify(t.slug) === slug)
+}
+
+// ─────────────────────────────────────────────────────────────
+// MATCH DETAIL TYPES — for the /tournament/[slug]/match/[matchId] page
+// ─────────────────────────────────────────────────────────────
+export interface BattingRow {
+  name: string
+  runs: number
+  balls: number
+  fours: number
+  sixes: number
+  notOut: boolean
+  how: string // dismissal text; ignored when notOut is true
+}
+
+export interface BowlingRow {
+  name: string
+  overs: string
+  runs: number
+  wkts: number
+  econ: string
+}
+
+// [scoreline label, batter dismissed, over]
+export type FowEntry = [string, string, string]
+
+export interface MatchSquad {
+  team: string
+  captain: string
+  players: { name: string; role: string; xi: boolean }[]
+}
+
+export interface LiveScriptStep {
+  over: number // 19 or 20 — the client checks specifically for these to recompute over totals
+  ball: string // "O.B" string, e.g. "19.1" — must include a "19.6" and a "20.6" step to end the sim
+  runs: number
+  wkt: boolean
+  wpA: number
+  wpB: number
+  text: string
+}
+
+interface InningsComplete {
+  batting: BattingRow[]
+  bowling: BowlingRow[]
+  fow: FowEntry[]
+  extras: number
+  extrasNote: string
+  total: number
+  wkts: number
+  overs: string
+  overRuns: number[]
+  dnb?: string[]
+  potm?: { name: string; note: string }
+}
+
+export interface MatchDetail {
+  id: string
+  tournamentSlug: string
+  tournamentName: string
+  round: string
+  venue: string
+  date: string
+  time: string
+  toss: string
+  target: number
+  resultNote: string
+  pitch: string
+  context: string
+  officials: {
+    umpires: string
+    thirdUmpire: string
+    referee: string
+    format: string
+  }
+  teamA: { name: string; short: string }
+  teamB: { name: string; short: string }
+  innings1: InningsComplete
+  innings2Final: InningsComplete
+  innings2Partial: {
+    runsAtStart: number
+    wktsAtStart: number
+    overAtStart: string
+    overRunsAtStart: number[]
+    over19ExtraRuns: number
+    batting: BattingRow[]
+    bowling: BowlingRow[]
+    fow: FowEntry[]
+  }
+  liveScript: LiveScriptStep[]
+  squads: MatchSquad[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// MATCH DETAIL DATA — keyed by match id (must match a bracket `id` above)
+// ─────────────────────────────────────────────────────────────
+const matchDetails: Record<string, MatchDetail> = {
+  q1: {
+    id: "q1",
+    tournamentSlug: "crimson-cup-full-season",
+    tournamentName: "Crimson Cup Full Season",
+    round: "Qualifier 1",
+    venue: "Negombo Cricket Grounds",
+    date: "12 Jul",
+    time: "7:00 PM",
+    toss: "Desert Hawks won the toss, elected to bowl",
+    target: 169,
+    resultNote: "Valiant Originals won by 16 runs",
+    pitch:
+      "A true, hard surface that held up well under lights. Even bounce through the innings with a short boundary down the leg side that favored the bigger hitters in the middle overs.",
+    context:
+      "Valiant Originals topped the group stage and came into this Qualifier unbeaten in their last four. Desert Hawks needed a win to keep their campaign alive after two narrow group-stage losses.",
+    officials: {
+      umpires: "K. Dharmasena, R. Illingworth",
+      thirdUmpire: "S. Ravi",
+      referee: "J. Srinath",
+      format: "T20 · 20 overs per side",
+    },
+    teamA: { name: "Valiant Originals", short: "VO" },
+    teamB: { name: "Desert Hawks", short: "DH" },
+
+    innings1: {
+      batting: [
+        { name: "R. Fernando", runs: 71, balls: 44, fours: 7, sixes: 3, notOut: false, how: "c Perera b Kumara" },
+        { name: "T. Rathnayake", runs: 6, balls: 7, fours: 1, sixes: 0, notOut: false, how: "b Kumara" },
+        { name: "N. Silva", runs: 58, balls: 36, fours: 5, sixes: 2, notOut: true, how: "" },
+        { name: "P. Jayawardena", runs: 14, balls: 12, fours: 1, sixes: 0, notOut: false, how: "c Silva b Gunaratne" },
+        { name: "M. de Alwis", runs: 12, balls: 9, fours: 1, sixes: 0, notOut: false, how: "run out" },
+        { name: "H. Dissanayake", runs: 5, balls: 4, fours: 1, sixes: 0, notOut: true, how: "" },
+      ],
+      bowling: [
+        { name: "S. Kumara", overs: "4.0", runs: 32, wkts: 2, econ: "8.00" },
+        { name: "I. Perera", overs: "4.0", runs: 38, wkts: 1, econ: "9.50" },
+        { name: "A. Gunaratne", overs: "4.0", runs: 29, wkts: 1, econ: "7.25" },
+        { name: "R. Wickramasinghe", overs: "4.0", runs: 35, wkts: 0, econ: "8.75" },
+        { name: "D. Mendis", overs: "4.0", runs: 32, wkts: 0, econ: "8.00" },
+      ],
+      fow: [
+        ["1-14", "T. Rathnayake", "2.1"],
+        ["2-108", "R. Fernando", "14.3"],
+        ["3-128", "P. Jayawardena", "16.5"],
+        ["4-149", "M. de Alwis", "18.4"],
+      ],
+      extras: 2,
+      extrasNote: "lb 2",
+      total: 168,
+      wkts: 4,
+      overs: "20.0",
+      overRuns: [7, 9, 6, 11, 8, 5, 10, 12, 7, 6, 9, 8, 13, 7, 10, 6, 9, 8, 11, 6],
+      dnb: ["S. Kariyawasam", "A. Bandara"],
+    },
+
+    innings2Final: {
+      batting: [
+        { name: "K. Perera", runs: 24, balls: 19, fours: 3, sixes: 0, notOut: false, how: "c Fernando b Silva" },
+        { name: "A. Wickramasinghe", runs: 11, balls: 10, fours: 1, sixes: 0, notOut: false, how: "b Rathnayake" },
+        { name: "D. Silva", runs: 58, balls: 34, fours: 5, sixes: 2, notOut: false, how: "c Dissanayake b Silva" },
+        { name: "J. Fonseka", runs: 19, balls: 16, fours: 2, sixes: 0, notOut: false, how: "c & b Fernando" },
+        { name: "M. Jayasuriya", runs: 21, balls: 14, fours: 1, sixes: 1, notOut: true, how: "" },
+        { name: "M. Gunasekara", runs: 6, balls: 7, fours: 0, sixes: 0, notOut: false, how: "run out" },
+        { name: "R. Kariyawasam", runs: 2, balls: 3, fours: 0, sixes: 0, notOut: true, how: "" },
+      ],
+      bowling: [
+        { name: "N. Silva", overs: "4.0", runs: 34, wkts: 2, econ: "8.50" },
+        { name: "T. Rathnayake", overs: "4.0", runs: 31, wkts: 1, econ: "7.75" },
+        { name: "R. Fernando", overs: "2.0", runs: 18, wkts: 1, econ: "9.00" },
+        { name: "P. Jayawardena", overs: "4.0", runs: 26, wkts: 0, econ: "6.50" },
+        { name: "M. de Alwis", overs: "4.0", runs: 30, wkts: 0, econ: "7.50" },
+        { name: "H. Dissanayake", overs: "2.0", runs: 12, wkts: 0, econ: "6.00" },
+      ],
+      fow: [
+        ["1-21", "A. Wickramasinghe", "2.4"],
+        ["2-58", "K. Perera", "6.1"],
+        ["3-118", "J. Fonseka", "13.2"],
+        ["4-136", "D. Silva", "15.5"],
+        ["5-143", "M. Gunasekara", "17.1"],
+      ],
+      extras: 1,
+      extrasNote: "lb 1",
+      total: 152,
+      wkts: 5,
+      overs: "20.0",
+      overRuns: [6, 8, 5, 9, 7, 6, 11, 8, 7, 6, 9, 7, 12, 8, 7, 6, 9, 8, 10, 3],
+      potm: { name: "R. Fernando", note: "71 (44) & 1/18" },
+    },
+
+    innings2Partial: {
+      runsAtStart: 142,
+      wktsAtStart: 4,
+      overAtStart: "18.2",
+      overRunsAtStart: [6, 8, 5, 9, 7, 6, 11, 8, 7, 6, 9, 7, 12, 8, 7, 6, 9, 8],
+      over19ExtraRuns: 3,
+      batting: [
+        { name: "K. Perera", runs: 24, balls: 19, fours: 3, sixes: 0, notOut: false, how: "c Fernando b Silva" },
+        { name: "A. Wickramasinghe", runs: 11, balls: 10, fours: 1, sixes: 0, notOut: false, how: "b Rathnayake" },
+        { name: "D. Silva", runs: 58, balls: 34, fours: 5, sixes: 2, notOut: false, how: "c Dissanayake b Silva" },
+        { name: "J. Fonseka", runs: 19, balls: 16, fours: 2, sixes: 0, notOut: true, how: "" },
+        { name: "M. Jayasuriya", runs: 21, balls: 12, fours: 1, sixes: 1, notOut: true, how: "" },
+      ],
+      bowling: [
+        { name: "N. Silva", overs: "3.2", runs: 28, wkts: 2, econ: "8.40" },
+        { name: "T. Rathnayake", overs: "4.0", runs: 31, wkts: 1, econ: "7.75" },
+        { name: "R. Fernando", overs: "2.0", runs: 18, wkts: 1, econ: "9.00" },
+        { name: "P. Jayawardena", overs: "4.0", runs: 26, wkts: 0, econ: "6.50" },
+        { name: "M. de Alwis", overs: "4.0", runs: 30, wkts: 0, econ: "7.50" },
+        { name: "H. Dissanayake", overs: "1.0", runs: 9, wkts: 0, econ: "9.00" },
+      ],
+      fow: [
+        ["1-21", "A. Wickramasinghe", "2.4"],
+        ["2-58", "K. Perera", "6.1"],
+        ["3-118", "J. Fonseka", "13.2"],
+        ["4-136", "D. Silva", "15.5"],
+      ],
+    },
+
+    liveScript: [
+      { over: 19, ball: "19.1", runs: 1, wkt: false, wpA: 44, wpB: 56, text: "Single tucked to the leg side." },
+      { over: 19, ball: "19.2", runs: 4, wkt: false, wpA: 40, wpB: 60, text: "Fonseka finds the gap through cover." },
+      { over: 19, ball: "19.3", runs: 0, wkt: true, wpA: 58, wpB: 42, text: "Gone! Gunasekara run out going for a tight second." },
+      { over: 19, ball: "19.4", runs: 1, wkt: false, wpA: 55, wpB: 45, text: "Worked away for a single." },
+      { over: 19, ball: "19.5", runs: 6, wkt: false, wpA: 46, wpB: 54, text: "Jayasuriya launches one over long-on!" },
+      { over: 19, ball: "19.6", runs: 1, wkt: false, wpA: 44, wpB: 56, text: "End of the 19th — single taken." },
+      { over: 20, ball: "20.1", runs: 2, wkt: false, wpA: 43, wpB: 57, text: "Two run to deep midwicket." },
+      { over: 20, ball: "20.2", runs: 1, wkt: false, wpA: 43, wpB: 57, text: "Quick single, keeps the strike rotating." },
+      { over: 20, ball: "20.3", runs: 4, wkt: false, wpA: 30, wpB: 70, text: "Boundary! Through backward point." },
+      { over: 20, ball: "20.4", runs: 1, wkt: false, wpA: 25, wpB: 75, text: "Single to long-off." },
+      { over: 20, ball: "20.5", runs: 0, wkt: false, wpA: 65, wpB: 35, text: "Dot ball — huge pressure now." },
+      { over: 20, ball: "20.6", runs: 1, wkt: false, wpA: 100, wpB: 0, text: "Final ball — Desert Hawks fall short. Valiant Originals win by 16 runs." },
+    ],
+
+    squads: [
+      {
+        team: "Valiant Originals",
+        captain: "R. Fernando",
+        players: [
+          { name: "R. Fernando", role: "Batter (C)", xi: true },
+          { name: "T. Rathnayake", role: "Bowler", xi: true },
+          { name: "N. Silva", role: "All-rounder", xi: true },
+          { name: "P. Jayawardena", role: "Bowler", xi: true },
+          { name: "M. de Alwis", role: "Batter", xi: true },
+          { name: "H. Dissanayake", role: "Wicketkeeper", xi: true },
+          { name: "S. Kariyawasam", role: "All-rounder", xi: true },
+          { name: "A. Bandara", role: "Bowler", xi: true },
+          { name: "L. Fonseka", role: "Batter", xi: false },
+          { name: "D. Mendis", role: "Bowler", xi: false },
+        ],
+      },
+      {
+        team: "Desert Hawks",
+        captain: "D. Silva",
+        players: [
+          { name: "D. Silva", role: "Batter (C)", xi: true },
+          { name: "M. Gunasekara", role: "All-rounder", xi: true },
+          { name: "R. Kariyawasam", role: "Bowler", xi: true },
+          { name: "K. Perera", role: "Batter", xi: true },
+          { name: "A. Wickramasinghe", role: "Batter", xi: true },
+          { name: "J. Fonseka", role: "Wicketkeeper", xi: true },
+          { name: "M. Jayasuriya", role: "All-rounder", xi: true },
+          { name: "S. Kumara", role: "Bowler", xi: true },
+          { name: "I. Perera", role: "Bowler", xi: true },
+          { name: "A. Gunaratne", role: "Bowler", xi: true },
+          { name: "R. Wickramasinghe", role: "Bowler", xi: false },
+        ],
+      },
+    ],
+  },
+}
+
+export function getMatchDetailById(tournamentSlug: string, matchId: string): MatchDetail | undefined {
+  const match = matchDetails[matchId]
+  if (!match || match.tournamentSlug !== slugify(tournamentSlug)) return undefined
+  return match
+}
+
+// Kept for the bracket UI (Overview/Bracket tab), which only needs the
+// lightweight team/score/winner shape, not the full match detail.
+export function getMatchById(tournamentSlug: string, matchId: string): BracketMatch | undefined {
+  const tournament = getTournamentBySlug(tournamentSlug)
+  return tournament?.bracket?.find((m) => m.id === matchId)
+}
+
+// Used by the bracket UI to decide whether a card should link out — only
+// matches that actually have a MatchDetail entry should be clickable,
+// rather than guessing from `winner` truthiness (which is also set on
+// bracket entries that don't have a built-out match page yet).
+export function hasMatchDetail(matchId: string): boolean {
+  return matchId in matchDetails
 }

@@ -377,6 +377,11 @@ export type ShowcaseSlide = {
   discord?: string
 }
 
-export function getTournamentBySlug(slug: string): ShowcaseSlide | undefined {
+// Renamed from getTournamentBySlug — this version only returns the raw
+// ShowcaseSlide (no liveMatch/pointsTable/bracket/etc). The richer merged
+// Tournament lookup lives in tournament-data.ts as getTournamentBySlug;
+// importing the two under the same name was the original bug, since
+// Tournament extends ShowcaseSlide with no type error to catch the mix-up.
+export function getShowcaseSlideBySlug(slug: string): ShowcaseSlide | undefined {
   return showcaseSlides.find((t) => slugify(t.slug) === slug)
 }

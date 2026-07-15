@@ -28,16 +28,17 @@ import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
 import RelatedTournaments from "@/components/tournament/related-tournaments"
 import { pageStyles } from "@/data/site-data"
-import type {
-  Tournament,
-  LiveMatch,
-  PointsRow,
-  Fixture,
-  BracketMatch,
-  BracketTeam,
-  Squad,
-  LeaderboardRow,
-  AwardEntry,
+import {
+  hasMatchDetail,
+  type Tournament,
+  type LiveMatch,
+  type PointsRow,
+  type Fixture,
+  type BracketMatch,
+  type BracketTeam,
+  type Squad,
+  type LeaderboardRow,
+  type AwardEntry,
 } from "@/data/tournament-data"
 
 interface TournamentDetailClientProps {
@@ -186,12 +187,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                     </TabsTrigger>
                   )}
                   <TabsTrigger
-                    value="rules"
-                    className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                  >
-                    Rules
-                  </TabsTrigger>
-                  <TabsTrigger
                     value="prizes"
                     className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
                   >
@@ -240,7 +235,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 {/* BRACKET */}
                 {hasBracket && (
                   <TabsContent value="bracket" className="mt-0">
-                    <BracketPanel matches={tournament.bracket!} />
+                    <BracketPanel matches={tournament.bracket!} slug={slug} />
                   </TabsContent>
                 )}
 
@@ -260,28 +255,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                     />
                   </TabsContent>
                 )}
-
-                <TabsContent value="rules" className="mt-0">
-                  <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">FORMAT & RULES</h2>
-                    <p className="text-gray-300 mb-4">
-                      <span className="text-gold font-semibold">Format: </span>
-                      {tournament.format || "Format to be announced by the organizer."}
-                    </p>
-                    {tournament.rules && tournament.rules.length > 0 ? (
-                      <ul className="text-gray-300 space-y-2">
-                        {tournament.rules.map((rule, i) => (
-                          <li key={i}>• {rule}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-gray-400 text-sm">
-                        Detailed rules haven't been published yet — check back closer to the start date.
-                      </p>
-                    )}
-                  </div>
-                </TabsContent>
-
+                
                 <TabsContent value="prizes" className="mt-0">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">PRIZE POOL</h2>
@@ -685,7 +659,7 @@ function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
 // ─────────────────────────────────────────────────────────────
 // BRACKET PANEL (playoff stage)
 // ─────────────────────────────────────────────────────────────
-function BracketPanel({ matches }: { matches: BracketMatch[] }) {
+function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string }) {
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 overflow-x-auto">
       <h2 className="text-2xl font-bold text-white mb-6 font-cinzel flex items-center gap-2">
@@ -693,16 +667,36 @@ function BracketPanel({ matches }: { matches: BracketMatch[] }) {
         PLAYOFF BRACKET
       </h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-[520px] sm:min-w-0">
-        {matches.map((m) => (
-          <div key={m.id} className="border border-gold/10 rounded-md p-4 bg-white/[0.02]">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-gold text-xs font-bold font-cinzel uppercase tracking-wide">{m.label}</span>
-              {m.date && <span className="text-gray-500 text-xs">{m.date}</span>}
+        {matches.map((m) => {
+          const playable = hasMatchDetail(m.id)
+          const card = (
+            <div
+              className={`border border-gold/10 rounded-md p-4 bg-white/[0.02] transition-all ${
+                playable ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-gold text-xs font-bold font-cinzel uppercase tracking-wide">{m.label}</span>
+                {m.date && <span className="text-gray-500 text-xs">{m.date}</span>}
+              </div>
+              <BracketTeamRow team={m.team1} isWinner={m.winner === m.team1.short} />
+              <BracketTeamRow team={m.team2} isWinner={m.winner === m.team2.short} />
+              {playable && (
+                <p className="text-gold text-[10px] uppercase tracking-widest font-cinzel mt-3 text-right">
+                  View match →
+                </p>
+              )}
             </div>
-            <BracketTeamRow team={m.team1} isWinner={m.winner === m.team1.short} />
-            <BracketTeamRow team={m.team2} isWinner={m.winner === m.team2.short} />
-          </div>
-        ))}
+          )
+
+          return playable ? (
+            <Link key={m.id} href={`/tournament/${slug}/match/${m.id}`}>
+              {card}
+            </Link>
+          ) : (
+            <div key={m.id}>{card}</div>
+          )
+        })}
       </div>
     </div>
   )
