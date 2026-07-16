@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
-import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone } from "lucide-react";
+import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone, Pause, Play } from "lucide-react";
 import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
 import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
-import { demoModel, getDemoSnapshot } from "@/lib/demo/demoModel";
+import { demoModel, getDemoSnapshot, type DemoLot } from "@/lib/demo/demoModel";
 import { DesktopFrame, MobileFrame } from "@/components/demo/DeviceFrames";
 import DemoAuctioneerPage from "@/components/demo/DemoAuctioneerPage";
 import DemoOwnerBidPage from "@/components/demo/DemoOwnerBidPage";
@@ -126,6 +126,8 @@ function useSpotlight() {
     shuffle: snap.shuffle,
     isLocked: snap.isLocked,
     narratorText: snap.narratorText,
+    auctionStatus: snap.auction.status,
+    completedLots: snap.completedLots as DemoLot[],
   };
 }
 
@@ -261,6 +263,50 @@ function CommentaryOverlay({
       )}
     </div>
   );
+}
+
+// In demo/automation mode, events (bid, reveal, sold, shuffle...) can fire
+// faster than a person can read the caption for the previous one — the
+// overlay is keyed by narratorText, so a same-render replacement just
+// stomps the old text before its entrance animation even finishes. This
+// queues incoming values and holds each on screen for a minimum dwell
+// time, draining the queue in order, so a fast burst plays back as a
+// readable sequence instead of flashing/skipping captions.
+function useThrottledNarrator(source: string, minDisplayMs = 1400) {
+  const [shown, setShown] = useState(source);
+  const queueRef = useRef<string[]>([]);
+  const shownRef = useRef(source);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleNext = useCallback(() => {
+    if (timerRef.current) return; // a hold is already in progress
+    const next = queueRef.current.shift();
+    if (next === undefined) return;
+    shownRef.current = next;
+    setShown(next);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      scheduleNext();
+    }, minDisplayMs);
+  }, [minDisplayMs]);
+
+  useEffect(() => {
+    if (!source) return;
+    const alreadyQueued = queueRef.current[queueRef.current.length - 1] === source;
+    if (source !== shownRef.current && !alreadyQueued) {
+      queueRef.current.push(source);
+      scheduleNext();
+    }
+  }, [source, scheduleNext]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    []
+  );
+
+  return shown;
 }
 
 function useTimecode() {
@@ -414,56 +460,163 @@ function OwnerDotSwitcher({
   );
 }
 
+// Compact "last result" readout for the header — most recent completed lot
+// (sold or unsold), color-coded the same way as the commentary chyron, plus
+// a running sold/unsold tally so the header still means something once the
+// caption itself has scrolled on to the next lot. Returns null with nothing
+// completed yet rather than showing an empty/placeholder chip.
+function ResultChip({ completedLots }: { completedLots: DemoLot[] }) {
+  const last = completedLots[0];
+  if (!last) return null;
+
+  const soldCount = completedLots.filter((l) => l.status === "sold").length;
+  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
+  const isSold = last.status === "sold";
+  const accent = isSold ? "#3ddc84" : "#e5484d";
+
+  return (
+    <div
+      className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+      style={{
+        background: "rgba(0,0,0,0.22)",
+        border: `1px solid color-mix(in srgb, ${accent} 35%, var(--color-border-overlay))`,
+      }}
+      title={
+        isSold
+          ? `${last.playerName} sold to ${last.winningTeamCode} for ${last.currentBid.toLocaleString()} pts`
+          : `${last.playerName} went unsold`
+      }
+    >
+      <span
+        className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-[2px]"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          letterSpacing: "0.1em",
+          color: "#08110c",
+          background: accent,
+        }}
+      >
+        {isSold ? "Sold" : "Unsold"}
+      </span>
+      <span
+        className="text-[10px] max-w-[220px] truncate"
+        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
+      >
+        {isSold ? `${last.playerName} → ${last.winningTeamCode} · ${last.currentBid.toLocaleString()} pts` : last.playerName}
+      </span>
+      <span
+        className="text-[8px] tabular-nums shrink-0"
+        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)", letterSpacing: "0.05em" }}
+      >
+        {soldCount}S / {unsoldCount}U
+      </span>
+    </div>
+  );
+}
+
 function MultiviewBar({
   active,
   syncing,
   mode,
   autoFocusEnabled,
+  auctionStatus,
+  completedLots,
   onToggleMode,
+  onTogglePause,
 }: {
   active: PanelKey[];
   syncing: PanelKey[];
   mode: "demo" | "interactive";
   autoFocusEnabled: boolean;
+  auctionStatus: "live" | "paused" | "completed";
+  completedLots: DemoLot[];
   onToggleMode: () => void;
+  onTogglePause: () => void;
 }) {
   const tc = useTimecode();
   return (
     <div
-      className="shrink-0 h-9 flex items-center justify-between px-4 relative z-20"
+      className="shrink-0 h-11 flex items-center justify-between px-4 relative z-20"
       style={{
         background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
         borderBottom: "1px solid var(--color-border-overlay)",
+        boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
       }}
     >
-      <div className="flex items-center gap-3">
-        <span
-          className="w-1.5 h-1.5 rounded-full bg-red-500"
-          style={{ animation: "feedPulse 1.6s ease-in-out infinite" }}
-        />
-        <span
-          className="text-[9px] uppercase"
-          style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.22em", color: "var(--color-outline)" }}
-        >
-          Multiview
-        </span>
-        <span
-          className="text-[11px] tabular-nums"
+      {/* ── Left: on-air badge + timecode ─────────────────────────── */}
+      <div className="flex items-center gap-4">
+        <div
+          className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
           style={{
-            fontFamily: "var(--font-headline-lg)",
-            fontStyle: "italic",
-            fontWeight: 700,
-            color: "var(--color-on-surface)",
-            letterSpacing: "0.02em",
+            background: "color-mix(in srgb, #e5484d 14%, transparent)",
+            border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
           }}
         >
-          {tc}
-        </span>
+          <span
+            className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
+            style={{ animation: "feedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
+          />
+          <span
+            className="text-[9px] font-bold uppercase"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
+          >
+            On Air
+          </span>
+        </div>
+
+        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
+
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[8px] uppercase"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.22em", color: "var(--color-outline)" }}
+          >
+            Multiview
+          </span>
+          <span
+            className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px]"
+            style={{
+              fontFamily: "var(--font-headline-lg)",
+              fontStyle: "italic",
+              fontWeight: 700,
+              color: "var(--color-theme-orange)",
+              letterSpacing: "0.03em",
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid var(--color-border-overlay)",
+            }}
+          >
+            {tc}
+          </span>
+        </div>
+
+        <button
+          onClick={onTogglePause}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110"
+          style={{
+            fontFamily: "var(--font-label-mono)",
+            letterSpacing: "0.08em",
+            background: auctionStatus === "paused"
+              ? "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)"
+              : "rgba(255,255,255,0.03)",
+            border: `1px solid ${
+              auctionStatus === "paused"
+                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
+                : "var(--color-border-overlay)"
+            }`,
+            color: auctionStatus === "paused" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+            cursor: "pointer",
+          }}
+        >
+          {auctionStatus === "paused" ? <Play size={11} /> : <Pause size={11} />}
+          <span className="text-[8px] uppercase">{auctionStatus === "paused" ? "Resume" : "Pause"}</span>
+        </button>
+
+        <ResultChip completedLots={completedLots} />
 
         {mode === "interactive" && !autoFocusEnabled && (
           <button
             onClick={() => demoModel.resumeAutoFocus()}
-            className="ml-1 px-2 py-0.5 rounded-full text-[8px] uppercase"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[8px] uppercase transition-colors hover:brightness-110"
             style={{
               fontFamily: "var(--font-label-mono)",
               letterSpacing: "0.1em",
@@ -473,66 +626,103 @@ function MultiviewBar({
               cursor: "pointer",
             }}
           >
+            <span className="w-1 h-1 rounded-full" style={{ background: "var(--color-theme-orange)" }} />
             Resume auto-switch
           </button>
         )}
-
       </div>
 
-      <div className="flex items-center gap-2">
-        {PANEL_ORDER.map((key) => {
-          const isLive = active.includes(key);
-          const isSync = syncing.includes(key);
-          const clickable = mode === "interactive" && CONTROLLABLE.includes(key);
-          return (
-            <div
-              key={key}
-              onClick={clickable ? () => demoModel.toggleActivePanel(key) : undefined}
-              className="flex items-center gap-1.5 px-2 py-1 rounded"
-              style={{
-                background: isLive
-                  ? "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)"
-                  : "rgba(255,255,255,0.02)",
-                border: `1px solid ${
-                  isLive
-                    ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
-                    : "var(--color-border-overlay)"
-                }`,
-                animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
-                cursor: clickable ? "pointer" : "default",
-              }}
-            >
-              <span
-                className="w-[6px] h-[6px] rounded-full shrink-0"
-                style={{ background: isLive ? "var(--color-theme-orange)" : "var(--color-outline)" }}
-              />
-              <span
-                className="text-[8px] uppercase"
+      {/* ── Right: panel tally + mode switch ──────────────────────── */}
+      <div className="flex items-center gap-3">
+        <div
+          className="flex items-center gap-1 p-1 rounded-[4px]"
+          style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
+        >
+          {PANEL_ORDER.map((key) => {
+            const isLive = active.includes(key);
+            const isSync = syncing.includes(key);
+            const clickable = mode === "interactive" && CONTROLLABLE.includes(key);
+            return (
+              <div
+                key={key}
+                onClick={clickable ? () => demoModel.toggleActivePanel(key) : undefined}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors"
                 style={{
-                  fontFamily: "var(--font-label-mono)",
-                  letterSpacing: "0.1em",
-                  color: isLive ? "var(--color-on-surface)" : "var(--color-outline)",
+                  background: isLive
+                    ? "color-mix(in srgb, var(--color-theme-orange) 16%, transparent)"
+                    : "transparent",
+                  boxShadow: isLive
+                    ? "inset 0 0 0 1px color-mix(in srgb, var(--color-theme-orange) 50%, transparent)"
+                    : "inset 0 0 0 1px transparent",
+                  animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
+                  cursor: clickable ? "pointer" : "default",
                 }}
               >
-                {PANEL_META[key].num} {PANEL_META[key].label}
-              </span>
-            </div>
-          );
-        })}
+                <span
+                  className="w-[6px] h-[6px] rounded-full shrink-0"
+                  style={{
+                    background: isLive ? "var(--color-theme-orange)" : "var(--color-outline)",
+                    boxShadow: isLive ? "0 0 5px 0.5px color-mix(in srgb, var(--color-theme-orange) 70%, transparent)" : "none",
+                    opacity: isLive ? 1 : 0.5,
+                  }}
+                />
+                <span
+                  className="text-[8px] uppercase tabular-nums"
+                  style={{
+                    fontFamily: "var(--font-label-mono)",
+                    letterSpacing: "0.1em",
+                    color: isLive ? "var(--color-on-surface)" : "var(--color-outline)",
+                    fontWeight: isLive ? 700 : 400,
+                  }}
+                >
+                  {PANEL_META[key].num} {PANEL_META[key].label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
 
         <button
           onClick={onToggleMode}
-          className="ml-2 px-2.5 py-1 rounded text-[8px] uppercase"
+          className="group flex items-center gap-2 pl-1 pr-3 py-1 rounded-full transition-colors"
           style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.1em",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid var(--color-border-overlay)",
-            color: "var(--color-on-surface)",
+            background: mode === "interactive"
+              ? "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)"
+              : "rgba(255,255,255,0.03)",
+            border: `1px solid ${
+              mode === "interactive"
+                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
+                : "var(--color-border-overlay)"
+            }`,
             cursor: "pointer",
           }}
         >
-          {mode === "demo" ? "Watching demo — Try it yourself" : "Playing — Watch demo"}
+          <span
+            className="flex items-center justify-center rounded-full transition-transform"
+            style={{
+              width: 16,
+              height: 16,
+              background: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-outline)",
+            }}
+          >
+            <span
+              className="rounded-full bg-black/70"
+              style={{ width: 6, height: 6 }}
+            />
+          </span>
+          <span
+            className="text-[8px] uppercase"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              letterSpacing: "0.1em",
+              color: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+              fontWeight: 700,
+            }}
+          >
+            {mode === "demo" ? "Watching demo — Try it yourself" : "Playing — Watch demo"}
+          </span>
         </button>
       </div>
     </div>
@@ -540,8 +730,19 @@ function MultiviewBar({
 }
 
 export default function SandboxPage() {
-  const { activePanels, syncPanels, mode, autoFocusEnabled, teams, currentLot, shuffle, isLocked, narratorText } =
-    useSpotlight();
+  const {
+    activePanels,
+    syncPanels,
+    mode,
+    autoFocusEnabled,
+    teams,
+    currentLot,
+    shuffle,
+    isLocked,
+    narratorText,
+    auctionStatus,
+    completedLots,
+  } = useSpotlight();
 
   const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
   const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
@@ -567,6 +768,21 @@ export default function SandboxPage() {
       demoInteractiveController.stop();
     };
   }, []);
+
+  // In demo mode, pausing needs to freeze the *scripted* timeline (cursor
+  // moves, clicks, bid/reveal/sold calls) — demoOrchestrator.pause() does
+  // that and also freezes the model's bidding clock as a side effect. In
+  // interactive mode there's no script to freeze (a real person is
+  // clicking), so pause only needs to stop the bidding clock itself.
+  const handleTogglePause = useCallback(() => {
+    if (mode === "demo") {
+      if (demoOrchestrator.isPaused()) demoOrchestrator.resume();
+      else demoOrchestrator.pause();
+    } else {
+      if (auctionStatus === "paused") demoModel.resume();
+      else demoModel.pause();
+    }
+  }, [mode, auctionStatus]);
 
   const handleToggleMode = useCallback(() => {
     const next = mode === "demo" ? "interactive" : "demo";
@@ -600,6 +816,7 @@ export default function SandboxPage() {
 
   const pctOf = (key: PanelKey) => layout[key] ?? 0;
 
+  const displayNarrator = useThrottledNarrator(narratorText);
   const guidance = getGuidance(mode, currentLot, shuffle, isLocked);
 
   // Exactly one owner spotlighted → offer a button to flip to the other one.
@@ -686,10 +903,13 @@ export default function SandboxPage() {
         syncing={syncPanels}
         mode={mode}
         autoFocusEnabled={autoFocusEnabled}
+        auctionStatus={auctionStatus}
+        completedLots={completedLots}
         onToggleMode={handleToggleMode}
+        onTogglePause={handleTogglePause}
       />
 
-      <CommentaryOverlay narratorText={narratorText} guidance={guidance} />
+      <CommentaryOverlay narratorText={displayNarrator} guidance={guidance} />
 
       <OwnerDotSwitcher
         mode={mode}

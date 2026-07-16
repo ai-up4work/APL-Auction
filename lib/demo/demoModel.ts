@@ -337,20 +337,31 @@ class DemoModelImpl {
   }
 
   // ── Clock ──────────────────────────────────────────────────────────────
+  // Factored out of startClock so pause()/resume() can stop and restart
+  // the interval without re-running the "reset to 100%" side effect that
+  // startClock() does for a brand-new lot.
+  private clockTick = () => {
+    const dec = 100 / ((TIMER_SECONDS * 1000) / TICK_MS);
+    const next = Math.max(0, this.snap.clockPct - dec);
+    const justLocked = next <= 0 && !this.snap.isLocked;
+    this.set({ clockPct: next, isLocked: next <= 0 });
+    if (justLocked) this.scheduleAutoResolve();
+  };
   private startClock() {
     this.stopClock();
     this.set({ clockPct: 100, isLocked: false });
-    this.clockTimer = setInterval(() => {
-      const dec = 100 / ((TIMER_SECONDS * 1000) / TICK_MS);
-      const next = Math.max(0, this.snap.clockPct - dec);
-      const justLocked = next <= 0 && !this.snap.isLocked;
-      this.set({ clockPct: next, isLocked: next <= 0 });
-      if (justLocked) this.scheduleAutoResolve();
-    }, TICK_MS);
+    this.clockTimer = setInterval(this.clockTick, TICK_MS);
   }
   private stopClock() {
     if (this.clockTimer) clearInterval(this.clockTimer);
     this.clockTimer = null;
+  }
+  /** Restarts the interval from whatever clockPct currently is, instead of
+   * resetting to 100% — used by resume() so unpausing a mid-countdown lot
+   * picks up where it left off rather than restarting the clock. */
+  private resumeClockFromCurrent() {
+    this.stopClock();
+    this.clockTimer = setInterval(this.clockTick, TICK_MS);
   }
 
   // ── Time's up → resolve automatically ───────────────────────────────
@@ -377,8 +388,22 @@ class DemoModelImpl {
     this.autoResolveTimer = null;
   }
 
-  pause() { this.set({ auction: { ...this.snap.auction, status: "paused" } }); }
-  resume() { this.set({ auction: { ...this.snap.auction, status: "live" } }); }
+  /** Freezes the bidding clock in place (if one is running) and flags the
+   * auction as paused. Used by the header pause control — previously this
+   * only flipped the status label while the clockTimer kept ticking
+   * silently underneath, so a "paused" lot could still resolve itself. */
+  pause() {
+    this.stopClock();
+    this.set({ auction: { ...this.snap.auction, status: "paused" } });
+  }
+  /** Un-freezes the clock from its current percentage (not a reset to
+   * 100%) if a lot is actively pending and unlocked when resume happens. */
+  resume() {
+    this.set({ auction: { ...this.snap.auction, status: "live" } });
+    if (this.snap.currentLot?.status === "pending" && !this.snap.isLocked) {
+      this.resumeClockFromCurrent();
+    }
+  }
   complete() { this.stopClock(); this.set({ auction: { ...this.snap.auction, status: "completed" } }); }
 
   // ── Shuffle reel ─────────────────────────────────────────────────────

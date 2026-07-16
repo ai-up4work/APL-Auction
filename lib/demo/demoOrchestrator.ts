@@ -84,6 +84,30 @@ function teamNameFor(teamId: string) {
   return demoModel.getSnapshot().auction.teams.find((t) => t.supabaseId === teamId)?.name ?? teamId;
 }
 
+// Extra breathing room inserted between each *beat* of the episode (open →
+// shuffle → reveal → bid → bid → bid → hammer → next lot) — not between
+// every individual step within a beat, so a cursor-move-then-click still
+// feels snappy, but the automation as a whole doesn't feel like it's
+// racing through the auction. Bumping this one constant re-paces the
+// entire script.
+const EXTRA_PAUSE_MS = 2000;
+
+// Original beat boundaries (in the un-paced timeline below) — every step
+// whose original `at` falls in one of these bands gets that many extra
+// pauses stacked on top of it, so beats later in the episode end up
+// further apart than earlier ones, compounding correctly instead of
+// everything shifting by one flat offset.
+function paceStep(at: number): number {
+  if (at < 1700) return at; // beat 0: open lot
+  if (at < 3700) return at + EXTRA_PAUSE_MS * 1; // beat 1: shuffle
+  if (at < 4400) return at + EXTRA_PAUSE_MS * 2; // beat 2: reveal
+  if (at < 7400) return at + EXTRA_PAUSE_MS * 3; // beat 3: opening bid
+  if (at < 10400) return at + EXTRA_PAUSE_MS * 4; // beat 4: counter bid
+  if (at < 13400) return at + EXTRA_PAUSE_MS * 5; // beat 5: raise
+  if (at < 16400) return at + EXTRA_PAUSE_MS * 6; // beat 6: hammer/sold
+  return at + EXTRA_PAUSE_MS * 7; // beat 7: hide / prepare next lot
+}
+
 function buildEpisode(aWinsFinal: boolean): Step[] {
   const first = aWinsFinal ? OWNER_B : OWNER_A;
   const firstTeam = aWinsFinal ? "tB" : "tA";
@@ -92,7 +116,7 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
   const nameOf = (a: string) => (a === OWNER_A ? "Priya · CSK Owner" : "Rohan · MI Owner");
   const colorOf = (a: string) => (a === OWNER_A ? "#f5a623" : "#3b8bd4");
 
-  return [
+  const rawSteps: Step[] = [
     { at: 0, type: "narrator", text: () => "Auctioneer opens the next lot" },
     focusStep(0, AUCTIONEER),
     { at: 0, type: "cursor", actor: AUCTIONEER, panel: "auctioneer", targetId: "demo-start-btn", label: "Auctioneer", color: "#c9971f" },
@@ -166,16 +190,36 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
     { at: 16400, type: "hide", actor: OWNER_B },
     { at: 16400, type: "narrator", text: () => "Preparing the next lot…" },
   ];
+
+  return rawSteps.map((s) => ({ ...s, at: paceStep(s.at) }));
 }
 
+// A pending timer, tracked with its wall-clock fire time so pause() can
+// compute exactly how much longer it had left, and resume() can put it
+// back exactly where it was — rather than pause just meaning "restart
+// the episode from scratch" or, worse, the timers silently continuing to
+// fire in the background while the UI looks frozen.
+type Pending = { timer: ReturnType<typeof setTimeout>; fireAt: number; remaining?: number; run: () => void };
+
 export class DemoOrchestrator {
-  private timers: ReturnType<typeof setTimeout>[] = [];
+  private timers: Pending[] = [];
   private episode = 0;
   private running = false;
+  private paused = false;
+
+  private schedule(run: () => void, delayMs: number) {
+    const fireAt = Date.now() + delayMs;
+    const timer = setTimeout(() => {
+      this.timers = this.timers.filter((t) => t.timer !== timer);
+      run();
+    }, delayMs);
+    this.timers.push({ timer, fireAt, run });
+  }
 
   start() {
     if (this.running) return;
     this.running = true;
+    this.paused = false;
     // Deliberately no demoModel.reset() here — mode toggling is a
     // hand-off between drivers, not a restart. Whatever purses, completed
     // lots, and remaining player pool exist carry straight over; setMode()
@@ -186,10 +230,44 @@ export class DemoOrchestrator {
     demoModel.setMode("demo");
     this.runNext();
   }
+
   stop() {
     this.running = false;
-    this.timers.forEach(clearTimeout);
+    this.paused = false;
+    this.timers.forEach((t) => clearTimeout(t.timer));
     this.timers = [];
+  }
+
+  /** Freezes the running script exactly where it is — every pending
+   * cursor move, click, bid, and the "next episode" timer all remember
+   * how much longer they had left, instead of losing their place or (if
+   * we'd merely cleared them without saving state) skipping steps on
+   * resume. Also freezes the model's bidding clock so a lot mid-countdown
+   * doesn't keep ticking down behind the paused UI. */
+  pause() {
+    if (!this.running || this.paused) return;
+    this.paused = true;
+    const now = Date.now();
+    this.timers = this.timers.map((t) => {
+      clearTimeout(t.timer);
+      return { ...t, remaining: Math.max(0, t.fireAt - now) };
+    });
+    demoModel.pause();
+  }
+
+  /** Reschedules every frozen timer with exactly the remaining delay it
+   * had at pause() time, and un-freezes the bidding clock. */
+  resume() {
+    if (!this.running || !this.paused) return;
+    this.paused = false;
+    const toResume = this.timers;
+    this.timers = [];
+    toResume.forEach((t) => this.schedule(t.run, t.remaining ?? 0));
+    demoModel.resume();
+  }
+
+  isPaused() {
+    return this.paused;
   }
 
   private runNext() {
@@ -197,9 +275,9 @@ export class DemoOrchestrator {
     demoModel.refillIfEmpty();
     const steps = buildEpisode(this.episode % 2 === 0);
     this.episode += 1;
-    steps.forEach((s) => this.timers.push(setTimeout(() => this.runStep(s), s.at)));
+    steps.forEach((s) => this.schedule(() => this.runStep(s), s.at));
     const total = steps[steps.length - 1].at + 1500;
-    this.timers.push(setTimeout(() => this.runNext(), total));
+    this.schedule(() => this.runNext(), total);
   }
 
   private runStep(step: Step) {

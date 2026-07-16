@@ -57,7 +57,7 @@ export function DesktopFrame({
       }}
     >
       <div
-        className="flex items-center justify-between px-3 border-b"
+        className="flex items-center justify-between px-3 border-b pt-2"
         style={{ height: chromeH, borderColor: BORDER_OVERLAY }}
       >
         <TrafficLights />
