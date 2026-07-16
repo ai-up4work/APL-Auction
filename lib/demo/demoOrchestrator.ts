@@ -176,7 +176,13 @@ export class DemoOrchestrator {
   start() {
     if (this.running) return;
     this.running = true;
-    demoModel.reset();
+    // Deliberately no demoModel.reset() here — mode toggling is a
+    // hand-off between drivers, not a restart. Whatever purses, completed
+    // lots, and remaining player pool exist carry straight over; setMode()
+    // only flips the mode flag. Note: if a lot was mid-bid in manual mode
+    // when this fires, the next scripted episode starts a fresh shuffle
+    // rather than resuming that exact lot — the pool/purses/history are
+    // preserved, but an in-flight lot at the hand-off moment isn't resolved.
     demoModel.setMode("demo");
     this.runNext();
   }

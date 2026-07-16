@@ -8,6 +8,12 @@ import { demoModel } from "./demoModel";
 // / placeBid() / hammerSold() / markUnsold() directly — this controller just
 // keeps the player pool from dead-ending and flags the model as
 // "interactive" so the UI knows not to expect a simulated cursor.
+//
+// Deliberately does NOT call demoModel.reset() here — switching modes is a
+// hand-off, not a restart. Whatever lot/purses/history exist when the
+// person flips from "Watch demo" to "Try it yourself" (or back) carry
+// straight over; setMode() only flips the mode flag (and re-enables
+// auto-focus) without touching any auction data.
 class DemoInteractiveController {
   private unsub: (() => void) | null = null;
   private running = false;
@@ -15,7 +21,6 @@ class DemoInteractiveController {
   start() {
     if (this.running) return;
     this.running = true;
-    demoModel.reset();
     demoModel.setMode("interactive");
 
     this.unsub = demoModel.subscribe(() => {
