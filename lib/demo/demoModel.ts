@@ -108,7 +108,7 @@ const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUn
   { name: "Pat Cummins", role: "All-rounder", origin: "Overseas", country: "Australia", img: "/players/pat.jpg", price: 1500, capped: true },
   { name: "Jadeja", role: "Batsman", origin: "Overseas", country: "India", img: "/players/jadeja.jpg", price: 1200, capped: false },
   { name: "Rohit Sharma", role: "Bowler", origin: "Local", country: "India", img: "/players/rohit.jpg", price: 2000, capped: true },
-  { name: "Jos Buttler", role: "Wicket Keeper", origin: "Overseas", country: "England", img: "/players/jos-buttle.jpg", price: 900, capped: false },
+  { name: "Jos Buttler", role: "Wicket Keeper", origin: "Overseas", country: "England", img: "/players/Jos-Buttle.jpg", price: 900, capped: false },
   { name: "Nicholas", role: "Batsman", origin: "Overseas", country: "Sri Lanka", img: "/players/Nicholas.png", price: 1100, capped: false },
 ];
 
