@@ -117,18 +117,7 @@ export default function AdminPage() {
         maxWidth: "100%",
       }}
     >
-      {/* Background gradients */}
-      <div
-        className="fixed inset-0 pointer-events-none"
-        style={{
-          background: `
-            radial-gradient(circle at 50% -20%, rgba(200,205,216,0.15) 0%, transparent 70%),
-            radial-gradient(circle at 0% 100%, rgba(201,151,31,0.05) 0%, transparent 50%),
-            radial-gradient(circle at 100% 100%, rgba(200,205,216,0.05) 0%, transparent 50%)
-          `,
-          zIndex: 0,
-        }}
-      />
+      
 
       {/* Saving indicator */}
       {isSaving && (

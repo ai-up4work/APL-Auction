@@ -679,10 +679,6 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
       />
 
       <div className="font-inter bg-background text-on-background fixed inset-0 flex flex-col overflow-hidden select-none">
-        <div className="flare w-[430px] h-[430px]" style={{ top: -140, left: -140 }} />
-        <div className="flare w-[430px] h-[430px]" style={{ bottom: -140, right: -140 }} />
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at center,rgba(201,151,31,0.10) 0%,transparent 70%)" }} />
-
         {/* HEADER */}
         <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
             <div className="flex items-center gap-[13px]">

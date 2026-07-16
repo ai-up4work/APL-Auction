@@ -207,18 +207,7 @@ export default function AuctionPicker({
       className="min-h-screen w-full flex flex-col items-center px-6 py-16 relative overflow-hidden"
       style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}
     >
-      {/* Background gradients — consistent with admin shell */}
-      <div
-        className="fixed inset-0 pointer-events-none"
-        style={{
-          background: `
-            radial-gradient(circle at 50% -20%, rgba(200,205,216,0.15) 0%, transparent 70%),
-            radial-gradient(circle at 0% 100%, rgba(201,151,31,0.05) 0%, transparent 50%),
-            radial-gradient(circle at 100% 100%, rgba(200,205,216,0.05) 0%, transparent 50%)
-          `,
-          zIndex: 0,
-        }}
-      />
+     
 
       <div className="w-full max-w-4xl relative z-10">
         <div className="text-center mb-10">
