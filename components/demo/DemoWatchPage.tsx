@@ -1,9 +1,10 @@
 // components/demo/DemoWatchPage.tsx
 "use client";
 
-import React, { useSyncExternalStore } from "react";
+import React, { useSyncExternalStore, useState, useEffect } from "react";
 import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts, type DemoPlayer } from "@/lib/demo/demoModel";
 import { ShuffleOverlay } from "@/components/ShuffleOverlay";
+import Image from "next/image";
 
 // ShuffleOverlay (shared with the real /watch page) expects FlowPlayer-shaped
 // objects — id, name, img, price as a formatted string, status. The demo
@@ -34,6 +35,19 @@ export default function DemoWatchPage() {
   const winningPurse = winningTeam ? teamPurses[winningTeam.supabaseId] : null;
   const nextBid = currentLot ? getNextBidAmount(currentLot.currentBid, auction.rules.tiers) : 0;
   const shotClockColor = clockPct < 25 ? "#ef4444" : clockPct < 50 ? "#f59e0b" : "#c9971f";
+
+  // Tracks whether the current lot's player image loaded okay. Reset
+  // whenever the lot changes so a broken image on lot N doesn't leave
+  // lot N+1 permanently stuck on the icon fallback. Mirrors the same
+  // pattern used on the auctioneer page.
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => setImgOk(true), [currentLot?.id]);
+
+  // Whether we should actually attempt to render the player's photo:
+  // there has to be a lot, it can't still be shuffling (player is a
+  // secret until reveal), the URL has to be set, and it can't have
+  // already failed to load for this lot.
+  const showPlayerImg = !!currentLot?.playerImg && !isShuffling && imgOk;
 
   const tickerMessages = completedLots.length === 0
     ? [`Welcome to ${auction.session.auctionName}`, "Bidding will begin shortly — stay tuned"]
@@ -104,9 +118,20 @@ export default function DemoWatchPage() {
                   </div>
                 )}
                 <div className={`relative z-10 w-[200px] h-[230px] rounded-xl overflow-hidden mb-4 border border-white/[0.08] flex items-center justify-center bg-white/5 ${(isSold || isUnsold) ? "grayscale brightness-50" : ""}`}>
-                  <span className="material-symbols-outlined text-white/10" style={{ fontSize: 72 }}>person</span>
+                  {showPlayerImg ? (
+                    <Image
+                      src={currentLot.playerImg}
+                      alt={currentLot.playerName}
+                      fill
+                      sizes="200px"
+                      className="object-cover object-top"
+                      onError={() => setImgOk(false)}
+                    />
+                  ) : (
+                    <span className="material-symbols-outlined text-white/10" style={{ fontSize: 72 }}>person</span>
+                  )}
                   {!isSold && !isUnsold && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1"><div className="h-full transition-all duration-100" style={{ width: `${clockPct}%`, background: shotClockColor }} /></div>
+                    <div className="absolute bottom-0 left-0 right-0 h-1 z-20"><div className="h-full transition-all duration-100" style={{ width: `${clockPct}%`, background: shotClockColor }} /></div>
                   )}
                 </div>
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-4 py-1 font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap" style={{ background: "#c9971f", color: "#000" }}>
