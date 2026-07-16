@@ -1,3 +1,4 @@
+// app/auction/live/[auctionId]/page.tsx
 "use client";
 
 import React, { use, useCallback, useEffect, useRef, useState } from "react";
