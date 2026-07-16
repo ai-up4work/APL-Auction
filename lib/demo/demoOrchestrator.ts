@@ -361,16 +361,42 @@ export class DemoOrchestrator {
    * from a clean slate. This is a marketing/sandbox demo meant to run
    * indefinitely, not a real auction with a single ending — a real
    * auctioneer console just stays completed. */
+  // private runCompletionEpisode() {
+  //   this.schedule(() => {
+  //     demoModel.setActivePanel(["auctioneer", "watch"]);
+  //     demoModel.setNarrator("Auction complete — every lot called");
+  //     demoModel.pulsePanels(ALL_PANELS);
+  //   }, 0);
+  //   this.schedule(() => {
+  //     demoModel.startNewCycle();
+  //     this.runNext();
+  //   }, 4500);
+  // }
+
+  /** Nothing left to call and no re-entry passes remain — the showcase
+   * has genuinely run its course. Plays the completion beat once and
+   * then deliberately stops scheduling anything further: it waits for
+   * the person to make a choice (via the completion overlay rendered in
+   * SandboxPage) — try the console themselves, or restart the loop —
+   * rather than silently auto-restarting on a timer. See
+   * restartAfterCompletion(), called by that overlay. */
   private runCompletionEpisode() {
     this.schedule(() => {
       demoModel.setActivePanel(["auctioneer", "watch"]);
       demoModel.setNarrator("Auction complete — every lot called");
       demoModel.pulsePanels(ALL_PANELS);
     }, 0);
-    this.schedule(() => {
-      demoModel.startNewCycle();
-      this.runNext();
-    }, 4500);
+  }
+
+  /** Called by the completion overlay's "Restart Demo" action. Gives the
+   * model a fresh player pool/purses/round counters and picks the
+   * scripted timeline back up. No-ops if start() was never called or
+   * stop() has since torn things down (e.g. the person flipped to
+   * interactive mode before clicking Restart). */
+  restartAfterCompletion() {
+    if (!this.running) return;
+    demoModel.startNewCycle();
+    this.runNext();
   }
 
   private runStep(step: Step) {
@@ -389,5 +415,7 @@ export class DemoOrchestrator {
     }
   }
 }
+
+
 
 export const demoOrchestrator = new DemoOrchestrator();

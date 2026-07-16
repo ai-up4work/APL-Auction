@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
-import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone, Pause, Play } from "lucide-react";
+import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone, Pause, Play, PartyPopper, RotateCcw, MousePointerClick } from "lucide-react";
 import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
 import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
 import { demoModel, getDemoSnapshot, type DemoLot } from "@/lib/demo/demoModel";
@@ -128,6 +128,7 @@ function useSpotlight() {
     narratorText: snap.narratorText,
     auctionStatus: snap.auction.status,
     completedLots: snap.completedLots as DemoLot[],
+    finalizedUnsoldCount: snap.finalizedUnsoldPlayers.length,
   };
 }
 
@@ -137,12 +138,16 @@ function useSpotlight() {
 // a second, mode-aware line describing what the viewer can actually do
 // right now. The "what's next" line is worded differently for demo
 // (nothing to do but watch) vs interactive (here's your actual button).
+// Suppressed entirely once the auction is complete — the completion
+// overlay takes over messaging at that point.
 function getGuidance(
   mode: "demo" | "interactive",
   lot: ReturnType<typeof useSpotlight>["currentLot"],
   shuffle: ReturnType<typeof useSpotlight>["shuffle"],
-  isLocked: boolean
+  isLocked: boolean,
+  auctionStatus: "live" | "paused" | "completed"
 ): string {
+  if (auctionStatus === "completed") return "";
   if (mode === "demo") {
     return "Watching the bot run the auction — switch to \"Try it yourself\" to take the controls.";
   }
@@ -591,7 +596,8 @@ function MultiviewBar({
 
         <button
           onClick={onTogglePause}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110"
+          disabled={auctionStatus === "completed"}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
           style={{
             fontFamily: "var(--font-label-mono)",
             letterSpacing: "0.08em",
@@ -613,7 +619,7 @@ function MultiviewBar({
 
         <ResultChip completedLots={completedLots} />
 
-        {mode === "interactive" && !autoFocusEnabled && (
+        {mode === "interactive" && !autoFocusEnabled && auctionStatus !== "completed" && (
           <button
             onClick={() => demoModel.resumeAutoFocus()}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[8px] uppercase transition-colors hover:brightness-110"
@@ -641,7 +647,7 @@ function MultiviewBar({
           {PANEL_ORDER.map((key) => {
             const isLive = active.includes(key);
             const isSync = syncing.includes(key);
-            const clickable = mode === "interactive" && CONTROLLABLE.includes(key);
+            const clickable = mode === "interactive" && CONTROLLABLE.includes(key) && auctionStatus !== "completed";
             return (
               <div
                 key={key}
@@ -729,6 +735,124 @@ function MultiviewBar({
   );
 }
 
+// ── Completion overlay ───────────────────────────────────────────────
+// Shown whenever auction.status === "completed", in EITHER mode — the
+// queue and the unsold pile are both empty, there's genuinely nothing
+// left to call. Rather than the model silently looping itself (demo
+// mode) or just sitting there inert (interactive mode), this asks the
+// person what they want to do next: hand them the controls, or watch
+// the whole showcase run again from a clean slate. Dims the panels
+// behind it but doesn't unmount them, so the final SOLD/UNSOLD stamp and
+// finished dashboards stay visible under the glass rather than flashing
+// to blank.
+function CompletionOverlay({
+  mode,
+  soldCount,
+  unsoldCount,
+  finalizedUnsoldCount,
+  onTryItYourself,
+  onRestart,
+}: {
+  mode: "demo" | "interactive";
+  soldCount: number;
+  unsoldCount: number;
+  finalizedUnsoldCount: number;
+  onTryItYourself: () => void;
+  onRestart: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0"
+        style={{ background: "rgba(6,6,8,0.72)", backdropFilter: "blur(6px)" }}
+      />
+      <div
+        className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
+        style={{
+          background: "rgba(13,17,23,0.96)",
+          border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
+          boxShadow: "0 0 80px color-mix(in srgb, var(--color-theme-orange) 12%, transparent), 0 24px 64px rgba(0,0,0,0.6)",
+        }}
+      >
+        <div className="flex items-center justify-center">
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{
+              background: "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
+            }}
+          >
+            <PartyPopper size={32} color="var(--color-theme-orange)" />
+          </div>
+        </div>
+
+        <div className="text-center space-y-2">
+          <h2
+            className="font-bold italic uppercase tracking-tight text-2xl"
+            style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}
+          >
+            Auction Complete
+          </h2>
+          <p
+            className="text-[11px] uppercase tracking-[0.12em] leading-relaxed"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+          >
+            Every lot has been called{unsoldCount > 0 || finalizedUnsoldCount > 0 ? " and re-entry rounds exhausted." : "."}
+          </p>
+        </div>
+
+        <div
+          className="grid grid-cols-3 gap-3 p-4 rounded-xl"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="text-center">
+            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Sold</p>
+            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#3ddc84" }}>{soldCount}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Unsold</p>
+            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#e5484d" }}>{unsoldCount}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Finalized</p>
+            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}>{finalizedUnsoldCount}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {mode === "demo" && (
+            <button
+              onClick={onTryItYourself}
+              className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                background: "linear-gradient(135deg,#A87815,#E8C468)",
+                color: "#1a1304",
+              }}
+            >
+              <MousePointerClick size={14} />
+              Try It Yourself
+            </button>
+          )}
+          <button
+            onClick={onRestart}
+            className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              background: mode === "demo" ? "rgba(255,255,255,0.05)" : "linear-gradient(135deg,#A87815,#E8C468)",
+              border: mode === "demo" ? "1px solid rgba(255,255,255,0.1)" : "none",
+              color: mode === "demo" ? "var(--color-on-surface)" : "#1a1304",
+            }}
+          >
+            <RotateCcw size={14} />
+            {mode === "demo" ? "Restart Demo" : "Restart Auction"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SandboxPage() {
   const {
     activePanels,
@@ -742,6 +866,7 @@ export default function SandboxPage() {
     narratorText,
     auctionStatus,
     completedLots,
+    finalizedUnsoldCount,
   } = useSpotlight();
 
   const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
@@ -795,6 +920,28 @@ export default function SandboxPage() {
     }
   }, [mode]);
 
+  // Completion overlay's "Try It Yourself" — only offered in demo mode
+  // (interactive mode is already "yourself"). Hands off the same way the
+  // regular mode toggle does, just triggered from the overlay instead of
+  // the header pill.
+  const handleTryItYourself = useCallback(() => {
+    demoOrchestrator.stop();
+    demoInteractiveController.start();
+  }, []);
+
+  // Completion overlay's "Restart Demo" / "Restart Auction" — refills the
+  // player pool/purses/round counters via demoModel.startNewCycle() and,
+  // in demo mode, hands control straight back to the orchestrator's
+  // scripted timeline so the showcase picks up right where a fresh
+  // episode would start.
+  const handleRestart = useCallback(() => {
+    if (mode === "demo") {
+      demoOrchestrator.restartAfterCompletion();
+    } else {
+      demoModel.startNewCycle();
+    }
+  }, [mode]);
+
   // globals.css forces `html { overflow-y: scroll }` site-wide so the
   // marketing pages never jump-shift. This page is a fixed single
   // viewport, so we suppress that just while mounted and put it back
@@ -817,14 +964,10 @@ export default function SandboxPage() {
   const pctOf = (key: PanelKey) => layout[key] ?? 0;
 
   const displayNarrator = useThrottledNarrator(narratorText);
-  const guidance = getGuidance(mode, currentLot, shuffle, isLocked);
+  const guidance = getGuidance(mode, currentLot, shuffle, isLocked, auctionStatus);
 
-  // Exactly one owner spotlighted → offer a button to flip to the other one.
-  // Both, neither, or the owner-picking UI already visible (chips) covers
-  // every other case, so the button only appears in the single-owner state.
-  const hasA = highlighted.includes("ownerA");
-  const hasB = highlighted.includes("ownerB");
-  const switchToOwner: "ownerA" | "ownerB" | null = hasA && !hasB ? "ownerB" : hasB && !hasA ? "ownerA" : null;
+  const soldCount = completedLots.filter((l) => l.status === "sold").length;
+  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
 
   const frames: Record<PanelKey, React.ReactNode> = {
     auctioneer: (
@@ -942,6 +1085,17 @@ export default function SandboxPage() {
           </Cell>
         ))}
       </div>
+
+      {auctionStatus === "completed" && (
+        <CompletionOverlay
+          mode={mode}
+          soldCount={soldCount}
+          unsoldCount={unsoldCount}
+          finalizedUnsoldCount={finalizedUnsoldCount}
+          onTryItYourself={handleTryItYourself}
+          onRestart={handleRestart}
+        />
+      )}
     </div>
   );
 }
