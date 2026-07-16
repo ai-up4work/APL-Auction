@@ -1,8 +1,10 @@
+// app/auction/live/[auctionId]/page.tsx
 "use client";
 
-import React, { useSyncExternalStore } from "react";
+import React, { useSyncExternalStore, useState, useEffect } from "react";
 import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
 import DemoCursor from "./DemoCursor";
+import Image from "next/image";
 
 const BID_COLOR = "#c9971f";
 
@@ -24,6 +26,19 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
   const purgePct = purse ? Math.min((purse.remaining / auction.rules.totalPoints) * 100, 100) : 0;
 
   const canBid = !!currentLot && currentLot.status === "pending" && !isLocked && nextBid <= (purse?.remaining ?? 0) && !isLeading;
+
+  // Tracks whether the current lot's player image loaded okay. Reset
+  // whenever the lot changes so a broken image on lot N doesn't leave
+  // lot N+1 permanently stuck on the icon fallback. Mirrors the same
+  // pattern used on the auctioneer page.
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => setImgOk(true), [currentLot?.id]);
+
+  // Whether we should actually attempt to render the player's photo:
+  // there has to be a lot, it can't still be shuffling/revealing (player
+  // is a secret until reveal), the URL has to be set, and it can't have
+  // already failed to load for this lot.
+  const showPlayerImg = !!currentLot?.playerImg && !isRevealing && imgOk;
 
   function handleBid() {
     if (!canBid) return;
@@ -70,13 +85,23 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         {/* Player card - flex-1 allows it to fill dynamic empty space */}
         <section className="glass rounded-xl overflow-hidden relative flex-1 min-h-[150px]">
           <div className="w-full h-full bg-white/[0.03] flex items-center justify-center relative">
-            <span className="material-symbols-outlined text-white/10" style={{ fontSize: 90 }}>person</span>
+            {showPlayerImg ? (
+              <Image
+                src={currentLot!.playerImg}
+                alt={currentLot!.playerName}
+                className="w-full h-full object-cover object-top"
+                fill
+                onError={() => setImgOk(false)}
+              />
+            ) : (
+              <span className="material-symbols-outlined text-white/10" style={{ fontSize: 90 }}>person</span>
+            )}
             <div className="absolute top-3 left-3">
               <span className="f-label text-[9px] px-3 py-1 rounded-full" style={{ background: BID_COLOR, color: "#000" }}>
                 {currentLot ? `LOT #${currentLot.lotNumber} • ${isRevealing ? "REVEALING" : isSold ? "SOLD" : isUnsold ? "UNSOLD" : "ON THE BLOCK"}` : "AWAITING LOT"}
               </span>
             </div>
-            <div className="absolute bottom-2 left-3 right-3">
+            <div className="absolute bottom-0 left-0 right-0 pt-10 px-3 pb-2" style={{ background: showPlayerImg ? "linear-gradient(to top, rgba(11,13,14,0.92), rgba(11,13,14,0.55) 60%, transparent)" : "none" }}>
               <h1 className="f-display text-[26px] text-white leading-none mb-1">{isRevealing ? "???" : currentLot?.playerName ?? "—"}</h1>
               <p className="f-label-sm text-[9px] text-white/50">{isRevealing ? "—" : currentLot ? `${currentLot.playerRole} · ${currentLot.playerCountry}` : "Auctioneer hasn't started yet"}</p>
             </div>

@@ -1,9 +1,10 @@
 // components/demo/DemoAuctioneerPage.tsx
 "use client";
 
-import React, { useSyncExternalStore, useState } from "react";
+import React, { useSyncExternalStore, useState, useEffect } from "react";
 import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
 import DemoCursor from "./DemoCursor";
+import Image from "next/image";
 
 type Particle = { id: number; tx: number; ty: number; color: string; duration: number };
 const SOLD_COLORS = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
@@ -83,6 +84,12 @@ export default function DemoAuctioneerPage() {
   const [isStartingReentry, setIsStartingReentry] = useState(false);
   const [reentryToast, setReentryToast] = useState<string | null>(null);
 
+  // Tracks whether the current lot's player image loaded okay. Reset
+  // whenever the lot changes so a broken image on lot N doesn't leave
+  // lot N+1 permanently stuck on the icon fallback.
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => setImgOk(true), [currentLot?.id]);
+
   const soldState: "pending" | "sold" | "unsold" =
     currentLot?.status === "sold" ? "sold" : currentLot?.status === "unsold" ? "unsold" : "pending";
   const isShuffling = currentLot?.status === "shuffling";
@@ -97,6 +104,12 @@ export default function DemoAuctioneerPage() {
 
   const pendingUnsoldCount = unsoldPlayers.length;
   const showReentryButton = pendingUnsoldCount > 0 && auction.players.length === 0 && !isCompleted;
+
+  // Whether we should actually attempt to render the player's photo right
+  // now: there has to be a lot, it can't still be shuffling (player is a
+  // secret until reveal), the URL has to be set, and it can't have
+  // already failed to load for this lot.
+  const showPlayerImg = !!currentLot?.playerImg && !isShuffling && imgOk;
 
   function spawnParticles(colors: string[]) {
     const created: Particle[] = Array.from({ length: 40 }, () => {
@@ -310,7 +323,19 @@ export default function DemoAuctioneerPage() {
 
             <div className="relative shrink-0">
               <div className="w-44 h-44 rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl relative bg-white/5 flex items-center justify-center">
-                <span className="material-symbols-outlined text-white/15" style={{ fontSize: 56 }}>{isShuffling ? "casino" : "person"}</span>
+                {showPlayerImg ? (
+                  <Image
+                    src={currentLot!.playerImg}
+                    alt={currentLot!.playerName}
+                    className="w-full h-full object-cover object-top"
+                    fill
+                    onError={() => setImgOk(false)}
+                  />
+                ) : (
+                  <span className="material-symbols-outlined text-white/15" style={{ fontSize: 56 }}>
+                    {isShuffling ? "casino" : "person"}
+                  </span>
+                )}
                 {currentLot && soldState === "pending" && !isShuffling && (
                   <div className="absolute bottom-0 left-0 right-0 h-1">
                     <div className="h-full transition-all duration-100" style={{ width: `${clockPct}%`, background: shotClockColor }} />

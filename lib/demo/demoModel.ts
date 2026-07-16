@@ -105,11 +105,11 @@ const AUTO_RESOLVE_DELAY_MS = 1300;
 const UNSOLD_REENTRY_ROUNDS = 1;
 
 const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUnsoldFinal">[] = [
-  { name: "Marcus Vane", role: "All-rounder", origin: "Overseas", country: "Australia", img: "", price: 1500, capped: true },
-  { name: "Elena Rodas", role: "Batsman", origin: "Overseas", country: "South Africa", img: "", price: 1200, capped: false },
-  { name: "Rohan Sharma", role: "Bowler", origin: "Local", country: "India", img: "", price: 2000, capped: true },
-  { name: "Jaxon Kade", role: "Wicket Keeper", origin: "Overseas", country: "England", img: "", price: 900, capped: false },
-  { name: "Li Wei", role: "Batsman", origin: "Overseas", country: "Sri Lanka", img: "", price: 1100, capped: false },
+  { name: "Pat Cummins", role: "All-rounder", origin: "Overseas", country: "Australia", img: "/players/pat.jpg", price: 1500, capped: true },
+  { name: "Jadeja", role: "Batsman", origin: "Overseas", country: "India", img: "/players/jadeja.jpg", price: 1200, capped: false },
+  { name: "Rohit Sharma", role: "Bowler", origin: "Local", country: "India", img: "/players/rohit.jpg", price: 2000, capped: true },
+  { name: "Jos Buttler", role: "Wicket Keeper", origin: "Overseas", country: "England", img: "/players/jos-buttle.jpg", price: 900, capped: false },
+  { name: "Nicholas", role: "Batsman", origin: "Overseas", country: "Sri Lanka", img: "/players/Nicholas.png", price: 1100, capped: false },
 ];
 
 function makeTeams(): DemoTeam[] {

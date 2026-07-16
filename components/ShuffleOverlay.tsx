@@ -109,14 +109,12 @@ function ReelCard({
   );
 }
 
-// ── a single spinning reel column ────────────────────────────────────────
+// ── a single spinning reel column (only rendered while NOT locked) ───────
 function ReelColumn({
   pool,
   centerIndex,
   offset,
   cardSize,
-  locked,
-  lockedPlayer,
   transitionMs,
   blurPx,
 }: {
@@ -124,8 +122,6 @@ function ReelColumn({
   centerIndex: number;
   offset: number;
   cardSize: number;
-  locked: boolean;
-  lockedPlayer: Player | null;
   transitionMs: number;
   blurPx: number;
 }) {
@@ -134,10 +130,6 @@ function ReelColumn({
 
   const items: (Player | null)[] = [];
   for (let d = -half; d <= half; d++) {
-    if (locked) {
-      items.push(lockedPlayer);
-      continue;
-    }
     if (n === 0) {
       items.push(null);
       continue;
@@ -148,14 +140,12 @@ function ReelColumn({
 
   return (
     <div
-      key={locked ? 'locked' : centerIndex}
+      key={centerIndex}
       className="flex flex-col items-center"
       style={{
         gap: 8,
-        animation: locked
-          ? 'reel-settle 380ms cubic-bezier(0.18,0.9,0.32,1.2) both'
-          : `reel-tick ${transitionMs}ms linear both`,
-        filter: locked ? 'none' : `blur(${blurPx}px)`,
+        animation: `reel-tick ${transitionMs}ms linear both`,
+        filter: `blur(${blurPx}px)`,
       }}
     >
       {items.map((p, i) => (
@@ -164,7 +154,7 @@ function ReelColumn({
           player={p}
           size={cardSize}
           dim={i !== half}
-          glow={locked && i === half}
+          glow={false}
         />
       ))}
     </div>
@@ -231,10 +221,10 @@ export function ShuffleOverlay({
           from { transform: translateY(-22px); opacity: 0.5; }
           to   { transform: translateY(0);      opacity: 1;   }
         }
-        @keyframes reel-settle {
-          0%   { transform: translateY(-14px) scale(0.9);  opacity: 0.4; }
-          55%  { transform: translateY(4px)   scale(1.05); opacity: 1;   }
-          100% { transform: translateY(0)     scale(1);    opacity: 1;   }
+        @keyframes reel-zoom-lock {
+          0%   { transform: scale(0.5);  opacity: 0.25; }
+          60%  { transform: scale(1.08); opacity: 1;    }
+          100% { transform: scale(1);    opacity: 1;    }
         }
         @keyframes bulb-blink {
           0%, 100% { opacity: 0.25; }
@@ -302,6 +292,7 @@ export function ShuffleOverlay({
         <div
           className="relative flex items-center justify-center gap-3 md:gap-5 rounded-2xl overflow-hidden px-4 md:px-6 py-4"
           style={{
+            minHeight: locked ? 260 : undefined,
             background: 'radial-gradient(circle, #14181a 55%, #0a0d0e 100%)',
             border: '1px solid rgba(255,255,255,0.06)',
           }}
@@ -319,36 +310,42 @@ export function ShuffleOverlay({
             style={{ background: `rgba(${ACC_RGB},${locked ? 0.5 : 0.18})` }}
           />
 
-          <ReelColumn
-            pool={pool}
-            centerIndex={shuffleIndex}
-            offset={0}
-            cardSize={62}
-            locked={locked}
-            lockedPlayer={shuffleTarget}
-            transitionMs={transitionMs}
-            blurPx={Math.max(0, blurPx - 1.5)}
-          />
-          <ReelColumn
-            pool={pool}
-            centerIndex={shuffleIndex}
-            offset={offsetB}
-            cardSize={92}
-            locked={locked}
-            lockedPlayer={shuffleTarget}
-            transitionMs={transitionMs}
-            blurPx={blurPx}
-          />
-          <ReelColumn
-            pool={pool}
-            centerIndex={shuffleIndex}
-            offset={offsetC}
-            cardSize={62}
-            locked={locked}
-            lockedPlayer={shuffleTarget}
-            transitionMs={transitionMs}
-            blurPx={Math.max(0, blurPx - 1.5)}
-          />
+          {locked ? (
+            // Locked: one single, larger image zooms in — no repeated tiles.
+            <div
+              key={shuffleTarget?.id ?? 'locked-card'}
+              style={{ animation: 'reel-zoom-lock 480ms cubic-bezier(0.18,0.9,0.32,1.2) both' }}
+            >
+              <ReelCard player={shuffleTarget} size={176} dim={false} glow={true} />
+            </div>
+          ) : (
+            <>
+              <ReelColumn
+                pool={pool}
+                centerIndex={shuffleIndex}
+                offset={0}
+                cardSize={62}
+                transitionMs={transitionMs}
+                blurPx={Math.max(0, blurPx - 1.5)}
+              />
+              <ReelColumn
+                pool={pool}
+                centerIndex={shuffleIndex}
+                offset={offsetB}
+                cardSize={92}
+                transitionMs={transitionMs}
+                blurPx={blurPx}
+              />
+              <ReelColumn
+                pool={pool}
+                centerIndex={shuffleIndex}
+                offset={offsetC}
+                cardSize={62}
+                transitionMs={transitionMs}
+                blurPx={Math.max(0, blurPx - 1.5)}
+              />
+            </>
+          )}
         </div>
 
         {/* confetti burst on win */}
