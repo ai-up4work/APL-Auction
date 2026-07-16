@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
+import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone } from "lucide-react";
 import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
 import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
 import { demoModel, getDemoSnapshot } from "@/lib/demo/demoModel";
@@ -121,7 +122,145 @@ function useSpotlight() {
     mode: snap.mode,
     autoFocusEnabled: snap.autoFocusEnabled,
     teams: snap.auction.teams,
+    currentLot: snap.currentLot,
+    shuffle: snap.shuffle,
+    isLocked: snap.isLocked,
+    narratorText: snap.narratorText,
   };
+}
+
+// ── Live commentary ──────────────────────────────────────────────────
+// Two lines: the model's own narrator caption (what just happened — the
+// same text broadcastEvent() sets on every bid/sold/unsold/shuffle), and
+// a second, mode-aware line describing what the viewer can actually do
+// right now. The "what's next" line is worded differently for demo
+// (nothing to do but watch) vs interactive (here's your actual button).
+function getGuidance(
+  mode: "demo" | "interactive",
+  lot: ReturnType<typeof useSpotlight>["currentLot"],
+  shuffle: ReturnType<typeof useSpotlight>["shuffle"],
+  isLocked: boolean
+): string {
+  if (mode === "demo") {
+    return "Watching the bot run the auction — switch to \"Try it yourself\" to take the controls.";
+  }
+  if (!lot || lot.status === "sold" || lot.status === "unsold") {
+    return "Lot resolved. Auctioneer: click Start Shuffle to bring up the next player.";
+  }
+  if (lot.status === "shuffling" && !shuffle.target) {
+    return "Reel is spinning — nothing to do yet, the next player is about to be revealed.";
+  }
+  if (lot.status === "shuffling" && shuffle.target) {
+    return "Player revealed — bidding opens in a moment.";
+  }
+  if (lot.status === "pending" && !isLocked) {
+    return "Bidding is open. Owner A / Owner B: place a bid from your phone to raise it — every bid resets the clock.";
+  }
+  if (lot.status === "pending" && isLocked) {
+    return lot.winningTeamId
+      ? "Time's up. Auctioneer: click Hammer Sold to confirm the winner (or it resolves on its own in a moment)."
+      : "Time's up with no bids. Auctioneer: click Mark Unsold (or it resolves on its own in a moment).";
+  }
+  return "";
+}
+
+// Classifies the narrator caption so the chyron can color/tag itself by
+// event type — the accent + tag alone should tell you what happened
+// before you've even read the words. Order matters: "unsold" must be
+// checked before the generic "sold" test since "unsold" contains "sold".
+type CommentaryKind = "sold" | "unsold" | "bid" | "reveal" | "shuffle" | "info";
+
+function classifyNarrator(text: string): { kind: CommentaryKind; accent: string; tag: string } {
+  if (/unsold/i.test(text)) return { kind: "unsold", accent: "#e5484d", tag: "UNSOLD" };
+  if (/\bsold\b/i.test(text)) return { kind: "sold", accent: "#3ddc84", tag: "SOLD" };
+  if (/\bbids?\b|\bpts\b/i.test(text)) return { kind: "bid", accent: "#f5a623", tag: "BID" };
+  if (/bidding is open|steps up/i.test(text)) return { kind: "reveal", accent: "#4fd1c5", tag: "ON THE BLOCK" };
+  if (/shuffl/i.test(text)) return { kind: "shuffle", accent: "#8b8bf5", tag: "SHUFFLE" };
+  return { kind: "info", accent: "#f5a623", tag: "LIVE" };
+}
+
+// Broadcast-style chyron / lower-third, not a chat toast. A left accent
+// rule + a small mono event tag stand in for an icon badge, keeping the
+// same "glanceable event type" job without reading as generic notification
+// UI. Floating overlay, not docked — pinned centered under the toolbar so
+// it never steals layout space from the panels underneath. pointer-events:
+// none on the wrapper keeps it from ever blocking a click on what's behind
+// it. Keyed by narratorText so React remounts the chyron on every new
+// caption, replaying the entrance animation each time — a rapid string of
+// bids each get their own visible "pop" instead of the text silently
+// swapping in place.
+function CommentaryOverlay({
+  narratorText,
+  guidance,
+}: {
+  narratorText: string;
+  guidance: string;
+}) {
+  if (!narratorText && !guidance) return null;
+  const { accent, tag } = classifyNarrator(narratorText || guidance);
+  return (
+    <div className="pointer-events-none fixed top-12 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-0 max-w-[640px] w-[92%]">
+      {narratorText && (
+        <div
+          key={narratorText}
+          className="commentary-toast flex items-stretch overflow-hidden rounded-[3px]"
+          style={{
+            background: "rgba(8,8,8,0.88)",
+            backdropFilter: "blur(10px)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            boxShadow: "0 12px 30px -10px rgba(0,0,0,0.6)",
+          }}
+        >
+          {/* Left accent rule — doubles as the event's color key, in place
+              of an icon badge. */}
+          <span className="shrink-0" style={{ width: 3, background: accent }} />
+
+          <div className="flex items-center gap-3 pl-3.5 pr-4 py-2.5">
+            <span
+              className="shrink-0 text-[9px] uppercase font-bold"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                letterSpacing: "0.14em",
+                color: accent,
+              }}
+            >
+              {tag}
+            </span>
+            <span className="w-px self-stretch bg-white/10" />
+            <span
+              className="text-[13px] leading-snug"
+              style={{
+                fontFamily: "var(--font-headline-lg)",
+                fontStyle: "italic",
+                fontWeight: 700,
+                color: "var(--color-on-surface)",
+              }}
+            >
+              {narratorText}
+            </span>
+          </div>
+        </div>
+      )}
+      {guidance && (
+        <div
+          className="px-4 py-1 text-[9px] uppercase text-center"
+          style={{
+            fontFamily: "var(--font-label-mono)",
+            letterSpacing: "0.1em",
+            background: "rgba(6,6,6,0.7)",
+            borderLeft: "1px solid rgba(255,255,255,0.06)",
+            borderRight: "1px solid rgba(255,255,255,0.06)",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: "0 0 3px 3px",
+            color: "var(--color-outline)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          {guidance}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function useTimecode() {
@@ -401,7 +540,8 @@ function MultiviewBar({
 }
 
 export default function SandboxPage() {
-  const { activePanels, syncPanels, mode, autoFocusEnabled, teams } = useSpotlight();
+  const { activePanels, syncPanels, mode, autoFocusEnabled, teams, currentLot, shuffle, isLocked, narratorText } =
+    useSpotlight();
 
   const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
   const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
@@ -459,6 +599,8 @@ export default function SandboxPage() {
   const layout = computeLayout(highlighted);
 
   const pctOf = (key: PanelKey) => layout[key] ?? 0;
+
+  const guidance = getGuidance(mode, currentLot, shuffle, isLocked);
 
   // Exactly one owner spotlighted → offer a button to flip to the other one.
   // Both, neither, or the owner-picking UI already visible (chips) covers
@@ -518,6 +660,16 @@ export default function SandboxPage() {
           50% { opacity: 0.45; }
         }
 
+        @keyframes commentaryIn {
+          0% { opacity: 0; transform: translateY(-16px) scale(0.97); }
+          55% { opacity: 1; transform: translateY(2px) scale(1.005); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .commentary-toast {
+          animation: commentaryIn 380ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
         .sandbox-scanlines {
           background-image: repeating-linear-gradient(
             0deg,
@@ -535,9 +687,9 @@ export default function SandboxPage() {
         mode={mode}
         autoFocusEnabled={autoFocusEnabled}
         onToggleMode={handleToggleMode}
-        switchToOwner={switchToOwner}
-        onSwitchOwner={() => switchToOwner && demoModel.focusOwner(switchToOwner)}
       />
+
+      <CommentaryOverlay narratorText={narratorText} guidance={guidance} />
 
       <OwnerDotSwitcher
         mode={mode}
