@@ -26,6 +26,8 @@ import {
 } from "@/lib/auctionLiveDb";
 import { ensureTeamPurses, shuffleArray, fmtPts, type TeamPurse } from "@/lib/auctionLiveUtils";
 import type { Player } from "@/types/auction";
+import Image from 'next/image';
+
 
 type FlowPlayer = (typeof AUCTION_CONFIG.players)[number];
 type FlowTeam   = (typeof AUCTION_CONFIG.teams)[number];
@@ -818,7 +820,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
                         >
                           {currentLot?.playerImg ? (
-                            <img src={currentLot.playerImg} alt={currentLot.playerName} className="w-full h-full object-cover object-top" style={{ filter: "grayscale(0.15) contrast(1.2)" }} />
+                            <Image src={currentLot.playerImg} alt={currentLot.playerName} className="w-full h-full object-cover object-top" style={{ filter: "grayscale(0.15) contrast(1.2)" }} width={280} height={325} />
                           ) : (
                             <div className="w-full h-full bg-surface-container flex items-center justify-center">
                               <span className="ms text-outline-variant text-9xl">person</span>
@@ -1032,7 +1034,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                         ].filter(Boolean).join(" ")}
                       >
                         <div className={["w-10 h-10 rounded-lg overflow-hidden flex-shrink-0", isUnsoldP ? "grayscale opacity-40" : "bg-surface-container-highest"].join(" ")}>
-                          {p.img ? <img src={p.img} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-surface-container-highest" />}
+                          {p.img ? <Image src={p.img} className="w-full h-full object-cover" alt="" width={40} height={40} /> : <div className="w-full h-full bg-surface-container-highest" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">

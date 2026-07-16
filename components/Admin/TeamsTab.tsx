@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import type { Team } from "@/types/auction";
 import ImageUploadField from "@/components/Admin/ImageUploadField";
+import Image from "next/image";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TOOLS = [
@@ -397,7 +398,7 @@ function TeamCard({
           <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden shadow-lg"
             style={{ background: "var(--color-surface-bright)", border: isActive ? "2px solid var(--color-theme-orange)" : "1px solid var(--color-outline-variant)" }}>
             {team.logo
-              ? <img src={team.logo} alt={team.name} className="w-16 h-16 object-cover" />
+              ? <Image src={team.logo} alt={team.name} className="w-16 h-16 object-cover" width={64} height={64} />
               : <span className="text-sm font-black" style={{ color: team.color, fontFamily: "var(--font-label-mono)" }}>{team.code}</span>
             }
           </div>

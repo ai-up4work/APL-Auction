@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuction } from "@/context/AuctionContext";
+import Image from "next/image";
 
 const STATUS_COLOR: Record<string, string> = {
   setup:     "var(--color-outline)",
@@ -76,7 +77,7 @@ function AuctionCard({
           }}
         >
           {auction.auctionLogo ? (
-            <img src={auction.auctionLogo} alt="" className="w-14 h-14 object-cover" />
+            <Image src={auction.auctionLogo} alt="" className="w-14 h-14 object-cover" width={56} height={56}/>
           ) : (
             <span className="material-symbols-outlined" style={{ fontSize: 24, color: "var(--color-theme-orange)" }}>
               gavel
