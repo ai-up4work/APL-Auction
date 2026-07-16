@@ -1,12 +1,14 @@
 "use client";
 
-import { demoModel, fmtPts } from "./demoModel";
+import { demoModel, getDemoSnapshot, fmtPts } from "./demoModel";
 
 const AUCTIONEER = "auctioneer";
 const OWNER_A = "ownerA";
 const OWNER_B = "ownerB";
 const WATCH = "watch";
 const ALL_PANELS = [AUCTIONEER, OWNER_A, OWNER_B, WATCH];
+
+type EpisodeOutcome = "sold" | "unsold";
 
 type Step =
   | { at: number; type: "cursor"; actor: string; panel: string; targetId: string; label: string; color: string }
@@ -97,6 +99,14 @@ const EXTRA_PAUSE_MS = 2000;
 // pauses stacked on top of it, so beats later in the episode end up
 // further apart than earlier ones, compounding correctly instead of
 // everything shifting by one flat offset.
+//
+// Unsold episodes only ever use the first three bands (open/shuffle/
+// reveal) plus the final "hide" band — no bid beats occur, since the
+// model's own clock + auto-resolve timer marks the lot unsold on its own.
+// The final band still lands comfortably after that auto-resolve fires
+// (reveal lands around paced ~7.7s; the clock + auto-resolve delay adds
+// another ~13.3s on top of that, i.e. ~21s — the "else" band below paces
+// the hide/next-lot beat out to ~30s, a safe margin either way).
 function paceStep(at: number): number {
   if (at < 1700) return at; // beat 0: open lot
   if (at < 3700) return at + EXTRA_PAUSE_MS * 1; // beat 1: shuffle
@@ -108,7 +118,7 @@ function paceStep(at: number): number {
   return at + EXTRA_PAUSE_MS * 7; // beat 7: hide / prepare next lot
 }
 
-function buildEpisode(aWinsFinal: boolean): Step[] {
+function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
   const first = aWinsFinal ? OWNER_B : OWNER_A;
   const firstTeam = aWinsFinal ? "tB" : "tA";
   const second = aWinsFinal ? OWNER_A : OWNER_B;
@@ -116,7 +126,8 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
   const nameOf = (a: string) => (a === OWNER_A ? "Priya · CSK Owner" : "Rohan · MI Owner");
   const colorOf = (a: string) => (a === OWNER_A ? "#f5a623" : "#3b8bd4");
 
-  const rawSteps: Step[] = [
+  // ── Beats shared by every episode: open the lot, shuffle, reveal. ────
+  const openBeats: Step[] = [
     { at: 0, type: "narrator", text: () => "Auctioneer opens the next lot" },
     focusStep(0, AUCTIONEER),
     { at: 0, type: "cursor", actor: AUCTIONEER, panel: "auctioneer", targetId: "demo-start-btn", label: "Auctioneer", color: "#c9971f" },
@@ -136,10 +147,10 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
     { at: 3700, type: "reveal" },
     { at: 3720, type: "narrator", text: () => `${demoModel.getSnapshot().currentLot?.playerName ?? "Player"} steps up — bidding is open` },
     { at: 3720, type: "sync", panels: ALL_PANELS },
+  ];
 
-    // Spotlight the bidding owner together with the Auctioneer console
-    // (75/25) so the bid and the console reacting to it are visible at
-    // once, instead of falling back to the owner+Watch combo.
+  // ── Sold path: three escalating bids, then the hammer. ───────────────
+  const soldBeats: Step[] = [
     focusStep(4400, [AUCTIONEER, first]),
     { at: 4400, type: "cursor", actor: first, panel: first, targetId: "demo-bid-btn", label: nameOf(first), color: colorOf(first) },
     { at: 4400, type: "narrator", text: () => `${nameOf(first)} places the opening bid` },
@@ -183,12 +194,31 @@ function buildEpisode(aWinsFinal: boolean): Step[] {
       const lot = demoModel.getSnapshot().currentLot;
       return lot ? `SOLD — ${lot.playerName} to ${lot.winningTeamCode} for ${fmtPts(lot.currentBid)} pts!` : "Sold!";
     } },
+  ];
 
+  // ── Unsold path: nobody bids. Nothing to click — the model's own
+  // clock + auto-resolve timer (see demoModel.scheduleAutoResolve) flips
+  // the lot to "unsold" on its own about 13.3s after bidding opens, and
+  // fires the narrator caption + panel pulse itself via broadcastEvent()
+  // when it does. The orchestrator just narrates the "quiet" moment and
+  // gets out of the way. ────────────────────────────────────────────────
+  const unsoldBeats: Step[] = [
+    { at: 4400, type: "narrator", text: () => "No bids coming in — the clock's the only thing moving" },
+    focusStep(4400, [AUCTIONEER, WATCH]),
+  ];
+
+  const closingBeats: Step[] = [
     focusStep(16400, []),
     { at: 16400, type: "hide", actor: AUCTIONEER },
     { at: 16400, type: "hide", actor: OWNER_A },
     { at: 16400, type: "hide", actor: OWNER_B },
     { at: 16400, type: "narrator", text: () => "Preparing the next lot…" },
+  ];
+
+  const rawSteps: Step[] = [
+    ...openBeats,
+    ...(outcome === "sold" ? soldBeats : unsoldBeats),
+    ...closingBeats,
   ];
 
   return rawSteps.map((s) => ({ ...s, at: paceStep(s.at) }));
@@ -270,14 +300,77 @@ export class DemoOrchestrator {
     return this.paused;
   }
 
+  /** Decides what the next beat of the showcase should be, based on the
+   * model's actual current state rather than blindly looping — mirrors
+   * the three real states an auction can be in: still has players to
+   * call, empty queue but an unsold pile worth a re-entry pass, or
+   * genuinely finished. */
   private runNext() {
     if (!this.running) return;
-    demoModel.refillIfEmpty();
-    const steps = buildEpisode(this.episode % 2 === 0);
+    const snap = getDemoSnapshot();
+
+    if (snap.auction.players.length > 0) {
+      this.runLotEpisode();
+      return;
+    }
+    if (snap.unsoldPlayers.length > 0 && snap.roundInfo.current < snap.roundInfo.limit) {
+      this.runReentryEpisode();
+      return;
+    }
+    this.runCompletionEpisode();
+  }
+
+  /** Normal lot: shuffle → reveal → bid (or not) → resolve. Every third
+   * lot plays out with nobody bidding, so the re-entry mechanic actually
+   * has something to demonstrate once the queue runs dry. */
+  private runLotEpisode() {
+    const outcome: EpisodeOutcome = this.episode % 3 === 2 ? "unsold" : "sold";
+    const steps = buildEpisode(this.episode % 2 === 0, outcome);
     this.episode += 1;
     steps.forEach((s) => this.schedule(() => this.runStep(s), s.at));
     const total = steps[steps.length - 1].at + 1500;
     this.schedule(() => this.runNext(), total);
+  }
+
+  /** Queue's empty but the unsold pile still has eligible players — walks
+   * the auctioneer's cursor to the real "Re-entry Round" button and clicks
+   * it, same as a person would, so the requeue plays out through the
+   * actual production-mirroring demoModel.startReentryRound() logic
+   * rather than a scripted shortcut. */
+  private runReentryEpisode() {
+    const count = getDemoSnapshot().unsoldPlayers.length;
+    this.schedule(() => {
+      demoModel.setActivePanel(["auctioneer", "watch"]);
+      demoModel.setNarrator(`Queue's empty — ${count} unsold player${count === 1 ? "" : "s"} eligible for re-entry`);
+    }, 0);
+    this.schedule(
+      () => moveCursor(AUCTIONEER, "auctioneer", "demo-reentry-btn", "Auctioneer", "#c9971f"),
+      500
+    );
+    this.schedule(() => click(AUCTIONEER), 2000);
+    // startReentryRound() itself fires the narrator caption + panel pulse
+    // via broadcastEvent() — nothing extra needed here beyond triggering
+    // the click, but the click already invoked the button's own onClick.
+    this.schedule(() => demoModel.setCursor(AUCTIONEER, { visible: false }), 2900);
+    this.schedule(() => this.runNext(), 3800);
+  }
+
+  /** Nothing left to call and no re-entry passes remain — the showcase
+   * has genuinely run its course. Holds on a completion beat for a few
+   * seconds so it reads as a real ending, then loops the whole thing
+   * from a clean slate. This is a marketing/sandbox demo meant to run
+   * indefinitely, not a real auction with a single ending — a real
+   * auctioneer console just stays completed. */
+  private runCompletionEpisode() {
+    this.schedule(() => {
+      demoModel.setActivePanel(["auctioneer", "watch"]);
+      demoModel.setNarrator("Auction complete — every lot called");
+      demoModel.pulsePanels(ALL_PANELS);
+    }, 0);
+    this.schedule(() => {
+      demoModel.startNewCycle();
+      this.runNext();
+    }, 4500);
   }
 
   private runStep(step: Step) {

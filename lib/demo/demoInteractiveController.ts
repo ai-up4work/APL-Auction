@@ -5,7 +5,8 @@ import { demoModel, getDemoSnapshot } from "./demoModel";
 // Replaces demoOrchestrator when a real person is controlling the panels.
 // Real clicks on the real buttons in DemoAuctioneerPage / DemoOwnerBidPage
 // already call demoModel.startShuffle() / placeBid() / hammerSold() /
-// markUnsold() directly, so this controller doesn't need to drive those.
+// markUnsold() / startReentryRound() directly, so this controller doesn't
+// need to drive those.
 //
 // It DOES need to own one thing end-to-end: the "director's cut" jump to
 // the Watch panel while the shuffle reel is spinning, and the jump back
@@ -18,11 +19,11 @@ import { demoModel, getDemoSnapshot } from "./demoModel";
 // re-asserted continuously for as long as the lot is actually shuffling,
 // so it can't be raced or overridden by unrelated focus changes.
 //
-// Deliberately does NOT call demoModel.reset() here — switching modes is a
-// hand-off, not a restart. Whatever lot/purses/history exist when the
-// person flips from "Watch demo" to "Try it yourself" (or back) carry
-// straight over; setMode() only flips the mode flag (and re-enables
-// auto-focus) without touching any auction data.
+// Deliberately does NOT call demoModel.reset() or auto-refill anything —
+// switching modes is a hand-off, not a restart, and running dry in
+// interactive mode is a real end state a person should see and act on
+// (via the Re-entry Round button, or just be done), not something the
+// controller silently papers over.
 class DemoInteractiveController {
   private unsub: (() => void) | null = null;
   private running = false;
@@ -54,7 +55,6 @@ class DemoInteractiveController {
     this.preShufflePanels = null;
 
     this.unsub = demoModel.subscribe(() => {
-      demoModel.refillIfEmpty();
       this.reactToLotStatus();
     });
   }

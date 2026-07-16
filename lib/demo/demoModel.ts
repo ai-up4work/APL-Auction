@@ -71,6 +71,19 @@ export type ShuffleState = {
   target: DemoPlayer | null;
 };
 
+// ── Re-entry round outcomes, mirrors the production /lib/auctionLiveDb
+// startReentryRound() return shape so both UIs can share the same
+// reasonToMessage()-style copy. ───────────────────────────────────────
+export type ReentryReason =
+  | "round_limit_reached"
+  | "all_squads_full"
+  | "no_team_can_afford"
+  | "no_unsold_players";
+
+export type ReentryResult =
+  | { started: true; round: number; requeued: number }
+  | { started: false; reason: ReentryReason; finalized: number };
+
 const TIMER_SECONDS = 12;
 const TICK_MS = 100;
 
@@ -86,6 +99,10 @@ const SHUFFLE_HIDE_MS = REVEAL_HOLD_MS + 300;
 // resolution — mirrors a real auctioneer's "going once, going twice" pause
 // instead of snapping straight to the stamp the instant the clock dies.
 const AUTO_RESOLVE_DELAY_MS = 1300;
+
+// How many extra passes an unsold player gets before being finalized —
+// kept small since the demo pool is only 5 players deep.
+const UNSOLD_REENTRY_ROUNDS = 1;
 
 const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUnsoldFinal">[] = [
   { name: "Marcus Vane", role: "All-rounder", origin: "Overseas", country: "Australia", img: "", price: 1500, capped: true },
@@ -122,6 +139,10 @@ export type DemoAuction = {
     teamSize: number;
     basePrice: number;
     tiers: { from: number; to: number | null; increment: number }[];
+    // How many re-entry passes an unsold player is allowed before being
+    // finalized as unsold-for-good. Mirrors the production auction's
+    // `unsoldReentryRounds` rule.
+    unsoldReentryRounds: number;
   };
   session: {
     auctionName: string;
@@ -167,6 +188,14 @@ type Snapshot = {
   // via the stepper (focusOwner) carries forward to the next lot instead
   // of always resetting to Owner A.
   lastOwnerFocus: "ownerA" | "ownerB";
+  // Players who went unsold and are still eligible for a re-entry pass —
+  // kept separate from `auction.players` (the not-yet-called queue) so a
+  // lot resolving unsold doesn't just vanish the player from the demo.
+  unsoldPlayers: DemoPlayer[];
+  // Players who went unsold and then failed/exhausted re-entry — out for
+  // good, kept around only so a completion summary can name them.
+  finalizedUnsoldPlayers: DemoPlayer[];
+  roundInfo: { current: number; limit: number };
 };
 
 function initialSnapshot(): Snapshot {
@@ -190,6 +219,7 @@ function initialSnapshot(): Snapshot {
           { from: 3000, to: 6000, increment: 500 },
           { from: 6000, to: null, increment: 1000 },
         ],
+        unsoldReentryRounds: UNSOLD_REENTRY_ROUNDS,
       },
       session: {
         auctionName: "Valiant League · Live Demo",
@@ -213,6 +243,9 @@ function initialSnapshot(): Snapshot {
     mode: "demo",
     autoFocusEnabled: true,
     lastOwnerFocus: "ownerA",
+    unsoldPlayers: [],
+    finalizedUnsoldPlayers: [],
+    roundInfo: { current: 0, limit: UNSOLD_REENTRY_ROUNDS },
   };
 }
 
@@ -328,9 +361,9 @@ class DemoModelImpl {
   }
 
   // ── All-panel "something just happened" flourish ────────────────────
-  // Used by placeBid / hammerSold / markUnsold / startShuffle so the pulse
-  // ring + narrator caption fire the same way regardless of whether a bot
-  // script or a real click triggered the state change.
+  // Used by placeBid / hammerSold / markUnsold / startShuffle / reentry so
+  // the pulse ring + narrator caption fire the same way regardless of
+  // whether a bot script or a real click triggered the state change.
   private broadcastEvent(text: string, panels: DemoPanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"]) {
     this.setNarrator(text);
     this.pulsePanels(panels);
@@ -404,7 +437,11 @@ class DemoModelImpl {
       this.resumeClockFromCurrent();
     }
   }
-  complete() { this.stopClock(); this.set({ auction: { ...this.snap.auction, status: "completed" } }); }
+  complete() {
+    this.stopClock();
+    this.cancelAutoResolve();
+    this.set({ auction: { ...this.snap.auction, status: "completed" } });
+  }
 
   // ── Shuffle reel ─────────────────────────────────────────────────────
   private tickShuffle(delay = 65, elapsed = 0) {
@@ -579,6 +616,7 @@ class DemoModelImpl {
     // stamp and ticker live, so send everyone's eyes there, overriding
     // any manual pin (another director's-cut moment).
     this.forceFocus(["auctioneer", "watch"]);
+    this.maybeComplete();
   }
 
   markUnsold() {
@@ -587,27 +625,144 @@ class DemoModelImpl {
     this.cancelAutoResolve();
     this.stopClock();
     const closed: DemoLot = { ...lot, status: "unsold" };
+    const player = this.snap.auction.players.find((p2) => p2.supabaseId === lot.playerId) ?? null;
     this.set({
       currentLot: closed,
       completedLots: [closed, ...this.snap.completedLots],
-      auction: { ...this.snap.auction, players: this.snap.auction.players.filter((p2) => p2.supabaseId !== lot.playerId) },
+      auction: {
+        ...this.snap.auction,
+        players: this.snap.auction.players.filter((p2) => p2.supabaseId !== lot.playerId),
+      },
+      // Player moves to the unsold pile — still in play, waiting on a
+      // possible re-entry round — rather than being dropped entirely.
+      unsoldPlayers: player ? [...this.snap.unsoldPlayers, player] : this.snap.unsoldPlayers,
     });
     this.broadcastEvent(`${closed.playerName} went unsold — no bids before time ran out`);
     this.forceFocus(["auctioneer", "watch"]);
+    this.maybeComplete();
   }
 
-  refillIfEmpty() {
-    if (this.snap.auction.players.length === 0) {
-      const teams = makeTeams();
-      const purses: Record<string, DemoTeamPurse> = {};
-      teams.forEach((t) => (purses[t.supabaseId] = { remaining: this.snap.auction.rules.totalPoints, roster: 0 }));
-      this.set({
-        auction: { ...this.snap.auction, players: makePlayers(), teams, status: "live" },
-        teamPurses: purses,
-        completedLots: [],
-        lotNumber: 0,
-      });
+  // ── Unsold re-entry ──────────────────────────────────────────────────
+  private canAffordCheapestUnsold(): boolean {
+    const unsold = this.snap.unsoldPlayers;
+    if (unsold.length === 0) return true;
+    const cheapest = Math.min(...unsold.map((p) => p.price));
+    return this.snap.auction.teams.some((t) => {
+      const purse = this.snap.teamPurses[t.supabaseId];
+      return !!purse && purse.remaining >= cheapest && purse.roster < this.snap.auction.rules.teamSize;
+    });
+  }
+
+  private allSquadsFull(): boolean {
+    return this.snap.auction.teams.every(
+      (t) => (this.snap.teamPurses[t.supabaseId]?.roster ?? 0) >= this.snap.auction.rules.teamSize
+    );
+  }
+
+  /** Moves everything still in unsoldPlayers into finalizedUnsoldPlayers
+   * (marking isUnsoldFinal) and checks whether that was the last thing
+   * standing between the auction and being genuinely done. */
+  private finalizeUnsold() {
+    if (this.snap.unsoldPlayers.length === 0) return;
+    const finalized = this.snap.unsoldPlayers.map((p) => ({ ...p, isUnsoldFinal: true }));
+    this.set({
+      unsoldPlayers: [],
+      finalizedUnsoldPlayers: [...this.snap.finalizedUnsoldPlayers, ...finalized],
+    });
+    this.maybeComplete();
+  }
+
+  /** Fires once the queue AND the unsold pile are both empty — the
+   * auction has genuinely run its course, nothing left to call or
+   * re-enter. Safe to call defensively from multiple places. */
+  private maybeComplete() {
+    if (
+      this.snap.auction.players.length === 0 &&
+      this.snap.unsoldPlayers.length === 0 &&
+      this.snap.auction.status !== "completed"
+    ) {
+      this.complete();
     }
+  }
+
+  /** Mirrors the production "Start Re-entry Round" action: reshuffles
+   * every currently-unsold player back into the live queue for one more
+   * pass, up to rules.unsoldReentryRounds total passes. Bails out — and
+   * permanently finalizes whoever's still unsold — if the round limit's
+   * hit, every squad is already full, or no team can even afford the
+   * cheapest unsold player: the same three reasons the real console
+   * surfaces via reasonToMessage(). */
+  startReentryRound(): ReentryResult {
+    const unsold = this.snap.unsoldPlayers;
+    if (unsold.length === 0) return { started: false, reason: "no_unsold_players", finalized: 0 };
+
+    const limit = this.snap.auction.rules.unsoldReentryRounds;
+    const current = this.snap.roundInfo.current;
+
+    if (current >= limit) {
+      const finalizedCount = unsold.length;
+      this.finalizeUnsold();
+      this.broadcastEvent(
+        `Re-entry round limit reached — ${finalizedCount} player${finalizedCount === 1 ? "" : "s"} marked Unsold (Final).`
+      );
+      return { started: false, reason: "round_limit_reached", finalized: finalizedCount };
+    }
+    if (this.allSquadsFull()) {
+      const finalizedCount = unsold.length;
+      this.finalizeUnsold();
+      this.broadcastEvent(
+        `Every team's squad is full — ${finalizedCount} player${finalizedCount === 1 ? "" : "s"} marked Unsold (Final).`
+      );
+      return { started: false, reason: "all_squads_full", finalized: finalizedCount };
+    }
+    if (!this.canAffordCheapestUnsold()) {
+      const finalizedCount = unsold.length;
+      this.finalizeUnsold();
+      this.broadcastEvent(
+        `No team can afford the cheapest unsold player — ${finalizedCount} player${finalizedCount === 1 ? "" : "s"} marked Unsold (Final).`
+      );
+      return { started: false, reason: "no_team_can_afford", finalized: finalizedCount };
+    }
+
+    // Requeue: bump each player's reentryCount, clear isUnsoldFinal (in
+    // case this is somehow a second lap), and append to the back of the
+    // live queue so they're called again like any other lot.
+    const requeued = unsold.map((p) => ({
+      ...p,
+      reentryCount: (p.reentryCount ?? 0) + 1,
+      isUnsoldFinal: false,
+    }));
+    const nextRound = current + 1;
+    this.set({
+      auction: { ...this.snap.auction, players: [...this.snap.auction.players, ...requeued], status: "live" },
+      unsoldPlayers: [],
+      roundInfo: { current: nextRound, limit },
+    });
+    this.broadcastEvent(
+      `Re-entry Round ${nextRound} started — ${requeued.length} player${requeued.length === 1 ? "" : "s"} shuffled back into the pool.`
+    );
+    return { started: true, round: nextRound, requeued: requeued.length };
+  }
+
+  /** Full reset used to loop the demo showcase once a completion beat has
+   * played out — clears players, purses, unsold piles, and round
+   * counters back to a clean slate. Only ever called by the demo
+   * orchestrator; a real person driving the console in interactive mode
+   * doesn't get a magic refill — they either start a re-entry round via
+   * startReentryRound(), or the auction is just done. */
+  startNewCycle() {
+    const teams = makeTeams();
+    const purses: Record<string, DemoTeamPurse> = {};
+    teams.forEach((t) => (purses[t.supabaseId] = { remaining: this.snap.auction.rules.totalPoints, roster: 0 }));
+    this.set({
+      auction: { ...this.snap.auction, players: makePlayers(), teams, status: "live" },
+      teamPurses: purses,
+      completedLots: [],
+      lotNumber: 0,
+      unsoldPlayers: [],
+      finalizedUnsoldPlayers: [],
+      roundInfo: { current: 0, limit: this.snap.auction.rules.unsoldReentryRounds },
+    });
   }
 
   setCursor(actorId: string, patch: Partial<CursorState>) {

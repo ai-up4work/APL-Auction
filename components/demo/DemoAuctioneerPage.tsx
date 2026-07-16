@@ -31,21 +31,62 @@ function AuctionStamp({ state }: { state: "sold" | "unsold" }) {
   );
 }
 
+// Same "Re-entry Round" affordance as the production console — appears
+// once the queue is empty and there are unsold players still eligible
+// for a re-entry pass, mirroring the real page's showReentryButton logic
+// (pendingUnsoldCount > 0 && playerQueue.length === 0).
+function ReentryButton({ count, isStarting, onClick }: { count: number; isStarting: boolean; onClick: () => void }) {
+  return (
+    <button
+      id="demo-reentry-btn"
+      onClick={onClick}
+      disabled={isStarting}
+      className="flex items-center gap-1.5 px-4 py-1.5 rounded font-mono-geist font-bold uppercase tracking-[0.16em] text-[10px] border disabled:opacity-50"
+      style={{
+        background: "rgba(99,102,241,0.15)",
+        borderColor: "rgba(129,140,248,0.3)",
+        color: "#a5b4fc",
+      }}
+      title={`${count} player${count === 1 ? "" : "s"} unsold and eligible for re-entry`}
+    >
+      <span className="material-symbols-outlined text-sm">{isStarting ? "refresh" : "restart_alt"}</span>
+      Re-entry Round
+      <span className="px-1.5 py-0.5 rounded-full text-[9px]" style={{ background: "rgba(129,140,248,0.2)" }}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
 export default function DemoAuctioneerPage() {
   const snap = useSyncExternalStore(
     demoModel.subscribe.bind(demoModel),
     getDemoSnapshot,
     getDemoSnapshot
   );
-  const { auction, currentLot, bidHistory, teamPurses, lotNumber, clockPct, isLocked } = snap;
+  const {
+    auction,
+    currentLot,
+    bidHistory,
+    teamPurses,
+    lotNumber,
+    clockPct,
+    isLocked,
+    unsoldPlayers,
+    finalizedUnsoldPlayers,
+    roundInfo,
+  } = snap;
 
   const [particles, setParticles] = useState<Particle[]>([]);
   const [flashActive, setFlashActive] = useState(false);
   const [glowActive, setGlowActive] = useState(false);
+  const [isStartingReentry, setIsStartingReentry] = useState(false);
+  const [reentryToast, setReentryToast] = useState<string | null>(null);
 
   const soldState: "pending" | "sold" | "unsold" =
     currentLot?.status === "sold" ? "sold" : currentLot?.status === "unsold" ? "unsold" : "pending";
   const isShuffling = currentLot?.status === "shuffling";
+  const isCompleted = auction.status === "completed";
 
   const winningTeam = currentLot?.winningTeamId
     ? auction.teams.find((t) => t.supabaseId === currentLot.winningTeamId) ?? null
@@ -53,6 +94,9 @@ export default function DemoAuctioneerPage() {
   const nextBidAmount = currentLot ? getNextBidAmount(currentLot.currentBid, auction.rules.tiers) : 0;
 
   const shotClockColor = clockPct < 25 ? "#ef4444" : clockPct < 50 ? "#f59e0b" : "#c9971f";
+
+  const pendingUnsoldCount = unsoldPlayers.length;
+  const showReentryButton = pendingUnsoldCount > 0 && auction.players.length === 0 && !isCompleted;
 
   function spawnParticles(colors: string[]) {
     const created: Particle[] = Array.from({ length: 40 }, () => {
@@ -65,6 +109,7 @@ export default function DemoAuctioneerPage() {
 
   function handleStartNext() {
     if (currentLot && currentLot.status !== "sold" && currentLot.status !== "unsold") return;
+    if (auction.players.length === 0) return;
     demoModel.startShuffle();
     setTimeout(() => demoModel.revealLot(), 2000);
   }
@@ -79,6 +124,18 @@ export default function DemoAuctioneerPage() {
     if (!currentLot || soldState !== "pending") return;
     demoModel.markUnsold();
     spawnParticles(UNSOLD_COLORS);
+  }
+  function handleStartReentry() {
+    if (isStartingReentry) return;
+    setIsStartingReentry(true);
+    const result = demoModel.startReentryRound();
+    setReentryToast(
+      result.started
+        ? `Re-entry Round ${result.round} — ${result.requeued} player${result.requeued === 1 ? "" : "s"} back in the pool.`
+        : `Re-entry unavailable — ${result.finalized} player${result.finalized === 1 ? "" : "s"} marked Unsold (Final).`
+    );
+    setTimeout(() => setReentryToast(null), 4000);
+    setIsStartingReentry(false);
   }
 
   const totalSlotsLeft = auction.teams.reduce((sum, t) => {
@@ -118,6 +175,8 @@ export default function DemoAuctioneerPage() {
         .unsold-hatch-layer { position: absolute; inset: 0; background: repeating-linear-gradient(-45deg, transparent 0px, transparent 6px, rgba(113,128,150,0.08) 6px, rgba(113,128,150,0.08) 7px); }
         .unsold-word { font-family: 'Archivo Narrow', sans-serif; font-size: 40px; font-weight: 700; font-style: italic; letter-spacing: 0.12em; text-transform: uppercase; color: #A0AEC0; line-height: 1; display: block; position: relative; z-index: 2; }
         .unsold-sub { display: block; text-align: center; font-family: 'Geist Mono', monospace; font-size: 8px; font-weight: 500; letter-spacing: 0.35em; text-transform: uppercase; color: rgba(160,174,192,0.55); margin-top: 6px; position: relative; z-index: 2; }
+        @keyframes reentry-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.35); } 50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); } }
+        .reentry-glow { animation: reentry-glow 1.6s ease-in-out infinite; }
       `}</style>
 
       <DemoCursor cursor={snap.cursors["auctioneer"] as React.ComponentProps<typeof DemoCursor>["cursor"]} />
@@ -131,12 +190,35 @@ export default function DemoAuctioneerPage() {
         <div className="w-[400px] h-[400px] rounded-full blur-[100px]" style={{ background: soldState === "sold" ? "rgba(201,151,31,0.18)" : "rgba(113,128,150,0.12)" }} />
       </div>
 
+      {reentryToast && (
+        <div
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-[200] px-4 py-2 rounded-full text-[10px] font-bold max-w-md text-center"
+          style={{
+            background: "rgba(99,102,241,0.14)",
+            border: "1px solid rgba(129,140,248,0.4)",
+            color: "#a5b4fc",
+            fontFamily: "'Geist Mono', monospace",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          {reentryToast}
+        </div>
+      )}
+
       {/* TOP BAR */}
       <header className="shrink-0 flex justify-between items-center px-6 h-14 glass-panel border-b border-white/10">
         <div className="flex items-center gap-3">
           <h1 className="font-archivo text-lg font-bold italic tracking-tighter text-theme-orange uppercase" style={{ color: "#c9971f" }}>
             {auction.session.auctionName}
           </h1>
+          {roundInfo.current > 0 && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(129,140,248,0.2)" }}>
+              <span className="material-symbols-outlined text-indigo-300 text-xs">autorenew</span>
+              <span className="font-mono-geist text-[9px] text-indigo-300 uppercase font-bold tracking-[0.14em]">
+                Re-entry {roundInfo.current}/{roundInfo.limit}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-4">
           {currentLot && soldState === "pending" && !isShuffling && (
@@ -151,6 +233,11 @@ export default function DemoAuctioneerPage() {
             <div className="text-white/40 uppercase tracking-[0.1em]">Lot</div>
             <div className="font-bold" style={{ color: "#c9971f" }}>#{lotNumber} / {auction.players.length + auction.rules.teamSize}</div>
           </div>
+          {showReentryButton && (
+            <div className="reentry-glow rounded">
+              <ReentryButton count={pendingUnsoldCount} isStarting={isStartingReentry} onClick={handleStartReentry} />
+            </div>
+          )}
           <button className="bg-white/5 text-white/60 px-4 py-1.5 rounded font-mono-geist font-bold uppercase tracking-[0.2em] text-[10px] border border-white/10">Pause</button>
           <button className="bg-red-500/10 text-red-300 px-4 py-1.5 rounded font-mono-geist font-bold uppercase tracking-[0.2em] text-[10px] border border-white/10">Complete</button>
         </div>
@@ -164,17 +251,54 @@ export default function DemoAuctioneerPage() {
               <h3 className="font-mono-geist text-[10px] text-white/50 uppercase font-bold tracking-[0.2em]">Remaining Pool</h3>
               <span className="bg-white/5 px-2 py-0.5 rounded font-mono-geist text-[9px] font-bold tracking-widest">{auction.players.length} PENDING</span>
             </div>
+            {pendingUnsoldCount > 0 && (
+              <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                <span className="material-symbols-outlined text-indigo-300 text-sm">hourglass_top</span>
+                <span className="font-mono-geist text-[9px] text-indigo-300 uppercase tracking-[0.1em]">
+                  {pendingUnsoldCount} awaiting re-entry
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
             {auction.players.map((p) => (
               <div key={p.supabaseId} className="p-2.5 rounded flex items-center gap-3 hover:bg-white/5">
                 <span className="w-2 h-2 rounded-full bg-white/20" />
                 <div>
-                  <p className="font-archivo text-xs font-bold uppercase text-white/70">{p.name}</p>
+                  <p className="font-archivo text-xs font-bold uppercase text-white/70 flex items-center gap-1.5">
+                    {p.name}
+                    {(p.reentryCount ?? 0) > 0 && (
+                      <span className="px-1 py-0.5 rounded text-[7px] font-bold normal-case" style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc" }}>
+                        R{p.reentryCount}
+                      </span>
+                    )}
+                  </p>
                   <p className="font-mono-geist text-[9px] text-white/40">{p.role} | {p.country}</p>
                 </div>
               </div>
             ))}
+            {auction.players.length === 0 && !isCompleted && (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <span className="material-symbols-outlined text-white/20 text-3xl mb-2">check_circle</span>
+                <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest">All players called</p>
+                {pendingUnsoldCount > 0 && (
+                  <p className="font-mono-geist text-[9px] text-indigo-300 uppercase tracking-widest mt-2">
+                    {pendingUnsoldCount} unsold — start a re-entry round above
+                  </p>
+                )}
+              </div>
+            )}
+            {isCompleted && (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <span className="material-symbols-outlined text-theme-orange text-3xl mb-2" style={{ color: "#c9971f" }}>military_tech</span>
+                <p className="font-mono-geist text-[9px] uppercase tracking-widest" style={{ color: "#c9971f" }}>Auction complete</p>
+                {finalizedUnsoldPlayers.length > 0 && (
+                  <p className="font-mono-geist text-[9px] text-white/40 uppercase tracking-widest mt-2">
+                    {finalizedUnsoldPlayers.length} finalized unsold
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -195,7 +319,11 @@ export default function DemoAuctioneerPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 w-full mt-3">
-                {isShuffling ? (
+                {isCompleted ? (
+                  <div className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-lg font-mono-geist text-[9px] uppercase tracking-[0.2em]" style={{ background: "rgba(201,151,31,0.06)", border: "1px solid rgba(201,151,31,0.2)", color: "#c9971f" }}>
+                    Auction complete
+                  </div>
+                ) : isShuffling ? (
                   <div className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-lg font-mono-geist text-[9px] uppercase tracking-[0.2em]" style={{ background: "rgba(201,151,31,0.06)", border: "1px solid rgba(201,151,31,0.2)", color: "#c9971f" }}>
                     Revealing on broadcast…
                   </div>
@@ -206,7 +334,7 @@ export default function DemoAuctioneerPage() {
                       style={{ background: "linear-gradient(135deg,#A87815,#E8C468)", color: "#1a1304" }}>
                       Hammer Sold
                     </button>
-                    <button onClick={handleMarkUnsold} className="flex items-center justify-center gap-1 py-2.5 rounded-lg font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/60 border border-white/10">
+                    <button id="demo-unsold-btn" onClick={handleMarkUnsold} className="flex items-center justify-center gap-1 py-2.5 rounded-lg font-mono-geist text-[9px] uppercase tracking-[0.2em] text-white/60 border border-white/10">
                       Mark Unsold
                     </button>
                   </>
@@ -222,7 +350,7 @@ export default function DemoAuctioneerPage() {
 
             <div className="flex-1 space-y-3">
               <span className="font-mono-geist text-[10px] tracking-[0.3em] uppercase font-bold block" style={{ color: isShuffling ? "#c9971f" : soldState === "sold" ? "#c9971f" : soldState === "unsold" ? "#718096" : isLocked ? "#ef4444" : "#c9971f" }}>
-                {isShuffling ? "Revealing Player…" : soldState === "sold" ? "Auction Finalized" : soldState === "unsold" ? "Marked Unsold" : currentLot ? (isLocked ? "Bidding Locked — Make Decision" : "Currently on Block") : "Awaiting First Lot"}
+                {isCompleted ? "Auction Complete" : isShuffling ? "Revealing Player…" : soldState === "sold" ? "Lot Sold" : soldState === "unsold" ? "Marked Unsold" : currentLot ? (isLocked ? "Bidding Locked — Make Decision" : "Currently on Block") : "Awaiting First Lot"}
               </span>
               <h2 className="font-archivo text-3xl text-white tracking-tight font-bold italic uppercase">
                 {isShuffling ? "???" : currentLot?.playerName ?? "—"}
