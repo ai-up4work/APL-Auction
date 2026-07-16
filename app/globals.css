@@ -682,11 +682,12 @@
   html {
     scroll-behavior: smooth;
     overflow-y: scroll; /* Keep scrollbar always visible */
+    overflow-x: hidden;
   }
   body {
     @apply bg-background text-foreground;
     background-color: black;
-    width: 100vw;
+    width: 100%;
     overflow-x: hidden; /* Prevent horizontal scrolling */
   }
   /* Removed @apply font-cinzel and using font-family directly */
