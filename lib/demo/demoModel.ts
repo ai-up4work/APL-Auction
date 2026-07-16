@@ -114,8 +114,8 @@ const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUn
 
 function makeTeams(): DemoTeam[] {
   return [
-    { id: 1, supabaseId: "tA", code: "CSK", name: "Chennai Sabers", color: "#f5a623", logo: "", roster: 0 },
-    { id: 2, supabaseId: "tB", code: "MI", name: "Mumbai Marauders", color: "#3b8bd4", logo: "", roster: 0 },
+    { id: 1, supabaseId: "tA", code: "CSK", name: "Chennai Sabers", color: "#f5a623", logo: "/Franchises/csk.png", roster: 0 },
+    { id: 2, supabaseId: "tB", code: "MI", name: "Mumbai Marauders", color: "#3b8bd4", logo: "/Franchises/MI.png", roster: 0 },
   ];
 }
 
@@ -222,8 +222,8 @@ function initialSnapshot(): Snapshot {
         unsoldReentryRounds: UNSOLD_REENTRY_ROUNDS,
       },
       session: {
-        auctionName: "Valiant League · Live Demo",
-        auctionLogo: "",
+        auctionName: "Moon Knight League · Live Demo",
+        auctionLogo: "/moon-knight-logo.png",
         timerSeconds: TIMER_SECONDS,
       },
     },
