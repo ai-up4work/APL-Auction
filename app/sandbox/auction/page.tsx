@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
 import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
+import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
 import { demoModel, getDemoSnapshot } from "@/lib/demo/demoModel";
 import { DesktopFrame, MobileFrame } from "@/components/demo/DeviceFrames";
 import DemoAuctioneerPage from "@/components/demo/DemoAuctioneerPage";
@@ -12,6 +13,15 @@ type PanelKey = "auctioneer" | "watch" | "ownerA" | "ownerB";
 const DESKTOP: PanelKey[] = ["auctioneer", "watch"];
 const MOBILE: PanelKey[] = ["ownerA", "ownerB"];
 const PANEL_ORDER: PanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"];
+
+// Watch is spectator-only in every mode — nothing to click there, so it's
+// excluded from the clickable-chip behavior even in interactive mode.
+const CONTROLLABLE: PanelKey[] = ["auctioneer", "ownerA", "ownerB"];
+
+const OWNER_DISPLAY_NAME: Record<"ownerA" | "ownerB", string> = {
+  ownerA: "Owner A",
+  ownerB: "Owner B",
+};
 
 const DESKTOP_W = 1350;
 const DESKTOP_H = 800;
@@ -108,6 +118,9 @@ function useSpotlight() {
   return {
     activePanels: snap.activePanels as PanelKey[],
     syncPanels: snap.syncPanels as PanelKey[],
+    mode: snap.mode,
+    autoFocusEnabled: snap.autoFocusEnabled,
+    teams: snap.auction.teams,
   };
 }
 
@@ -143,7 +156,138 @@ function Cell({ pct, ready, isSyncing, children }: { pct: number; ready: boolean
   );
 }
 
-function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelKey[] }) {
+// Right-edge vertical stepper for the two owner panels — two nodes joined
+// by a connecting line, each colored to its team. Doubles as a mini legend
+// as well as the switch control. Only relevant in interactive mode, and
+// only while at least one owner panel is part of the current spotlight —
+// during shuffle/sold/unsold beats (auctioneer + watch only) there's
+// nothing to switch to yet, so it stays hidden rather than dangling
+// irrelevant.
+function OwnerDotSwitcher({
+  mode,
+  active,
+  teams,
+  onSelect,
+}: {
+  mode: "demo" | "interactive";
+  active: PanelKey[];
+  teams: { supabaseId: string; code: string; name: string; color: string }[];
+  onSelect: (owner: "ownerA" | "ownerB") => void;
+}) {
+  const hasA = active.includes("ownerA");
+  const hasB = active.includes("ownerB");
+  if (mode !== "interactive" || (!hasA && !hasB)) return null;
+
+  const teamFor = (owner: "ownerA" | "ownerB") =>
+    teams.find((t) => t.supabaseId === (owner === "ownerA" ? "tA" : "tB"));
+
+  const colorA = teamFor("ownerA")?.color ?? "var(--color-outline)";
+  const colorB = teamFor("ownerB")?.color ?? "var(--color-outline)";
+  const activeColor = hasA ? colorA : colorB;
+
+  return (
+    <div
+      className="fixed right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center"
+      style={{
+        background: "rgba(10,10,10,0.6)",
+        border: "1px solid var(--color-border-overlay)",
+        borderRadius: 999,
+        padding: "18px 11px",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      {(["ownerA", "ownerB"] as const).map((owner, i) => {
+        const isActive = active.includes(owner);
+        const team = teamFor(owner);
+        const color = team?.color ?? "var(--color-outline)";
+        return (
+          <div key={owner} className="flex flex-col items-center">
+            <button
+              onClick={() => onSelect(owner)}
+              title={team?.name ?? OWNER_DISPLAY_NAME[owner]}
+              className="group relative flex items-center justify-center"
+              style={{ cursor: isActive ? "default" : "pointer", width: 26, height: 26 }}
+            >
+              <span
+                className="absolute right-full mr-2.5 px-1.5 py-0.5 rounded text-[8px] uppercase whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                style={{
+                  fontFamily: "var(--font-label-mono)",
+                  letterSpacing: "0.08em",
+                  background: "rgba(10,10,10,0.9)",
+                  border: `1px solid color-mix(in srgb, ${color} 50%, transparent)`,
+                  color: "var(--color-on-surface)",
+                }}
+              >
+                {team?.name ?? OWNER_DISPLAY_NAME[owner]}
+              </span>
+              {/* Outer ring only lights up on the active step, like a
+                  progress-stepper node. */}
+              <span
+                className="absolute rounded-full transition-all"
+                style={{
+                  width: isActive ? 26 : 0,
+                  height: isActive ? 26 : 0,
+                  border: `1.5px solid ${color}`,
+                  opacity: isActive ? 0.5 : 0,
+                }}
+              />
+              <span
+                className="rounded-full transition-all"
+                style={{
+                  width: isActive ? 15 : 8,
+                  height: isActive ? 15 : 8,
+                  background: color,
+                  boxShadow: isActive
+                    ? `0 0 10px 1px color-mix(in srgb, ${color} 70%, transparent)`
+                    : "none",
+                  border: isActive ? "none" : `1px solid color-mix(in srgb, ${color} 55%, transparent)`,
+                }}
+              />
+            </button>
+            {/* Connecting rail between the two steps. */}
+            {i === 0 && (
+              <span
+                className="w-px"
+                style={{
+                  height: 22,
+                  margin: "6px 0",
+                  background: `linear-gradient(180deg, ${colorA}, ${colorB})`,
+                  opacity: 0.35,
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+
+      <span
+        className="mt-2 text-[7px] uppercase"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          letterSpacing: "0.14em",
+          color: activeColor,
+          opacity: 0.85,
+        }}
+      >
+        {(hasA ? teamFor("ownerA")?.code : teamFor("ownerB")?.code) ?? ""}
+      </span>
+    </div>
+  );
+}
+
+function MultiviewBar({
+  active,
+  syncing,
+  mode,
+  autoFocusEnabled,
+  onToggleMode,
+}: {
+  active: PanelKey[];
+  syncing: PanelKey[];
+  mode: "demo" | "interactive";
+  autoFocusEnabled: boolean;
+  onToggleMode: () => void;
+}) {
   const tc = useTimecode();
   return (
     <div
@@ -176,15 +320,35 @@ function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelK
         >
           {tc}
         </span>
+
+        {mode === "interactive" && !autoFocusEnabled && (
+          <button
+            onClick={() => demoModel.resumeAutoFocus()}
+            className="ml-1 px-2 py-0.5 rounded-full text-[8px] uppercase"
+            style={{
+              fontFamily: "var(--font-label-mono)",
+              letterSpacing: "0.1em",
+              background: "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 40%, transparent)",
+              color: "var(--color-theme-orange)",
+              cursor: "pointer",
+            }}
+          >
+            Resume auto-switch
+          </button>
+        )}
+
       </div>
 
       <div className="flex items-center gap-2">
         {PANEL_ORDER.map((key) => {
           const isLive = active.includes(key);
           const isSync = syncing.includes(key);
+          const clickable = mode === "interactive" && CONTROLLABLE.includes(key);
           return (
             <div
               key={key}
+              onClick={clickable ? () => demoModel.toggleActivePanel(key) : undefined}
               className="flex items-center gap-1.5 px-2 py-1 rounded"
               style={{
                 background: isLive
@@ -196,6 +360,7 @@ function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelK
                     : "var(--color-border-overlay)"
                 }`,
                 animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
+                cursor: clickable ? "pointer" : "default",
               }}
             >
               <span
@@ -215,19 +380,35 @@ function MultiviewBar({ active, syncing }: { active: PanelKey[]; syncing: PanelK
             </div>
           );
         })}
+
+        <button
+          onClick={onToggleMode}
+          className="ml-2 px-2.5 py-1 rounded text-[8px] uppercase"
+          style={{
+            fontFamily: "var(--font-label-mono)",
+            letterSpacing: "0.1em",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid var(--color-border-overlay)",
+            color: "var(--color-on-surface)",
+            cursor: "pointer",
+          }}
+        >
+          {mode === "demo" ? "Watching demo — Try it yourself" : "Playing — Watch demo"}
+        </button>
       </div>
     </div>
   );
 }
 
 export default function SandboxPage() {
-  const { activePanels, syncPanels } = useSpotlight();
+  const { activePanels, syncPanels, mode, autoFocusEnabled, teams } = useSpotlight();
 
   const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
   const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
-  // Fit by height to allow proper stretching in the cell constraints
-  const ownerACell = useCellFit(MOBILE_W, MOBILE_H, "height");
-  const ownerBCell = useCellFit(MOBILE_W, MOBILE_H, "height");
+  // Fit both dimensions ("contain") so the mobile frame never overflows its
+  // flex cell, no matter how narrow that cell gets.
+  const ownerACell = useCellFit(MOBILE_W, MOBILE_H, "contain");
+  const ownerBCell = useCellFit(MOBILE_W, MOBILE_H, "contain");
 
   const cellReady: Record<PanelKey, boolean> = {
     auctioneer: auctioneerCell.ready,
@@ -236,10 +417,27 @@ export default function SandboxPage() {
     ownerB: ownerBCell.ready,
   };
 
+  // Starts in demo (bot-driven) mode, same as it always did. Switching
+  // modes tears down whichever driver was running and reset()s the model
+  // so the two never overlap or fight over state.
   useEffect(() => {
     demoOrchestrator.start();
-    return () => demoOrchestrator.stop();
+    return () => {
+      demoOrchestrator.stop();
+      demoInteractiveController.stop();
+    };
   }, []);
+
+  const handleToggleMode = useCallback(() => {
+    const next = mode === "demo" ? "interactive" : "demo";
+    if (next === "interactive") {
+      demoOrchestrator.stop();
+      demoInteractiveController.start();
+    } else {
+      demoInteractiveController.stop();
+      demoOrchestrator.start();
+    }
+  }, [mode]);
 
   // globals.css forces `html { overflow-y: scroll }` site-wide so the
   // marketing pages never jump-shift. This page is a fixed single
@@ -261,6 +459,13 @@ export default function SandboxPage() {
   const layout = computeLayout(highlighted);
 
   const pctOf = (key: PanelKey) => layout[key] ?? 0;
+
+  // Exactly one owner spotlighted → offer a button to flip to the other one.
+  // Both, neither, or the owner-picking UI already visible (chips) covers
+  // every other case, so the button only appears in the single-owner state.
+  const hasA = highlighted.includes("ownerA");
+  const hasB = highlighted.includes("ownerB");
+  const switchToOwner: "ownerA" | "ownerB" | null = hasA && !hasB ? "ownerB" : hasB && !hasA ? "ownerA" : null;
 
   const frames: Record<PanelKey, React.ReactNode> = {
     auctioneer: (
@@ -324,7 +529,22 @@ export default function SandboxPage() {
         }
       `}</style>
 
-      <MultiviewBar active={highlighted} syncing={syncPanels} />
+      <MultiviewBar
+        active={highlighted}
+        syncing={syncPanels}
+        mode={mode}
+        autoFocusEnabled={autoFocusEnabled}
+        onToggleMode={handleToggleMode}
+        switchToOwner={switchToOwner}
+        onSwitchOwner={() => switchToOwner && demoModel.focusOwner(switchToOwner)}
+      />
+
+      <OwnerDotSwitcher
+        mode={mode}
+        active={highlighted}
+        teams={teams}
+        onSelect={(owner) => demoModel.focusOwner(owner)}
+      />
 
       <div
         className="pointer-events-none absolute inset-0 z-0 sandbox-scanlines"

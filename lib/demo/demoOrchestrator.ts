@@ -177,6 +177,7 @@ export class DemoOrchestrator {
     if (this.running) return;
     this.running = true;
     demoModel.reset();
+    demoModel.setMode("demo");
     this.runNext();
   }
   stop() {
