@@ -18,27 +18,16 @@ type Step =
   | { at: number; type: "reveal" }
   | { at: number; type: "bid"; teamId: string }
   | { at: number; type: "sold" }
-  // ── Director steps ──────────────────────────────────────────────────
-  // `panels` supports zero, one, or several panel keys at once, so beats
-  // can spotlight combos (e.g. Auctioneer + the bidding owner, 75/25)
-  // instead of only ever a single panel.
   | { at: number; type: "focus"; panels: string[] }
   | { at: number; type: "sync"; panels: string[] }
   | { at: number; type: "narrator"; text: () => string };
 
-/** Convenience so call sites can still write a single panel key inline. */
 function focusStep(at: number, panels: string | string[]): Step {
   return { at, type: "focus", panels: Array.isArray(panels) ? panels : [panels] };
 }
 
-// Remembers the last real DOM element each actor's cursor was sent to,
-// so `click()` can fire a genuine `el.click()` on it.
 const lastTarget: Record<string, HTMLElement | null> = {};
 
-// offsetLeft/offsetTop/offsetWidth/offsetHeight are pure LAYOUT values —
-// never affected by an ancestor's CSS `transform: scale(...)` (which now
-// includes the spotlight/dim wrapper too), so this stays exact regardless
-// of how big or small a panel is currently rendered.
 function getLocalOffset(el: HTMLElement, container: HTMLElement) {
   let x = 0;
   let y = 0;
@@ -86,36 +75,17 @@ function teamNameFor(teamId: string) {
   return demoModel.getSnapshot().auction.teams.find((t) => t.supabaseId === teamId)?.name ?? teamId;
 }
 
-// Extra breathing room inserted between each *beat* of the episode (open →
-// shuffle → reveal → bid → bid → bid → hammer → next lot) — not between
-// every individual step within a beat, so a cursor-move-then-click still
-// feels snappy, but the automation as a whole doesn't feel like it's
-// racing through the auction. Bumping this one constant re-paces the
-// entire script.
 const EXTRA_PAUSE_MS = 2000;
 
-// Original beat boundaries (in the un-paced timeline below) — every step
-// whose original `at` falls in one of these bands gets that many extra
-// pauses stacked on top of it, so beats later in the episode end up
-// further apart than earlier ones, compounding correctly instead of
-// everything shifting by one flat offset.
-//
-// Unsold episodes only ever use the first three bands (open/shuffle/
-// reveal) plus the final "hide" band — no bid beats occur, since the
-// model's own clock + auto-resolve timer marks the lot unsold on its own.
-// The final band still lands comfortably after that auto-resolve fires
-// (reveal lands around paced ~7.7s; the clock + auto-resolve delay adds
-// another ~13.3s on top of that, i.e. ~21s — the "else" band below paces
-// the hide/next-lot beat out to ~30s, a safe margin either way).
 function paceStep(at: number): number {
-  if (at < 1700) return at; // beat 0: open lot
-  if (at < 3700) return at + EXTRA_PAUSE_MS * 1; // beat 1: shuffle
-  if (at < 4400) return at + EXTRA_PAUSE_MS * 2; // beat 2: reveal
-  if (at < 7400) return at + EXTRA_PAUSE_MS * 3; // beat 3: opening bid
-  if (at < 10400) return at + EXTRA_PAUSE_MS * 4; // beat 4: counter bid
-  if (at < 13400) return at + EXTRA_PAUSE_MS * 5; // beat 5: raise
-  if (at < 16400) return at + EXTRA_PAUSE_MS * 6; // beat 6: hammer/sold
-  return at + EXTRA_PAUSE_MS * 7; // beat 7: hide / prepare next lot
+  if (at < 1700) return at;
+  if (at < 3700) return at + EXTRA_PAUSE_MS * 1;
+  if (at < 4400) return at + EXTRA_PAUSE_MS * 2;
+  if (at < 7400) return at + EXTRA_PAUSE_MS * 3;
+  if (at < 10400) return at + EXTRA_PAUSE_MS * 4;
+  if (at < 13400) return at + EXTRA_PAUSE_MS * 5;
+  if (at < 16400) return at + EXTRA_PAUSE_MS * 6;
+  return at + EXTRA_PAUSE_MS * 7;
 }
 
 function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
@@ -126,7 +96,6 @@ function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
   const nameOf = (a: string) => (a === OWNER_A ? "Priya · CSK Owner" : "Rohan · MI Owner");
   const colorOf = (a: string) => (a === OWNER_A ? "#f5a623" : "#3b8bd4");
 
-  // ── Beats shared by every episode: open the lot, shuffle, reveal. ────
   const openBeats: Step[] = [
     { at: 0, type: "narrator", text: () => "Auctioneer opens the next lot" },
     focusStep(0, AUCTIONEER),
@@ -134,12 +103,6 @@ function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
     { at: 1600, type: "click", actor: AUCTIONEER },
 
     { at: 1700, type: "shuffle" },
-    // Shuffle/reveal only ever renders on the Watch broadcast screen (the
-    // reel lives in DemoWatchPage). Spotlight both desktop feeds
-    // (Auctioneer + Watch) together for this whole beat so computeLayout
-    // resolves to a clean 50/50 two-desktop split instead of pairing a
-    // single desktop panel with an owner's phone (which pulls a mobile
-    // panel on screen even though no bidder has anything to show yet).
     focusStep(1700, [AUCTIONEER, WATCH]),
     { at: 1720, type: "narrator", text: () => "Shuffling the pool — revealing next player…" },
     { at: 1720, type: "sync", panels: ALL_PANELS },
@@ -149,7 +112,6 @@ function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
     { at: 3720, type: "sync", panels: ALL_PANELS },
   ];
 
-  // ── Sold path: three escalating bids, then the hammer. ───────────────
   const soldBeats: Step[] = [
     focusStep(4400, [AUCTIONEER, first]),
     { at: 4400, type: "cursor", actor: first, panel: first, targetId: "demo-bid-btn", label: nameOf(first), color: colorOf(first) },
@@ -196,12 +158,6 @@ function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
     } },
   ];
 
-  // ── Unsold path: nobody bids. Nothing to click — the model's own
-  // clock + auto-resolve timer (see demoModel.scheduleAutoResolve) flips
-  // the lot to "unsold" on its own about 13.3s after bidding opens, and
-  // fires the narrator caption + panel pulse itself via broadcastEvent()
-  // when it does. The orchestrator just narrates the "quiet" moment and
-  // gets out of the way. ────────────────────────────────────────────────
   const unsoldBeats: Step[] = [
     { at: 4400, type: "narrator", text: () => "No bids coming in — the clock's the only thing moving" },
     focusStep(4400, [AUCTIONEER, WATCH]),
@@ -224,11 +180,6 @@ function buildEpisode(aWinsFinal: boolean, outcome: EpisodeOutcome): Step[] {
   return rawSteps.map((s) => ({ ...s, at: paceStep(s.at) }));
 }
 
-// A pending timer, tracked with its wall-clock fire time so pause() can
-// compute exactly how much longer it had left, and resume() can put it
-// back exactly where it was — rather than pause just meaning "restart
-// the episode from scratch" or, worse, the timers silently continuing to
-// fire in the background while the UI looks frozen.
 type Pending = { timer: ReturnType<typeof setTimeout>; fireAt: number; remaining?: number; run: () => void };
 
 export class DemoOrchestrator {
@@ -236,6 +187,15 @@ export class DemoOrchestrator {
   private episode = 0;
   private running = false;
   private paused = false;
+  private modelUnsub: (() => void) | null = null;
+  // Transition-tracking flag (not a one-shot latch) — flips true the
+  // instant the model reports "completed", flips back false the moment
+  // it reports anything else (a fresh cycle via startNewCycle(), or a
+  // successful re-entry round). This is what lets the watcher below fire
+  // exactly once per genuine completion, rather than re-firing on every
+  // single unrelated snapshot emission (cursor moves, pulses, etc. all
+  // go through the same subscribe callback) while status stays completed.
+  private wasCompleted = false;
 
   private schedule(run: () => void, delayMs: number) {
     const fireAt = Date.now() + delayMs;
@@ -250,14 +210,33 @@ export class DemoOrchestrator {
     if (this.running) return;
     this.running = true;
     this.paused = false;
-    // Deliberately no demoModel.reset() here — mode toggling is a
-    // hand-off between drivers, not a restart. Whatever purses, completed
-    // lots, and remaining player pool exist carry straight over; setMode()
-    // only flips the mode flag. Note: if a lot was mid-bid in manual mode
-    // when this fires, the next scripted episode starts a fresh shuffle
-    // rather than resuming that exact lot — the pool/purses/history are
-    // preserved, but an in-flight lot at the hand-off moment isn't resolved.
+    this.wasCompleted = getDemoSnapshot().auction.status === "completed";
     demoModel.setMode("demo");
+
+    // Watches for the auction flipping to "completed" mid-episode — e.g.
+    // the last player selling (hammerSold) or going unsold via the
+    // model's own auto-resolve timer, either of which can land partway
+    // through a scripted episode. Without this, whatever steps were
+    // already scheduled for that episode's tail end (cursor hides, the
+    // "preparing next lot" narrator line) keep firing for several
+    // seconds afterward — bleeding through the completion overlay's
+    // translucent backdrop and reading as "it's already starting again"
+    // even though nothing structural changed. Reacting here cancels
+    // everything still pending and jumps straight to the completion beat
+    // the instant the model itself says it's actually done.
+    this.modelUnsub = demoModel.subscribe(() => {
+      if (!this.running) return;
+      const isCompleted = getDemoSnapshot().auction.status === "completed";
+      if (isCompleted && !this.wasCompleted) {
+        this.wasCompleted = true;
+        this.timers.forEach((t) => clearTimeout(t.timer));
+        this.timers = [];
+        this.runCompletionEpisode();
+      } else if (!isCompleted) {
+        this.wasCompleted = false;
+      }
+    });
+
     this.runNext();
   }
 
@@ -266,14 +245,10 @@ export class DemoOrchestrator {
     this.paused = false;
     this.timers.forEach((t) => clearTimeout(t.timer));
     this.timers = [];
+    this.modelUnsub?.();
+    this.modelUnsub = null;
   }
 
-  /** Freezes the running script exactly where it is — every pending
-   * cursor move, click, bid, and the "next episode" timer all remember
-   * how much longer they had left, instead of losing their place or (if
-   * we'd merely cleared them without saving state) skipping steps on
-   * resume. Also freezes the model's bidding clock so a lot mid-countdown
-   * doesn't keep ticking down behind the paused UI. */
   pause() {
     if (!this.running || this.paused) return;
     this.paused = true;
@@ -285,8 +260,6 @@ export class DemoOrchestrator {
     demoModel.pause();
   }
 
-  /** Reschedules every frozen timer with exactly the remaining delay it
-   * had at pause() time, and un-freezes the bidding clock. */
   resume() {
     if (!this.running || !this.paused) return;
     this.paused = false;
@@ -300,11 +273,6 @@ export class DemoOrchestrator {
     return this.paused;
   }
 
-  /** Decides what the next beat of the showcase should be, based on the
-   * model's actual current state rather than blindly looping — mirrors
-   * the three real states an auction can be in: still has players to
-   * call, empty queue but an unsold pile worth a re-entry pass, or
-   * genuinely finished. */
   private runNext() {
     if (!this.running) return;
     const snap = getDemoSnapshot();
@@ -320,9 +288,6 @@ export class DemoOrchestrator {
     this.runCompletionEpisode();
   }
 
-  /** Normal lot: shuffle → reveal → bid (or not) → resolve. Every third
-   * lot plays out with nobody bidding, so the re-entry mechanic actually
-   * has something to demonstrate once the queue runs dry. */
   private runLotEpisode() {
     const outcome: EpisodeOutcome = this.episode % 3 === 2 ? "unsold" : "sold";
     const steps = buildEpisode(this.episode % 2 === 0, outcome);
@@ -332,11 +297,6 @@ export class DemoOrchestrator {
     this.schedule(() => this.runNext(), total);
   }
 
-  /** Queue's empty but the unsold pile still has eligible players — walks
-   * the auctioneer's cursor to the real "Re-entry Round" button and clicks
-   * it, same as a person would, so the requeue plays out through the
-   * actual production-mirroring demoModel.startReentryRound() logic
-   * rather than a scripted shortcut. */
   private runReentryEpisode() {
     const count = getDemoSnapshot().unsoldPlayers.length;
     this.schedule(() => {
@@ -348,38 +308,19 @@ export class DemoOrchestrator {
       500
     );
     this.schedule(() => click(AUCTIONEER), 2000);
-    // startReentryRound() itself fires the narrator caption + panel pulse
-    // via broadcastEvent() — nothing extra needed here beyond triggering
-    // the click, but the click already invoked the button's own onClick.
     this.schedule(() => demoModel.setCursor(AUCTIONEER, { visible: false }), 2900);
     this.schedule(() => this.runNext(), 3800);
   }
 
-  /** Nothing left to call and no re-entry passes remain — the showcase
-   * has genuinely run its course. Holds on a completion beat for a few
-   * seconds so it reads as a real ending, then loops the whole thing
-   * from a clean slate. This is a marketing/sandbox demo meant to run
-   * indefinitely, not a real auction with a single ending — a real
-   * auctioneer console just stays completed. */
-  // private runCompletionEpisode() {
-  //   this.schedule(() => {
-  //     demoModel.setActivePanel(["auctioneer", "watch"]);
-  //     demoModel.setNarrator("Auction complete — every lot called");
-  //     demoModel.pulsePanels(ALL_PANELS);
-  //   }, 0);
-  //   this.schedule(() => {
-  //     demoModel.startNewCycle();
-  //     this.runNext();
-  //   }, 4500);
-  // }
-
-  /** Nothing left to call and no re-entry passes remain — the showcase
-   * has genuinely run its course. Plays the completion beat once and
-   * then deliberately stops scheduling anything further: it waits for
-   * the person to make a choice (via the completion overlay rendered in
-   * SandboxPage) — try the console themselves, or restart the loop —
-   * rather than silently auto-restarting on a timer. See
-   * restartAfterCompletion(), called by that overlay. */
+  /** Nothing left to call and no re-entry passes remain. Plays the
+   * completion beat once and then deliberately schedules nothing
+   * further — waits for the person to click either "Try It Yourself" or
+   * "Restart" on the completion overlay. May be invoked either from
+   * runNext() (the auction ran dry naturally at the top of a fresh
+   * decision point) or from the mid-episode watcher in start() (the
+   * auction completed partway through a beat that was still playing
+   * out) — both paths converge here, and the watcher above guarantees
+   * whichever fires first wins and nothing stale is left running. */
   private runCompletionEpisode() {
     this.schedule(() => {
       demoModel.setActivePanel(["auctioneer", "watch"]);
@@ -395,6 +336,7 @@ export class DemoOrchestrator {
    * interactive mode before clicking Restart). */
   restartAfterCompletion() {
     if (!this.running) return;
+    this.wasCompleted = false;
     demoModel.startNewCycle();
     this.runNext();
   }
@@ -415,7 +357,5 @@ export class DemoOrchestrator {
     }
   }
 }
-
-
 
 export const demoOrchestrator = new DemoOrchestrator();

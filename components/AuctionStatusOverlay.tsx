@@ -172,8 +172,7 @@ export function CompletedContent({ stats }: { stats?: AuctionStats }) {
 
         {/* LEFT — headline + aggregate stats + hint */}
         <div className="flex-1 flex flex-col items-center justify-center px-10 py-8 relative min-w-0">
-          <div className="absolute inset-0 pointer-events-none"
-            style={{ background: "radial-gradient(circle at 50% 40%,rgba(201,151,31,0.09) 0%,transparent 65%)" }} />
+          <div className="absolute inset-0 pointer-events-none" />
 
           <div className="relative z-10 flex flex-col items-center text-center max-w-md">
             <div className="w-20 h-20 rounded-full bg-[rgba(201,151,31,0.10)] border border-[rgba(201,151,31,0.28)] flex items-center justify-center mb-6"
