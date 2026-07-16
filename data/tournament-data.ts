@@ -6,6 +6,7 @@
 // and merges it in by slug.
 
 import { showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
+import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket"
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -105,10 +106,18 @@ export interface TournamentExtras {
   bracket?: BracketMatch[]
   /** Which bracket chart to preview in the Bracket tab (renders a
    *  generated 32-team demo bracket via BracketPreviewPanel — see that
-   *  component for why it doesn't read real per-tournament match data).
-   *  Leave unset to keep using the legacy flat `bracket` array via
-   *  BracketPanel instead. */
+   *  component for why it doesn't read real per-tournament match data
+   *  BY DEFAULT). Leave unset to keep using the legacy flat `bracket`
+   *  array via BracketPanel instead. */
   bracketFormat?: "single" | "double"
+  /** Real single-elimination bracket data (Round objects, same shape
+   *  TournamentBracket/DoubleElimBoard consume) for a specific
+   *  tournament. When present, BracketPreviewPanel and the full bracket
+   *  page use THIS instead of the shared generated demo bracket, so the
+   *  tournament shows its own teams/results/current-round state rather
+   *  than a random unrelated 32-team demo. Only meaningful when
+   *  `bracketFormat === "single"`. */
+  bracketRounds?: Round[]
   squads?: Squad[]
   runsLeaderboard?: LeaderboardRow[]
   wicketsLeaderboard?: LeaderboardRow[]
@@ -116,6 +125,226 @@ export interface TournamentExtras {
 }
 
 export type Tournament = ShowcaseSlide & TournamentExtras
+
+// ─────────────────────────────────────────────────────────────
+// CRIMSON CUP — real 32-team single-elimination bracket data
+// ─────────────────────────────────────────────────────────────
+/*
+  Frozen at a genuine "middle of the tournament" snapshot:
+    Round of 32   -> fully completed (16 matches)
+    Round of 16   -> 4 completed, 1 LIVE (the featured live match, same
+                     fixture as `liveMatch` below), 3 upcoming (teams
+                     known from R32, not yet played)
+    Quarterfinal  -> only pairs where BOTH feeding R16 matches are
+                     already decided get real teams; the rest are TBD
+    Semifinal     -> TBD, nothing has advanced this far yet
+    Final         -> TBD
+*/
+
+const CC_TEAMS: { name: string; code: string; color: string }[] = [
+  { name: "Valiant Originals", code: "VO", color: "#c9971f" },
+  { name: "Ampara Avengers", code: "AV", color: "#4a5168" },
+  { name: "Desert Hawks", code: "DH", color: "#e07856" },
+  { name: "Puttalam Pirates", code: "PT", color: "#4a5168" },
+  { name: "Coastal Titans", code: "CT", color: "#3b82c4" },
+  { name: "Nuwara Eliya Eagles", code: "NE", color: "#4a5168" },
+  { name: "Northside Knights", code: "NK", color: "#7c5cbf" },
+  { name: "Vavuniya Vipers", code: "VP", color: "#4a5168" },
+  { name: "Storm Chargers", code: "SC", color: "#2f9e6f" },
+  { name: "Hambantota Hurricanes", code: "HH", color: "#4a5168" },
+  { name: "Bronze Trophy Alliance", code: "BTA", color: "#cd7f32" },
+  { name: "Polonnaruwa Panthers", code: "PP", color: "#4a5168" },
+  { name: "Iron Knights CC", code: "IK", color: "#6b7280" },
+  { name: "Batticaloa Barons", code: "BB", color: "#4a5168" },
+  { name: "Silver Hawks", code: "SH", color: "#a8a8a8" },
+  { name: "Kurunegala Kings", code: "KK", color: "#4a5168" },
+  { name: "Golden Lions", code: "GL", color: "#e0b04a" },
+  { name: "Anuradhapura Archers", code: "AA", color: "#4a5168" },
+  { name: "Crimson Blades", code: "CB", color: "#c0392b" },
+  { name: "Ratnapura Rhinos", code: "RR", color: "#4a5168" },
+  { name: "Iron Wolves", code: "IW", color: "#5a6b7a" },
+  { name: "Trinco Tridents", code: "TT", color: "#4a5168" },
+  { name: "Royal Strikers", code: "RS", color: "#2e5aac" },
+  { name: "Matara Marauders", code: "MM", color: "#4a5168" },
+  { name: "Falcon Riders", code: "FR", color: "#8c6b3f" },
+  { name: "Galle Giants", code: "GG", color: "#4a5168" },
+  { name: "The Wardens CC", code: "TW", color: "#f5a623" },
+  { name: "Kandy Cobras", code: "KC", color: "#4a5168" },
+  { name: "Badulla Royals", code: "BR", color: "#9c3fa3" },
+  { name: "Jaffna Jaguars", code: "JJ", color: "#4a5168" },
+  { name: "Blaze Strikers", code: "BS", color: "#d94f4f" },
+  { name: "Valley Vultures", code: "VV", color: "#4a5168" },
+]
+
+function ccTeam(idx: number, score?: number, isWinner?: boolean): TeamNode {
+  const t = CC_TEAMS[idx]
+  return { id: t.code, code: t.code, name: t.name, color: t.color, score, isWinner }
+}
+
+function winnerTeamNode(m: MatchNode): TeamNode {
+  const w = m.teamA?.isWinner ? m.teamA : m.teamB!
+  return { ...w, score: undefined, isWinner: undefined }
+}
+
+function buildCrimsonCupBracket(): Round[] {
+  // ---- Round of 32 (16 matches) — fully completed ----
+  // Each pair: [teamAIdx, teamBIdx, scoreA, scoreB].
+  const r32Pairs: [number, number, number, number][] = [
+    [0, 1, 178, 142], // Valiant Originals beat Ampara Avengers
+    [2, 3, 165, 151], // Desert Hawks beat Puttalam Pirates
+    [4, 5, 159, 162], // Nuwara Eliya Eagles upset Coastal Titans
+    [6, 7, 171, 140], // Northside Knights beat Vavuniya Vipers
+    [8, 9, 188, 133], // Storm Chargers beat Hambantota Hurricanes
+    [10, 11, 176, 149], // Bronze Trophy Alliance beat Polonnaruwa Panthers
+    [12, 13, 163, 158], // Iron Knights CC beat Batticaloa Barons
+    [14, 15, 169, 144], // Silver Hawks beat Kurunegala Kings
+    [16, 17, 181, 137], // Golden Lions beat Anuradhapura Archers
+    [18, 19, 174, 146], // Crimson Blades beat Ratnapura Rhinos
+    [20, 21, 155, 168], // Trinco Tridents upset Iron Wolves
+    [22, 23, 179, 141], // Royal Strikers beat Matara Marauders
+    [24, 25, 166, 150], // Falcon Riders beat Galle Giants
+    [26, 27, 172, 148], // The Wardens CC beat Kandy Cobras
+    [28, 29, 160, 157], // Badulla Royals beat Jaffna Jaguars
+    [30, 31, 183, 139], // Blaze Strikers beat Valley Vultures
+  ]
+
+  const r32Matches: MatchNode[] = r32Pairs.map(([aIdx, bIdx, sa, sb], i) => {
+    const aWins = sa > sb
+    return {
+      id: `r32-${i + 1}`,
+      label: `R32-${i + 1}`,
+      status: "completed",
+      teamA: ccTeam(aIdx, sa, aWins),
+      teamB: ccTeam(bIdx, sb, !aWins),
+      aFrom: null,
+      bFrom: null,
+      venue: "Negombo Cricket Grounds",
+      date: "3–5 Jul",
+    }
+  })
+
+  function winnerOf(m: MatchNode): { idx: number; score: number } {
+    const winnerTeam = m.teamA?.isWinner ? m.teamA : m.teamB!
+    const idx = CC_TEAMS.findIndex((t) => t.code === winnerTeam.code)
+    return { idx, score: winnerTeam.score ?? 0 }
+  }
+
+  // ---- Round of 16 (8 matches) ----
+  // r16-1..4: completed. r16-5: LIVE — same fixture as `liveMatch` below
+  // (Valiant Originals vs Desert Hawks). r16-6..8: upcoming, teams known
+  // from R32 but not yet played.
+  const r16Results: [boolean, number, number][] = [
+    [true, 178, 152], // r16-1 completed, A wins
+    [true, 149, 165], // r16-2 completed, B wins
+    [true, 172, 158], // r16-3 completed, A wins
+    [true, 161, 155], // r16-4 completed, A wins
+  ]
+
+  const r16Matches: MatchNode[] = []
+  for (let i = 0; i < 8; i++) {
+    const feederA = r32Matches[i * 2]
+    const feederB = r32Matches[i * 2 + 1]
+    const wA = winnerOf(feederA)
+    const wB = winnerOf(feederB)
+    const id = `r16-${i + 1}`
+
+    if (i < 4) {
+      const [aWins, sa, sb] = r16Results[i]
+      r16Matches.push({
+        id,
+        label: `R16-${i + 1}`,
+        status: "completed",
+        teamA: ccTeam(wA.idx, sa, aWins),
+        teamB: ccTeam(wB.idx, sb, !aWins),
+        aFrom: feederA.id,
+        bFrom: feederB.id,
+        venue: "Negombo Cricket Grounds",
+        date: "9 Jul",
+      })
+    } else if (i === 4) {
+      r16Matches.push({
+        id,
+        label: `R16-${i + 1}`,
+        status: "live",
+        teamA: ccTeam(wA.idx, 168),
+        teamB: ccTeam(wB.idx, 142),
+        aFrom: feederA.id,
+        bFrom: feederB.id,
+        venue: "Negombo Cricket Grounds",
+        date: "16 Jul",
+      })
+    } else {
+      r16Matches.push({
+        id,
+        label: `R16-${i + 1}`,
+        status: "scheduled",
+        teamA: ccTeam(wA.idx),
+        teamB: ccTeam(wB.idx),
+        aFrom: feederA.id,
+        bFrom: feederB.id,
+        venue: "Negombo Cricket Grounds",
+        date: "17 Jul",
+      })
+    }
+  }
+
+  // ---- Quarterfinal (4 matches) ----
+  // Only pairs where BOTH feeding R16 matches are already decided get
+  // real teams slotted in; everything still undecided stays TBD.
+  const qfMatches: MatchNode[] = []
+  for (let i = 0; i < 4; i++) {
+    const feederA = r16Matches[i * 2]
+    const feederB = r16Matches[i * 2 + 1]
+    const aDone = feederA.status === "completed"
+    const bDone = feederB.status === "completed"
+    qfMatches.push({
+      id: `qf-${i + 1}`,
+      label: `QF-${i + 1}`,
+      status: "scheduled",
+      teamA: aDone ? winnerTeamNode(feederA) : null,
+      teamB: bDone ? winnerTeamNode(feederB) : null,
+      aFrom: feederA.id,
+      bFrom: feederB.id,
+      venue: "Negombo Cricket Grounds",
+      date: "20 Jul",
+    })
+  }
+
+  // ---- Semifinal (2) + Final (1) — nothing has advanced this far yet ----
+  const sfMatches: MatchNode[] = [0, 1].map((i) => ({
+    id: `sf-${i + 1}`,
+    label: `SF-${i + 1}`,
+    status: "scheduled",
+    teamA: null,
+    teamB: null,
+    aFrom: qfMatches[i * 2].id,
+    bFrom: qfMatches[i * 2 + 1].id,
+    venue: "Negombo Cricket Grounds",
+    date: "24 Jul",
+  }))
+
+  const finalMatch: MatchNode = {
+    id: "cc-final",
+    label: "Final",
+    status: "scheduled",
+    teamA: null,
+    teamB: null,
+    aFrom: sfMatches[0].id,
+    bFrom: sfMatches[1].id,
+    venue: "Negombo Cricket Grounds",
+    date: "28 Jul",
+  }
+
+  return [
+    { id: 0, name: "Round of 32", shortName: "R32", matches: r32Matches },
+    { id: 1, name: "Round of 16", shortName: "R16", matches: r16Matches },
+    { id: 2, name: "Quarterfinal", shortName: "QF", matches: qfMatches },
+    { id: 3, name: "Semifinal", shortName: "SF", matches: sfMatches },
+    { id: 4, name: "Final", shortName: "F", matches: [finalMatch] },
+  ]
+}
+
+export const crimsonCupBracketRounds: Round[] = buildCrimsonCupBracket()
 
 // ─────────────────────────────────────────────────────────────
 // EXTRAS — keyed by the `slug` field already on each ShowcaseSlide
@@ -226,6 +455,7 @@ const tournamentExtras: Record<string, TournamentExtras> = {
   // ───────────────────────────── League (flagship) ────────────
   "crimson-cup-full-season": {
     bracketFormat: "single",
+    bracketRounds: crimsonCupBracketRounds,
     liveMatch: {
       matchStatus: "live",
       team1: { name: "Valiant Originals", short: "VO" },
@@ -253,7 +483,7 @@ const tournamentExtras: Record<string, TournamentExtras> = {
       ],
       venue: "Negombo Cricket Grounds",
       toss: "Desert Hawks won the toss, elected to bowl",
-      matchNote: "DH need 27 runs from 10 balls · Final",
+      matchNote: "DH need 27 runs from 10 balls · Round of 16",
     },
     pointsTable: [
       { team: "Valiant Originals", short: "VO", played: 8, won: 6, lost: 2, nrr: "+1.42", points: 12, form: ["W", "W", "L", "W", "W"] },

@@ -212,7 +212,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
           </div>
 
           {/* Row 2: Tabs (main) + rest of sidebar */}
-          <div className="flex flex-col lg:flex-row gap-8">
+          <div className="flex flex-col lg:flex-row gap-8 lg:items-stretch">
             {/* Main Content */}
             <div className="w-full lg:w-2/3 fade-in">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">

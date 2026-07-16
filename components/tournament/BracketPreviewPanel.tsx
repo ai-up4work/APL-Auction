@@ -1,6 +1,7 @@
 // File: components/tournament/BracketPreviewPanel.tsx
 "use client"
 
+import { useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, Network, Trophy, RotateCcw, Award, Radio } from "lucide-react"
 import type { MatchNode, Round, TeamNode } from "@/components/tournament/TournamentBracket"
@@ -31,11 +32,29 @@ function isDone(m: MatchNode) {
   return m.status === "completed"
 }
 
-/** First round with any not-yet-completed match, else the last round. */
-function findCurrentRoundIndex(rounds: Round[]): number {
-  if (!rounds.length) return -1
+/**
+ * Picks the 2 rounds to preview out of a single progression (winners
+ * array, losers array, or a single-elim `rounds` array): the current
+ * "in progress" round and the one after it.
+ *
+ * "Current" = the first round that still has an unfinished match. If
+ * every round is done (bracket fully resolved) OR the first unfinished
+ * round IS the last round, there's no "next" round to pair it with —
+ * in both of those cases we fall back to showing the LAST TWO rounds
+ * instead (e.g. Semis + Final), so the preview never collapses down to
+ * a single lonely card in an otherwise-empty two-column grid.
+ *
+ * Clamped generically (not hard-coded to "semis") so it also holds up
+ * for a bracket with only 1-2 rounds total.
+ */
+function getPreviewRounds(rounds: Round[]): Round[] {
+  if (rounds.length === 0) return []
+  if (rounds.length <= 2) return rounds
+
   const idx = rounds.findIndex((r) => r.matches.some((m) => !isDone(m)))
-  return idx === -1 ? rounds.length - 1 : idx
+  const curIdx = idx === -1 ? rounds.length - 1 : idx
+  const startIdx = Math.min(curIdx, rounds.length - 2)
+  return rounds.slice(startIdx, startIdx + 2)
 }
 
 /* ------------------------------------------------------------------ */
@@ -130,6 +149,151 @@ function getDoubleElimDemoData(): DoubleElimData {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Connector geometry — same "elbow entering the target's top/bottom  */
+/*  edge" shape TournamentBracket's non-final rounds use, copied       */
+/*  locally since it isn't exported from that file.                    */
+/* ------------------------------------------------------------------ */
+
+function topEntryPath(x1: number, y1: number, x2: number, y2: number, radius = 10): string {
+  if (Math.abs(x2 - x1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`
+  const dir = y2 > y1 ? 1 : -1
+  const sign = x2 > x1 ? 1 : -1
+  const r = Math.max(0, Math.min(radius, Math.abs(x2 - x1), Math.abs(y2 - y1)))
+  return `M ${x1} ${y1} L ${x2 - r * sign} ${y1} Q ${x2} ${y1} ${x2} ${y1 + r * dir} L ${x2} ${y2}`
+}
+
+interface ConnectorPath {
+  id: string
+  d: string
+}
+
+/**
+ * Drives a single left/right round pair: measures the LEFT column's
+ * actual rendered card centers, positions each RIGHT column match at
+ * the average of its feeders' centers (so a Final sits exactly at the
+ * midpoint between its two Semifinal cards, not wherever normal flow
+ * happens to place it), and derives the connector line between them.
+ *
+ * This mirrors computeRowCenters (DoubleElimBoard) / 
+ * computeCentersFromLeaves (TournamentBracket) — just scoped to one
+ * round pair instead of a whole bracket's worth of rounds.
+ */
+function useRoundPairLayout(leftRound: Round | undefined, rightRound: Round | undefined) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const leftColRef = useRef<HTMLDivElement>(null)
+  const cardEls = useRef<Record<string, HTMLDivElement | null>>({})
+  const refCache = useRef<Record<string, (el: HTMLDivElement | null) => void>>({})
+
+  const [centerY, setCenterY] = useState<Record<string, number>>({})
+  const [colHeight, setColHeight] = useState(0)
+  const [paths, setPaths] = useState<ConnectorPath[]>([])
+  const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
+
+  function getCardRef(id: string) {
+    if (!refCache.current[id]) {
+      refCache.current[id] = (el: HTMLDivElement | null) => {
+        cardEls.current[id] = el
+      }
+    }
+    return refCache.current[id]
+  }
+
+  // Pass 1: measure the left column's cards, compute each right-column
+  // match's center as the average of its feeders — same idea as
+  // computeRowCenters, just for exactly one pair of rounds.
+  useLayoutEffect(() => {
+    function recompute() {
+      const leftColEl = leftColRef.current
+      if (!leftColEl || !leftRound) return
+      const leftColRect = leftColEl.getBoundingClientRect()
+
+      const leftCenters: Record<string, number> = {}
+      for (const m of leftRound.matches) {
+        const el = cardEls.current[m.id]
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        if (r.height === 0) return
+        leftCenters[m.id] = r.top - leftColRect.top + r.height / 2
+      }
+
+      const nextCenterY: Record<string, number> = { ...leftCenters }
+      if (rightRound) {
+        for (const m of rightRound.matches) {
+          const feederYs = [m.aFrom, m.bFrom]
+            .filter((id): id is string => !!id && leftCenters[id] !== undefined)
+            .map((id) => leftCenters[id])
+          nextCenterY[m.id] = feederYs.length
+            ? feederYs.reduce((a, b) => a + b, 0) / feederYs.length
+            : leftColEl.scrollHeight / 2
+        }
+      }
+      setCenterY(nextCenterY)
+      if (Math.abs(leftColEl.scrollHeight - colHeight) > 1) setColHeight(leftColEl.scrollHeight)
+    }
+    recompute()
+    const raf = requestAnimationFrame(recompute)
+    const ro = new ResizeObserver(recompute)
+    if (leftColRef.current) ro.observe(leftColRef.current)
+    window.addEventListener("resize", recompute)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+      window.removeEventListener("resize", recompute)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leftRound, rightRound])
+
+  // Pass 2: once the right column's cards are actually rendered at
+  // those computed centers, measure real rects and draw the connector
+  // between each feeder and its target.
+  useLayoutEffect(() => {
+    function recomputeConnectors() {
+      const containerEl = containerRef.current
+      if (!containerEl || !rightRound) {
+        setPaths([])
+        return
+      }
+      const containerRect = containerEl.getBoundingClientRect()
+      if (containerRect.width === 0) return
+      setSvgSize({ w: containerRect.width, h: containerRect.height })
+
+      const next: ConnectorPath[] = []
+      for (const match of rightRound.matches) {
+        ;(["aFrom", "bFrom"] as const).forEach((key, slotIdx) => {
+          const feederId = match[key]
+          if (!feederId) return
+          const sourceEl = cardEls.current[feederId]
+          const targetEl = cardEls.current[match.id]
+          if (!sourceEl || !targetEl) return
+          const sRect = sourceEl.getBoundingClientRect()
+          const tRect = targetEl.getBoundingClientRect()
+          if (sRect.width === 0 || tRect.width === 0) return
+
+          const startX = sRect.right - containerRect.left
+          const startY = sRect.top + sRect.height / 2 - containerRect.top
+          const endX = tRect.left - containerRect.left
+          const endY = (slotIdx === 0 ? tRect.top : tRect.bottom) - containerRect.top
+
+          next.push({ id: `${match.id}-${slotIdx === 0 ? "A" : "B"}`, d: topEntryPath(startX, startY, endX, endY) })
+        })
+      }
+      setPaths(next)
+    }
+    recomputeConnectors()
+    const raf = requestAnimationFrame(recomputeConnectors)
+    const ro = new ResizeObserver(recomputeConnectors)
+    if (containerRef.current) ro.observe(containerRef.current)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerY, colHeight])
+
+  return { containerRef, leftColRef, getCardRef, centerY, colHeight, paths, svgSize }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Presentation                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -145,9 +309,15 @@ function MiniTeamRow({ team, isWinner }: { team: MatchNode["teamA"]; isWinner: b
   )
 }
 
-function MiniMatchCard({ match }: { match: MatchNode }) {
+function MiniMatchCard({
+  match,
+  cardRef,
+}: {
+  match: MatchNode
+  cardRef?: (el: HTMLDivElement | null) => void
+}) {
   return (
-    <div className="border border-gold/10 rounded-md p-3 bg-white/[0.02]">
+    <div ref={cardRef} className="border border-gold/10 rounded-md p-3 bg-white/[0.02]">
       <div className="flex items-center justify-between mb-2">
         <span className="text-gold text-[10px] font-bold font-cinzel uppercase tracking-wide">{match.label}</span>
         {match.status === "live" ? (
@@ -164,7 +334,11 @@ function MiniMatchCard({ match }: { match: MatchNode }) {
   )
 }
 
-function MiniColumn({ round }: { round: Round }) {
+/**
+ * Renders one round on its own (used when there's only a single round
+ * to preview — no feeder pairing/connectors needed).
+ */
+function SingleColumn({ round }: { round: Round }) {
   return (
     <div>
       <p className="text-gray-400 text-[10px] uppercase tracking-widest font-cinzel mb-2">{round.name}</p>
@@ -177,6 +351,92 @@ function MiniColumn({ round }: { round: Round }) {
   )
 }
 
+/**
+ * Renders a left/right round pair with the right column's matches
+ * pinned to the true vertical midpoint of their feeders, connected by
+ * real measured lines — the mini version of what DoubleElimBoard and
+ * TournamentBracket do for a full bracket.
+ */
+function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
+  const leftRound = rounds[0]
+  const rightRound = rounds[1]
+  const { containerRef, leftColRef, getCardRef, centerY, colHeight, paths, svgSize } = useRoundPairLayout(
+    leftRound,
+    rightRound
+  )
+
+  if (!leftRound) return null
+  if (!rightRound) return <SingleColumn round={leftRound} />
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative grid grid-cols-1 sm:grid-cols-2 gap-10 min-w-[480px] sm:min-w-0"
+    >
+      {/* Left column — normal flow, this is the measurement baseline */}
+      <div>
+        <p className="text-gray-400 text-[10px] uppercase tracking-widest font-cinzel mb-2">{leftRound.name}</p>
+        <div ref={leftColRef} className="flex flex-col gap-6">
+          {leftRound.matches.map((m) => (
+            <div key={m.id}>
+              <MiniMatchCard match={m} cardRef={getCardRef(m.id)} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right column — each match absolutely positioned at the
+          midpoint of its feeders' measured centers. The wrapper below
+          the label is given the SAME height as the left column
+          (colHeight), so its own top edge lines up with leftColRef's
+          top edge — meaning centerY values (measured relative to
+          leftColRef) land in the right place here too, with no extra
+          offset math needed. */}
+      <div>
+        <p className="text-gray-400 text-[10px] uppercase tracking-widest font-cinzel mb-2">{rightRound.name}</p>
+        <div className="relative" style={{ minHeight: colHeight || undefined }}>
+          {rightRound.matches.map((m) => (
+            <div
+              key={m.id}
+              ref={getCardRef(m.id)}
+              className="absolute left-0 right-0"
+              style={{ top: centerY[m.id] ?? 0, transform: "translateY(-50%)" }}
+            >
+              <MiniMatchCard match={m} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Connector lines — brighter/thicker than a faint border color
+          so they actually read against the dark card background, and
+          sized to the container's real pixel dimensions (not "100%")
+          so the path coordinates, which are computed in pixels, always
+          line up with what's drawn. */}
+      {svgSize.w > 0 && (
+        <svg
+          className="absolute inset-0 pointer-events-none hidden sm:block"
+          width={svgSize.w}
+          height={svgSize.h}
+          viewBox={`0 0 ${svgSize.w} ${svgSize.h}`}
+        >
+          {paths.map((p) => (
+            <path
+              key={p.id}
+              d={p.d}
+              fill="none"
+              stroke="var(--color-theme-orange, #c9971f)"
+              strokeWidth={2}
+              strokeOpacity={0.55}
+              strokeLinecap="round"
+            />
+          ))}
+        </svg>
+      )}
+    </div>
+  )
+}
+
 function PanelShell({
   fullBracketHref,
   children,
@@ -185,7 +445,14 @@ function PanelShell({
   children: React.ReactNode
 }) {
   return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 overflow-x-auto">
+    // h-full + flex-col here, paired with `lg:items-stretch` on the row
+    // that holds this panel + the sidebar (see TournamentDetailClient),
+    // is what makes this card grow to match the sidebar's height instead
+    // of shrinking down to hug just a couple of match cards. `flex-1` on
+    // the content wrapper below then centers a short preview vertically
+    // in whatever space is left, rather than leaving dead space at the
+    // bottom.
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 h-full flex flex-col overflow-x-auto">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
         <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
           <Network className="h-5 w-5 text-gold" />
@@ -199,7 +466,7 @@ function PanelShell({
           <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
-      {children}
+      <div className="flex-1 flex flex-col justify-center">{children}</div>
     </div>
   )
 }
@@ -208,53 +475,49 @@ export default function BracketPreviewPanel(props: BracketPreviewProps) {
   if (props.format === "single") {
     const { slug } = props
     const rounds = getSingleElimDemoRounds()
-    const curIdx = findCurrentRoundIndex(rounds)
-    const visible = curIdx === -1 ? [] : rounds.slice(curIdx, curIdx + 2)
+    const visible = getPreviewRounds(rounds)
     const fullBracketHref = `/tournament/${slug}/bracket/singleElimination`
 
     return (
       <PanelShell fullBracketHref={fullBracketHref}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-[440px] sm:min-w-0">
-          {visible.map((round) => (
-            <MiniColumn key={round.id} round={round} />
-          ))}
-        </div>
+        <ConnectedRoundPair rounds={visible} />
       </PanelShell>
     )
   }
 
-  // Double elimination: show current WB round + current LB round in
-  // parallel (they progress independently), and the Grand Final once
-  // both finals have been reached.
+  // Double elimination: winners and losers progress on independent
+  // clocks, so each gets its own current+next pair via getPreviewRounds
+  // rather than sharing one index, and its own independent
+  // measurement/connector pass via ConnectedRoundPair. Grand Final
+  // shows once it actually has both teams filled in — simpler and more
+  // robust than inferring "reached the final" from WB/LB round indices,
+  // and it naturally covers the fully-finished-tournament case too. It's
+  // shown without a connector into it, since its real feeders (the
+  // WB/LB finals) aren't necessarily the same matches currently visible
+  // above.
   const { slug } = props
   const data = getDoubleElimDemoData()
-  const wbIdx = findCurrentRoundIndex(data.winners)
-  const lbIdx = data.losers.length ? findCurrentRoundIndex(data.losers) : -1
-  const wbAtFinal = wbIdx === data.winners.length - 1
-  const lbAtFinal = lbIdx === -1 || lbIdx === data.losers.length - 1
-  const gfReached = wbAtFinal && lbAtFinal && isDone(data.winners[wbIdx]?.matches[0])
+  const wbVisible = getPreviewRounds(data.winners)
+  const lbVisible = data.losers.length ? getPreviewRounds(data.losers) : []
+  const gfReached = !!data.grandFinal.teamA && !!data.grandFinal.teamB
 
   return (
     <PanelShell fullBracketHref={`/tournament/${slug}/bracket/doubleElimination`}>
       <div className="space-y-6 min-w-[280px]">
-        {wbIdx !== -1 && (
+        {wbVisible.length > 0 && (
           <div>
             <p className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
               <Trophy className="h-3 w-3" /> Winners bracket
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <MiniColumn round={data.winners[wbIdx]} />
-            </div>
+            <ConnectedRoundPair rounds={wbVisible} />
           </div>
         )}
-        {lbIdx !== -1 && (
+        {lbVisible.length > 0 && (
           <div>
             <p className="flex items-center gap-1.5 text-orange-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
               <RotateCcw className="h-3 w-3" /> Losers bracket
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <MiniColumn round={data.losers[lbIdx]} />
-            </div>
+            <ConnectedRoundPair rounds={lbVisible} />
           </div>
         )}
         {gfReached && (
