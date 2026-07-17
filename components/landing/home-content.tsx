@@ -31,12 +31,13 @@ import {
   comparisonColumns,
   comparisonRows,
   faqs,
-  knights,
   moduleData,
   showcaseSlides,
+  slugify,
   stats,
   testimonials,
   trustedClubs,
+  knights,
 } from "@/data/site-data"
 
 const moduleIcons = { gavel: Gavel, trophy: Trophy, monitor: MonitorPlay } as const
@@ -320,6 +321,105 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           </div>
         </div>
       </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+      HOW IT WORKS — the Auction → Bracket → Overlay pipeline
+      ═══════════════════════════════════════════════════════════ */}
+      {/* <section id="how-it-works" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="text-center mb-16 fade-in">
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
+              <TypeText text="How It " speed={45} />
+              <TypeText text="Works" speed={45} delay={200} className="text-gold" />
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
+              One flow, three stages — from drafting teams to broadcasting the final.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+            {[
+              {
+                step: "01",
+                title: "Draft Your Teams",
+                desc: "Run a live, points-based auction. Owners bid from their phones, purses are enforced automatically, and squads are built in real time.",
+                accent: "#F5A623",
+              },
+              {
+                step: "02",
+                title: "Build the Bracket",
+                desc: "Generate a single or double-elimination tournament from the teams you just drafted. Results advance winners automatically.",
+                accent: "#CD7F32",
+              },
+              {
+                step: "03",
+                title: "Go Live",
+                desc: "Score matches ball-by-ball with automatic milestone detection, and broadcast a stream-ready overlay straight into OBS.",
+                accent: "#C0C0C0",
+              },
+            ].map((s, i) => (
+              <div key={s.step} className={`rounded-lg border border-gold/20 bg-black/70 p-8 box-hover-effect fade-in-up stagger-${i + 1}`}>
+                <span className="font-cinzel text-4xl font-bold" style={{ color: s.accent }}>
+                  {s.step}
+                </span>
+                <h3 className="text-xl font-bold text-white font-cinzel mt-4 mb-3">{s.title}</h3>
+                <p className="text-gray-300 text-sm leading-relaxed">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section> */}
+
+      {/* ═══════════════════════════════════════════════════════════
+      FEATURED TOURNAMENTS — small teaser, full list lives on /tournament
+      ═══════════════════════════════════════════════════════════ */}
+      {/* <section id="tournaments" className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="text-center mb-16 fade-in">
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
+              <TypeText text="Featured " speed={45} />
+              <TypeText text="Tournaments" speed={45} delay={280} className="text-gold" />
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
+              A look at leagues run on Valiant League — from live auctions to broadcast finals.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
+            {showcaseSlides.slice(0, 3).map((t, i) => (
+              <Link
+                key={t.title}
+                href={`/tournament/${slugify(t.title)}`}
+                className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1} hover:border-gold/80 transition-all duration-300`}
+              >
+                <div className="relative h-40 md:h-48 border-b border-gold/20">
+                  <Image src={t.image || "/placeholder.svg"} alt={`Tournament: ${t.title}`} fill className="object-cover" />
+                </div>
+                <div className="p-5 md:p-6">
+                  <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
+                    {t.tag}
+                  </span>
+                  <h3 className="text-lg font-bold text-white font-cinzel mt-3 mb-1">{t.title}</h3>
+                  <p className="text-gray-300 text-xs">{t.by}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          <div className="text-center mt-10 fade-in-up stagger-4">
+            <Button
+              variant="outline"
+              className="border-gold text-gold hover:bg-gold/10"
+              onClick={() => handleNavigation("/tournament")}
+            >
+              View All Tournaments
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </section> */}
 
       {/* ═══════════════════════════════════════════════════════════
           TESTIMONIALS
