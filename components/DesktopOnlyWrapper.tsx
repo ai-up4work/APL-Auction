@@ -102,7 +102,7 @@ function PhoneTabletBlocker({ auctionName, auctionLogo }: { auctionName?: string
         >
           <div className="flex items-center gap-3">
             <img
-              src={auctionLogo || "/moon-knight-logo.png"}
+              src={auctionLogo || "/valiant-league-logo.png"}
               alt="Auction logo"
               style={{ height: "clamp(45px,6vw,36px)", width: "auto", objectFit: "cover" }}
             />

@@ -460,7 +460,7 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
         <div className="flex items-center gap-2.5">
           <div className="w-13 h-13 overflow-hidden flex items-center justify-center shrink-0">
             <img
-              src={auctionLogo || "/moon-knight-logo.png"}
+              src={auctionLogo || "/valiant-league-logo.png"}
               alt="Auction logo"
               className="w-full h-full object-cover"
             />

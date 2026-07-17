@@ -274,7 +274,7 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         />
       )}
 
-      <MatchMomentOverlay hideDemoButtons />
+      <MatchMomentOverlay hideDemoButtons logoSrc={state.matchSetup?.tournamentLogoUrl} />
 
       <LiveScoreBar
         show={state.liveScoreBar.show}

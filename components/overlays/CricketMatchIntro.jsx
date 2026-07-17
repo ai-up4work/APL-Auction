@@ -20,7 +20,7 @@ const TEAM_VISUAL_DEFAULTS = {
 const TOURNAMENT_DEFAULTS = {
   name: "MOON KNIGHT CUP",
   edition: "SEASON 7 · T20",
-  logo: "/moon-knight-logo.png",
+  logo: "/valiant-league-logo.png",
 };
 
 const MATCH_META_DEFAULTS = {

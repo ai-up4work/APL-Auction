@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 const TOURNAMENT = {
   name: "MOON KNIGHT CUP",
   edition: "SEASON 7 · T20",
-  logo: "/moon-knight-logo.png",
+  logo: "/valiant-league-logo.png",
 };
 
 /**

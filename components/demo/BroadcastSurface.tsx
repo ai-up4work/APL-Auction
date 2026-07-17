@@ -98,7 +98,7 @@ export default function BroadcastSurface({
         />
       )}
 
-      <MatchMomentOverlay hideDemoButtons />
+      <MatchMomentOverlay hideDemoButtons logoSrc={matchSetup.tournamentLogoUrl} />
 
       <LiveScoreBar show={channels.liveScoreBar} hideTrigger liveState={liveState} matchSetup={matchSetup} />
 

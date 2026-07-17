@@ -50,7 +50,7 @@ const images = {
   bg: "https://www.hindustantimes.com/ht-img/img/2024/09/30/1600x900/Cricket_3_1727677442716_1727677564058.jpg",
   "team-a": "/Franchises/CSK.png",
   "team-b": "/Franchises/RCB.png",
-  tournament: "/moon-knight-logo.png",
+  tournament: "/valiant-league-logo.png",
 }
 
 // Small helper so every logo slot (team A, team B, tournament) renders the

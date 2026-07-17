@@ -163,7 +163,7 @@ const EXIT_DURATION_MS = 260;
 // prevents back-to-back fires from feeling like a jump-cut.
 const QUEUE_GAP_MS = 1000;
 export const DEFAULT_CONFETTI_COLORS = ["#D4AF37", "#EAF1FB", "#C7CFDE", "#8FA6C9", "#ffffff"];
-const LOGO_SRC = "/moon-knight-logo.png";
+const LOGO_SRC = "/valiant-league-logo.png";
 
 // Watermark size per moment mode. Ball (four/six) and shield (maiden)
 // are bumped up noticeably from the old flat 300px so they actually
@@ -545,6 +545,7 @@ export default function MatchMomentOverlay({
   moments = {},
   confettiColors = DEFAULT_CONFETTI_COLORS,
   hideDemoButtons = false,
+  logoSrc = LOGO_SRC,
 }) {
   const [mounted, setMounted] = useState(false);
   const [active, setActive] = useState(null);
