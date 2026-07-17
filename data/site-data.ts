@@ -300,6 +300,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     title: "Iron Knights Season Opener",
     by: "Run by The Wardens CC — 8 teams, 96 players",
     image: "https://images.pexels.com/photos/9071736/pexels-photo-9071736.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    featured: true,
   },
   {
     tag: "Bracket",
@@ -307,6 +308,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     title: "Silver Cup Knockout",
     by: "Run by Royal Strikers — double-elimination, 16 teams",
     image: "https://images.pexels.com/photos/9072212/pexels-photo-9072212.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    featured: true,
   },
   {
     tag: "Overlay",
@@ -321,6 +323,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     title: "Crimson Cup Full Season",
     by: "Run by Valiant Originals — three months, one trophy",
     image: "https://images.pexels.com/photos/6532362/pexels-photo-6532362.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    featured: true,
   },
   {
     tag: "League",
@@ -385,6 +388,7 @@ export type ShowcaseSlide = {
   image: string
   // Optional extras for the tournament detail page — safe to omit
   description?: string
+  featured?: boolean
   format?: string
   prizePool?: string
   startDate?: string

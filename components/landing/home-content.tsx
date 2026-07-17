@@ -285,7 +285,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       </section>
 
       {/* Creators */}
-      <section id="creators" className="py-16 relative section-pattern">
+      {/* <section id="creators" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
@@ -320,7 +320,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* ═══════════════════════════════════════════════════════════
       HOW IT WORKS — the Auction → Bracket → Overlay pipeline
@@ -374,7 +374,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       {/* ═══════════════════════════════════════════════════════════
       FEATURED TOURNAMENTS — small teaser, full list lives on /tournament
       ═══════════════════════════════════════════════════════════ */}
-      {/* <section id="tournaments" className="py-16 relative section-pattern">
+      <section id="tournaments" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
@@ -388,7 +388,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
-            {showcaseSlides.slice(0, 3).map((t, i) => (
+            {showcaseSlides.filter((slide) => slide.featured).slice(0, 3).map((t, i) => (
               <Link
                 key={t.title}
                 href={`/tournament/${slugify(t.title)}`}
@@ -419,7 +419,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             </Button>
           </div>
         </div>
-      </section> */}
+      </section>
 
       {/* ═══════════════════════════════════════════════════════════
           TESTIMONIALS
