@@ -454,7 +454,7 @@ const tournamentExtras: Record<string, TournamentExtras> = {
 
   // ───────────────────────────── League (flagship) ────────────
   "crimson-cup-full-season": {
-    bracketFormat: "single",
+    bracketFormat: "double",
     bracketRounds: crimsonCupBracketRounds,
     liveMatch: {
       matchStatus: "live",
