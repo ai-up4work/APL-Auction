@@ -83,7 +83,7 @@ const teamB: TeamInfo = {
 export const HARDCODED_MATCH_SETUP: MatchSetup = {
   tournamentName: "Valiant Premier League",
   season: "2026",
-  tournamentLogoUrl: "",
+  tournamentLogoUrl: "/valiant-league-logo.png",
   venue: "Camelot Colosseum",
   format: "T20",
   matchNumber: "Match 14",
