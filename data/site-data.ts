@@ -200,7 +200,7 @@ export const moduleData = [
     title: "Live Auction\nRoom",
     description:
       "A real shot clock, enforced purses, and a bid room every owner runs from their own phone.",
-    badge: "CORE",
+    badge: "TRY THE AUCTION →",
     accent: "#F5A623",
     iconKey: "gavel" as const,
     link: "sandbox/auction",
@@ -209,16 +209,16 @@ export const moduleData = [
     title: "Automatic\nBrackets",
     description:
       "Single or double-elimination knockouts, drawn from your teams and updated as results come in.",
-    badge: "LIVE",
+    badge: "TRY THE BRACKET →",
     accent: "#CD7F32",
     iconKey: "trophy" as const,
     link: "sandbox/brackets",
   },
   {
-    title: "Broadcast\nOverlays",
+    title: "Live Scoring &\nOverlays",
     description:
-      "A transparent, stream-ready layer — score bar, scorecard, boundaries, weather — toggled from the console.",
-    badge: "STREAM",
+      "Ball-by-ball scoring that auto-detects boundaries, milestones, and match completion — feeding a stream-ready graphics layer with zero manual triggering.",
+    badge: "TRY THE OVERLAY →",
     accent: "#C0C0C0",
     iconKey: "monitor" as const,
     link: "sandbox/overlay",
@@ -256,38 +256,37 @@ export const testimonials = [
   {
     quote:
       "Valiant League is the first platform that actually respects match day. We ran three auctions in six weeks without touching a spreadsheet.",
-    name: "KGlimited",
-    role: "Founder, The Wardens",
+    name: "Marcus Fielding",
+    role: "Founder, Iron Knights CC",
   },
   {
     quote:
       "Finally a system that doesn't fight us. The overlays are flawless and there's zero setup required on stream day.",
-    name: "s7uid",
-    role: "Royal Guard, The Wardens",
+    name: "Devon Ashworth",
+    role: "Stream Producer, Royal Strikers",
   },
   {
     quote:
       "We replaced four spreadsheets and a Discord bot. Owner onboarding dropped from two weeks to two days.",
-    name: "vpowerv",
-    role: "Knight, The Wardens",
+    name: "Priya Nandan",
+    role: "League Ops, Golden Lions",
   },
 ]
 
 export type CellValue = true | false | "partial"
 
-export const comparisonRows: { feature: string; vl: CellValue; sheet: CellValue; discord: CellValue; zoom: CellValue }[] = [
-  { feature: "Live bid timer", vl: true, sheet: false, discord: false, zoom: "partial" },
-  { feature: "Mobile bidding", vl: true, sheet: false, discord: "partial", zoom: false },
-  { feature: "Automatic brackets", vl: true, sheet: false, discord: false, zoom: false },
-  { feature: "Broadcast overlays", vl: true, sheet: false, discord: false, zoom: false },
-  { feature: "Purse enforcement", vl: true, sheet: "partial", discord: false, zoom: false },
-  { feature: "Free tier to start", vl: true, sheet: true, discord: true, zoom: false },
+export const comparisonRows: { feature: string; vl: CellValue; sheet: CellValue; discord: CellValue }[] = [
+  { feature: "Live bid timer", vl: true, sheet: false, discord: false },
+  { feature: "Mobile bidding", vl: true, sheet: false, discord: "partial" },
+  { feature: "Automatic brackets", vl: true, sheet: false, discord: false },
+  { feature: "Broadcast overlays", vl: true, sheet: false, discord: false },
+  { feature: "Purse enforcement", vl: true, sheet: "partial", discord: false },
+  { feature: "Free tier to start", vl: true, sheet: true, discord: true },
 ]
 
 export const comparisonColumns = [
   { key: "sheet" as const, label: "Spreadsheet" },
   { key: "discord" as const, label: "Discord Bot" },
-  { key: "zoom" as const, label: "Zoom Call" },
 ]
 
 
@@ -358,7 +357,7 @@ export const faqs = [
   {
     question: "Can I import my existing teams and players?",
     answer:
-      "Yes. Upload a spreadsheet of teams, owners, and your player pool with base prices, and Valiant League sets up the auction room for you.",
+      "You can add teams and players individually from the Admin Panel today, with photo uploads and role/price fields built in. Bulk spreadsheet import is on our roadmap for larger leagues.",
   },
   {
     question: "What can I run after the auction?",
@@ -366,7 +365,6 @@ export const faqs = [
       "Move straight into a single or double-elimination bracket, drawn from the teams you just built, with results feeding the overlay live.",
   },
 ]
-
 
 
 /* ── slug helper — used instead of a hand-authored slug field ── */

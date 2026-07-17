@@ -57,7 +57,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
   useEffect(() => setIsLoaded(true), [])
 
   // ---- FAQ accordion ----
-  const [openFaq, setOpenFaq] = useState<number | null>(0)
+  const [openFaq, setOpenFaq] = useState<number | null>(100)
 
   // ---- showcase grid paging (3 cards per page) ----
   const [showcasePage, setShowcasePage] = useState(0)
@@ -214,8 +214,8 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               <TypeText text="Modules" speed={45} delay={280} className="text-gold" />
             </h2>
             <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              Three tools, one league. Every one of them reads and writes the same live data, so a bid, a result,
-              or a toggle shows up everywhere else instantly.
+              Three tools, one login. Each one runs its own live data in real time — bids,
+              brackets, and scores update instantly for everyone watching that module.
             </p>
           </div>
 
@@ -225,7 +225,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               return (
                 <div
                   key={mod.badge}
-                  className={`flex flex-col gap-5 p-8 md:p-10 md:flex-1 md:h-[340px] bg-black/70 box-hover-effect fade-in-up stagger-${index + 1}`}
+                  className={`flex flex-col gap-5 p-8 md:p-10 md:flex-1 md:h-[380px] bg-black/70 box-hover-effect fade-in-up stagger-${index + 1}`}
                   style={{ borderColor: `${mod.accent}55` }}
                 >
                   <div
