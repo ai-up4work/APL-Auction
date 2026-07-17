@@ -3,10 +3,31 @@
 import "./globals.css";
 import { AuctionProvider } from "@/context/AuctionContext";
 
-
 export const metadata = {
-  title: "APL Auction",
-  description: "Cricket Auction App",
+  title: "Valiant League — Live Auction, Tournament & Broadcast Platform",
+  description:
+    "Valiant League lets cricket clubs and tournament organizers run an entire competition lifecycle from one connected platform: draft players through a live points-based auction, build tournament brackets from the resulting teams, and broadcast matches with real-time overlay graphics — all synced live via Supabase.",
+  keywords: [
+    "cricket auction",
+    "cricket tournament bracket",
+    "live cricket overlay",
+    "cricket broadcast graphics",
+    "player draft auction",
+    "cricket scoring app",
+  ],
+  openGraph: {
+    title: "Valiant League",
+    description:
+      "Run your cricket club's auction, tournament bracket, and live broadcast overlay — all from one connected, real-time platform.",
+    siteName: "Valiant League",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Valiant League",
+    description:
+      "Live points-based auctions, tournament brackets, and real-time broadcast overlays for cricket clubs.",
+  },
 };
 
 export default function RootLayout({
