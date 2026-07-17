@@ -21,12 +21,21 @@ export const metadata = {
       "Run your cricket club's auction, tournament bracket, and live broadcast overlay — all from one connected, real-time platform.",
     siteName: "Valiant League",
     type: "website",
+    images: [
+      {
+        url: "/marketing/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Valiant League — Live Cricket Auction, Tournament & Broadcast Platform",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Valiant League",
     description:
       "Live points-based auctions, tournament brackets, and real-time broadcast overlays for cricket clubs.",
+    images: ["/marketing/og-image.png"],
   },
 };
 
