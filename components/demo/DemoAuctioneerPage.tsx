@@ -90,6 +90,11 @@ export default function DemoAuctioneerPage() {
   const [imgOk, setImgOk] = useState(true);
   useEffect(() => setImgOk(true), [currentLot?.id]);
 
+  // Tracks whether the auction logo in the header loaded okay. Separate
+  // from imgOk (which is for the player photo) so a broken logo doesn't
+  // affect the player image state and vice versa.
+  const [logoOk, setLogoOk] = useState(true);
+
   const soldState: "pending" | "sold" | "unsold" =
     currentLot?.status === "sold" ? "sold" : currentLot?.status === "unsold" ? "unsold" : "pending";
   const isShuffling = currentLot?.status === "shuffling";
@@ -110,6 +115,10 @@ export default function DemoAuctioneerPage() {
   // secret until reveal), the URL has to be set, and it can't have
   // already failed to load for this lot.
   const showPlayerImg = !!currentLot?.playerImg && !isShuffling && imgOk;
+
+  // Whether to render the auction logo in the header: needs a URL set on
+  // the session, and it can't have already failed to load.
+  const showAuctionLogo = !!auction.session.auctionLogo && logoOk;
 
   function spawnParticles(colors: string[]) {
     const created: Particle[] = Array.from({ length: 40 }, () => {
@@ -221,6 +230,17 @@ export default function DemoAuctioneerPage() {
       {/* TOP BAR */}
       <header className="shrink-0 flex justify-between items-center px-6 h-14 glass-panel border-b border-white/10">
         <div className="flex items-center gap-3">
+          {showAuctionLogo && (
+            <div className="relative w-12 h-12 shrink-0 rounded-md overflow-hidden">
+              <Image
+                src={auction.session.auctionLogo}
+                alt={`${auction.session.auctionName} logo`}
+                fill
+                className="object-contain"
+                onError={() => setLogoOk(false)}
+              />
+            </div>
+          )}
           <h1 className="font-archivo text-lg font-bold italic tracking-tighter text-theme-orange uppercase" style={{ color: "#c9971f" }}>
             {auction.session.auctionName}
           </h1>

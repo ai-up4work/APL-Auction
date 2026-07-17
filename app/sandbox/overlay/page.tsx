@@ -1,1036 +1,574 @@
+// File: app/sandbox/overlay/page.tsx
+//
+// Cricket overlay sandbox — restyled to match the broadcast-console feel
+// of the other two sandboxes (app/sandbox/brackets/page.tsx and the
+// auction multiview sandbox): pulsing on-air badge, console header with
+// a live score readout, a pill-based control deck, ambient scanline
+// texture, and a floating chyron for on-air moments instead of a plain
+// scrolling log. Same local-atom pattern (ControlCluster / Pill /
+// ActionButton) those two define for themselves rather than reusing the
+// old admin/ui Section/StatusPill card look, so all three sandboxes read
+// as one product.
+//
+// Still one component, no BroadcastChannel, no separate /preview route
+// (deleted — see the other two sandboxes' own admin-overlay patterns for
+// why a second navigable URL is worth avoiding).
+//
+// View switching: "Flip to Live" swaps the whole page into the actual
+// broadcast surface (video backdrop + the real portaled overlay
+// components); "Back to Controls" swaps back. On top of that, firing an
+// on-air moment (four/six/wicket/fifty/hundred/maiden/matchWon) now
+// auto-flips to Live so the celebration plays on the real broadcast
+// surface, then auto-reverts back to Controls once it would have
+// finished (see MOMENT_AUTO_REVERT_MS) — this replaces an earlier
+// version that kept MatchMomentOverlay mounted in both views, which just
+// stacked the celebration graphic on top of the admin UI instead of
+// showing it where it actually belongs. Any manual flip (the header
+// button, or "Back to Controls") cancels a pending auto-revert so it can
+// never yank the view out from under someone already navigating by hand.
+
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
-import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone, Pause, Play, PartyPopper, RotateCcw, MousePointerClick } from "lucide-react";
-import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
-import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
-import { demoModel, getDemoSnapshot, type DemoLot } from "@/lib/demo/demoModel";
-import { DesktopFrame, MobileFrame } from "@/components/demo/DeviceFrames";
-import DemoAuctioneerPage from "@/components/demo/DemoAuctioneerPage";
-import DemoOwnerBidPage from "@/components/demo/DemoOwnerBidPage";
-import DemoWatchPage from "@/components/demo/DemoWatchPage";
+import React, { useEffect, useRef, useState } from "react";
+import type { DismissalType } from "@/hooks/useLiveScoringEngine";
+import type { MomentPayload } from "@/lib/overlayBus";
 
-type PanelKey = "auctioneer" | "watch" | "ownerA" | "ownerB";
-const DESKTOP: PanelKey[] = ["auctioneer", "watch"];
-const MOBILE: PanelKey[] = ["ownerA", "ownerB"];
-const PANEL_ORDER: PanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"];
+import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 
-// Watch is spectator-only in every mode — nothing to click there, so it's
-// excluded from the clickable-chip behavior even in interactive mode.
-const CONTROLLABLE: PanelKey[] = ["auctioneer", "ownerA", "ownerB"];
+import WeatherCard from "@/components/overlays/WeatherCard";
+import MatchBoundaries from "@/components/overlays/MatchBoundaries";
+import TournamentBoundaries from "@/components/overlays/TournamentBoundaries";
+import LiveScoreBar from "@/components/overlays/LiveScoreBar";
+import CricketMatchIntro from "@/components/overlays/CricketMatchIntro";
+import MatchMomentOverlay from "@/components/overlays/MatchMomentOverlay";
+import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
+import CricketScorecard from "@/components/overlays/CricketScorecard";
 
-const OWNER_DISPLAY_NAME: Record<"ownerA" | "ownerB", string> = {
-  ownerA: "Owner A",
-  ownerB: "Owner B",
-};
+import { HARDCODED_MATCH_SETUP, emptyLiveState, defaultWeather, emptyBatter, emptyBowler } from "./lib/sandboxData";
 
-const DESKTOP_W = 1350;
-const DESKTOP_H = 800;
-const DESKTOP_CHROME_H = 26;
-const MOBILE_W = 400;
-const MOBILE_H = 750;
-const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
+import { MonitorPlay, LayoutPanelLeft, CloudSun, RotateCcw, Zap, Target, Trophy, ShieldCheck, PartyPopper } from "lucide-react";
 
-const PANEL_META: Record<PanelKey, { num: string; label: string }> = {
-  auctioneer: { num: "01", label: "Auctioneer" },
-  watch: { num: "02", label: "Broadcast" },
-  ownerA: { num: "03", label: "Owner A" },
-  ownerB: { num: "04", label: "Owner B" },
-};
-
-function computeLayout(highlighted: PanelKey[]): Record<PanelKey, number> {
-  const base: Record<PanelKey, number> = { auctioneer: 0, watch: 0, ownerA: 0, ownerB: 0 };
-  const desktopHi = highlighted.filter((p) => DESKTOP.includes(p));
-  const mobileHi = highlighted.filter((p) => MOBILE.includes(p));
-
-  if (desktopHi.length === 0 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
-  if (desktopHi.length === 1 && mobileHi.length === 0) return { ...base, [desktopHi[0]]: 75, ownerA: 25 };
-  if (desktopHi.length === 1 && mobileHi.length === 1) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 25 };
-  if (desktopHi.length === 1 && mobileHi.length === 2) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 12.5, [mobileHi[1]]: 12.5 };
-  if (desktopHi.length === 0 && mobileHi.length === 2) return { ...base, [mobileHi[0]]: 50, [mobileHi[1]]: 50 };
-  if (desktopHi.length === 0 && mobileHi.length === 1) return { ...base, [mobileHi[0]]: 25, watch: 75 };
-  if (desktopHi.length === 2 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
-  if (desktopHi.length === 2 && mobileHi.length === 1) return { ...base, auctioneer: 37.5, watch: 37.5, [mobileHi[0]]: 25 };
-  if (desktopHi.length === 2 && mobileHi.length === 2) return { ...base, auctioneer: 25, watch: 25, ownerA: 25, ownerB: 25 };
-
-  return { ...base, auctioneer: 50, watch: 50 };
+// ── Local channel-visibility shape ──────────────────────────────────
+export interface SandboxChannels {
+  weather: boolean;
+  liveScoreBar: boolean;
+  matchBoundaries: boolean;
+  tournamentBoundaries: boolean;
+  matchIntro: boolean;
+  tournamentLogo: boolean;
+  matchScorecard: boolean;
 }
 
-function useCellFit(naturalWidth: number, naturalHeight: number, fit: "contain" | "height" = "contain") {
-  const [scale, setScale] = useState(0);
-  const [ready, setReady] = useState(false);
-  const nodeRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
+const DEFAULT_CHANNELS: SandboxChannels = {
+  weather: false,
+  liveScoreBar: true,
+  matchBoundaries: false,
+  tournamentBoundaries: false,
+  matchIntro: false,
+  tournamentLogo: false,
+  matchScorecard: false,
+};
 
-  const recompute = useCallback(() => {
-    const el = nodeRef.current;
-    if (!el) return;
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    if (cw < 2 || ch < 2) return;
-    const widthRatio = cw / naturalWidth;
-    const heightRatio = ch / naturalHeight;
-    const raw = fit === "height" ? heightRatio : Math.min(widthRatio, heightRatio);
-    const s = raw * 0.998;
-    setScale(Math.max(s, 0.05));
-    setReady(true);
-  }, [naturalWidth, naturalHeight, fit]);
+const CHANNEL_LABELS: Record<keyof SandboxChannels, string> = {
+  weather: "Weather",
+  liveScoreBar: "Score Bar",
+  matchBoundaries: "Match 4s/6s",
+  tournamentBoundaries: "Tourn. 4s/6s",
+  matchIntro: "Match Intro",
+  tournamentLogo: "Tournament Logo",
+  matchScorecard: "Scorecard",
+};
 
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      nodeRef.current = el;
-      if (el) {
-        recompute();
-        const ro = new ResizeObserver(recompute);
-        ro.observe(el);
-        observerRef.current = ro;
-      } else {
-        setReady(false);
-      }
-    },
-    [recompute]
-  );
+const FONT_BODY = "var(--font-body, 'Inter', ui-sans-serif, system-ui, sans-serif)";
+
+type ViewMode = "control" | "live";
+
+// How long to hold on the Live view after a moment fires before auto-
+// reverting to Controls — roughly matched to how long each celebration
+// actually plays for. matchWon gets the longest hold since it's the
+// most consequential graphic; everything else is a quick beat.
+const MOMENT_AUTO_REVERT_MS: Record<MomentPayload["moment"], number> = {
+  four: 3200,
+  six: 3200,
+  wicket: 4200,
+  fifty: 4500,
+  hundred: 4500,
+  maiden: 3200,
+  matchWon: 6000,
+};
+
+// Same fade-out-before-unmount helper the real overlay display page uses.
+function useOverlayVisibility(show: boolean, exitMs: number) {
+  const [mounted, setMounted] = useState(show);
+  const [closing, setClosing] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    window.addEventListener("resize", recompute);
-    const raf1 = requestAnimationFrame(() => {
-      recompute();
-      requestAnimationFrame(recompute);
-    });
+    if (show) {
+      if (timer.current) clearTimeout(timer.current);
+      setClosing(false);
+      setMounted(true);
+    } else if (mounted) {
+      setClosing(true);
+      timer.current = setTimeout(() => {
+        setMounted(false);
+        setClosing(false);
+      }, exitMs);
+    }
     return () => {
-      window.removeEventListener("resize", recompute);
-      cancelAnimationFrame(raf1);
+      if (timer.current) clearTimeout(timer.current);
     };
-  }, [recompute]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
 
-  useEffect(() => () => observerRef.current?.disconnect(), []);
-
-  return { ref: setRef, scale, ready, boxW: naturalWidth * scale, boxH: naturalHeight * scale };
+  return { mounted, closing };
 }
 
-function useSpotlight() {
-  const snap = useSyncExternalStore(
-    demoModel.subscribe.bind(demoModel),
-    getDemoSnapshot,
-    getDemoSnapshot
-  );
-  return {
-    activePanels: snap.activePanels as PanelKey[],
-    syncPanels: snap.syncPanels as PanelKey[],
-    mode: snap.mode,
-    autoFocusEnabled: snap.autoFocusEnabled,
-    teams: snap.auction.teams,
-    currentLot: snap.currentLot,
-    shuffle: snap.shuffle,
-    isLocked: snap.isLocked,
-    narratorText: snap.narratorText,
-    auctionStatus: snap.auction.status,
-    completedLots: snap.completedLots as DemoLot[],
-    finalizedUnsoldCount: snap.finalizedUnsoldPlayers.length,
-  };
-}
+/* ------------------------------------------------------------------ */
+/*  Local console atoms — same family as brackets/page.tsx's           */
+/*  ControlCluster/Pill/ActionButton, so both sandboxes read as one    */
+/*  product instead of two different UI kits.                          */
+/* ------------------------------------------------------------------ */
 
-// ── Live commentary ──────────────────────────────────────────────────
-// Two lines: the model's own narrator caption (what just happened — the
-// same text broadcastEvent() sets on every bid/sold/unsold/shuffle), and
-// a second, mode-aware line describing what the viewer can actually do
-// right now. The "what's next" line is worded differently for demo
-// (nothing to do but watch) vs interactive (here's your actual button).
-// Suppressed entirely once the auction is complete — the completion
-// overlay takes over messaging at that point.
-function getGuidance(
-  mode: "demo" | "interactive",
-  lot: ReturnType<typeof useSpotlight>["currentLot"],
-  shuffle: ReturnType<typeof useSpotlight>["shuffle"],
-  isLocked: boolean,
-  auctionStatus: "live" | "paused" | "completed"
-): string {
-  if (auctionStatus === "completed") return "";
-  if (mode === "demo") {
-    return "Watching the bot run the auction — switch to \"Try it yourself\" to take the controls.";
-  }
-  if (!lot || lot.status === "sold" || lot.status === "unsold") {
-    return "Lot resolved. Auctioneer: click Start Shuffle to bring up the next player.";
-  }
-  if (lot.status === "shuffling" && !shuffle.target) {
-    return "Reel is spinning — nothing to do yet, the next player is about to be revealed.";
-  }
-  if (lot.status === "shuffling" && shuffle.target) {
-    return "Player revealed — bidding opens in a moment.";
-  }
-  if (lot.status === "pending" && !isLocked) {
-    return "Bidding is open. Owner A / Owner B: place a bid from your phone to raise it — every bid resets the clock.";
-  }
-  if (lot.status === "pending" && isLocked) {
-    return lot.winningTeamId
-      ? "Time's up. Auctioneer: click Hammer Sold to confirm the winner (or it resolves on its own in a moment)."
-      : "Time's up with no bids. Auctioneer: click Mark Unsold (or it resolves on its own in a moment).";
-  }
-  return "";
-}
-
-// Classifies the narrator caption so the chyron can color/tag itself by
-// event type — the accent + tag alone should tell you what happened
-// before you've even read the words. Order matters: "unsold" must be
-// checked before the generic "sold" test since "unsold" contains "sold".
-type CommentaryKind = "sold" | "unsold" | "bid" | "reveal" | "shuffle" | "info";
-
-function classifyNarrator(text: string): { kind: CommentaryKind; accent: string; tag: string } {
-  if (/unsold/i.test(text)) return { kind: "unsold", accent: "#e5484d", tag: "UNSOLD" };
-  if (/\bsold\b/i.test(text)) return { kind: "sold", accent: "#3ddc84", tag: "SOLD" };
-  if (/\bbids?\b|\bpts\b/i.test(text)) return { kind: "bid", accent: "#f5a623", tag: "BID" };
-  if (/bidding is open|steps up/i.test(text)) return { kind: "reveal", accent: "#4fd1c5", tag: "ON THE BLOCK" };
-  if (/shuffl/i.test(text)) return { kind: "shuffle", accent: "#8b8bf5", tag: "SHUFFLE" };
-  return { kind: "info", accent: "#f5a623", tag: "LIVE" };
-}
-
-// Broadcast-style chyron / lower-third, not a chat toast. A left accent
-// rule + a small mono event tag stand in for an icon badge, keeping the
-// same "glanceable event type" job without reading as generic notification
-// UI. Floating overlay, not docked — pinned centered under the toolbar so
-// it never steals layout space from the panels underneath. pointer-events:
-// none on the wrapper keeps it from ever blocking a click on what's behind
-// it. Keyed by narratorText so React remounts the chyron on every new
-// caption, replaying the entrance animation each time — a rapid string of
-// bids each get their own visible "pop" instead of the text silently
-// swapping in place.
-function CommentaryOverlay({
-  narratorText,
-  guidance,
-}: {
-  narratorText: string;
-  guidance: string;
-}) {
-  if (!narratorText && !guidance) return null;
-  const { accent, tag } = classifyNarrator(narratorText || guidance);
+function ControlCluster({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="pointer-events-none fixed top-12 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-0 max-w-[640px] w-[92%]">
-      {narratorText && (
-        <div
-          key={narratorText}
-          className="commentary-toast flex items-stretch overflow-hidden rounded-[3px]"
-          style={{
-            background: "rgba(8,8,8,0.88)",
-            backdropFilter: "blur(10px)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            boxShadow: "0 12px 30px -10px rgba(0,0,0,0.6)",
-          }}
-        >
-          {/* Left accent rule — doubles as the event's color key, in place
-              of an icon badge. */}
-          <span className="shrink-0" style={{ width: 3, background: accent }} />
-
-          <div className="flex items-center gap-3 pl-3.5 pr-4 py-2.5">
-            <span
-              className="shrink-0 text-[9px] uppercase font-bold"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                letterSpacing: "0.14em",
-                color: accent,
-              }}
-            >
-              {tag}
-            </span>
-            <span className="w-px self-stretch bg-white/10" />
-            <span
-              className="text-[13px] leading-snug"
-              style={{
-                fontFamily: "var(--font-headline-lg)",
-                fontStyle: "italic",
-                fontWeight: 700,
-                color: "var(--color-on-surface)",
-              }}
-            >
-              {narratorText}
-            </span>
-          </div>
-        </div>
-      )}
-      {guidance && (
-        <div
-          className="px-4 py-1 text-[9px] uppercase text-center"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.1em",
-            background: "rgba(6,6,6,0.7)",
-            borderLeft: "1px solid rgba(255,255,255,0.06)",
-            borderRight: "1px solid rgba(255,255,255,0.06)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: "0 0 3px 3px",
-            color: "var(--color-outline)",
-            backdropFilter: "blur(6px)",
-          }}
-        >
-          {guidance}
-        </div>
-      )}
+    <div className="flex flex-col gap-1.5">
+      <span
+        className="text-[9px] font-semibold uppercase"
+        style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.13em", color: "var(--color-outline)" }}
+      >
+        {label}
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">{children}</div>
     </div>
   );
 }
 
-// In demo/automation mode, events (bid, reveal, sold, shuffle...) can fire
-// faster than a person can read the caption for the previous one — the
-// overlay is keyed by narratorText, so a same-render replacement just
-// stomps the old text before its entrance animation even finishes. This
-// queues incoming values and holds each on screen for a minimum dwell
-// time, draining the queue in order, so a fast burst plays back as a
-// readable sequence instead of flashing/skipping captions.
-function useThrottledNarrator(source: string, minDisplayMs = 1400) {
-  const [shown, setShown] = useState(source);
-  const queueRef = useRef<string[]>([]);
-  const shownRef = useRef(source);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleNext = useCallback(() => {
-    if (timerRef.current) return; // a hold is already in progress
-    const next = queueRef.current.shift();
-    if (next === undefined) return;
-    shownRef.current = next;
-    setShown(next);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      scheduleNext();
-    }, minDisplayMs);
-  }, [minDisplayMs]);
-
-  useEffect(() => {
-    if (!source) return;
-    const alreadyQueued = queueRef.current[queueRef.current.length - 1] === source;
-    if (source !== shownRef.current && !alreadyQueued) {
-      queueRef.current.push(source);
-      scheduleNext();
-    }
-  }, [source, scheduleNext]);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    []
-  );
-
-  return shown;
-}
-
-function useTimecode() {
-  const [deci, setDeci] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setDeci((d) => d + 1), 100);
-    return () => clearInterval(id);
-  }, []);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const totalSec = Math.floor(deci / 10);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor(totalSec / 60) % 60;
-  const s = totalSec % 60;
-  const cs = (deci % 10) * 10;
-  return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(cs)}`;
-}
-
-function Cell({ pct, ready, isSyncing, children }: { pct: number; ready: boolean; isSyncing: boolean; children: React.ReactNode }) {
-  const visible = pct > 0 && ready;
+function Pill({
+  active,
+  onClick,
+  children,
+  title,
+}: {
+  active?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  title?: string;
+}) {
   return (
-    <div
-      className={`min-w-0 h-full flex items-center justify-center overflow-hidden ${isSyncing ? "panel-sync-ring" : ""}`}
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase whitespace-nowrap transition-colors"
       style={{
-        flex: `0 0 ${pct}%`,
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? "auto" : "none",
-        transition: `flex-basis ${ZOOM_TRANSITION}, opacity ${ZOOM_TRANSITION}`,
+        fontFamily: "var(--font-label-mono)",
+        letterSpacing: "0.09em",
+        background: active ? "color-mix(in srgb, var(--color-theme-orange) 16%, transparent)" : "rgba(255,255,255,0.03)",
+        boxShadow: active
+          ? "inset 0 0 0 1px color-mix(in srgb, var(--color-theme-orange) 50%, transparent)"
+          : "inset 0 0 0 1px var(--color-border-overlay)",
+        color: active ? "var(--color-theme-orange)" : "var(--color-outline)",
+        cursor: "pointer",
       }}
     >
       {children}
-    </div>
+    </button>
   );
 }
 
-// Right-edge vertical stepper for the two owner panels — two nodes joined
-// by a connecting line, each colored to its team. Doubles as a mini legend
-// as well as the switch control. Only relevant in interactive mode, and
-// only while at least one owner panel is part of the current spotlight —
-// during shuffle/sold/unsold beats (auctioneer + watch only) there's
-// nothing to switch to yet, so it stays hidden rather than dangling
-// irrelevant.
-function OwnerDotSwitcher({
-  mode,
-  active,
-  teams,
-  onSelect,
+function ConsoleActionButton({
+  onClick,
+  disabled,
+  solid,
+  icon,
+  children,
+  title,
 }: {
-  mode: "demo" | "interactive";
-  active: PanelKey[];
-  teams: { supabaseId: string; code: string; name: string; color: string }[];
-  onSelect: (owner: "ownerA" | "ownerB") => void;
+  onClick: () => void;
+  disabled?: boolean;
+  solid?: boolean;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  title?: string;
 }) {
-  const hasA = active.includes("ownerA");
-  const hasB = active.includes("ownerB");
-  if (mode !== "interactive" || (!hasA && !hasB)) return null;
-
-  const teamFor = (owner: "ownerA" | "ownerB") =>
-    teams.find((t) => t.supabaseId === (owner === "ownerA" ? "tA" : "tB"));
-
-  const colorA = teamFor("ownerA")?.color ?? "var(--color-outline)";
-  const colorB = teamFor("ownerB")?.color ?? "var(--color-outline)";
-  const activeColor = hasA ? colorA : colorB;
-
   return (
-    <div
-      className="fixed right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center"
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase transition-all hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
       style={{
-        background: "rgba(10,10,10,0.6)",
-        border: "1px solid var(--color-border-overlay)",
-        borderRadius: 999,
-        padding: "18px 11px",
-        backdropFilter: "blur(6px)",
+        fontFamily: "var(--font-label-mono)",
+        letterSpacing: "0.08em",
+        background: solid ? "linear-gradient(135deg,#A87815,#E8C468)" : "rgba(255,255,255,0.03)",
+        boxShadow: solid ? "none" : "inset 0 0 0 1px var(--color-border-overlay)",
+        color: solid ? "#1a1304" : "var(--color-on-surface)",
+        cursor: disabled ? "not-allowed" : "pointer",
       }}
     >
-      {(["ownerA", "ownerB"] as const).map((owner, i) => {
-        const isActive = active.includes(owner);
-        const team = teamFor(owner);
-        const color = team?.color ?? "var(--color-outline)";
-        return (
-          <div key={owner} className="flex flex-col items-center">
-            <button
-              onClick={() => onSelect(owner)}
-              title={team?.name ?? OWNER_DISPLAY_NAME[owner]}
-              className="group relative flex items-center justify-center"
-              style={{ cursor: isActive ? "default" : "pointer", width: 26, height: 26 }}
-            >
-              <span
-                className="absolute right-full mr-2.5 px-1.5 py-0.5 rounded text-[8px] uppercase whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                style={{
-                  fontFamily: "var(--font-label-mono)",
-                  letterSpacing: "0.08em",
-                  background: "rgba(10,10,10,0.9)",
-                  border: `1px solid color-mix(in srgb, ${color} 50%, transparent)`,
-                  color: "var(--color-on-surface)",
-                }}
-              >
-                {team?.name ?? OWNER_DISPLAY_NAME[owner]}
-              </span>
-              {/* Outer ring only lights up on the active step, like a
-                  progress-stepper node. */}
-              <span
-                className="absolute rounded-full transition-all"
-                style={{
-                  width: isActive ? 26 : 0,
-                  height: isActive ? 26 : 0,
-                  border: `1.5px solid ${color}`,
-                  opacity: isActive ? 0.5 : 0,
-                }}
-              />
-              <span
-                className="rounded-full transition-all"
-                style={{
-                  width: isActive ? 15 : 8,
-                  height: isActive ? 15 : 8,
-                  background: color,
-                  boxShadow: isActive
-                    ? `0 0 10px 1px color-mix(in srgb, ${color} 70%, transparent)`
-                    : "none",
-                  border: isActive ? "none" : `1px solid color-mix(in srgb, ${color} 55%, transparent)`,
-                }}
-              />
-            </button>
-            {/* Connecting rail between the two steps. */}
-            {i === 0 && (
-              <span
-                className="w-px"
-                style={{
-                  height: 22,
-                  margin: "6px 0",
-                  background: `linear-gradient(180deg, ${colorA}, ${colorB})`,
-                  opacity: 0.35,
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
+      {icon}
+      {children}
+    </button>
+  );
+}
 
-      <span
-        className="mt-2 text-[7px] uppercase"
+// ── Moment chyron — floating, non-blocking, keyed to replay its entrance
+// on every new moment. Same visual family as the auction sandbox's
+// CommentaryOverlay / the brackets sandbox's ChampionChyron: left accent
+// rule doubling as the event's color key, mono event tag, italic
+// headline text. Classified by moment type directly (not string-sniffed)
+// since fireMoment already knows exactly what kind of event this is.
+type FiredMoment = { id: number; moment: MomentPayload["moment"]; text: string };
+
+const MOMENT_META: Record<MomentPayload["moment"], { accent: string; tag: string; icon: React.ReactNode }> = {
+  four: { accent: "var(--color-theme-orange)", tag: "FOUR", icon: <Zap size={14} /> },
+  six: { accent: "var(--color-theme-orange)", tag: "SIX", icon: <Zap size={14} /> },
+  wicket: { accent: "#e5484d", tag: "WICKET", icon: <Target size={14} /> },
+  fifty: { accent: "#4fd1c5", tag: "FIFTY", icon: <Trophy size={14} /> },
+  hundred: { accent: "#4fd1c5", tag: "HUNDRED", icon: <Trophy size={14} /> },
+  maiden: { accent: "#8b8bf5", tag: "MAIDEN", icon: <ShieldCheck size={14} /> },
+  matchWon: { accent: "#3ddc84", tag: "MATCH WON", icon: <PartyPopper size={14} /> },
+};
+
+function MomentChyron({ fired }: { fired: FiredMoment | null }) {
+  if (!fired) return null;
+  const meta = MOMENT_META[fired.moment];
+  return (
+    <div className="pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
+      <div
+        key={fired.id}
+        className="chyron-in flex items-stretch overflow-hidden rounded-[3px]"
         style={{
-          fontFamily: "var(--font-label-mono)",
-          letterSpacing: "0.14em",
-          color: activeColor,
-          opacity: 0.85,
+          background: "rgba(8,8,8,0.88)",
+          backdropFilter: "blur(10px)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          boxShadow: "0 12px 30px -10px rgba(0,0,0,0.6)",
         }}
       >
-        {(hasA ? teamFor("ownerA")?.code : teamFor("ownerB")?.code) ?? ""}
-      </span>
+        <span className="shrink-0" style={{ width: 3, background: meta.accent }} />
+        <div className="flex items-center gap-3 pl-3.5 pr-4 py-2.5">
+          <span style={{ color: meta.accent }}>{meta.icon}</span>
+          <span
+            className="shrink-0 text-[10px] uppercase font-semibold"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.11em", color: meta.accent }}
+          >
+            {meta.tag}
+          </span>
+          <span className="w-px self-stretch bg-white/10" />
+          <span
+            className="text-[13px] leading-snug"
+            style={{
+              fontFamily: "var(--font-headline-lg)",
+              fontStyle: "italic",
+              fontWeight: 700,
+              color: "var(--color-on-surface)",
+            }}
+          >
+            {fired.text}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Compact "last result" readout for the header — most recent completed lot
-// (sold or unsold), color-coded the same way as the commentary chyron, plus
-// a running sold/unsold tally so the header still means something once the
-// caption itself has scrolled on to the next lot. Returns null with nothing
-// completed yet rather than showing an empty/placeholder chip.
-function ResultChip({ completedLots }: { completedLots: DemoLot[] }) {
-  const last = completedLots[0];
-  if (!last) return null;
+export default function OverlaySandboxPage() {
+  const matchSetup = HARDCODED_MATCH_SETUP;
 
-  const soldCount = completedLots.filter((l) => l.status === "sold").length;
-  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
-  const isSold = last.status === "sold";
-  const accent = isSold ? "#3ddc84" : "#e5484d";
+  const [view, setView] = useState<ViewMode>("control");
 
-  return (
-    <div
-      className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px]"
-      style={{
-        background: "rgba(0,0,0,0.22)",
-        border: `1px solid color-mix(in srgb, ${accent} 35%, var(--color-border-overlay))`,
-      }}
-      title={
-        isSold
-          ? `${last.playerName} sold to ${last.winningTeamCode} for ${last.currentBid.toLocaleString()} pts`
-          : `${last.playerName} went unsold`
-      }
-    >
-      <span
-        className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-[2px]"
-        style={{
-          fontFamily: "var(--font-label-mono)",
-          letterSpacing: "0.1em",
-          color: "#08110c",
-          background: accent,
-        }}
-      >
-        {isSold ? "Sold" : "Unsold"}
-      </span>
-      <span
-        className="text-[10px] max-w-[220px] truncate"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
-      >
-        {isSold ? `${last.playerName} → ${last.winningTeamCode} · ${last.currentBid.toLocaleString()} pts` : last.playerName}
-      </span>
-      <span
-        className="text-[8px] tabular-nums shrink-0"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)", letterSpacing: "0.05em" }}
-      >
-        {soldCount}S / {unsoldCount}U
-      </span>
-    </div>
-  );
-}
+  const [liveState, setLiveState] = useState(emptyLiveState);
+  const [liveDirty, setLiveDirty] = useState(false);
+  const [pushed, setPushed] = useState(false);
+  const [engineSyncState, setEngineSyncState] = useState<any>(null);
 
-function MultiviewBar({
-  active,
-  syncing,
-  mode,
-  autoFocusEnabled,
-  auctionStatus,
-  completedLots,
-  onToggleMode,
-  onTogglePause,
-}: {
-  active: PanelKey[];
-  syncing: PanelKey[];
-  mode: "demo" | "interactive";
-  autoFocusEnabled: boolean;
-  auctionStatus: "live" | "paused" | "completed";
-  completedLots: DemoLot[];
-  onToggleMode: () => void;
-  onTogglePause: () => void;
-}) {
-  const tc = useTimecode();
-  return (
-    <div
-      className="shrink-0 h-11 flex items-center justify-between px-4 relative z-20"
-      style={{
-        background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
-        borderBottom: "1px solid var(--color-border-overlay)",
-        boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
-      }}
-    >
-      {/* ── Left: on-air badge + timecode ─────────────────────────── */}
-      <div className="flex items-center gap-4">
-        <div
-          className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+  const [weatherData, setWeatherData] = useState(defaultWeather);
+  const [channels, setChannels] = useState<SandboxChannels>(DEFAULT_CHANNELS);
+  const [log, setLog] = useState<string[]>([]);
+  const [firedMoment, setFiredMoment] = useState<FiredMoment | null>(null);
+  const momentIdRef = useRef(0);
+
+  // Pending "auto-revert to Controls" timeout set by fireMoment. Any
+  // manual view switch (the header's Flip/Back buttons) cancels this so
+  // a leftover timer from an earlier moment can never yank the view back
+  // out from under someone who's already navigating on their own.
+  const autoRevertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearAutoRevert() {
+    if (autoRevertTimerRef.current) {
+      clearTimeout(autoRevertTimerRef.current);
+      autoRevertTimerRef.current = null;
+    }
+  }
+
+  function goLive() {
+    clearAutoRevert();
+    setView("live");
+  }
+
+  function backToControls() {
+    clearAutoRevert();
+    setView("control");
+  }
+
+  useEffect(() => clearAutoRevert, []);
+
+  function logEvent(label: string) {
+    setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 14));
+  }
+
+  // Body background: normal app background in "control" view. In "live"
+  // view the video backdrop covers the frame, so this is just a safe
+  // fallback color while it buffers.
+  useEffect(() => {
+    document.body.style.background = view === "live" ? "#000" : "";
+    return () => {
+      document.body.style.background = "";
+    };
+  }, [view]);
+
+  function fireMoment(payload: MomentPayload) {
+    const text = `${payload.player ? payload.player : ""}${payload.score ? ` ${payload.score}` : ""}`.trim() || payload.moment;
+    momentIdRef.current += 1;
+    setFiredMoment({ id: momentIdRef.current, moment: payload.moment, text });
+    logEvent(`Moment: ${payload.moment.toUpperCase()}${payload.player ? ` — ${payload.player}` : ""}`);
+
+    // Auto-flip to Live so the celebration plays on the actual broadcast
+    // surface instead of stacking on top of the admin UI, then auto-
+    // revert back to Controls once it would have finished. A fresh
+    // moment firing while already on Live (or while a previous auto-
+    // revert is still pending) just resets the hold — clearAutoRevert()
+    // inside goLive() handles that.
+    goLive();
+    (window as any).triggerBoundaryCelebration?.(payload.moment, payload);
+    autoRevertTimerRef.current = setTimeout(() => {
+      autoRevertTimerRef.current = null;
+      setView("control");
+    }, MOMENT_AUTO_REVERT_MS[payload.moment] ?? 3500);
+  }
+
+  function teamVisualsByName(name: string): { color?: string; logoUrl?: string } {
+    if (matchSetup.teamA.name === name) return { color: matchSetup.teamA.color, logoUrl: matchSetup.teamA.logoUrl };
+    if (matchSetup.teamB.name === name) return { color: matchSetup.teamB.color, logoUrl: matchSetup.teamB.logoUrl };
+    return {};
+  }
+
+  function handleBoundary(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
+    fireMoment({ moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` });
+  }
+
+  function handleMilestone(moment: "fifty" | "hundred", batter: { name: string; runs: number; balls: number; label?: string }) {
+    fireMoment({ moment, player: batter.label ?? batter.name ?? "Batter", score: `${batter.runs}(${batter.balls})` });
+  }
+
+  function handleWicket(payload: {
+    batsmanOut: "striker" | "nonStriker";
+    batter: { name: string; runs: number; balls: number };
+    dismissalType: DismissalType;
+    fielder: string;
+    bowlerName: string;
+  }) {
+    fireMoment({
+      moment: "wicket",
+      batsmanOut: payload.batsmanOut,
+      player: payload.batter.name || (payload.batsmanOut === "striker" ? "Striker" : "Non-striker"),
+      score: `${payload.batter.runs}(${payload.batter.balls})`,
+      dismissalType: payload.dismissalType,
+      bowler: payload.bowlerName,
+      fielder: payload.fielder,
+    });
+  }
+
+  function handleMaiden(payload: { bowlerName: string; maidens: number }) {
+    fireMoment({ moment: "maiden", bowler: payload.bowlerName, maidens: payload.maidens });
+  }
+
+  function handleMatchWonAuto(payload: {
+    winningTeamName: string;
+    margin: string;
+    method: "runs" | "wickets" | "tie";
+    teamColor?: string;
+    teamLogoUrl?: string;
+  }) {
+    const visuals = teamVisualsByName(payload.winningTeamName);
+    fireMoment({
+      moment: "matchWon",
+      player: payload.winningTeamName,
+      score: payload.margin,
+      method: payload.method,
+      teamColor: payload.teamColor ?? visuals.color,
+      teamLogoUrl: payload.teamLogoUrl ?? visuals.logoUrl,
+    });
+  }
+
+  function handleInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
+    logEvent(`Innings ended — target set to ${payload.target}`);
+  }
+
+  function handleMatchComplete(result: { winningTeamName: string; margin: string; method: "batting" | "bowling" | "tie" | "runs" | "wickets" }) {
+    logEvent(`Match complete — ${result.winningTeamName} ${result.margin}`);
+  }
+
+  function restartMatch() {
+    setLiveState((prev) => ({
+      score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+      striker: emptyBatter(),
+      nonStriker: emptyBatter(),
+      bowler: emptyBowler(),
+      partnership: { runs: 0, balls: 0 },
+      matchBoundaries: { fours: 0, sixes: 0 },
+      tournamentBoundaries: prev.tournamentBoundaries,
+      pointsTable: prev.pointsTable,
+      target: undefined,
+      inningsNumber: undefined,
+      matchComplete: false,
+      matchResult: undefined,
+      thisOver: [],
+    }));
+    setLiveDirty(true);
+    setEngineSyncState(null);
+    logEvent("Match restarted — same teams & squads");
+  }
+
+  function handlePush() {
+    setPushed(true);
+    setLiveDirty(false);
+    logEvent("Live State pushed");
+    setTimeout(() => setPushed(false), 1200);
+  }
+
+  function pushWeather() {
+    setChannels((prev) => ({ ...prev, weather: true }));
+    logEvent(`Weather pushed — ${weatherData.venue}: ${weatherData.temp}°${weatherData.unit}, ${weatherData.condition}`);
+  }
+
+  function toggleChannel(key: keyof SandboxChannels) {
+    setChannels((prev) => ({ ...prev, [key]: !prev[key] }));
+    logEvent(`${CHANNEL_LABELS[key]} ${channels[key] ? "hidden" : "shown"}`);
+  }
+
+  const weatherVis = useOverlayVisibility(channels.weather, 280);
+  const matchBoundariesVis = useOverlayVisibility(channels.matchBoundaries, 300);
+  const tournamentBoundariesVis = useOverlayVisibility(channels.tournamentBoundaries, 300);
+
+  // ── LIVE VIEW — the actual broadcast surface, same tab ──────────────
+  if (view === "live") {
+    return (
+      <div className="fixed inset-0" style={{ background: "#000" }}>
+        {/* Hardcoded backdrop — stands in for real match video so the
+            overlays preview correctly against footage instead of empty
+            space. muted+autoPlay+loop is required for autoplay without a
+            user gesture; playsInline stops iOS forcing fullscreen. */}
+        <video
+          className="fixed inset-0 w-full h-full object-cover"
+          src="/sample-match-footage.mp4"
+          autoPlay
+          loop
+          muted
+          playsInline
+        />
+
+        <button
+          type="button"
+          onClick={backToControls}
+          className="fixed top-4 left-4 z-[9999] flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors hover:brightness-110"
           style={{
-            background: "color-mix(in srgb, #e5484d 14%, transparent)",
+            fontFamily: "var(--font-label-mono)",
+            background: "rgba(13,17,23,0.96)",
+            border: "1px solid var(--color-border-overlay)",
+            color: "var(--color-on-surface)",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+          }}
+        >
+          <LayoutPanelLeft className="w-3.5 h-3.5" />
+          Back to Controls
+        </button>
+
+        {/* Small on-air style badge, top-right — same visual language as
+            the console header's "Sandbox" pill, so it's unmistakable
+            even here that this is the sandbox feed, not a real one. */}
+        <div
+          className="fixed top-4 right-4 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+          style={{
+            background: "color-mix(in srgb, #e5484d 16%, transparent)",
             border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
+            backdropFilter: "blur(6px)",
           }}
         >
           <span
             className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
-            style={{ animation: "feedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
+            style={{ animation: "sandboxFeedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
           />
           <span
             className="text-[9px] font-bold uppercase"
             style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
           >
-            On Air
+            Sandbox Feed
           </span>
         </div>
 
-        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
+        {weatherVis.mounted && <WeatherCard {...weatherData} closing={weatherVis.closing} />}
 
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[8px] uppercase"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.22em", color: "var(--color-outline)" }}
-          >
-            Multiview
-          </span>
-          <span
-            className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px]"
-            style={{
-              fontFamily: "var(--font-headline-lg)",
-              fontStyle: "italic",
-              fontWeight: 700,
-              color: "var(--color-theme-orange)",
-              letterSpacing: "0.03em",
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid var(--color-border-overlay)",
-            }}
-          >
-            {tc}
-          </span>
-        </div>
-
-        <button
-          onClick={onTogglePause}
-          disabled={auctionStatus === "completed"}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.08em",
-            background: auctionStatus === "paused"
-              ? "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)"
-              : "rgba(255,255,255,0.03)",
-            border: `1px solid ${
-              auctionStatus === "paused"
-                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
-                : "var(--color-border-overlay)"
-            }`,
-            color: auctionStatus === "paused" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
-            cursor: "pointer",
-          }}
-        >
-          {auctionStatus === "paused" ? <Play size={11} /> : <Pause size={11} />}
-          <span className="text-[8px] uppercase">{auctionStatus === "paused" ? "Resume" : "Pause"}</span>
-        </button>
-
-        <ResultChip completedLots={completedLots} />
-
-        {mode === "interactive" && !autoFocusEnabled && auctionStatus !== "completed" && (
-          <button
-            onClick={() => demoModel.resumeAutoFocus()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[8px] uppercase transition-colors hover:brightness-110"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              letterSpacing: "0.1em",
-              background: "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 40%, transparent)",
-              color: "var(--color-theme-orange)",
-              cursor: "pointer",
-            }}
-          >
-            <span className="w-1 h-1 rounded-full" style={{ background: "var(--color-theme-orange)" }} />
-            Resume auto-switch
-          </button>
+        {matchBoundariesVis.mounted && (
+          <MatchBoundaries fours={liveState.matchBoundaries.fours} sixes={liveState.matchBoundaries.sixes} closing={matchBoundariesVis.closing} />
         )}
+
+        {tournamentBoundariesVis.mounted && (
+          <TournamentBoundaries
+            fours={liveState.tournamentBoundaries.fours}
+            sixes={liveState.tournamentBoundaries.sixes}
+            closing={tournamentBoundariesVis.closing}
+          />
+        )}
+
+        <MatchMomentOverlay hideDemoButtons />
+
+        <LiveScoreBar show={channels.liveScoreBar} hideTrigger liveState={liveState} matchSetup={matchSetup} />
+
+        <CricketMatchIntro show={channels.matchIntro} hideTrigger matchSetup={matchSetup} tournament={matchSetup.tournament} matchMeta={matchSetup.matchMeta} />
+
+        {channels.tournamentLogo && (
+          <TournamentLogoDisplay
+            name={matchSetup.tournamentName || undefined}
+            edition={[matchSetup.season && `SEASON ${matchSetup.season}`, matchSetup.format].filter(Boolean).join(" · ") || undefined}
+            logo={matchSetup.tournamentLogoUrl || undefined}
+          />
+        )}
+
+        {/* matchId={null} — no real balls ledger in the sandbox, so this
+            shows team names/score with empty batting/bowling lists rather
+            than real ball-by-ball figures. */}
+        <CricketScorecard show={channels.matchScorecard} hideTrigger matchId={null} matchSetup={matchSetup} liveState={liveState} />
       </div>
+    );
+  }
 
-      {/* ── Right: panel tally + mode switch ──────────────────────── */}
-      <div className="flex items-center gap-3">
-        <div
-          className="flex items-center gap-1 p-1 rounded-[4px]"
-          style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
-        >
-          {PANEL_ORDER.map((key) => {
-            const isLive = active.includes(key);
-            const isSync = syncing.includes(key);
-            const clickable = mode === "interactive" && CONTROLLABLE.includes(key) && auctionStatus !== "completed";
-            return (
-              <div
-                key={key}
-                onClick={clickable ? () => demoModel.toggleActivePanel(key) : undefined}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors"
-                style={{
-                  background: isLive
-                    ? "color-mix(in srgb, var(--color-theme-orange) 16%, transparent)"
-                    : "transparent",
-                  boxShadow: isLive
-                    ? "inset 0 0 0 1px color-mix(in srgb, var(--color-theme-orange) 50%, transparent)"
-                    : "inset 0 0 0 1px transparent",
-                  animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
-                  cursor: clickable ? "pointer" : "default",
-                }}
-              >
-                <span
-                  className="w-[6px] h-[6px] rounded-full shrink-0"
-                  style={{
-                    background: isLive ? "var(--color-theme-orange)" : "var(--color-outline)",
-                    boxShadow: isLive ? "0 0 5px 0.5px color-mix(in srgb, var(--color-theme-orange) 70%, transparent)" : "none",
-                    opacity: isLive ? 1 : 0.5,
-                  }}
-                />
-                <span
-                  className="text-[8px] uppercase tabular-nums"
-                  style={{
-                    fontFamily: "var(--font-label-mono)",
-                    letterSpacing: "0.1em",
-                    color: isLive ? "var(--color-on-surface)" : "var(--color-outline)",
-                    fontWeight: isLive ? 700 : 400,
-                  }}
-                >
-                  {PANEL_META[key].num} {PANEL_META[key].label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
-
-        <button
-          onClick={onToggleMode}
-          className="group flex items-center gap-2 pl-1 pr-3 py-1 rounded-full transition-colors"
-          style={{
-            background: mode === "interactive"
-              ? "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)"
-              : "rgba(255,255,255,0.03)",
-            border: `1px solid ${
-              mode === "interactive"
-                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
-                : "var(--color-border-overlay)"
-            }`,
-            cursor: "pointer",
-          }}
-        >
-          <span
-            className="flex items-center justify-center rounded-full transition-transform"
-            style={{
-              width: 16,
-              height: 16,
-              background: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-outline)",
-            }}
-          >
-            <span
-              className="rounded-full bg-black/70"
-              style={{ width: 6, height: 6 }}
-            />
-          </span>
-          <span
-            className="text-[8px] uppercase"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              letterSpacing: "0.1em",
-              color: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
-              fontWeight: 700,
-            }}
-          >
-            {mode === "demo" ? "Watching demo — Try it yourself" : "Playing — Watch demo"}
-          </span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Completion overlay ───────────────────────────────────────────────
-// Shown whenever auction.status === "completed", in EITHER mode — the
-// queue and the unsold pile are both empty, there's genuinely nothing
-// left to call. Rather than the model silently looping itself (demo
-// mode) or just sitting there inert (interactive mode), this asks the
-// person what they want to do next: hand them the controls, or watch
-// the whole showcase run again from a clean slate. Dims the panels
-// behind it but doesn't unmount them, so the final SOLD/UNSOLD stamp and
-// finished dashboards stay visible under the glass rather than flashing
-// to blank.
-function CompletionOverlay({
-  mode,
-  soldCount,
-  unsoldCount,
-  finalizedUnsoldCount,
-  onTryItYourself,
-  onRestart,
-}: {
-  mode: "demo" | "interactive";
-  soldCount: number;
-  unsoldCount: number;
-  finalizedUnsoldCount: number;
-  onTryItYourself: () => void;
-  onRestart: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(6,6,8,0.72)", backdropFilter: "blur(6px)" }}
-      />
-      <div
-        className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
-        style={{
-          background: "rgba(13,17,23,0.96)",
-          border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
-          boxShadow: "0 0 80px color-mix(in srgb, var(--color-theme-orange) 12%, transparent), 0 24px 64px rgba(0,0,0,0.6)",
-        }}
-      >
-        <div className="flex items-center justify-center">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center"
-            style={{
-              background: "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
-            }}
-          >
-            <PartyPopper size={32} color="var(--color-theme-orange)" />
-          </div>
-        </div>
-
-        <div className="text-center space-y-2">
-          <h2
-            className="font-bold italic uppercase tracking-tight text-2xl"
-            style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}
-          >
-            Auction Complete
-          </h2>
-          <p
-            className="text-[11px] uppercase tracking-[0.12em] leading-relaxed"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-          >
-            Every lot has been called{unsoldCount > 0 || finalizedUnsoldCount > 0 ? " and re-entry rounds exhausted." : "."}
-          </p>
-        </div>
-
-        <div
-          className="grid grid-cols-3 gap-3 p-4 rounded-xl"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
-        >
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Sold</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#3ddc84" }}>{soldCount}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Unsold</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#e5484d" }}>{unsoldCount}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Finalized</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}>{finalizedUnsoldCount}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {mode === "demo" && (
-            <button
-              onClick={onTryItYourself}
-              className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                background: "linear-gradient(135deg,#A87815,#E8C468)",
-                color: "#1a1304",
-              }}
-            >
-              <MousePointerClick size={14} />
-              Try It Yourself
-            </button>
-          )}
-          <button
-            onClick={onRestart}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              background: mode === "demo" ? "rgba(255,255,255,0.05)" : "linear-gradient(135deg,#A87815,#E8C468)",
-              border: mode === "demo" ? "1px solid rgba(255,255,255,0.1)" : "none",
-              color: mode === "demo" ? "var(--color-on-surface)" : "#1a1304",
-            }}
-          >
-            <RotateCcw size={14} />
-            {mode === "demo" ? "Restart Demo" : "Restart Auction"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function SandboxPage() {
-  const {
-    activePanels,
-    syncPanels,
-    mode,
-    autoFocusEnabled,
-    teams,
-    currentLot,
-    shuffle,
-    isLocked,
-    narratorText,
-    auctionStatus,
-    completedLots,
-    finalizedUnsoldCount,
-  } = useSpotlight();
-
-  const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
-  const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
-  // Fit both dimensions ("contain") so the mobile frame never overflows its
-  // flex cell, no matter how narrow that cell gets.
-  const ownerACell = useCellFit(MOBILE_W, MOBILE_H, "contain");
-  const ownerBCell = useCellFit(MOBILE_W, MOBILE_H, "contain");
-
-  const cellReady: Record<PanelKey, boolean> = {
-    auctioneer: auctioneerCell.ready,
-    watch: watchCell.ready,
-    ownerA: ownerACell.ready,
-    ownerB: ownerBCell.ready,
-  };
-
-  // Starts in demo (bot-driven) mode, same as it always did. Switching
-  // modes tears down whichever driver was running and reset()s the model
-  // so the two never overlap or fight over state.
-  useEffect(() => {
-    demoOrchestrator.start();
-    return () => {
-      demoOrchestrator.stop();
-      demoInteractiveController.stop();
-    };
-  }, []);
-
-  // In demo mode, pausing needs to freeze the *scripted* timeline (cursor
-  // moves, clicks, bid/reveal/sold calls) — demoOrchestrator.pause() does
-  // that and also freezes the model's bidding clock as a side effect. In
-  // interactive mode there's no script to freeze (a real person is
-  // clicking), so pause only needs to stop the bidding clock itself.
-  const handleTogglePause = useCallback(() => {
-    if (mode === "demo") {
-      if (demoOrchestrator.isPaused()) demoOrchestrator.resume();
-      else demoOrchestrator.pause();
-    } else {
-      if (auctionStatus === "paused") demoModel.resume();
-      else demoModel.pause();
-    }
-  }, [mode, auctionStatus]);
-
-  const handleToggleMode = useCallback(() => {
-    const next = mode === "demo" ? "interactive" : "demo";
-    if (next === "interactive") {
-      demoOrchestrator.stop();
-      demoInteractiveController.start();
-    } else {
-      demoInteractiveController.stop();
-      demoOrchestrator.start();
-    }
-  }, [mode]);
-
-  // Completion overlay's "Try It Yourself" — only offered in demo mode
-  // (interactive mode is already "yourself"). Hands off the same way the
-  // regular mode toggle does, just triggered from the overlay instead of
-  // the header pill.
-  const handleTryItYourself = useCallback(() => {
-    demoOrchestrator.stop();
-    demoInteractiveController.start();
-  }, []);
-
-  // Completion overlay's "Restart Demo" / "Restart Auction" — refills the
-  // player pool/purses/round counters via demoModel.startNewCycle() and,
-  // in demo mode, hands control straight back to the orchestrator's
-  // scripted timeline so the showcase picks up right where a fresh
-  // episode would start.
-  const handleRestart = useCallback(() => {
-    if (mode === "demo") {
-      demoOrchestrator.restartAfterCompletion();
-    } else {
-      demoModel.startNewCycle();
-    }
-  }, [mode]);
-
-  // globals.css forces `html { overflow-y: scroll }` site-wide so the
-  // marketing pages never jump-shift. This page is a fixed single
-  // viewport, so we suppress that just while mounted and put it back
-  // on unmount rather than touching the global rule.
-  useEffect(() => {
-    const html = document.documentElement;
-    const prevHtmlOverflow = html.style.overflowY;
-    const prevBodyOverflow = document.body.style.overflow;
-    html.style.overflowY = "hidden";
-    document.body.style.overflow = "hidden";
-    return () => {
-      html.style.overflowY = prevHtmlOverflow;
-      document.body.style.overflow = prevBodyOverflow;
-    };
-  }, []);
-
-  const highlighted: PanelKey[] = activePanels;
-  const layout = computeLayout(highlighted);
-
-  const pctOf = (key: PanelKey) => layout[key] ?? 0;
-
-  const displayNarrator = useThrottledNarrator(narratorText);
-  const guidance = getGuidance(mode, currentLot, shuffle, isLocked, auctionStatus);
-
-  const soldCount = completedLots.filter((l) => l.status === "sold").length;
-  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
-
-  const frames: Record<PanelKey, React.ReactNode> = {
-    auctioneer: (
-      <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={auctioneerCell.scale} label="Auctioneer Console">
-        <DemoAuctioneerPage />
-      </DesktopFrame>
-    ),
-    watch: (
-      <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={watchCell.scale} label="Broadcast Overlay">
-        <DemoWatchPage />
-      </DesktopFrame>
-    ),
-    ownerA: (
-      <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale}>
-        <DemoOwnerBidPage teamId="tA" cursorKey="ownerA" />
-      </MobileFrame>
-    ),
-    ownerB: (
-      <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerBCell.scale}>
-        <DemoOwnerBidPage teamId="tB" cursorKey="ownerB" />
-      </MobileFrame>
-    ),
-  };
-
-  const cellRefs: Record<PanelKey, (el: HTMLDivElement | null) => void> = {
-    auctioneer: auctioneerCell.ref,
-    watch: watchCell.ref,
-    ownerA: ownerACell.ref,
-    ownerB: ownerBCell.ref,
-  };
-
-  const cellDims: Record<PanelKey, { w: number; h: number }> = {
-    auctioneer: { w: auctioneerCell.boxW, h: auctioneerCell.boxH },
-    watch: { w: watchCell.boxW, h: watchCell.boxH },
-    ownerA: { w: ownerACell.boxW, h: ownerACell.boxH },
-    ownerB: { w: ownerBCell.boxW, h: ownerBCell.boxH },
-  };
+  // ── CONTROL VIEW — broadcast-console styled scorer + control deck ───
+  const scoreReadout = `${liveState.score.runs}/${liveState.score.wickets} (${liveState.score.overs}.${liveState.score.balls})`;
+  const inningsLabel = liveState.matchComplete
+    ? "Match Complete"
+    : liveState.target !== undefined
+    ? `Innings ${liveState.inningsNumber ?? 2} · Chasing ${liveState.target}`
+    : `Innings ${liveState.inningsNumber ?? 1}`;
 
   return (
-    <div className="h-screen w-screen overflow-hidden relative flex flex-col">
+    <div className="h-screen w-screen overflow-hidden relative flex flex-col" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
       <style jsx global>{`
-        @keyframes panel-sync-pulse {
-          0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 55%, transparent); }
-          70% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
-          100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
-        }
-
-        @keyframes feedPulse {
+        @keyframes sandboxFeedPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.45; }
         }
-
-        @keyframes commentaryIn {
+        @keyframes chyronIn {
           0% { opacity: 0; transform: translateY(-16px) scale(0.97); }
           55% { opacity: 1; transform: translateY(2px) scale(1.005); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
-
-        .commentary-toast {
-          animation: commentaryIn 380ms cubic-bezier(0.22, 1, 0.36, 1);
+        .chyron-in {
+          animation: chyronIn 380ms cubic-bezier(0.22, 1, 0.36, 1);
         }
-
-        .sandbox-scanlines {
+        .overlay-sandbox-scanlines {
           background-image: repeating-linear-gradient(
             0deg,
             rgba(255, 255, 255, 0.012) 0px,
@@ -1041,28 +579,10 @@ export default function SandboxPage() {
         }
       `}</style>
 
-      <MultiviewBar
-        active={highlighted}
-        syncing={syncPanels}
-        mode={mode}
-        autoFocusEnabled={autoFocusEnabled}
-        auctionStatus={auctionStatus}
-        completedLots={completedLots}
-        onToggleMode={handleToggleMode}
-        onTogglePause={handleTogglePause}
-      />
-
-      <CommentaryOverlay narratorText={displayNarrator} guidance={guidance} />
-
-      <OwnerDotSwitcher
-        mode={mode}
-        active={highlighted}
-        teams={teams}
-        onSelect={(owner) => demoModel.focusOwner(owner)}
-      />
-
+      {/* Ambient scanline + top radial glow texture — same treatment as
+          the other two sandboxes, so all three read as one console. */}
       <div
-        className="pointer-events-none absolute inset-0 z-0 sandbox-scanlines"
+        className="pointer-events-none absolute inset-0 z-0 overlay-sandbox-scanlines"
         style={{
           background:
             "radial-gradient(900px 380px at 50% 0%, color-mix(in srgb, var(--color-theme-orange) 7%, transparent), transparent 65%), " +
@@ -1071,31 +591,231 @@ export default function SandboxPage() {
         }}
       />
 
-      <div className="flex-1 min-h-0 flex relative z-10">
-        {PANEL_ORDER.map((key) => (
-          <Cell key={key} pct={pctOf(key)} ready={cellReady[key]} isSyncing={syncPanels.includes(key)}>
-            <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
-              <div
-                style={{ width: cellDims[key].w, height: cellDims[key].h }}
-                className="overflow-hidden flex items-center justify-center shrink-0"
-              >
-                {frames[key]}
-              </div>
-            </div>
-          </Cell>
-        ))}
+      {/* ── Console header ────────────────────────────────────────── */}
+      <div
+        className="shrink-0 h-11 flex items-center justify-between px-4 relative z-20"
+        style={{
+          background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
+          borderBottom: "1px solid var(--color-border-overlay)",
+          boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
+        }}
+      >
+        <div className="flex items-center gap-4 min-w-0">
+          <div
+            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
+            style={{
+              background: "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 45%, transparent)",
+            }}
+          >
+            <span
+              className="w-[7px] h-[7px] rounded-full"
+              style={{
+                background: "var(--color-theme-orange)",
+                animation: "sandboxFeedPulse 1.6s ease-in-out infinite",
+                boxShadow: "0 0 6px 1px color-mix(in srgb, var(--color-theme-orange) 60%, transparent)",
+              }}
+            />
+            <span
+              className="text-[10px] font-semibold uppercase"
+              style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.11em", color: "var(--color-theme-orange)" }}
+            >
+              Sandbox
+            </span>
+          </div>
+
+          <span className="w-px h-5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
+
+          <span
+            className="text-[12px] shrink-0"
+            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+          >
+            {matchSetup.teamA.shortCode} vs {matchSetup.teamB.shortCode}
+          </span>
+
+          <span
+            className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px] shrink-0"
+            style={{
+              fontFamily: "var(--font-headline-lg)",
+              fontStyle: "italic",
+              fontWeight: 700,
+              color: "var(--color-theme-orange)",
+              letterSpacing: "0.03em",
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid var(--color-border-overlay)",
+            }}
+          >
+            {scoreReadout}
+          </span>
+
+          <div
+            className="hidden md:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
+            style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
+          >
+            <span
+              className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-[2px]"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                letterSpacing: "0.06em",
+                color: liveState.matchComplete ? "#08110c" : "var(--color-on-surface)",
+                background: liveState.matchComplete ? "#3ddc84" : "transparent",
+              }}
+            >
+              {inningsLabel}
+            </span>
+          </div>
+
+          <span
+            className="hidden lg:inline text-[10px] truncate"
+            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+          >
+            hardcoded squads · no backend
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <ConsoleActionButton onClick={restartMatch} icon={<RotateCcw className="w-2.5 h-2.5" />}>
+            Restart
+          </ConsoleActionButton>
+          <ConsoleActionButton
+            onClick={goLive}
+            solid
+            icon={<MonitorPlay className="w-2.5 h-2.5" />}
+            title="Switch this tab into the actual broadcast surface"
+          >
+            Flip to Live
+          </ConsoleActionButton>
+        </div>
       </div>
 
-      {auctionStatus === "completed" && (
-        <CompletionOverlay
-          mode={mode}
-          soldCount={soldCount}
-          unsoldCount={unsoldCount}
-          finalizedUnsoldCount={finalizedUnsoldCount}
-          onTryItYourself={handleTryItYourself}
-          onRestart={handleRestart}
-        />
-      )}
+      {/* ── Control deck ─────────────────────────────────────────── */}
+      <div
+        className="shrink-0 relative z-10"
+        style={{ background: "rgba(10,10,10,0.35)", borderBottom: "1px solid var(--color-border-overlay)" }}
+      >
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
+          <ControlCluster label="On Air Channels">
+            {(Object.keys(CHANNEL_LABELS) as (keyof SandboxChannels)[]).map((key) => (
+              <Pill key={key} active={channels[key]} onClick={() => toggleChannel(key)}>
+                {CHANNEL_LABELS[key]}
+              </Pill>
+            ))}
+          </ControlCluster>
+
+          <ControlCluster label="Weather">
+            <input
+              type="number"
+              value={weatherData.temp}
+              onChange={(e) => setWeatherData((p) => ({ ...p, temp: Number(e.target.value) || 0 }))}
+              className="w-16 px-2 py-1.5 rounded-full text-[10px] font-bold text-center focus:outline-none"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                background: "rgba(255,255,255,0.03)",
+                boxShadow: "inset 0 0 0 1px var(--color-border-overlay)",
+                color: "var(--color-on-surface)",
+              }}
+            />
+            <select
+              value={weatherData.condition}
+              onChange={(e) => setWeatherData((p) => ({ ...p, condition: e.target.value }))}
+              className="px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase focus:outline-none"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                letterSpacing: "0.06em",
+                background: "rgba(255,255,255,0.03)",
+                boxShadow: "inset 0 0 0 1px var(--color-border-overlay)",
+                color: "var(--color-on-surface)",
+              }}
+            >
+              {/* Must match WeatherCard's DEFAULT_CONDITIONS keys exactly
+                  — anything else silently falls back to the sunny icon. */}
+              <option value="sunny">Sunny</option>
+              <option value="clear">Clear</option>
+              <option value="partly-cloudy">Partly Cloudy</option>
+              <option value="cloudy">Cloudy</option>
+              <option value="overcast">Overcast</option>
+              <option value="rain">Rain</option>
+              <option value="storm">Stormy</option>
+              <option value="snow">Snow</option>
+              <option value="fog">Foggy</option>
+            </select>
+            <ConsoleActionButton onClick={pushWeather} icon={<CloudSun className="w-2.5 h-2.5" />}>
+              Push Weather
+            </ConsoleActionButton>
+          </ControlCluster>
+        </div>
+
+        {/* Event feed — same compact glass-strip treatment as the
+            brackets sandbox's roster strip, swapped for a scrolling
+            mono event log instead of team chips. */}
+        <div
+          className="flex items-start gap-3 px-5 py-2.5"
+          style={{ background: "rgba(0,0,0,0.22)", borderTop: "1px solid var(--color-border-overlay)" }}
+        >
+          <span
+            className="text-[9px] font-semibold uppercase shrink-0 pt-0.5"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em", color: "var(--color-outline)" }}
+          >
+            Event Feed
+          </span>
+          <div className="flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+            {log.length === 0 ? (
+              <span
+                className="text-[10px]"
+                style={{ fontFamily: FONT_BODY, color: "var(--color-outline)" }}
+              >
+                Nothing fired yet — tap the ball pad to start scoring.
+              </span>
+            ) : (
+              log.slice(0, 6).map((l, i) => (
+                <span
+                  key={i}
+                  className="text-[10px] truncate max-w-[280px]"
+                  style={{ fontFamily: "var(--font-label-mono)", color: i === 0 ? "var(--color-on-surface)" : "var(--color-outline)" }}
+                >
+                  {l}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <MomentChyron fired={firedMoment} />
+
+      {/* ── Scoring console — fills remaining space, scrolls
+            independently under the fixed header/control deck. ── */}
+      <div className="flex-1 min-h-0 overflow-auto relative z-10 px-5 py-5">
+        <div
+          className="rounded-xl p-5"
+          style={{
+            background: "rgba(10,10,10,0.35)",
+            border: "1px solid var(--color-border-overlay)",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+          }}
+        >
+          <LiveStatePanel
+            matchId={null}
+            liveState={liveState}
+            setLiveState={setLiveState}
+            setLiveDirty={setLiveDirty}
+            liveDirty={liveDirty}
+            onPush={handlePush}
+            pushLabel={pushed ? "Pushed ✓" : "Push Live State"}
+            matchSetup={matchSetup}
+            onBoundary={handleBoundary}
+            onMilestone={handleMilestone}
+            onWicketConfirm={handleWicket}
+            onMaiden={handleMaiden}
+            onInningsEnd={handleInningsEnd}
+            onMatchComplete={handleMatchComplete}
+            onFireMatchWonMoment={handleMatchWonAuto}
+            onRestartMatch={restartMatch}
+            initialEngineState={engineSyncState}
+            onEngineStateChange={setEngineSyncState}
+          />
+        </div>
+      </div>
     </div>
   );
 }

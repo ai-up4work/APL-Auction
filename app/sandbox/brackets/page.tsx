@@ -29,7 +29,7 @@ const FORMAT_LABELS: Record<FormatType, string> = {
 // one from the admin overlay. Kept as a named constant (rather than a
 // literal passed at each call site) so the sandbox and the admin overlay
 // agree on what "no override yet" looks like.
-const DEFAULT_LOGO_SRC = "/moon-knight-logo.png";
+const DEFAULT_LOGO_SRC = "/valiant-league-logo.png";
 
 // Same split as the admin panel: mono/uppercase/wide-tracking stays on
 // labels, badges, and codes; anything meant to be read (team names) uses

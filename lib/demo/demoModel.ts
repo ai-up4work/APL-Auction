@@ -104,18 +104,24 @@ const AUTO_RESOLVE_DELAY_MS = 1300;
 // kept small since the demo pool is only 5 players deep.
 const UNSOLD_REENTRY_ROUNDS = 1;
 
+// Player portraits pulled from public/images/knights/knight-1.png ..
+// knight-100.png so every lot on the block shows an actual knight instead
+// of a generic headshot. "country" doubles as each knight's home
+// stronghold/realm rather than a real nation, to stay in-theme.
 const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUnsoldFinal">[] = [
-  { name: "Pat Cummins", role: "All-rounder", origin: "Overseas", country: "Australia", img: "/players/pat.jpg", price: 1500, capped: true },
-  { name: "Jadeja", role: "Batsman", origin: "Overseas", country: "India", img: "/players/jadeja.jpg", price: 1200, capped: false },
-  { name: "Rohit Sharma", role: "Bowler", origin: "Local", country: "India", img: "/players/rohit.jpg", price: 2000, capped: true },
-  { name: "Jos Buttler", role: "Wicket Keeper", origin: "Overseas", country: "England", img: "/players/Jos-Buttle.jpg", price: 900, capped: false },
-  { name: "Nicholas", role: "Batsman", origin: "Overseas", country: "Sri Lanka", img: "/players/Nicholas.png", price: 1100, capped: false },
+  { name: "Alaric Thorne", role: "All-rounder", origin: "Overseas", country: "Ironhold", img: "/images/knights/knight-1.png", price: 1500, capped: true },
+  { name: "Cedric Ashworth", role: "Batsman", origin: "Overseas", country: "Ravenhold", img: "/images/knights/knight-2.png", price: 1200, capped: false },
+  { name: "Tristan Blackwell", role: "Bowler", origin: "Local", country: "Camelot", img: "/images/knights/knight-3.png", price: 2000, capped: true },
+  { name: "Gareth Stormridge", role: "Wicket Keeper", origin: "Overseas", country: "Duskmoor", img: "/images/knights/knight-4.png", price: 900, capped: false },
+  { name: "Edmund Vale", role: "Batsman", origin: "Overseas", country: "Ashenvale", img: "/images/knights/knight-5.png", price: 1100, capped: false },
 ];
 
 function makeTeams(): DemoTeam[] {
   return [
-    { id: 1, supabaseId: "tA", code: "CSK", name: "Chennai Sabers", color: "#f5a623", logo: "/Franchises/csk.png", roster: 0 },
-    { id: 2, supabaseId: "tB", code: "MI", name: "Mumbai Marauders", color: "#3b8bd4", logo: "/Franchises/MI.png", roster: 0 },
+    // Same two houses used elsewhere in the Valiant League branding, so
+    // the icons/colors stay consistent across the demo and sandbox pages.
+    { id: 1, supabaseId: "tA", code: "IK", name: "Ironclad Knights", color: "#4B4B5A", logo: "https://raw.githubusercontent.com/game-icons/icons/master/skoll/mounted-knight.svg", roster: 0 },
+    { id: 2, supabaseId: "tB", code: "CC", name: "Crimson Crusaders", color: "#A3312F", logo: "https://raw.githubusercontent.com/game-icons/icons/master/delapouite/black-knight-helm.svg", roster: 0 },
   ];
 }
 
@@ -222,8 +228,8 @@ function initialSnapshot(): Snapshot {
         unsoldReentryRounds: UNSOLD_REENTRY_ROUNDS,
       },
       session: {
-        auctionName: "Moon Knight League · Live Demo",
-        auctionLogo: "/moon-knight-logo.png",
+        auctionName: "Valiant Premier League · Live Demo",
+        auctionLogo: "/valiant-league-logo.png",
         timerSeconds: TIMER_SECONDS,
       },
     },
