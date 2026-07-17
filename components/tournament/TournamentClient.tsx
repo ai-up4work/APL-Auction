@@ -137,8 +137,6 @@ export default function TournamentClient() {
       </section>
 
       <SectionDivider />
-
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }

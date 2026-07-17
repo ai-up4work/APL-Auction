@@ -621,7 +621,6 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       </section>
 
       <SectionDivider />
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }

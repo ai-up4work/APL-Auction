@@ -87,7 +87,7 @@ export default function BracketDemo() {
       title="Championship Bracket"
       eyebrowLabel="Knockout Stage"
       helperText="Hover or click a team to trace their path."
-      logoSrc="/moon-knight-logo.png"
+      logoSrc="/valiant-league-logo.png"
     />
   );
 }

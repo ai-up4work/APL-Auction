@@ -446,7 +446,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
       </section>
 
       <SectionDivider />
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }

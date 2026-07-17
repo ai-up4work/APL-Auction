@@ -88,7 +88,7 @@ export default function DoubleElimDemo() {
         title="Championship Bracket"
         eyebrowLabel="Knockout · Double Elimination"
         helperText="Hover or click a team to trace their path."
-        logoSrc="/moon-knight-logo.png"
+        logoSrc="/valiant-league-logo.png"
       />
     </div>
   );
