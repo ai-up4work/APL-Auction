@@ -36,14 +36,17 @@ import { HARDCODED_MATCH_SETUP, emptyLiveState, defaultWeather } from "../lib/sa
 // Mirrors the admin page's DEFAULT_CHANNELS so the monitor's first paint
 // (before the initial "state" message arrives) matches what the admin
 // page starts with, instead of flashing every channel off then snapping
-// on a beat later.
+// on a beat later. Keep this in lockstep with DEFAULT_CHANNELS in
+// app/sandbox/overlay/page.tsx — there's no shared import for it since
+// it's a plain literal on both sides, so a change to one without the
+// other reintroduces that first-paint mismatch flash.
 const DEFAULT_CHANNELS: SandboxChannels = {
-  weather: false,
+  weather: true,
   liveScoreBar: true,
   matchBoundaries: false,
   tournamentBoundaries: false,
   matchIntro: false,
-  tournamentLogo: false,
+  tournamentLogo: true,
   matchScorecard: false,
 };
 

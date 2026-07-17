@@ -36,6 +36,22 @@
 // specifically to keep the overlay components themselves untouched
 // rather than special-casing them for scaled rendering.
 //
+// NOTE on the monitor iframe's lifecycle: LivePreviewMonitor only
+// renders in the "control" branch below, so it (and its <iframe>) is
+// destroyed and rebuilt every time you flip to Live and back. This page
+// component itself does NOT unmount on that switch — it just swaps
+// which JSX branch it returns — so liveState/channels/weatherData here
+// stay intact the whole time. The freshly-remounted iframe re-requests
+// a snapshot on mount (see /preview/page.tsx), and the "requestState"
+// handler below MUST answer with a live-updating ref
+// (stateSnapshotRef), not the plain closed-over state variables — a
+// handler set up once in a mount-only effect would otherwise always
+// answer with whatever those variables were at first mount, which is
+// exactly the bug where the monitor comes back showing only the
+// default-on channel (Score Bar) after a round trip through Live, even
+// though every toggle you made is still sitting right there in this
+// page's own state.
+//
 // On a moment firing, the monitor transitions into a clearly-different
 // "On Air" state (glowing ring, pulsing dot, slight scale-up) with an
 // eased CSS transition so the change reads as deliberate, not a snap.
@@ -60,12 +76,12 @@ import { HARDCODED_MATCH_SETUP, emptyLiveState, defaultWeather, emptyBatter, emp
 import { MonitorPlay, LayoutPanelLeft, CloudSun, RotateCcw, Zap, Target, Trophy, ShieldCheck, PartyPopper } from "lucide-react";
 
 const DEFAULT_CHANNELS: SandboxChannels = {
-  weather: false,
+  weather: true,
   liveScoreBar: true,
   matchBoundaries: false,
   tournamentBoundaries: false,
   matchIntro: false,
-  tournamentLogo: false,
+  tournamentLogo: true,
   matchScorecard: false,
 };
 
@@ -96,6 +112,21 @@ const MOMENT_AUTO_REVERT_MS: Record<MomentPayload["moment"], number> = {
   hundred: 4500,
   maiden: 3200,
   matchWon: 6000,
+};
+
+// How long a channel stays on before auto-turning itself off, for
+// channels that are timed graphics rather than persistent ones (Score
+// Bar, Weather, etc. are NOT in here — those stay exactly as toggled).
+// Match Intro is a one-shot animated sequence; Scorecard here is being
+// used the same way — a graphic that's shown for a beat, not left up
+// for the rest of the innings. Keep MATCH_INTRO_AUTO_OFF_MS in sync with
+// however long the actual intro animation inside BroadcastSurface's
+// MatchIntro overlay plays for.
+const MATCH_INTRO_AUTO_OFF_MS = 6000;
+const MATCH_SCORECARD_AUTO_OFF_MS = 10000;
+const AUTO_OFF_CHANNEL_DURATIONS: Partial<Record<keyof SandboxChannels, number>> = {
+  matchIntro: MATCH_INTRO_AUTO_OFF_MS,
+  matchScorecard: MATCH_SCORECARD_AUTO_OFF_MS,
 };
 
 // Native size of the broadcast "stage" — the /preview route (and the
@@ -262,7 +293,12 @@ function MomentChyron({ fired }: { fired: FiredMoment | null }) {
   if (!fired) return null;
   const meta = MOMENT_META[fired.moment];
   return (
-    <div className="pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
+    // top-[190px] clears the console header (44px) + the control deck
+    // below it (channel pills row + weather row + event feed strip,
+    // ~140px combined) with a small buffer — it used to sit at top-16
+    // (64px), which landed squarely on top of the "On Air Channels"
+    // pill row and hid whichever channels happened to be underneath it.
+    <div className="pointer-events-none fixed top-[190px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
       <div
         key={fired.id}
         className="chyron-in flex items-stretch overflow-hidden rounded-[3px]"
@@ -318,38 +354,6 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
 
   return (
     <div className="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-1.5 pointer-events-none">
-      {/* Status label above the monitor — flips between the calm
-          "Live Preview" idle state and a loud "On Air" state that
-          matches whichever moment is currently featured, so the label
-          itself is part of the clear-transition signal, not just the
-          glow around the frame. */}
-      <div
-        className="flex items-center gap-1.5 px-2 py-1 rounded-full transition-colors duration-500"
-        style={{
-          background: onAir ? "color-mix(in srgb, #e5484d 18%, transparent)" : "rgba(0,0,0,0.4)",
-          border: `1px solid ${onAir ? "color-mix(in srgb, #e5484d 50%, transparent)" : "var(--color-border-overlay)"}`,
-        }}
-      >
-        <span
-          className="w-[6px] h-[6px] rounded-full"
-          style={{
-            background: onAir ? "#e5484d" : "var(--color-outline)",
-            animation: onAir ? "sandboxFeedPulse 1s ease-in-out infinite" : "none",
-            boxShadow: onAir ? "0 0 6px 1px rgba(229,72,77,0.6)" : "none",
-          }}
-        />
-        <span
-          className="text-[9px] font-semibold uppercase transition-colors duration-500"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.12em",
-            color: onAir ? "#e5484d" : "var(--color-outline)",
-          }}
-        >
-          {onAir ? `On Air — ${meta!.tag}` : "Live Preview"}
-        </span>
-      </div>
-
       {/* The monitor frame. The scale-up + glow transition is the "clear
           transition" the enter/hold/revert cycle hinges on — 500ms
           eased both ways so entering and leaving read as deliberate
@@ -431,6 +435,39 @@ export default function OverlaySandboxPage() {
   // should trigger a re-render.
   const busRef = useRef<ReturnType<typeof connectSandboxBus> | null>(null);
 
+  // Timers for auto-off channels — see AUTO_OFF_CHANNEL_DURATIONS. Keyed
+  // per-channel so Match Intro and Scorecard (or any future timed
+  // channel) can each hold their own independent timer without
+  // stepping on each other.
+  const autoOffTimersRef = useRef<Partial<Record<keyof SandboxChannels, ReturnType<typeof setTimeout>>>>({});
+
+  // Whether the Match 4s/6s channel has already been auto-enabled for
+  // the CURRENT innings. Fires exactly once — on the first four or six
+  // of an innings, matchBoundaries gets turned on automatically (if it
+  // isn't already). After that, this flag stops it from re-forcing the
+  // channel back on, so the operator's own manual toggle is respected
+  // for the rest of the innings — it behaves like a default that only
+  // applies once. Reset to false on a new innings / restart so the next
+  // innings gets its own "first boundary" moment.
+  const matchBoundariesAutoEnabledRef = useRef(false);
+
+  // Always-current snapshot of everything the monitor iframe needs to
+  // render. This exists specifically so the "requestState" responder in
+  // the mount-only effect below never answers from a stale closure.
+  // That effect runs exactly once (empty deps) and sets up a message
+  // handler; without this ref, that handler would forever close over
+  // matchSetup/liveState/weatherData/channels as they were at the very
+  // first render, and would keep answering every future requestState
+  // with those original values. That's the exact bug where flipping to
+  // Live and back destroys + remounts the monitor's iframe (see
+  // LivePreviewMonitor — it isn't rendered in the "live" branch), the
+  // iframe re-asks "what's current?" on mount, and it used to get told
+  // "the initial defaults" instead of whatever channels/liveState this
+  // page's own state currently holds — so the monitor came back showing
+  // only the Score Bar (the one channel that's on by default) even
+  // though the real page still had everything else toggled on.
+  const stateSnapshotRef = useRef({ matchSetup, liveState, weatherData, channels });
+
   function clearPreviewRevert() {
     if (previewRevertTimerRef.current) {
       clearTimeout(previewRevertTimerRef.current);
@@ -455,38 +492,61 @@ export default function OverlaySandboxPage() {
 
   useEffect(() => clearPreviewRevert, []);
 
+  useEffect(
+    () => () => {
+      Object.values(autoOffTimersRef.current).forEach((t) => clearTimeout(t));
+    },
+    []
+  );
+
   // Set up the bus once on mount: respond to the monitor iframe's
   // initial "requestState" with a fresh snapshot, and send one
   // proactively right away too, in case the iframe's own requestState
   // message beats this listener into existence (unlikely, but free to
   // guard against).
+  //
+  // IMPORTANT: the requestState responder reads stateSnapshotRef.current
+  // — NOT the matchSetup/liveState/weatherData/channels variables in
+  // this closure directly. Those variables are only ever what they were
+  // at the moment this effect ran (mount), because the effect has an
+  // empty dependency array and is deliberately not re-created on every
+  // state change (that's the job of the second effect below). Reading
+  // them directly here would mean every "requestState" — including the
+  // one the monitor iframe sends every time it remounts after a Flip to
+  // Live → Back to Controls round trip — gets answered with whatever
+  // state existed on the very first render, not the current state.
   useEffect(() => {
     const bus = connectSandboxBus();
     busRef.current = bus;
 
     const off = bus.on((msg) => {
       if (msg.type === "requestState") {
-        bus.send({ type: "state", data: { matchSetup, liveState, weatherData, channels } });
+        bus.send({ type: "state", data: stateSnapshotRef.current });
       }
     });
 
-    bus.send({ type: "state", data: { matchSetup, liveState, weatherData, channels } });
+    bus.send({ type: "state", data: stateSnapshotRef.current });
 
     return () => {
       off();
       bus.close();
       busRef.current = null;
     };
-    // Intentionally only on mount — the effect below keeps the iframe in
-    // sync on every subsequent change instead of re-subscribing here.
+    // Intentionally only on mount — the effect below keeps the ref (and
+    // the iframe) in sync on every subsequent change instead of
+    // re-subscribing here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-sync the monitor iframe's document any time state it needs to
   // render changes — it has no other way to find out, since it's a
-  // separate document/window from this page.
+  // separate document/window from this page. This is also the ONLY
+  // place stateSnapshotRef gets updated, which is what keeps the
+  // requestState responder above answering with live data instead of
+  // mount-time data.
   useEffect(() => {
-    busRef.current?.send({ type: "state", data: { matchSetup, liveState, weatherData, channels } });
+    stateSnapshotRef.current = { matchSetup, liveState, weatherData, channels };
+    busRef.current?.send({ type: "state", data: stateSnapshotRef.current });
   }, [matchSetup, liveState, weatherData, channels]);
 
   function goLive() {
@@ -539,6 +599,16 @@ export default function OverlaySandboxPage() {
   }
 
   function handleBoundary(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
+    // First boundary of the innings: turn Match 4s/6s on automatically
+    // if it isn't already, then leave it alone for the rest of the
+    // innings — the operator's own toggling takes over from here.
+    if (!matchBoundariesAutoEnabledRef.current) {
+      matchBoundariesAutoEnabledRef.current = true;
+      if (!channels.matchBoundaries) {
+        setChannels((prev) => ({ ...prev, matchBoundaries: true }));
+        logEvent(`${CHANNEL_LABELS.matchBoundaries} auto-shown — first boundary`);
+      }
+    }
     fireMoment({ moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` });
   }
 
@@ -587,6 +657,7 @@ export default function OverlaySandboxPage() {
   }
 
   function handleInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
+    matchBoundariesAutoEnabledRef.current = false;
     logEvent(`Innings ended — target set to ${payload.target}`);
   }
 
@@ -612,6 +683,7 @@ export default function OverlaySandboxPage() {
     }));
     setLiveDirty(true);
     setEngineSyncState(null);
+    matchBoundariesAutoEnabledRef.current = false;
     logEvent("Match restarted — same teams & squads");
   }
 
@@ -628,8 +700,32 @@ export default function OverlaySandboxPage() {
   }
 
   function toggleChannel(key: keyof SandboxChannels) {
+    const turningOn = !channels[key];
     setChannels((prev) => ({ ...prev, [key]: !prev[key] }));
-    logEvent(`${CHANNEL_LABELS[key]} ${channels[key] ? "hidden" : "shown"}`);
+    logEvent(`${CHANNEL_LABELS[key]} ${turningOn ? "shown" : "hidden"}`);
+
+    // Channels listed in AUTO_OFF_CHANNEL_DURATIONS are timed graphics
+    // (Match Intro, Scorecard) rather than persistent ones — turning
+    // one on also arms a timer that flips it back off once its display
+    // window is up. Toggling it off manually (or back on again) before
+    // that clears/resets the timer, same idea as featurePreview() above
+    // for the monitor's on-air hold. Every channel NOT in that map
+    // (Score Bar included) is purely manual: no timer, ever.
+    const autoOffMs = AUTO_OFF_CHANNEL_DURATIONS[key];
+    if (autoOffMs !== undefined) {
+      const existing = autoOffTimersRef.current[key];
+      if (existing) {
+        clearTimeout(existing);
+        delete autoOffTimersRef.current[key];
+      }
+      if (turningOn) {
+        autoOffTimersRef.current[key] = setTimeout(() => {
+          delete autoOffTimersRef.current[key];
+          setChannels((prev) => ({ ...prev, [key]: false }));
+          logEvent(`${CHANNEL_LABELS[key]} auto-hidden`);
+        }, autoOffMs);
+      }
+    }
   }
 
   // ── LIVE VIEW — the actual broadcast surface, same tab, same document
@@ -643,27 +739,36 @@ export default function OverlaySandboxPage() {
 
         <BroadcastSurface channels={channels} liveState={liveState} weatherData={weatherData} matchSetup={matchSetup} />
 
+        {/* Positioned at the vertical center of the left edge rather
+            than the top-left corner — the top-left corner is where the
+            Tournament Logo channel renders, and this button was sitting
+            directly on top of it. Center-left is clear of that overlay
+            (and of the score bar at the bottom) no matter how tall the
+            logo happens to render. Kept compact and low-contrast by
+            default, brightening only on hover, so it doesn't compete
+            with the broadcast graphics for attention. */}
         <button
           type="button"
           onClick={backToControls}
-          className="fixed top-4 left-4 z-[9999] flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors hover:brightness-110"
+          className="fixed top-1/2 left-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all opacity-70 hover:opacity-100 hover:brightness-110"
           style={{
             fontFamily: "var(--font-label-mono)",
-            background: "rgba(13,17,23,0.96)",
-            border: "1px solid var(--color-border-overlay)",
+            background: "rgba(13,17,23,0.9)",
+            border: "1px solid rgba(255,255,255,0.12)",
             color: "var(--color-on-surface)",
-            boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
           }}
         >
-          <LayoutPanelLeft className="w-3.5 h-3.5" />
+          <LayoutPanelLeft className="w-3 h-3" />
           Back to Controls
         </button>
 
-        {/* Small on-air style badge, top-right — same visual language as
-            the console header's "Sandbox" pill, so it's unmistakable
-            even here that this is the sandbox feed, not a real one. */}
+        {/* Same reasoning mirrored on the right edge, vertically
+            centered opposite the Back to Controls tab — the top-right
+            corner is where the Weather channel renders. */}
         <div
-          className="fixed top-4 right-4 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+          className="fixed top-1/2 right-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] opacity-70 hover:opacity-100 transition-opacity"
           style={{
             background: "color-mix(in srgb, #e5484d 16%, transparent)",
             border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
