@@ -1,0 +1,20 @@
+[
+  {
+    "id": "colombo",
+    "name": "Colombo Kings",
+    "city": "Colombo",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuDKLF-A-fipxTesQxXXrfegx-zuBd7RtnHYq69H6MWOqe9tzv9euFjiIwuWNdlBYHBg0p2SkPj_q6ke5bQ5ghu8JxN1jRbh7l1-2osxKZA_-rGlyvQ_gdGbl7TMxgwU6UiyLhZ24XdhnS0BnRFey4_dp_-R5JPpKKE3kipJqKvUMzUgkfVUSyhSd0KSb2ooI9hSbYlHWfRJt1M6GdqyDAeuSgztsR0_KxdhAzrXhpjLm5OVV6sTySYLklHB8lpyjuUDZol8sFMlYo0"
+  },
+  {
+    "id": "kandy",
+    "name": "Kandy Warriors",
+    "city": "Kandy",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuD24yWLl1NTSYTXulDo3pVzqRnM769dgPzDpD7d_vK7lpq2Ue2t84menyhDuvBD_FQ0Xo8NKdGqyyo8jWsFMWoExsg9QbuQ4QMEiSUKr_81lkSFzcRy2B2ADBSzEl8IXz2cMYXibWgOWIGcq1RURtnaCfsuN2E-hpGhT7Lcy4YAdBpTzdkRx--7dQRLFEu1ZEh56WTyCmGIiWEMJftGiQZ-9Jh-qmogjwJqSo3Yk0WaeZfE4gpC-TgD3jhY34PS7zSYvfJx1EgpfXo"
+  },
+  {
+    "id": "galle",
+    "name": "Galle Gladiators",
+    "city": "Galle",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuC7loAfGrh2Hofa2fq03FpBrPCXE1HE84oydSM0diARMhIEDBPsHEd-wSb7TQ326OkQdto3NiM0038E00tAb6l9rEGS1ITgHK76dOeQsG_HxNw3jS0RD2Lh7NcweQhlrgS7R-noVArgIhjPODUyQHjTlasgUvTxSfDYOsIv-WDNmIQ2tGyvlGLixidlmjfpaGZIsl2PftQFuQlgtRc1Ax4Vx8g1qMnkRevuSox-Yj4UoMjn8TJRL2pGnMR1eXiZaoKQ5lElp22Pr5I"
+  }
+]

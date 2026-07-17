@@ -1,0 +1,48 @@
+{
+  "squad": {
+    "playersBought": 6,
+    "totalSlots": 16,
+    "slotsRemaining": 10,
+    "nextPickCountdown": "04:12",
+    "composition": [
+      { "label": "Batsmen",        "icon": "sports_cricket",  "value": 3 },
+      { "label": "Bowlers",        "icon": "sports_baseball", "value": 2 },
+      { "label": "All-Rounders",   "icon": "star_half",       "value": 0 },
+      { "label": "Wicket Keepers", "icon": "front_hand",      "value": 1 }
+    ],
+    "players": [
+      {
+        "name": "VIRAT KOHLI",
+        "role": "BATSMAN",
+        "origin": "OVERSEAS",
+        "price": "$17.5M",
+        "alt": "Virat Kohli",
+        "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuCFhtAxu86EzlhyfUdEL_GLRo3I1J4NwNnIo4z-88VMC6IhrYlOfFD7lO4nSJIHMpeXwKPAHkYy2ph57VAkZL85EGnUEr4X_gXseKRc9bJAHUFawI40RATdIpdt9poU0PqT2RBd0ddsjicQm0CrhH2RBDbUNYeXrfHLzRQghTFImrwwATSNw6BMPWQAO7RRlqCq4HAAtH3A7ZmiJvD5ZNhPT4-LyWuPnnQYTqJpboTAbHt-Bnnh1aY-D-r0pK-DG-kDvu0A4gRPhm0"
+      },
+      {
+        "name": "JASPRIT BUMRAH",
+        "role": "BOWLER",
+        "origin": "LOCAL",
+        "price": "$12.0M",
+        "alt": "Jasprit Bumrah",
+        "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuCAV9pySpjfGbGMZkhkfSrb5pUvDCUSU8kLt-JU3vIB1wBpSSq6SC5W53ctZJgD-RPE1Akb-GRsN95wQVQx2LOM6pb62bims8eC7-QoUdeVD6HzfWsnu95CG5wC0qmSgrHkC3e8PtkMZi1IlSoEXkUGf5cPIRi4Eks3n5TTJzYuBAlQ7EL7i-5dDno2HhkgBW6xp2wBqMclPJmYKD1fOFi2ccLhwfmcsR7Uh-LWsyL7C7_I-E2VK8L0lJrOeniJMUpJQbhoczabOVk"
+      },
+      {
+        "name": "MS DHONI",
+        "role": "WK BATSMAN",
+        "origin": "LOCAL",
+        "price": "$15.0M",
+        "alt": "MS Dhoni",
+        "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuD2t4Xdn8HDNenUW8YfAMazgQ5s6QV8UZZHFUEKzkSNqjWaMlU2vAV-LhtD4qxgKiH_NtnQLh_vn7RNDj1CZ_5mWImUtCVDr-UxCpoSh4Y3Y1Yc0e0qVJ-XnRncO3wLu1ZMlXQUafqXBpynWdhnRCOwD64fBl8EdfC98ka0kk3jUiEpaKRE0Ow3hDZw_AHktuOsu9C4ic6LiT31sTPmgdHGmHA9EN3zDqTUDpF9flIxUPD9vmS0YyO93UP816TA9xpzHCwc8wT_zIY"
+      },
+      {
+        "name": "CHRIS GAYLE",
+        "role": "BATSMAN",
+        "origin": "OVERSEAS",
+        "price": "$8.2M",
+        "alt": "Chris Gayle",
+        "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuBqC_S2ZbJit5nC7mQyydgwWtJrgH4BnlIj8oqvq1vTpWyJh_wpzhKYhQi2tzlv3wbJDFBq9QF-vzBaekDIbksGfEJKgy45s0lQwalcVY2pwUqtv8S7Vx6EWhfFWgxL6jaxwMcJt6KC1-6KJFZaw_r-QcJFxb_sRq6aGHWTEGBY20zYlx1CAEuD1h2Q-RR3BzQv8O5EKe-y3lKndfhMEWXAWt5vc56V5xWWKdmiGVnyB3JKDEAysN0gyj7V6MDhfllcQN28zd3EECY"
+      }
+    ]
+  }
+}

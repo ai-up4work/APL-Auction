@@ -1,0 +1,88 @@
+{
+  "stats": {
+    "totalBids": 42,
+    "successfulWins": 7
+  },
+  "events": [
+    {
+      "type": "BOUGHT",
+      "name": "Rashid Khan",
+      "sub": "All-Rounder • Marquee",
+      "price": "14.50 CR",
+      "time": "2m ago",
+      "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuBMTENxyIYrQ4WwzUvomiFMu9uzLHvXl_2a5OMcb3HmlYIKmGuOSzrINBjPxg1A7R4Yg5dva4TA3Oy5R3SduV758v7F9bqt6FuQGI0eYQs1Y8CPoIE0vHqYcwhV6miB-gV54nmIymBIKB8bSQZDc9RXix8Muz6FkoCaNeHcneqOnKmuSCY8dQtHiKYi-loJQ7Z4SpEZGJwtOR809zkU-CSplY21kEX5gh-MCyLTmfqDyB-NDVtekMVwsdma2psRF0dbRW621RwgB9I"
+    },
+    {
+      "type": "OUTBID",
+      "name": "Virat Kohli",
+      "sub": "Your bid of 11.00 CR was topped",
+      "price": "11.25 CR",
+      "time": "12m ago"
+    },
+    {
+      "type": "UNSOLD",
+      "name": "David Warner",
+      "sub": "Base Price: 2.00 CR",
+      "price": "—",
+      "time": "24m ago"
+    },
+    {
+      "type": "BIDDING WAR",
+      "name": "Ben Stokes",
+      "sub": "Titan Kings vs. Royal Blasters",
+      "price": "9.75 CR",
+      "time": "Just Now"
+    },
+    {
+      "type": "WITHDRAWN",
+      "name": "Mitchell Starc",
+      "sub": "Player opted out mid-auction",
+      "price": "—",
+      "time": "1h ago"
+    },
+    {
+      "type": "BOUGHT",
+      "name": "MS Dhoni",
+      "sub": "WK Batsman • Icon",
+      "price": "15.00 CR",
+      "time": "1h 10m ago",
+      "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuD2t4Xdn8HDNenUW8YfAMazgQ5s6QV8UZZHFUEKzkSNqjWaMlU2vAV-LhtD4qxgKiH_NtnQLh_vn7RNDj1CZ_5mWImUtCVDr-UxCpoSh4Y3Y1Yc0e0qVJ-XnRncO3wLu1ZMlXQUafqXBpynWdhnRCOwD64fBl8EdfC98ka0kk3jUiEpaKRE0Ow3hDZw_AHktuOsu9C4ic6LiT31sTPmgdHGmHA9EN3zDqTUDpF9flIxUPD9vmS0YyO93UP816TA9xpzHCwc8wT_zIY"
+    },
+    {
+      "type": "OUTBID",
+      "name": "Chris Gayle",
+      "sub": "Your bid of 7.50 CR was topped",
+      "price": "8.20 CR",
+      "time": "1h 28m ago"
+    },
+    {
+      "type": "BOUGHT",
+      "name": "Jasprit Bumrah",
+      "sub": "Bowler • Premium",
+      "price": "12.00 CR",
+      "time": "1h 45m ago",
+      "img": "https://lh3.googleusercontent.com/aida-public/AB6AXuCAV9pySpjfGbGMZkhkfSrb5pUvDCUSU8kLt-JU3vIB1wBpSSq6SC5W53ctZJgD-RPE1Akb-GRsN95wQVQx2LOM6pb62bims8eC7-QoUdeVD6HzfWsnu95CG5wC0qmSgrHkC3e8PtkMZi1IlSoEXkUGf5cPIRi4Eks3n5TTJzYuBAlQ7EL7i-5dDno2HhkgBW6xp2wBqMclPJmYKD1fOFi2ccLhwfmcsR7Uh-LWsyL7C7_I-E2VK8L0lJrOeniJMUpJQbhoczabOVk"
+    },
+    {
+      "type": "UNSOLD",
+      "name": "Shakib Al Hasan",
+      "sub": "Base Price: 1.50 CR",
+      "price": "—",
+      "time": "2h ago"
+    },
+    {
+      "type": "BIDDING WAR",
+      "name": "Andre Russell",
+      "sub": "Storm XI vs. Knight Riders",
+      "price": "11.00 CR",
+      "time": "2h 15m ago"
+    },
+    {
+      "type": "WITHDRAWN",
+      "name": "Jason Roy",
+      "sub": "Player opted out mid-auction",
+      "price": "—",
+      "time": "2h 40m ago"
+    }
+  ]
+}
