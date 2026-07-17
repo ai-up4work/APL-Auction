@@ -290,9 +290,11 @@ export function ShuffleOverlay({
 
         {/* reel window */}
         <div
-          className="relative flex items-center justify-center gap-3 md:gap-5 rounded-2xl overflow-hidden px-4 md:px-6 py-4"
+          className={`relative flex items-center justify-center gap-3 md:gap-5 rounded-2xl overflow-hidden ${
+            locked ? 'p-0' : 'px-0 md:px-0 py-0'
+          }`}
           style={{
-            minHeight: locked ? 260 : undefined,
+            minHeight: locked ? 320 : undefined,
             background: 'radial-gradient(circle, #14181a 55%, #0a0d0e 100%)',
             border: '1px solid rgba(255,255,255,0.06)',
           }}
@@ -316,7 +318,7 @@ export function ShuffleOverlay({
               key={shuffleTarget?.id ?? 'locked-card'}
               style={{ animation: 'reel-zoom-lock 480ms cubic-bezier(0.18,0.9,0.32,1.2) both' }}
             >
-              <ReelCard player={shuffleTarget} size={176} dim={false} glow={true} />
+              <ReelCard player={shuffleTarget} size={240} dim={false} glow={true} />
             </div>
           ) : (
             <>
