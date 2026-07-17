@@ -227,7 +227,7 @@ export const trustedClubs = ["Iron Knights CC", "Royal Strikers", "Silver Hawks"
 export const stats = [
   { value: "500+", label: "Leagues Run" },
   { value: "99.9%", label: "Uptime SLA" },
-  { value: "6s", label: "Auction Shot Clock" },
+  { value: "15s", label: "Auction Shot Clock" },
   { value: "200+", label: "Tournaments Drawn" },
 ]
 

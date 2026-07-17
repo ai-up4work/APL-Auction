@@ -1,15 +1,8 @@
-// File: components/demo/MatchResultCard.tsx
+// File: components/demo/tournament/MatchResultCard.tsx
 "use client";
 import { useState } from "react";
 import { CheckCircle2, Radio } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
-
-function parseScore(raw: string): number | null {
-  if (raw.trim() === "") return null;
-  const n = Number(raw);
-  if (Number.isNaN(n) || n < 0 || !Number.isInteger(n)) return null;
-  return n;
-}
 
 export default function MatchResultCard({
   match,
@@ -22,55 +15,27 @@ export default function MatchResultCard({
 }: {
   match: MatchNode;
   onRecordResult: (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void;
-  /** Lets a parent (e.g. a bracket canvas) measure this card's real DOM position
-   *  so it can draw connector lines to/from it. */
   cardRef?: (el: HTMLDivElement | null) => void;
-  /** Currently highlighted team code, for hover-to-trace-a-team highlighting. */
   hoveredTeamCode?: string | null;
   onTeamHover?: (code: string | null) => void;
-  /** Click a team to pin the highlight on it, so it stays lit while you scroll. */
   onTeamClick?: (code: string) => void;
-  /** The currently pinned team, if any — shown with a small pin marker. */
   pinnedTeamCode?: string | null;
 }) {
   const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
   const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
 
-  // A bye slot (one side permanently BYE) never needs score entry — it's
-  // already resolved by the generator. A "both empty" slot has nothing to
-  // show at all yet. Anything else — including "only one side has
-  // advanced so far" — should still render whichever team(s) are known.
-  const isBye = match.teamA?.code === "BYE" || match.teamB?.code === "BYE";
-  const bothKnown = !!match.teamA && !!match.teamB;
-  const playable = bothKnown && !isBye;
-  const hasAnyTeam = !!match.teamA || !!match.teamB;
+  const isBye = match.teamB?.code === "BYE" || match.teamA?.code === "BYE";
+  const bothAssigned = !!match.teamA && !!match.teamB;
+  const playable = bothAssigned && !isBye;
   const locked = match.status === "completed";
 
-  // Both fields must be non-negative integers before anything can submit.
-  // Parsed once per render and reused by both the tie-check and the
-  // enabled/disabled state of the Save button, so they can never disagree.
-  const parsedA = parseScore(scoreA);
-  const parsedB = parseScore(scoreB);
-  const bothValid = parsedA !== null && parsedB !== null;
-  const isTie = bothValid && parsedA === parsedB;
-
-  function submitWithWinner(winner: "A" | "B") {
-    if (parsedA === null || parsedB === null) return;
-    onRecordResult(match.id, winner, parsedA, parsedB);
-  }
-
-  function submit() {
-    // Normal path — only reachable when scores differ, so the higher
-    // score unambiguously determines the winner.
-    if (parsedA === null || parsedB === null || parsedA === parsedB) return;
-    onRecordResult(match.id, parsedA > parsedB ? "A" : "B", parsedA, parsedB);
-  }
-
-  if (!hasAnyTeam) {
+  // Nothing assigned yet at all — genuinely empty slot, nothing to show.
+  if (!match.teamA && !match.teamB) {
     return (
       <div
         ref={cardRef}
-        className="rounded-xl border border-dashed border-border-overlay bg-background/80 px-3 py-2.5"
+        id={`match-card-${match.id}`}
+        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
       >
         <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
         <p className="mt-1 text-[11px] font-label-mono text-outline">Waiting for teams</p>
@@ -78,9 +43,44 @@ export default function MatchResultCard({
     );
   }
 
+  // One real feeder was a bye — auto-completed by the generator, just
+  // show the bye result plainly, nothing to play or type in.
+  if (isBye) {
+    const realTeam = match.teamA?.code !== "BYE" ? match.teamA : match.teamB;
+    return (
+      <div
+        ref={cardRef}
+        id={`match-card-${match.id}`}
+        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
+      >
+        <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+        <p className="mt-1 text-[11px] font-label-mono text-outline">{realTeam?.name ?? "TBD"} — Bye</p>
+      </div>
+    );
+  }
+
+  const numA = Number(scoreA);
+  const numB = Number(scoreB);
+  const bothFilled = scoreA.trim() !== "" && scoreB.trim() !== "" && !Number.isNaN(numA) && !Number.isNaN(numB);
+  const isTie = bothFilled && numA === numB;
+
+  function submitDecisive() {
+    if (!bothFilled || isTie) return;
+    onRecordResult(match.id, numA > numB ? "A" : "B", numA, numB);
+  }
+
+  /** Explicit manual override for a tied scoreline — the person (or the
+   *  bot, driving the same UI) picks who actually advances. Scores are
+   *  recorded as-entered; the winner flag is what matters for bracket
+   *  progression. */
+  function submitTieBreak(winner: "A" | "B") {
+    onRecordResult(match.id, winner, numA, numB);
+  }
+
   return (
     <div
       ref={cardRef}
+      id={`match-card-${match.id}`}
       className={`w-full rounded-xl relative overflow-hidden bg-surface-container-low border transition-colors duration-200 ${
         match.status === "live"
           ? "border-status-live/40 shadow-[0_0_24px_rgba(255,180,171,0.12)]"
@@ -100,55 +100,65 @@ export default function MatchResultCard({
               Live
             </span>
           )}
-          {isBye && (
-            <span className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">
-              Bye
-            </span>
-          )}
         </div>
 
         <TeamResultRow
+          matchId={match.id}
+          slot="A"
           team={match.teamA}
           score={scoreA}
           onScoreChange={setScoreA}
           locked={locked}
-          showScore={playable}
+          playable={playable}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
         />
         <TeamResultRow
+          matchId={match.id}
+          slot="B"
           team={match.teamB}
           score={scoreB}
           onScoreChange={setScoreB}
           locked={locked}
-          showScore={playable}
+          playable={playable}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
         />
 
+        {/* Only one side has shown up so far — nothing to score yet, but
+           we still show who's already through instead of hiding them
+           behind a generic "waiting" message. */}
+        {!playable && (
+          <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-outline mt-0.5">
+            Waiting for opponent
+          </p>
+        )}
+
         {playable && !locked && isTie && (
-          <div className="mt-0.5 flex flex-col gap-1.5 rounded-lg border border-theme-orange/30 bg-theme-orange/5 p-2">
-            <p className="text-[9px] font-label-mono font-bold uppercase tracking-wide text-theme-orange text-center">
-              Scores are tied — who won?
+          <div className="mt-0.5 flex flex-col gap-1">
+            <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-status-live">
+              Scores tied — who won?
             </p>
             <div className="flex gap-1.5">
               <button
                 type="button"
-                onClick={() => submitWithWinner("A")}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container border border-border-overlay py-1.5 hover:border-theme-orange/50 active:scale-[0.98] transition-all truncate px-1"
+                id={`tie-btn-${match.id}-A`}
+                onClick={() => submitTieBreak("A")}
+                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate"
               >
-                {match.teamA?.code ?? "A"}
+                {match.teamA?.code} wins
               </button>
               <button
                 type="button"
-                onClick={() => submitWithWinner("B")}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container border border-border-overlay py-1.5 hover:border-theme-orange/50 active:scale-[0.98] transition-all truncate px-1"
+                id={`tie-btn-${match.id}-B`}
+                onClick={() => submitTieBreak("B")}
+                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate"
               >
-                {match.teamB?.code ?? "B"}
+                {match.teamB?.code} wins
               </button>
             </div>
           </div>
@@ -157,9 +167,10 @@ export default function MatchResultCard({
         {playable && !locked && !isTie && (
           <button
             type="button"
-            onClick={submit}
-            disabled={!bothValid}
-            className="mt-0.5 w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:hover:opacity-40 disabled:cursor-not-allowed"
+            id={`save-btn-${match.id}`}
+            onClick={submitDecisive}
+            disabled={!bothFilled}
+            className="mt-0.5 w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Save result
           </button>
@@ -170,93 +181,88 @@ export default function MatchResultCard({
 }
 
 function TeamResultRow({
+  matchId,
+  slot,
   team,
   score,
   onScoreChange,
   locked,
-  showScore,
+  playable,
   hoveredTeamCode,
   onTeamHover,
   onTeamClick,
   pinnedTeamCode,
 }: {
+  matchId: string;
+  slot: "A" | "B";
   team: TeamNode | null;
   score: string;
   onScoreChange: (v: string) => void;
   locked: boolean;
-  /** Only render the editable score box once both sides are real teams
-   *  (i.e. the match is actually playable) — a lone advanced team with a
-   *  still-TBD opponent has nothing to score yet. */
-  showScore: boolean;
+  playable: boolean;
   hoveredTeamCode?: string | null;
   onTeamHover?: (code: string | null) => void;
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
 }) {
-  // Empty slot — the other side of this match hasn't been decided yet.
-  if (!team) {
-    return (
-      <div className="flex items-center gap-2 p-1 lg:p-1.5 rounded-lg relative bg-background/40 border border-dashed border-border-overlay">
-        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background border border-dashed border-outline/40 font-label-mono font-black text-[10px] text-outline">
-          ?
-        </span>
-        <span className="font-label-mono font-bold text-xs uppercase tracking-wide text-outline">
-          To Be Determined
-        </span>
-      </div>
-    );
-  }
-
-  const isBye = team.code === "BYE";
-  const isHovered = !isBye && hoveredTeamCode === team.code;
+  const isTBD = !team;
+  const isHovered = !!team && hoveredTeamCode === team.code;
   const isAnyHovered = !!hoveredTeamCode;
-  const isPinned = !isBye && pinnedTeamCode === team.code;
+  const isPinned = !!team && pinnedTeamCode === team.code;
 
   return (
     <div
-      onMouseEnter={() => !isBye && onTeamHover?.(team.code)}
-      onMouseLeave={() => !isBye && onTeamHover?.(null)}
-      onClick={() => !isBye && onTeamClick?.(team.code)}
-      className={`flex items-center justify-between gap-2 p-1 lg:p-1.5 rounded-lg relative bg-surface-container border transition-all duration-200 ${
-        !isBye && onTeamClick ? "cursor-pointer" : ""
-      } ${
+      onMouseEnter={() => team && onTeamHover?.(team.code)}
+      onMouseLeave={() => onTeamHover?.(null)}
+      onClick={() => team && onTeamClick?.(team.code)}
+      className={`flex items-center justify-between gap-2 p-1 lg:p-1.5 rounded-lg relative border transition-all duration-200 ${
+        isTBD ? "bg-background/40 border-dashed border-border-overlay text-outline" : "bg-surface-container border-border-overlay"
+      } ${!isTBD && onTeamClick ? "cursor-pointer" : ""} ${
         isHovered
           ? "scale-[1.02] border-theme-orange/40 bg-surface-container-high shadow-[0_0_20px_rgba(201,151,31,0.15)]"
-          : isAnyHovered
+          : isAnyHovered && !isTBD
           ? "opacity-30 blur-[0.5px] border-border-overlay"
           : isPinned
           ? "border-theme-orange/50 bg-surface-container-high"
-          : "border-border-overlay"
+          : ""
       }`}
     >
-      <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />
+      {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
       <div className="flex items-center gap-2 pl-1.5 min-w-0">
-        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px]">
-          {team.logo ? (
-            <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
-          ) : (
-            <span style={{ color: team.color }}>{team.code}</span>
-          )}
-        </span>
+        {!isTBD ? (
+          <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px]">
+            {team.logo ? (
+              <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
+            ) : (
+              <span style={{ color: team.color }}>{team.code}</span>
+            )}
+          </span>
+        ) : (
+          <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background border border-dashed border-outline/40 font-label-mono font-black text-[10px] text-outline">
+            ?
+          </span>
+        )}
         <span
           className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate ${
-            team.isWinner ? "text-theme-orange" : "text-on-surface"
+            isTBD ? "text-outline font-medium" : team.isWinner ? "text-theme-orange" : "text-on-surface"
           }`}
         >
-          {team.name}
+          {isTBD ? "To Be Determined" : team.name}
         </span>
-        {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange shrink-0" strokeWidth={3} />}
+        {!isTBD && team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange shrink-0" strokeWidth={3} />}
         {isPinned && (
           <span className="text-[8px] font-label-mono font-black uppercase tracking-widest text-theme-orange border border-theme-orange/40 rounded px-1 py-0.5 shrink-0">
             Pinned
           </span>
         )}
       </div>
-      {showScore && (
+      {/* Score box only makes sense once both sides are real teams —
+         showing an editable "0" box next to a TBD row implied you could
+         score a match that isn't playable yet. */}
+      {playable && (
         <input
+          id={`score-input-${matchId}-${slot}`}
           type="number"
-          min={0}
-          step={1}
           value={score}
           disabled={locked}
           onClick={(e) => e.stopPropagation()}
