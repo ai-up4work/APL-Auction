@@ -6,7 +6,6 @@ import { Shuffle, Sparkles, RotateCcw, Settings2, Trophy, X, PartyPopper, Chevro
 import TournamentBracket from "@/components/demo/TournamentBracketEditable";
 import type { Round, MatchNode } from "@/components/demo/TournamentBracket";
 import DoubleElimBoard from "@/components/demo/DoubleElimBoard";
-import TournamentAdminPanel from "@/components/demo/TournamentAdminPanel";
 
 import type { AdminTeam } from "@/lib/tournament/seeding";
 import { randomDraw } from "@/lib/tournament/seeding";
@@ -504,30 +503,6 @@ export default function BracketSandboxPage() {
             </div>
           )}
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowAdminOverlay(true)}
-          className="group flex items-center gap-2 pl-1 pr-3 py-1 rounded-full transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid var(--color-border-overlay)",
-            cursor: "pointer",
-          }}
-        >
-          <span
-            className="flex items-center justify-center rounded-full"
-            style={{ width: 16, height: 16, background: "var(--color-outline)" }}
-          >
-            <Settings2 size={9} className="text-black/70" />
-          </span>
-          <span
-            className="text-[9px] uppercase"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.08em", color: "var(--color-on-surface)", fontWeight: 600 }}
-          >
-            Admin panel
-          </span>
-        </button>
       </div>
 
       {/* ── Control deck — glass panel of labeled clusters, same border/  */}
@@ -749,7 +724,6 @@ export default function BracketSandboxPage() {
             <X className="w-3.5 h-3.5" />
             Close admin panel
           </button>
-          <TournamentAdminPanel logoSrc={logoSrc} onLogoSrcChange={setLogoSrc} />
         </div>
       )}
     </div>
