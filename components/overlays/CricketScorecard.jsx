@@ -214,11 +214,6 @@ export default function CricketScorecard({
     ? `${matchResult.winningTeamName} ${matchResult.margin}`
     : "Match in progress";
 
-  // Add debug logging
-  console.log('CricketScorecard - matchSetup:', matchSetup);
-  console.log('CricketScorecard - teamA:', teamA);
-  console.log('CricketScorecard - teamB:', teamB);
-
   if (!teamA || !teamB) {
     console.warn('CricketScorecard: Missing team data');
     return null;
