@@ -75,6 +75,46 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
   const opacity = useTransform(scrollYProgress, [0, 1], [1, 0])
   const scale = useTransform(scrollYProgress, [0, 1], [1, 0.8])
 
+  // ---- trusted clubs marquee: auto color-in as each logo passes center ----
+  const marqueeRef = useRef<HTMLDivElement>(null)
+  const logoRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  useEffect(() => {
+    let frameId: number
+
+    const update = () => {
+      const container = marqueeRef.current
+      if (container) {
+        const containerRect = container.getBoundingClientRect()
+        const centerX = containerRect.left + containerRect.width / 2
+
+        logoRefs.current.forEach((el) => {
+          if (!el) return
+          const rect = el.getBoundingClientRect()
+          const logoCenterX = rect.left + rect.width / 2
+          const distance = Math.abs(logoCenterX - centerX)
+
+          // distance (px) where color is fully "on" vs fully "off"
+          const fullColorRange = containerRect.width * 0.12
+          const fullGrayRange = containerRect.width * 0.4
+
+          let t = (distance - fullColorRange) / (fullGrayRange - fullColorRange)
+          t = Math.min(1, Math.max(0, t))
+
+          const grayscale = t * 100
+          const logoOpacity = 1 - t * 0.1 // fully in color -> 1, fully out -> 0.6
+
+          el.style.filter = `grayscale(${grayscale}%)`
+          el.style.opacity = String(logoOpacity)
+        })
+      }
+      frameId = requestAnimationFrame(update)
+    }
+
+    frameId = requestAnimationFrame(update)
+    return () => cancelAnimationFrame(frameId)
+  }, [])
+
   return (
     <>
       {/* Hero */}
@@ -132,7 +172,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          TRUSTED BY — logo marquee
+          TRUSTED BY — logo marquee, auto color-in near center
       ═══════════════════════════════════════════════════════════ */}
       <section className="py-10 md:py-14 relative bg-black border-y border-gold/10">
         <div className="container mx-auto px-4 text-center mb-6 fade-in">
@@ -140,18 +180,20 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             TRUSTED BY CLUBS LIKE
           </span>
         </div>
-        <div className="relative w-full overflow-hidden marquee-mask">
+        <div className="relative w-full overflow-hidden marquee-mask" ref={marqueeRef}>
           <div className="flex items-center gap-16 md:gap-24 w-max marquee-track">
             {[...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs].map((club, i) => (
-              <div 
-                key={`${club.name || 'club'}-${i}`}
-                className="flex-shrink-0 w-24 md:w-32 flex items-center justify-center"
+              <div
+                key={`${club.name || "club"}-${i}`}
+                ref={(el) => {
+                  logoRefs.current[i] = el
+                }}
+                className="flex-shrink-0 w-24 md:w-32 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
               >
                 <img
                   src={club.logo}
                   alt={`${club.name} logo`}
-                  /* Optional styling: makes logos gray/faded until hovered */
-                  className="w-full h-auto object-contain opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-300" 
+                  className="w-full h-auto object-contain"
                   loading="lazy"
                 />
               </div>

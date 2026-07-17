@@ -144,8 +144,22 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 /* ── logo marquee ── */
 @keyframes scrollMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .marquee-track { animation: scrollMarquee 28s linear infinite; }
-.marquee-mask { -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); }
-
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+}
 /* ── faq chevron rotate ── */
 .faq-icon { transition: transform 0.3s ease, background-color 0.3s ease; }
 

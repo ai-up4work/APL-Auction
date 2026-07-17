@@ -1156,3 +1156,20 @@
   box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
   transform: translateY(-5px);
 }
+
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+}
