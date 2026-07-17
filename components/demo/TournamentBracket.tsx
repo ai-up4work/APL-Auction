@@ -731,7 +731,7 @@ export default function TournamentBracket({
                   <img
                     src={logoSrc}
                     alt=""
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-30"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-15"
                   />
                 </div>
               )}

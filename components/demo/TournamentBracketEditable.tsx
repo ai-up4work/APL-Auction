@@ -5,31 +5,6 @@ import { Trophy, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Round, MatchNode } from "@/components/tournament/TournamentBracket";
 import MatchResultCard from "./MatchResultCard";
 
-/* ------------------------------------------------------------------ */
-/*  Editable counterpart to TournamentBracket.                         */
-/*                                                                       */
-/*  TournamentBracket itself is left untouched — this is a parallel     */
-/*  component for screens (like the sandbox) that want in-place score   */
-/*  entry, mirroring what DoubleElimBoard already does with             */
-/*  MatchResultCard. It reuses the same mirrored-layout / connector-    */
-/*  geometry approach as TournamentBracket so the visual result matches,*/
-/*  but every match renders as an editable MatchResultCard instead of   */
-/*  the read-only card, and onRecordResult is required (not optional)   */
-/*  since there's no point using this component without it — for a     */
-/*  purely read-only bracket, use TournamentBracket instead.            */
-/*                                                                       */
-/*  Trade-offs vs TournamentBracket, since MatchResultCard doesn't       */
-/*  support everything the read-only MatchCard did:                     */
-/*   - No "From {round}" tap-through on TBD slots (MatchResultCard has   */
-/*     no onFromClick). Mobile still has the round-pager buttons at the  */
-/*     top, so navigation between rounds isn't lost, just that one       */
-/*     shortcut.                                                         */
-/*   - MatchResultCard exposes a single ref for the whole card, not a    */
-/*     per-team-row ref. The Final's connector lines fall back to        */
-/*     anchoring at the card's vertical center instead of the exact      */
-/*     team row — cosmetic only.                                        */
-/* ------------------------------------------------------------------ */
-
 export interface TournamentBracketEditableProps {
   rounds: Round[];
   onRecordResult: (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void;
@@ -40,6 +15,12 @@ export interface TournamentBracketEditableProps {
   logoSrc?: string;
   className?: string;
   onActiveTeamChange?: (teamCode: string | null) => void;
+  /** Skips the top eyebrow/title/on-air/helper block. For embedding this
+   *  bracket inside a page that already has its own compact toolbar
+   *  covering the same info (e.g. the bracket sandbox). Everything else —
+   *  desktop canvas, mobile round-pager — renders unchanged. Defaults to
+   *  false so every existing usage keeps its header exactly as before. */
+  hideHeader?: boolean;
 }
 
 const GROW_WEIGHT = {
@@ -48,10 +29,6 @@ const GROW_WEIGHT = {
   quarter: 1.1,
   compact: 0.9,
 };
-
-/* ------------------------------------------------------------------ */
-/*  Geometry helpers — identical to TournamentBracket's                */
-/* ------------------------------------------------------------------ */
 
 function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 12): string {
   const midX = (x1 + x2) / 2;
@@ -84,11 +61,6 @@ function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: 
 }
 
 type RefSetter = (el: HTMLDivElement | null) => void;
-
-/* ------------------------------------------------------------------ */
-/*  Column renderer — same slot/positioning logic as TournamentBracket's */
-/*  BracketColumn, but always renders MatchResultCard.                  */
-/* ------------------------------------------------------------------ */
 
 function BracketColumn({
   roundName,
@@ -193,10 +165,6 @@ interface Connector {
   teamCode?: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main component                                                     */
-/* ------------------------------------------------------------------ */
-
 export default function TournamentBracketEditable({
   rounds,
   onRecordResult,
@@ -207,6 +175,7 @@ export default function TournamentBracketEditable({
   logoSrc,
   className = "",
   onActiveTeamChange,
+  hideHeader = false,
 }: TournamentBracketEditableProps) {
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
   const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
@@ -336,11 +305,6 @@ export default function TournamentBracketEditable({
           const teamCodeForConnector = team?.code || null;
 
           if (isFinal) {
-            // MatchResultCard only exposes a single ref for the whole
-            // card (no per-team-row ref like the read-only MatchCard),
-            // so this always falls back to the card's own rect — the
-            // connector anchors at the card's vertical center rather
-            // than the exact team row. Cosmetic only.
             const trRect = tRect;
             const endX = (flowsRight ? trRect.left : trRect.right) - containerRect.left;
             const endY = trRect.top + trRect.height / 2 - containerRect.top;
@@ -456,33 +420,35 @@ export default function TournamentBracketEditable({
         .bracket-scrollbar { scrollbar-width: thin; scrollbar-color: var(--color-border-overlay) transparent; }
       `}</style>
 
-      <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
-        <div>
-          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
-            <Trophy className="w-3.5 h-3.5" />
-            {eyebrowLabel}
-          </span>
-          <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
-        </div>
-        <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
-          <div className="flex items-center gap-2">
-            <span className="tally bg-[radial-gradient(circle_at_35%_30%,#ff9d94,var(--color-status-live)_65%)] shadow-[0_0_6px_1px_rgba(255,180,171,0.55)] animate-[connPulse_1.4s_ease-in-out_infinite]" />
-            <span className="font-label-mono text-[10px] uppercase tracking-widest text-on-surface-variant">{liveLabel}</span>
+      {!hideHeader && (
+        <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
+          <div>
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
+              <Trophy className="w-3.5 h-3.5" />
+              {eyebrowLabel}
+            </span>
+            <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
           </div>
-          <div className="w-px h-4 bg-border-overlay hidden md:block" />
-          {selectedTeamCode ? (
-            <button
-              type="button"
-              onClick={() => setSelectedTeamCode(null)}
-              className="font-label-mono text-[11px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80 hidden md:block"
-            >
-              Tracing {selectedTeamCode} · click to release
-            </button>
-          ) : (
-            <p className="font-body-md text-[11px] text-outline hidden md:block">{helperText}</p>
-          )}
+          <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
+            <div className="flex items-center gap-2">
+              <span className="tally bg-[radial-gradient(circle_at_35%_30%,#ff9d94,var(--color-status-live)_65%)] shadow-[0_0_6px_1px_rgba(255,180,171,0.55)] animate-[connPulse_1.4s_ease-in-out_infinite]" />
+              <span className="font-label-mono text-[10px] uppercase tracking-widest text-on-surface-variant">{liveLabel}</span>
+            </div>
+            <div className="w-px h-4 bg-border-overlay hidden md:block" />
+            {selectedTeamCode ? (
+              <button
+                type="button"
+                onClick={() => setSelectedTeamCode(null)}
+                className="font-label-mono text-[11px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80 hidden md:block"
+              >
+                Tracing {selectedTeamCode} · click to release
+              </button>
+            ) : (
+              <p className="font-body-md text-[11px] text-outline hidden md:block">{helperText}</p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="w-full overflow-x-hidden">

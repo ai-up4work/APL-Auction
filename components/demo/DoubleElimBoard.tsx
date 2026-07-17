@@ -17,6 +17,13 @@ export interface DoubleElimBoardProps {
   logoSrc?: string;
   className?: string;
   onActiveTeamChange?: (teamCode: string | null) => void;
+  /** Skips the top eyebrow/title/helper-text block entirely. For embedding
+   *  this board inside a page that already has its own compact toolbar
+   *  covering the same info (e.g. the bracket sandbox) — avoids showing
+   *  the same "Double Elimination" framing twice. Everything else
+   *  (canvas, connectors, mobile view) renders unchanged. Defaults to
+   *  false so every existing usage keeps its header exactly as before. */
+  hideHeader?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +194,7 @@ export default function DoubleElimBoard({
   logoSrc,
   className = "",
   onActiveTeamChange,
+  hideHeader = false,
 }: DoubleElimBoardProps) {
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
   const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
@@ -281,13 +289,6 @@ export default function DoubleElimBoard({
         const team = slot === "A" ? target.teamA : target.teamB;
 
         if (laneX != null) {
-          // Cross-row "drop into the losers bracket" link: exit from a
-          // point ON the source card's left border — below its vertical
-          // middle, so the line visibly touches/attaches to the card
-          // instead of floating below it with a gap — travel the
-          // dedicated empty lane, then enter the target the same way,
-          // touching its left border below the middle. Never touches a
-          // card in between.
           const sX = sR.left - masterRect.left;
           const sY = sR.top - masterRect.top + sR.height * 0.7;
           const tX = tR.left - masterRect.left;
@@ -296,9 +297,6 @@ export default function DoubleElimBoard({
           return;
         }
 
-        // Normal same-row (or into-the-final) link: source's right edge to
-        // target's left edge, with the vertical run at the midpoint between
-        // them — i.e. always inside the empty gap between the two columns.
         const sX = sR.right - masterRect.left;
         const sY = sR.top + sR.height / 2 - masterRect.top;
         const tX = tR.left - masterRect.left;
@@ -426,40 +424,35 @@ export default function DoubleElimBoard({
 
   return (
     <div className={`min-h-screen w-full bg-background text-on-surface p-2 md:p-2 ${className}`}>
-      <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
-        <div>
-          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
-            <Trophy className="w-3.5 h-3.5" />
-            {eyebrowLabel}
-          </span>
-          <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
+      {!hideHeader && (
+        <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
+          <div>
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
+              <Trophy className="w-3.5 h-3.5" />
+              {eyebrowLabel}
+            </span>
+            <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
+          </div>
+          <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
+            {selectedTeamCode ? (
+              <button
+                type="button"
+                onClick={() => setSelectedTeamCode(null)}
+                className="font-label-mono text-[11px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80"
+              >
+                Tracing {selectedTeamCode} · click to release
+              </button>
+            ) : (
+              <p className="font-body-md text-[11px] text-outline">{helperText}</p>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
-          {selectedTeamCode ? (
-            <button
-              type="button"
-              onClick={() => setSelectedTeamCode(null)}
-              className="font-label-mono text-[11px] font-bold uppercase tracking-wide text-theme-orange hover:opacity-80"
-            >
-              Tracing {selectedTeamCode} · click to release
-            </button>
-          ) : (
-            <p className="font-body-md text-[11px] text-outline">{helperText}</p>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Desktop: measured canvas with real connector lines */}
       <div className="hidden md:block max-w-[1600px] mx-auto relative">
         <div className="db-scroll overflow-x-auto pb-6">
           <div ref={masterRef} className="relative" style={{ width: totalWidth, height: totalHeight, minWidth: "100%" }}>
-            {/* Connectors are drawn FIRST (underneath everything else) on
-                purpose. Cards below have solid/opaque backgrounds, so
-                whichever part of a connector's path happens to fall
-                under a card gets visually covered by that card instead
-                of painting over its face — a line only ever shows in the
-                actual empty gaps between cards, never appearing to cut
-                across one. */}
             <svg className="absolute inset-0 pointer-events-none" width={totalWidth} height={totalHeight}>
               {connectors.map((c) => {
                 const active = c.teamCode && c.teamCode === activeTeamCode;
@@ -485,7 +478,7 @@ export default function DoubleElimBoard({
               <img
                 src={logoSrc}
                 alt=""
-                className="absolute pointer-events-none opacity-30 w-[300px] h-auto object-contain"
+                className="absolute pointer-events-none opacity-15 w-[300px] h-auto object-contain"
                 style={{ left: gfX + COL_W / 2, top: gfCenterY, transform: "translate(-50%, -50%)" }}
               />
             )}
@@ -578,11 +571,6 @@ export default function DoubleElimBoard({
         </div>
       </div>
 
-      {/* Themed scrollbar for .db-scroll containers (horizontal canvas
-          + mobile round rows) AND the page's own vertical scrollbar
-          (html) — both styled the same way so they're visually
-          consistent with each other instead of one being custom and
-          the other left as the browser/OS default. */}
       <style jsx global>{`
         html {
           scrollbar-width: thin;

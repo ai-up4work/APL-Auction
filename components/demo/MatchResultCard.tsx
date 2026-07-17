@@ -70,7 +70,7 @@ export default function MatchResultCard({
     return (
       <div
         ref={cardRef}
-        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
+        className="rounded-xl border border-dashed border-border-overlay bg-background/80 px-3 py-2.5"
       >
         <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
         <p className="mt-1 text-[11px] font-label-mono text-outline">Waiting for teams</p>
