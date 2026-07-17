@@ -136,17 +136,25 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       ═══════════════════════════════════════════════════════════ */}
       <section className="py-10 md:py-14 relative bg-black border-y border-gold/10">
         <div className="container mx-auto px-4 text-center mb-6 fade-in">
-          <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-300">TRUSTED BY CLUBS LIKE</span>
+          <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-300">
+            TRUSTED BY CLUBS LIKE
+          </span>
         </div>
         <div className="relative w-full overflow-hidden marquee-mask">
-          <div className="flex items-center gap-16 w-max marquee-track">
+          <div className="flex items-center gap-16 md:gap-24 w-max marquee-track">
             {[...trustedClubs, ...trustedClubs].map((club, i) => (
-              <span
-                key={`${club}-${i}`}
-                className="font-cinzel font-semibold text-lg md:text-xl text-gray-400 tracking-wide whitespace-nowrap"
+              <div 
+                key={`${club.name || 'club'}-${i}`}
+                className="flex-shrink-0 w-24 md:w-32 flex items-center justify-center"
               >
-                {club}
-              </span>
+                <img
+                  src={club.logo}
+                  alt={`${club.name} logo`}
+                  /* Optional styling: makes logos gray/faded until hovered */
+                  className="w-full h-auto object-contain opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-300" 
+                  loading="lazy"
+                />
+              </div>
             ))}
           </div>
         </div>

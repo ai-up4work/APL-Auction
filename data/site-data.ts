@@ -222,7 +222,13 @@ export const knights = [
   { id: 9, name: "haypon", role: "Royal Guard", image: "/images/knights/knight-9.png", twitter: "#", description: "Plans and executes gaming tournaments, AMAs, and community events." },
 ]
 
-export const trustedClubs = ["Iron Knights CC", "Royal Strikers", "Silver Hawks", "Golden Lions", "Crimson Wardens"]
+export const trustedClubs = [
+  { name: "Iron Knights CC", logo: "/trusted-clubs/iron-knights-tr.png" },
+  { name: "Royal Strikers", logo: "/trusted-clubs/royal-strikers-tr.png" },
+  { name: "Silver Hawks", logo: "/trusted-clubs/silver-hawks-tr.png" },
+  { name: "Golden Lions", logo: "/trusted-clubs/golden-lions-tr.png" },
+  { name: "Crimson Wardens", logo: "/trusted-clubs/crimson-wardens.png" }
+]
 
 export const stats = [
   { value: "500+", label: "Leagues Run" },
