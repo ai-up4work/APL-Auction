@@ -1,6 +1,5 @@
-// File: components/demo/tournament/MatchResultCard.tsx
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Radio } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 
@@ -23,6 +22,23 @@ export default function MatchResultCard({
 }) {
   const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
   const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
+
+  // MatchResultCard instances are keyed only by match.id, which stays the
+  // same across a demo restart/reshuffle/format-switch — so React reuses
+  // the component instance and its local state instead of remounting it.
+  // Without this sync, whatever was last typed (or previously recorded)
+  // into this card sticks around even after the model resets the match to
+  // a fresh "scheduled" state with no score — showing stale leftover
+  // scores, and occasionally a stale "Scores tied — who won?" prompt,
+  // right after a restart, before anything new has actually been typed.
+  // Re-sync whenever the match's identity, status, or recorded score
+  // actually changes; this does NOT fire while someone (or the bot) is
+  // mid-typing into a still-"scheduled" match, since none of those
+  // dependencies change until a result is submitted or the match resets.
+  useEffect(() => {
+    setScoreA(match.teamA?.score?.toString() ?? "");
+    setScoreB(match.teamB?.score?.toString() ?? "");
+  }, [match.id, match.status, match.teamA?.score, match.teamB?.score]);
 
   const isBye = match.teamB?.code === "BYE" || match.teamA?.code === "BYE";
   const bothAssigned = !!match.teamA && !!match.teamB;

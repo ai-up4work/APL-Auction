@@ -4,7 +4,7 @@
 import { bracketDemoModel, getBracketSnapshot, allDoubleElimMatches } from "./bracketDemoModel";
 import type { MatchNode } from "@/components/demo/TournamentBracket";
 
-const BOT_LABEL = "Auto-Sim";
+const BOT_LABEL = "Tournament Admin Bot";
 const BOT_COLOR = "#c9971f";
 const PANEL_SELECTOR = '[data-demo-panel="bracket"]';
 
@@ -27,16 +27,29 @@ function getPanel(): HTMLElement | null {
   return document.querySelector(PANEL_SELECTOR) as HTMLElement | null;
 }
 
+/** Position of `el`, in `container`-local pixels, that accounts for CSS
+ *  transforms — not just offsetTop/offsetParent.
+ *
+ *  Every match card past the leaf column (Round of 16, Quarters, Semis,
+ *  ...) is positioned in TournamentBracket via
+ *  `top: centerY; transform: translateY(-50%)` so it can be vertically
+ *  centered against its two feeder matches. offsetTop reports the
+ *  pre-transform box — i.e. `centerY` itself — NOT where the card
+ *  actually sits on screen, so walking the offsetParent chain (the old
+ *  approach) put the cursor `height / 2` px below the real card for
+ *  every round after the first. getBoundingClientRect() reflects the
+ *  post-transform box, so diffing it against the container's rect gives
+ *  the true local position. We add back scrollLeft/scrollTop because
+ *  absolutely-positioned children are laid out in the container's
+ *  unscrolled content space, while getBoundingClientRect() is
+ *  viewport-relative. */
 function getLocalOffset(el: HTMLElement, container: HTMLElement) {
-  let x = 0;
-  let y = 0;
-  let node: HTMLElement | null = el;
-  while (node && node !== container) {
-    x += node.offsetLeft || 0;
-    y += node.offsetTop || 0;
-    node = node.offsetParent as HTMLElement | null;
-  }
-  return { x, y };
+  const elRect = el.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  return {
+    x: elRect.left - containerRect.left + container.scrollLeft,
+    y: elRect.top - containerRect.top + container.scrollTop,
+  };
 }
 
 /** Moves the simulated cursor onto any element inside the bracket panel
@@ -54,20 +67,16 @@ function moveCursorTo(targetId: string, label = BOT_LABEL): boolean {
   }
   el.scrollIntoView({ block: "center", behavior: "smooth" });
   const { x, y } = getLocalOffset(el, container);
+  const rect = el.getBoundingClientRect();
   bracketDemoModel.setCursor({
     visible: true,
-    x: x + el.offsetWidth / 2,
-    y: y + el.offsetHeight / 2,
+    x: x + rect.width / 2,
+    y: y + rect.height / 2,
     label,
     color: BOT_COLOR,
     clicking: false,
   });
   return true;
-}
-
-function pulseClick() {
-  bracketDemoModel.setCursor({ clicking: true });
-  setTimeout(() => bracketDemoModel.setCursor({ clicking: false }), STEP_CLICK_MS);
 }
 
 /** Sets a native <input>'s value the way a real keystroke would, so
@@ -154,6 +163,15 @@ export class BracketOrchestrator {
     this.timers.push({ timer, fireAt, run });
   }
 
+  /** Click pulse as a tracked step — routed through this.schedule (not a
+   *  bare setTimeout) so pause()/stop() can actually cancel the
+   *  "clicking: false" reset instead of letting it fire late/stale after
+   *  a pause or a fresh episode has already started. */
+  private pulseClick() {
+    bracketDemoModel.setCursor({ clicking: true });
+    this.schedule(() => bracketDemoModel.setCursor({ clicking: false }), STEP_CLICK_MS);
+  }
+
   start() {
     if (this.running) return;
     this.running = true;
@@ -216,16 +234,6 @@ export class BracketOrchestrator {
     // cycle) re-triggers runNext() via its own scheduled steps.
   }
 
-  /** Moves the cursor to `targetId`, waits out the full glide, then runs
-   *  `after` — guaranteeing nothing happens to a control until the dot
-   *  has visibly arrived on top of it. Returns the delay consumed so
-   *  callers can chain further steps off of it. */
-  private glideThenAct(atMs: number, targetId: string, after: () => void): number {
-    this.schedule(() => moveCursorTo(targetId), atMs);
-    this.schedule(() => after(), atMs + CURSOR_GLIDE_MS);
-    return atMs + CURSOR_GLIDE_MS;
-  }
-
   /** Types `value` into the input at `targetId` one character at a time,
    *  each on its own timer, starting at `atMs` (which should already be
    *  past the cursor's glide there). Returns the time the last character
@@ -279,7 +287,7 @@ export class BracketOrchestrator {
 
     this.schedule(() => moveCursorTo(controlId), t);
     t += CURSOR_GLIDE_MS;
-    this.schedule(() => pulseClick(), t);
+    this.schedule(() => this.pulseClick(), t);
     t += STEP_CLICK_MS;
 
     this.schedule(() => {

@@ -207,7 +207,7 @@ function StatusChyron({ text }: { text: string }) {
   const isChampion = text.includes("🏆");
   const accent = isChampion ? "var(--color-theme-orange)" : "#8b8bf5";
   return (
-    <div className="pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
+    <div className="pointer-events-none fixed top-56 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
       <div
         key={text}
         className="chyron-in flex items-stretch overflow-hidden rounded-[3px]"
