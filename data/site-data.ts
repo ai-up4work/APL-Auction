@@ -223,10 +223,10 @@ export const knights = [
 ]
 
 export const trustedClubs = [
-  { name: "Iron Knights CC", logo: "/trusted-clubs/iron-knights-tr.png" },
-  { name: "Royal Strikers", logo: "/trusted-clubs/royal-strikers-tr.png" },
-  { name: "Silver Hawks", logo: "/trusted-clubs/silver-hawks-tr.png" },
-  { name: "Golden Lions", logo: "/trusted-clubs/golden-lions-tr.png" },
+  { name: "Iron Knights CC", logo: "/trusted-clubs/iron-knights.png" },
+  { name: "Royal Strikers", logo: "/trusted-clubs/royal-strikers.png" },
+  { name: "Silver Hawks", logo: "/trusted-clubs/silver-hawks.png" },
+  { name: "Golden Lions", logo: "/trusted-clubs/golden-lions.png" },
   { name: "Crimson Wardens", logo: "/trusted-clubs/crimson-wardens.png" }
 ]
 
