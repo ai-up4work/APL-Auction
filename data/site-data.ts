@@ -237,6 +237,7 @@ export const knights = [
 ]
 
 export const trustedClubs = [
+  // { name: "Moon Knight League", logo: "/trusted-clubs/moon-knight.png" },
   { name: "Iron Knights CC", logo: "/trusted-clubs/iron-knights.png" },
   { name: "Royal Strikers", logo: "/trusted-clubs/royal-strikers.png" },
   { name: "Silver Hawks", logo: "/trusted-clubs/silver-hawks.png" },
