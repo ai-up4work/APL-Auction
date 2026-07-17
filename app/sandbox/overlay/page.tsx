@@ -73,7 +73,7 @@ import { connectSandboxBus, type SandboxChannels } from "./lib/sandBoxBus";
 
 import { HARDCODED_MATCH_SETUP, emptyLiveState, defaultWeather, emptyBatter, emptyBowler } from "./lib/sandboxData";
 
-import { MonitorPlay, LayoutPanelLeft, CloudSun, RotateCcw, Zap, Target, Trophy, ShieldCheck, PartyPopper } from "lucide-react";
+import { MonitorPlay, LayoutPanelLeft, CloudSun, RotateCcw, Zap, Target, Trophy, ShieldCheck, PartyPopper, ChevronDown } from "lucide-react";
 
 const DEFAULT_CHANNELS: SandboxChannels = {
   weather: true,
@@ -96,6 +96,22 @@ const CHANNEL_LABELS: Record<keyof SandboxChannels, string> = {
 };
 
 const FONT_BODY = "var(--font-body, 'Inter', ui-sans-serif, system-ui, sans-serif)";
+
+// Must match WeatherCard's DEFAULT_CONDITIONS keys exactly — anything
+// else silently falls back to the sunny icon. Single source of truth
+// for both the dropdown trigger's label lookup and its option list,
+// used by <WeatherConditionSelect> below.
+const WEATHER_CONDITIONS: { value: string; label: string }[] = [
+  { value: "sunny", label: "Sunny" },
+  { value: "clear", label: "Clear" },
+  { value: "partly-cloudy", label: "Partly Cloudy" },
+  { value: "cloudy", label: "Cloudy" },
+  { value: "overcast", label: "Overcast" },
+  { value: "rain", label: "Rain" },
+  { value: "storm", label: "Stormy" },
+  { value: "snow", label: "Snow" },
+  { value: "fog", label: "Foggy" },
+];
 
 type ViewMode = "control" | "live";
 
@@ -407,6 +423,96 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
   );
 }
 
+// ── Weather condition dropdown — a themed replacement for the native
+// <select>. Native selects can only be styled up to the closed trigger;
+// the OPEN option list is rendered by the browser/OS itself and ignores
+// app CSS entirely, which is exactly why it was showing up as a plain
+// white system list against this dark console. This rebuilds it as a
+// regular button + absolutely-positioned panel so every pixel of it —
+// trigger and open list both — follows the same dark/mono/gold language
+// as the rest of the control deck (Pill's active-state treatment, same
+// glass-panel look as the monitor frame). Closes on outside click,
+// Escape, or picking an option.
+function WeatherConditionSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const current = WEATHER_CONDITIONS.find((c) => c.value === value) ?? WEATHER_CONDITIONS[0];
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase transition-colors focus:outline-none"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          letterSpacing: "0.06em",
+          background: open ? "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)" : "rgba(255,255,255,0.03)",
+          boxShadow: open
+            ? "inset 0 0 0 1px color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
+            : "inset 0 0 0 1px var(--color-border-overlay)",
+          color: open ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+        }}
+      >
+        {current.label}
+        <ChevronDown className="w-3 h-3 transition-transform" style={{ transform: open ? "rotate(180deg)" : "none" }} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute left-0 top-[calc(100%+6px)] z-50 w-40 rounded-lg overflow-hidden py-1"
+          style={{
+            background: "rgba(12,12,12,0.97)",
+            backdropFilter: "blur(10px)",
+            border: "1px solid var(--color-border-overlay)",
+            boxShadow: "0 20px 45px -8px rgba(0,0,0,0.6)",
+          }}
+        >
+          {WEATHER_CONDITIONS.map((c) => {
+            const active = c.value === value;
+            return (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => {
+                  onChange(c.value);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 text-[10px] font-semibold uppercase transition-colors hover:bg-white/5"
+                style={{
+                  fontFamily: "var(--font-label-mono)",
+                  letterSpacing: "0.06em",
+                  background: active ? "color-mix(in srgb, var(--color-theme-orange) 16%, transparent)" : "transparent",
+                  color: active ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+                }}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OverlaySandboxPage() {
   const matchSetup = HARDCODED_MATCH_SETUP;
 
@@ -550,12 +656,51 @@ export default function OverlaySandboxPage() {
   }, [matchSetup, liveState, weatherData, channels]);
 
   function goLive() {
+    // Push a history entry marking "we're in Live view" BEFORE switching
+    // state. Without this, Live/Control is pure React state — the
+    // browser is still sitting on whatever history entry it was on when
+    // /sandbox/overlay first loaded. On mobile especially, a single
+    // back-swipe from Live would then skip straight past this page
+    // entirely (to a different site, or close the tab if there's no
+    // prior entry) instead of just backing out of the broadcast view.
+    // Pushing this marker gives the back button something of ours to
+    // consume first.
+    if (typeof window !== "undefined") {
+      window.history.pushState({ sandboxOverlayLive: true }, "");
+    }
     setView("live");
   }
 
   function backToControls() {
-    setView("control");
+    // If we're on the history entry goLive() pushed, go back through it
+    // rather than calling setView directly — that pops the marker AND
+    // fires the popstate listener below (which does the actual
+    // setView("control")), so there's exactly one code path for "how do
+    // we get back to Controls," whether it's triggered by this button
+    // or the browser's own back button. Falls back to a plain setView
+    // for the rare case there's no pushed marker to unwind (e.g. this
+    // got called without goLive ever having run).
+    if (typeof window !== "undefined" && (window.history.state as any)?.sandboxOverlayLive) {
+      window.history.back();
+    } else {
+      setView("control");
+    }
   }
+
+  // Catches the browser/phone back button (or trackpad back-gesture)
+  // while in Live view and routes it to Controls instead of letting it
+  // fall through to whatever the browser would otherwise show — the
+  // page before this one in history, or closing the tab if there isn't
+  // one. Also fires (harmlessly) if popstate happens for some other
+  // reason while already in Controls, since landing on Controls is a
+  // no-op there.
+  useEffect(() => {
+    function onPopState() {
+      setView("control");
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   function logEvent(label: string) {
     setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 14));
@@ -935,8 +1080,19 @@ export default function OverlaySandboxPage() {
       </div>
 
       {/* ── Control deck ─────────────────────────────────────────── */}
+      {/* z-20, not z-10: the Scoring Console below is also position:
+          relative with its own z-index (see "Scoring console" comment
+          further down). Two sibling stacking contexts tied on z-index
+          paint in DOM order — later wins — so at z-10/z-10 the console
+          (later in the markup) was painting over anything from this
+          deck that extended past its own edge, including the open
+          weather dropdown despite that dropdown's own z-50 (which only
+          wins comparisons *inside* this deck's stacking context, not
+          against a sibling one). Bumping the deck itself to z-20 settles
+          that tie so the whole deck — dropdown included — stays on top,
+          regardless of DOM order. */}
       <div
-        className="shrink-0 relative z-10"
+        className="shrink-0 relative z-20"
         style={{ background: "rgba(10,10,10,0.35)", borderBottom: "1px solid var(--color-border-overlay)" }}
       >
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
@@ -961,30 +1117,10 @@ export default function OverlaySandboxPage() {
                 color: "var(--color-on-surface)",
               }}
             />
-            <select
+            <WeatherConditionSelect
               value={weatherData.condition}
-              onChange={(e) => setWeatherData((p) => ({ ...p, condition: e.target.value }))}
-              className="px-3 py-1.5 rounded-full text-[10px] font-semibold uppercase focus:outline-none"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                letterSpacing: "0.06em",
-                background: "rgba(255,255,255,0.03)",
-                boxShadow: "inset 0 0 0 1px var(--color-border-overlay)",
-                color: "var(--color-on-surface)",
-              }}
-            >
-              {/* Must match WeatherCard's DEFAULT_CONDITIONS keys exactly
-                  — anything else silently falls back to the sunny icon. */}
-              <option value="sunny">Sunny</option>
-              <option value="clear">Clear</option>
-              <option value="partly-cloudy">Partly Cloudy</option>
-              <option value="cloudy">Cloudy</option>
-              <option value="overcast">Overcast</option>
-              <option value="rain">Rain</option>
-              <option value="storm">Stormy</option>
-              <option value="snow">Snow</option>
-              <option value="fog">Foggy</option>
-            </select>
+              onChange={(condition) => setWeatherData((p) => ({ ...p, condition }))}
+            />
             <ConsoleActionButton onClick={pushWeather} icon={<CloudSun className="w-2.5 h-2.5" />}>
               Push Weather
             </ConsoleActionButton>
@@ -1030,7 +1166,12 @@ export default function OverlaySandboxPage() {
       <MomentChyron fired={firedMoment} />
 
       {/* ── Scoring console — fills remaining space, scrolls
-            independently under the fixed header/control deck. ── */}
+            independently under the fixed header/control deck. Stays at
+            z-10, one below the Control Deck's z-20 above — see the
+            comment on that deck for why the relative order between
+            these two matters (it's not just visual layering, it's
+            which one wins DOM-order ties for anything that pops out of
+            its own box, like the weather dropdown). ── */}
       <div className="flex-1 min-h-0 overflow-auto relative z-10 px-5 py-5">
         <div
           className="rounded-xl p-5"

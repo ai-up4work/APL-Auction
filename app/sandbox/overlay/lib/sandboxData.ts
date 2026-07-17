@@ -64,7 +64,7 @@ const teamA: TeamInfo = {
   name: "Crownguard Strikers",
   shortCode: "CGS",
   color: "#c9971f",
-  logoUrl: "",
+  logoUrl: "/Franchises/crowsguard.png",
   squad: CROWNGUARD_XI,
   // knight-1..knight-11
   squadPlayers: squad("cgs", CROWNGUARD_XI, 1),
@@ -74,7 +74,7 @@ const teamB: TeamInfo = {
   name: "Ravenhold Riders",
   shortCode: "RHR",
   color: "#2f6fed",
-  logoUrl: "",
+  logoUrl: "/Franchises/ravens.png",
   squad: RAVENHOLD_XI,
   // knight-12..knight-22
   squadPlayers: squad("rhr", RAVENHOLD_XI, 12),

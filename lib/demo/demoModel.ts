@@ -112,8 +112,8 @@ const PLAYER_POOL: Omit<DemoPlayer, "id" | "supabaseId" | "reentryCount" | "isUn
   { name: "Alaric Thorne", role: "All-rounder", origin: "Overseas", country: "Ironhold", img: "/images/knights/knight-1.png", price: 1500, capped: true },
   { name: "Cedric Ashworth", role: "Batsman", origin: "Overseas", country: "Ravenhold", img: "/images/knights/knight-2.png", price: 1200, capped: false },
   { name: "Tristan Blackwell", role: "Bowler", origin: "Local", country: "Camelot", img: "/images/knights/knight-3.png", price: 2000, capped: true },
-  { name: "Gareth Stormridge", role: "Wicket Keeper", origin: "Overseas", country: "Duskmoor", img: "/images/knights/knight-4.png", price: 900, capped: false },
-  { name: "Edmund Vale", role: "Batsman", origin: "Overseas", country: "Ashenvale", img: "/images/knights/knight-5.png", price: 1100, capped: false },
+  { name: "Gareth Stormridge", role: "Wicket Keeper", origin: "Overseas", country: "Duskmoor", img: "/images/knights/knight-7.png", price: 900, capped: false },
+  { name: "Edmund Vale", role: "Batsman", origin: "Overseas", country: "Ashenvale", img: "/images/knights/knight-8.png", price: 1100, capped: false },
 ];
 
 function makeTeams(): DemoTeam[] {
