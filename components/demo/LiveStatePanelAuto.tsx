@@ -7,6 +7,7 @@ import DemoCursor from "@/components/demo/DemoCursor";
 import { useDemoCursor } from "@/hooks/useDemoCursor";
 import { EXTRA_OPTIONS } from "@/hooks/useLiveScoringEngine";
 import type { SquadPlayer } from "@/lib/overlayBus";
+import LiveScoreBar from "@/components/overlays/LiveScoreBar";
 
 const EXTRA_LABEL_BY_VALUE: Record<string, string> = Object.fromEntries(
   EXTRA_OPTIONS.map((o) => [o.key, o.label])
@@ -1377,6 +1378,7 @@ export default function LiveStatePanelAuto({
       </div>
 
       <LiveStatePanel ref={handleRef} {...panelProps} onRestartMatch={onRestartMatch} readOnly={mode === "demo"} />
+      {/* <LiveScoreBar show={true} /> */}
     </div>
   );
 }
