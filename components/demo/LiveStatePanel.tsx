@@ -13,7 +13,6 @@ import {
   type ExtraType,
   type DismissalType,
   type PendingWicket,
-  type Toast,
   type EngineSyncState,
 } from "@/hooks/useLiveScoringEngine";
 import ManualCorrectionPanel from "./ManualCorrectionPanel";
@@ -300,27 +299,6 @@ function CrewSlot({
           {statLine && <span className="crew-slot-stat">{statLine}</span>}
         </div>
       </div>
-    </div>
-  );
-}
-
-function ToastStack({ toasts }: { toasts: Toast[] }) {
-  if (toasts.length === 0) return null;
-  return (
-    <div className="scorer-toast-stack">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className="scorer-toast"
-          style={{
-            background: t.tone === "wicket" ? "var(--color-error-container)" : t.tone === "milestone" ? "rgba(201,151,31,0.16)" : "rgba(201,151,31,0.1)",
-            border: `1px solid ${t.tone === "wicket" ? "rgba(255,180,171,0.35)" : "rgba(201,151,31,0.35)"}`,
-            color: t.tone === "wicket" ? "var(--color-error)" : "var(--color-theme-orange)",
-          }}
-        >
-          {t.text}
-        </div>
-      ))}
     </div>
   );
 }
@@ -700,7 +678,7 @@ export interface LiveStatePanelHandle {
   noPartnerAvailable: () => boolean;
   isSecondInnings: () => boolean;
   canUndo: () => boolean;
-  isFreeHitActive: () => boolean;   // <-- added
+  isFreeHitActive: () => boolean;
   getBattingSquad: () => SquadPlayer[];
   getBowlingSquad: () => SquadPlayer[];
   getDismissedNames: () => Set<string>;
@@ -843,7 +821,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
       noPartnerAvailable: () => !!engine.noPartnerAvailable,
       isSecondInnings: () => (liveState.inningsNumber ?? 1) === 2,
       canUndo: () => engine.canUndo,
-      isFreeHitActive: () => engine.isFreeHit,   // <-- added
+      isFreeHitActive: () => engine.isFreeHit,
       getBattingSquad: () => battingSquad,
       getBowlingSquad: () => bowlingSquad,
       getDismissedNames: () => engine.dismissedPlayers,
@@ -908,7 +886,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
   return (
     <DrawerSection step="3" title="Scorer" description="Tap the ball, we do the maths" dirty={liveDirty} defaultOpen>
       <style>{`
-        @keyframes scorerToastIn { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes scorerDialogIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
         @keyframes scorerBackdropIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes freeHitPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(96,165,250,0.45); } 50% { box-shadow: 0 0 0 5px rgba(96,165,250,0); } }
@@ -937,8 +914,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           50% { box-shadow: 0 0 0 12px rgba(201,151,31,0.14), 0 12px 32px rgba(0,0,0,0.35); }
         }
 
-        .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; }
-        .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
         .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 9000; animation: scorerBackdropIn 140ms ease-out; padding: 16px; }
         .scorer-dialog { width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--color-surface-container-low); border: 1px solid var(--color-border-overlay); border-radius: 14px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
         .ball-controls-row { margin-bottom: 12px; }
@@ -1334,9 +1309,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
         }
       `}</style>
 
-      <ViewportPortal>
-        <ToastStack toasts={engine.toasts} />
-      </ViewportPortal>
       {engine.pendingWicket && (
         <ViewportPortal>
           <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} readOnly={readOnly} />

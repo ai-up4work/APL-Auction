@@ -146,9 +146,10 @@ function pickDelivery(runTable: Array<[PlainRun, number]>): DeliveryKind {
 //
 //   1. Dot ball                              6. Wide
 //   2. Single                                 7. No ball -> Free Hit ->
-//   3. Bye                                       free-hit ball scored ->
-//   4. Two                                       constrained-wicket demo
-//   5. Leg bye                                   -> Free Hit cancelled
+//   3. Bye                                       appeal (locked to Run
+//   4. Two                                       Out) -> free-hit ball
+//   5. Leg bye                                   scored -> Free Hit
+//                                                 cancelled
 //   8. Four                                  9. Six
 //  10. Manual "Swap Strike" demo            11. Boundary push to Fifty
 //  12. Wicket — Bowled                      13. Wicket — Caught
@@ -350,10 +351,30 @@ class ScriptedDriver {
     return ok;
   }
 
+  // Commentary for a plain (non-extra, non-wicket) run value. Only runs
+  // that genuinely rotate the strike (odd values: 1 and 3) claim to be
+  // "rotating the strike" in the pre-ball line — 2 leaves the batters
+  // where they started, so it gets its own neutral wording instead of
+  // reusing the rotation language a viewer could catch as wrong.
   private runCommentary(striker: string, r: PlainRun): { before: string; after: string } {
     switch (r) {
       case 0:
         return { before: `Bowled to ${striker} — clicking "0" to record a dot ball.`, after: `Dot ball. ${striker} defends it, no run taken.` };
+      case 1:
+        return {
+          before: `${striker} looks to rotate the strike — clicking "1" to record a single.`,
+          after: `${striker} works it away and the batters cross for a single.`,
+        };
+      case 3:
+        return {
+          before: `${striker} pushes for three — clicking "3" to record the run, rotating the strike in the process.`,
+          after: `${striker} and the non-striker sprint hard for the third — strike rotates.`,
+        };
+      case 2:
+        return {
+          before: `${striker} finds a gap — clicking "2" to record two runs.`,
+          after: `${striker} and the non-striker cross twice — strike stays put.`,
+        };
       case 4:
         return {
           before: `${striker} shapes up to go big — clicking "4" to send this one racing to the boundary.`,
@@ -363,8 +384,8 @@ class ScriptedDriver {
         return { before: `${striker} clears the front leg — clicking "6" for the maximum.`, after: `SIX! ${striker} clears the ropes with a big strike.` };
       default:
         return {
-          before: `${striker} looks to rotate the strike — clicking "${r}" to record ${r} run${r > 1 ? "s" : ""}.`,
-          after: `${striker} works it away and the batters cross for ${r} run${r > 1 ? "s" : ""}.`,
+          before: `${striker} faces up — clicking "${r}" to record ${r} run${r > 1 ? "s" : ""}.`,
+          after: `${striker} gets ${r} run${r > 1 ? "s" : ""} away.`,
         };
     }
   }
@@ -665,10 +686,14 @@ class ScriptedDriver {
     await this.beat(gen, STEP_GAP_MS + POST_MOMENT_HOLD_MS);
   }
 
-  // Called AFTER a wicket has genuinely been declined/skipped on a real
-  // free-hit delivery — never before the ball's been bowled. Shows the
-  // dialog, calls out that Run Out is the only valid option here, and
-  // then closes it without recording anything.
+  // Called on a currently-active Free Hit — the dialog is opened,
+  // callout that Run Out is the only valid option here, and then closed
+  // without recording anything. Deliberately called BEFORE the free-hit
+  // ball itself is bowled/scored (see playExtra) since that's the one
+  // legal delivery the free hit actually protects — appealing after
+  // that delivery has already been recorded would be appealing on an
+  // unprotected ball, which would make the "Run Out only" messaging
+  // false.
   private async demonstrateFreeHitConstraint(gen: number) {
     await this.announcedClick(
       gen,
@@ -685,14 +710,14 @@ class ScriptedDriver {
       gen,
       "demo-wicket-skip",
       "Skip",
-      "That run was already scored fair and square — closing the dialog without recording a dismissal.",
+      "No dismissal to record here — closing the dialog and getting on with the free-hit ball itself.",
       "Dialog closed, no wicket recorded.",
       WICKET_COLOR
     );
     await this.beat(gen, STEP_GAP_MS);
   }
 
-  private async playExtra(gen: number, extraValue: string) {
+  private async playExtra(gen: number, extraValue: string, isShowcaseNoBall = false) {
     const label = extraLabel(extraValue);
     await this.announcedClickByText(
       gen,
@@ -721,22 +746,55 @@ class ScriptedDriver {
       await this.beat(gen, STEP_GAP_MS);
       if (!this.isCurrent(gen)) return;
 
-      // 1. Arm the Free Hit for the NEXT delivery.
-      await this.announcedClick(
-        gen,
-        "demo-free-hit-toggle",
-        "Mark Free Hit",
-        "That no-ball earns a Free Hit — marking it active for the very next delivery.",
-        "Free Hit is now active.",
-        RUN_COLOR
-      );
+      // 1. Arm the Free Hit for the NEXT delivery — but only if it
+      // isn't already active. The engine auto-sets isFreeHit the moment
+      // a no-ball delivery is recorded (which already happened above,
+      // via the "Bowl it" click), so by the time we get here Free Hit
+      // is usually already ON. demo-free-hit-toggle is a toggle, not a
+      // "turn on" button — clicking it while already active would
+      // silently flip it back OFF.
+      if (!this.handleGetter()?.isFreeHitActive()) {
+        await this.announcedClick(
+          gen,
+          "demo-free-hit-toggle",
+          "Mark Free Hit",
+          "That no-ball earns a Free Hit — marking it active for the very next delivery.",
+          "Free Hit is now active.",
+          RUN_COLOR
+        );
+      } else {
+        this.onLog("Free Hit was armed automatically the instant that no-ball was recorded — no toggle needed.");
+      }
       await this.beat(gen, STEP_GAP_MS);
       if (!this.isCurrent(gen)) return;
 
-      // 2. Actually bowl and SCORE the free-hit delivery first — this
-      // is the real "pick the score from the Free Hit ball" step, not
-      // something to be skipped past. The engine reads whatever ball
-      // value is clicked here exactly like any other delivery.
+      // 2. Whether an appeal happens on the free-hit ball at all. The
+      // scripted innings-1 no-ball ALWAYS shows it (guaranteed showcase
+      // — never left to chance). Every other no-ball in the innings
+      // only shows it about half the time, so the demo also shows the
+      // far more common case: a free-hit ball that's just played out
+      // normally with no appeal at all.
+      //
+      // This MUST happen before the free-hit ball is scored, not after
+      // — the free hit only protects the ONE legal delivery that
+      // follows the no-ball. Once that delivery is recorded, isFreeHit
+      // clears and any appeal after that point is on an unprotected
+      // ball, which would make the "Run Out is the ONLY dismissal"
+      // messaging false.
+      const showAppeal = isShowcaseNoBall || Math.random() < 0.5;
+      if (showAppeal) {
+        await this.demonstrateFreeHitConstraint(gen);
+        if (!this.isCurrent(gen)) return;
+      } else {
+        this.onLog("No appeal on this one — the fielding side just plays on to the free-hit ball.");
+        await this.beat(gen, STEP_GAP_MS);
+        if (!this.isCurrent(gen)) return;
+      }
+
+      // 3. NOW bowl and SCORE the free-hit delivery for real — this is
+      // the one legal ball the free hit actually protects. The engine
+      // reads whatever ball value is clicked here exactly like any
+      // other delivery.
       const strikerName = this.handleGetter()?.getStrikerName() || "The batter";
       const shot = pickWeighted<4 | 6>([[4, 60], [6, 40]]);
       await this.announcedClick(
@@ -750,15 +808,9 @@ class ScriptedDriver {
       await this.beat(gen, STEP_GAP_MS + POST_MOMENT_HOLD_MS);
       if (!this.isCurrent(gen)) return;
 
-      // 3. NOW, on that already-scored free-hit ball, show the
-      // run-out-only constraint as a follow-up appeal — never before
-      // the ball existed.
-      await this.demonstrateFreeHitConstraint(gen);
-      if (!this.isCurrent(gen)) return;
-
       // 4. Only click "cancel" if the flag is actually still on. Most
       // engines auto-clear isFreeHit the moment a legal delivery is
-      // recorded (step 2 above already was one) — blindly toggling
+      // recorded (step 3 above already was one) — blindly toggling
       // again here would just re-arm a brand-new Free Hit instead of
       // canceling the old one, which is the bug this fixes.
       if (this.handleGetter()?.isFreeHitActive()) {
@@ -858,7 +910,7 @@ class ScriptedDriver {
         await this.playPlainRun(gen, beat.value);
         return;
       case "extra":
-        await this.playExtra(gen, beat.extra);
+        await this.playExtra(gen, beat.extra, beat.extra === "noBall");
         return;
       case "swapStrike":
         await this.announcedClick(
