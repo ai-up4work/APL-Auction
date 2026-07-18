@@ -1,59 +1,5 @@
 "use client";
 
-// Automatic ("demo") variant of the live scoring console. Wraps the
-// real <LiveStatePanel> (unchanged engine/graphics) and layers a
-// scripted driver on top of it that operates the REAL rendered
-// controls via genuine DOM clicks — see hooks/useDemoCursor.ts.
-//
-// CURSOR COORDINATE SPACE FIX: useDemoCursor computes cursor.x/y as
-// ABSOLUTE VIEWPORT pixels (getBoundingClientRect, matching DemoCursor's
-// position:fixed portal to document.body). Previously this component
-// passed <DemoCursor frameWidth={wrapRef.current?.clientWidth} .../> —
-// the *local scoring panel's* own box size, not the viewport. That
-// mismatch made the ghost cursor (and its flash) drift toward the
-// center of that smaller local box instead of tracking the real
-// on-screen position of whatever it had actually just clicked — the
-// click itself was always correct (flashElement/.click() operate
-// directly on the real element via getBoundingClientRect, independent
-// of the cursor overlay), but the VISUAL cursor could look like it was
-// clicking in empty space in the middle of the screen. Fixed by
-// tracking window.innerWidth/innerHeight instead, since that's the
-// space the coordinates are actually measured in.
-//
-// SWAP STRIKE FIX: "Swap Strike" is a MANUAL OVERRIDE for a scorer
-// correcting a mistake — real strike rotation already happens
-// automatically inside the engine (odd runs, end of over). The driver
-// previously clicked "Swap Strike" unconditionally on every single
-// match cycle, right after assigning openers and before any other
-// scrolling had happened on the page — the one click in the whole
-// script with no natural lead-in scroll, which is why it could show up
-// looking oddly placed. It's now a rare, randomly-triggered demo of the
-// override (SWAP_STRIKE_DEMO_CHANCE) rather than a guaranteed step, and
-// it fires after the innings is already underway rather than as the
-// very first action, so the page has already scrolled to the scoring
-// area naturally by the time it happens.
-//
-// INNINGS LENGTH: previously each innings ran for a hardcoded random
-// window of 14–22 deliveries (2–4 overs) and then FORCED "End
-// Innings"/"End Match" regardless of what had actually happened. That
-// meant the "match" never really completed on its own terms — it was
-// always a short token sample, manually cut off every single cycle.
-//
-// Now each innings runs the real engine's actual stopping conditions:
-//   - all out (h.noPartnerAvailable())
-//   - overs complete (h.getLegalBallsBowled() >= h.getMaxLegalBalls(),
-//     read straight from the real scoreboard + the match's real format
-//     — T20 → 120 legal balls, ODI → 300, Test → unlimited)
-//   - the engine itself flips matchComplete (e.g. target reached in the
-//     second innings)
-// A generous safety cap (maxLegalBalls, or a large fallback for
-// Test-style unlimited overs) exists purely as a bug-guard against an
-// infinite loop if some other state got stuck — it is NOT the intended
-// stopping condition and should essentially never be hit in normal play.
-// The actual number of deliveries bowled each cycle is now genuinely
-// random, because it depends on how the random deliveries land (wickets
-// falling early vs. batters surviving), exactly like a real innings.
-
 import React, { useEffect, useRef, useState } from "react";
 import { MonitorPlay, Pause, Play, LayoutPanelLeft } from "lucide-react";
 import LiveStatePanel, { type LiveStatePanelHandle, type LiveStatePanelProps } from "./LiveStatePanel";
@@ -63,7 +9,7 @@ import { EXTRA_OPTIONS } from "@/hooks/useLiveScoringEngine";
 import type { SquadPlayer } from "@/lib/overlayBus";
 
 const EXTRA_LABEL_BY_VALUE: Record<string, string> = Object.fromEntries(
-  EXTRA_OPTIONS.map((o: { value: string; label: string }) => [o.value, o.label])
+  EXTRA_OPTIONS.map((o) => [o.key, o.label])
 );
 function extraLabel(value: string): string {
   return EXTRA_LABEL_BY_VALUE[value] ?? value;
@@ -111,37 +57,9 @@ const POST_MOMENT_HOLD_MS = 2000;
 
 const LEGAL_BALLS_PER_OVER = 6;
 
-// Bug-guard only — NOT the intended stopping condition. Used when the
-// format has no cap (e.g. Test) so the driver can't spin forever if
-// some unrelated state gets stuck. Real T20/ODI matches stop from
-// h.getMaxLegalBalls() long before this would ever matter.
 const UNCAPPED_FORMAT_SAFETY_BALLS = 40 * 6;
 
-// How often the driver calls out that strike rotated because of an
-// odd-run delivery — narrated some of the time, not every single time,
-// so it doesn't get repetitive.
 const STRIKE_ROTATION_CALLOUT_CHANCE = 0.35;
-
-// "Swap Strike" is a MANUAL OVERRIDE — a scorer fixing a mistake, or
-// choosing to rotate strike outside the normal odd-run/end-of-over
-// triggers. Real operators reach for it rarely. Previously the driver
-// fired it unconditionally once per match; now it's an occasional demo
-// beat, gated behind this chance AND only once real scoring is already
-// underway (never as the very first action of a cycle).
-const SWAP_STRIKE_DEMO_CHANCE = 0.2;
-
-// UNDO DEMO FIX: previously every single match cycle scripted an exact
-// "score 2, then immediately undo it" beat right at the start — always
-// the same run value, always a run (never a wicket), and never
-// skipped. That's not representative: Undo is a correction tool a
-// scorer reaches for occasionally, for whatever the last delivery
-// actually was (a run, an extra, or a wicket), not a guaranteed step
-// every match. It's now a low-probability, at-most-once-per-innings
-// beat that fires right after whatever delivery happens to occur next
-// (playPlainRun / playExtra / takeAWicket), so most cycles won't show
-// it at all, and when it does show up it's undoing something real
-// rather than a delivery invented solely to be undone.
-const UNDO_DEMO_CHANCE = 0.12;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -167,7 +85,16 @@ function randomFrom<T>(arr: T[]): T | undefined {
 }
 
 type PlainRun = 0 | 1 | 2 | 3 | 4 | 6;
-const PLAIN_RUN_TABLE: Array<[PlainRun, number]> = [
+
+// Two weighting tables for the *unscripted fallback* portion of an
+// innings. AGGRESSIVE is used for a chase we want the batting side to
+// win (more boundaries, fewer dots) so the target gets knocked off with
+// wickets in hand. CONSERVATIVE is used when we want the innings to run
+// out of overs instead (more dots/singles, fewer boundaries), so the
+// defending side wins by runs. Alternating between the two across match
+// cycles means both win conditions (method: "wickets" vs "runs") get
+// demonstrated over time instead of always the same outcome.
+const NEUTRAL_RUN_TABLE: Array<[PlainRun, number]> = [
   [0, 34],
   [1, 30],
   [2, 9],
@@ -175,10 +102,26 @@ const PLAIN_RUN_TABLE: Array<[PlainRun, number]> = [
   [4, 15],
   [6, 10],
 ];
+const AGGRESSIVE_RUN_TABLE: Array<[PlainRun, number]> = [
+  [0, 14],
+  [1, 26],
+  [2, 12],
+  [3, 3],
+  [4, 27],
+  [6, 18],
+];
+const CONSERVATIVE_RUN_TABLE: Array<[PlainRun, number]> = [
+  [0, 52],
+  [1, 30],
+  [2, 8],
+  [3, 2],
+  [4, 6],
+  [6, 2],
+];
 
 type DeliveryKind = { type: "run"; value: PlainRun } | { type: "wicket" } | { type: "extra"; extra: string };
 
-function pickDelivery(): DeliveryKind {
+function pickDelivery(runTable: Array<[PlainRun, number]>): DeliveryKind {
   const roll = Math.random();
   if (roll < 0.045) return { type: "wicket" };
   if (roll < 0.095) {
@@ -190,7 +133,74 @@ function pickDelivery(): DeliveryKind {
     ]);
     return { type: "extra", extra };
   }
-  return { type: "run", value: pickWeighted(PLAIN_RUN_TABLE) };
+  return { type: "run", value: pickWeighted(runTable) };
+}
+
+// ------------------------------------------------------------------
+// THE COMPLETE MATCH SCRIPT
+//
+// Innings 1 is no longer purely random — it's a fixed, ordered beat
+// sheet that guarantees every showcased capability appears, in this
+// order, before the driver falls back to normal (weighted-random)
+// scoring for whatever's left of the innings:
+//
+//   1. Dot ball                              6. Wide
+//   2. Single                                 7. No ball -> Free Hit ->
+//   3. Bye                                       free-hit ball scored ->
+//   4. Two                                       constrained-wicket demo
+//   5. Leg bye                                   -> Free Hit cancelled
+//   8. Four                                  9. Six
+//  10. Manual "Swap Strike" demo            11. Boundary push to Fifty
+//  12. Wicket — Bowled                      13. Wicket — Caught
+//  14. Wicket — LBW                         15. Wicket — Stumped
+//  16. Wicket — Hit Wicket                  17. Wicket — Caught & Bowled
+//  18. Wicket — Run Out (2 runs completed)  19. Undo Last Ball demo
+//  20. (fallback) normal random play, real bowler rotation, until the
+//      innings genuinely ends — all out or overs complete. A maiden can
+//      occur organically here.
+//
+// Innings 2 (the chase) isn't scripted ball-by-ball — the number of
+// deliveries needed depends on what innings 1 actually scored — but its
+// *bias* is scripted: even-numbered match cycles chase aggressively (the
+// batting side wins by wickets), odd-numbered cycles chase
+// conservatively (the bowling side defends and wins by runs). Over
+// several loops of the demo, both win methods get shown.
+//
+// End of every match: Undo the result -> re-confirm End Match -> Restart
+// Match -> loop back to a fresh Innings 1 script.
+// ------------------------------------------------------------------
+
+type ScriptBeat =
+  | { kind: "run"; value: PlainRun }
+  | { kind: "extra"; extra: string }
+  | { kind: "wicket"; who: "striker" | "nonstriker"; forceDismissal?: string; runsCompleted?: number }
+  | { kind: "swapStrike" }
+  | { kind: "milestonePush" }
+  | { kind: "undo" };
+
+function buildInningsOneScript(): ScriptBeat[] {
+  return [
+    { kind: "run", value: 0 },
+    { kind: "run", value: 1 },
+    { kind: "extra", extra: "bye" },
+    { kind: "run", value: 2 },
+    { kind: "extra", extra: "legBye" },
+    { kind: "run", value: 3 },
+    { kind: "extra", extra: "wide" },
+    { kind: "extra", extra: "noBall" }, // free-hit sequence fires automatically inside playExtra
+    { kind: "run", value: 4 },
+    { kind: "run", value: 6 },
+    { kind: "swapStrike" },
+    { kind: "milestonePush" },
+    { kind: "wicket", who: "striker", forceDismissal: "bowled" },
+    { kind: "wicket", who: "striker", forceDismissal: "caught" },
+    { kind: "wicket", who: "striker", forceDismissal: "lbw" },
+    { kind: "wicket", who: "striker", forceDismissal: "stumped" },
+    { kind: "wicket", who: "striker", forceDismissal: "hitWicket" },
+    { kind: "wicket", who: "striker", forceDismissal: "caughtAndBowled" },
+    { kind: "wicket", who: "nonstriker", forceDismissal: "runOut", runsCompleted: 2 },
+    { kind: "undo" },
+  ];
 }
 
 class ScriptedDriver {
@@ -203,10 +213,11 @@ class ScriptedDriver {
   private paused = false;
   private pauseWaiters: Array<() => void> = [];
 
-  // Legal deliveries bowled so far in the CURRENT over, tracked
-  // separately from the engine's own over/ball display purely as the
-  // driver's cue for "an over just finished, time to change bowlers."
   private legalBallsThisOver = 0;
+
+  // Counts completed match cycles so innings-2 chase bias can alternate
+  // between "batting side wins" and "bowling side wins" over time.
+  private cycleCount = 0;
 
   constructor(
     handleGetter: () => LiveStatePanelHandle | null,
@@ -236,6 +247,12 @@ class ScriptedDriver {
     this.cursorCtl.hide();
   }
 
+  // Pausing simply stops the internal clock: every scripted step is a
+  // single `await this.beat(...)` (or an await inside cursorCtl), and
+  // `waitIfPaused` blocks right there until resume() wakes it back up.
+  // Nothing about "where we are in the script" is lost — resuming
+  // continues from literally the next line of code that was about to
+  // run, whether that's mid-innings-1-script, mid-chase, or mid-dialog.
   pause() {
     if (!this.running || this.paused) return;
     this.paused = true;
@@ -280,6 +297,7 @@ class ScriptedDriver {
         // driver — just wait a beat and try the cycle again.
       }
       if (!this.isCurrent(gen)) return;
+      this.cycleCount += 1;
       await this.beat(gen, CYCLE_RESTART_GAP_MS);
     }
   }
@@ -357,96 +375,95 @@ class ScriptedDriver {
 
   private async ensureAssignments(gen: number): Promise<boolean> {
     while (this.isCurrent(gen)) {
-      await this.waitForHandle(gen);
-      if (!this.isCurrent(gen)) return false;
-      const h = this.h();
-      if (!h.isControlsLocked()) return true;
+        await this.waitForHandle(gen);
+        if (!this.isCurrent(gen)) return false;
+        if (!this.h().isControlsLocked()) return true;
 
-      const batting = h.getBattingSquad();
-      const bowling = h.getBowlingSquad();
-      const dismissed = h.getDismissedNames();
+        const batting = this.h().getBattingSquad();
+        const bowling = this.h().getBowlingSquad();
+        const dismissed = this.h().getDismissedNames();
 
-      if (!h.getStrikerName()) {
-        const exclude = new Set<string>([h.getNonStrikerName()].filter(Boolean));
+        if (!this.h().getStrikerName()) {
+        const exclude = new Set<string>([this.h().getNonStrikerName()].filter(Boolean));
         const pick = this.pickAvailable(batting, dismissed, exclude);
         if (pick) {
-          await this.announcedClick(
+            await this.announcedClick(
             gen,
             "demo-slot-striker",
             "Open striker slot",
             "Need a striker at the crease — opening the striker slot to bring in the next available batter.",
             `Striker slot opened — ${pick.name} is next in, since earlier batters are either out or already batting.`,
             CREW_COLOR
-          );
-          if (!this.isCurrent(gen)) return false;
-          await this.announcedClick(
+            );
+            if (!this.isCurrent(gen)) return false;
+            await this.announcedClick(
             gen,
             `demo-player-${pick.id}`,
             `Pick ${pick.name}`,
             `Selecting ${pick.name} — they haven't been dismissed and aren't already occupying another slot.`,
             `${pick.name} is on strike.`,
             CREW_COLOR
-          );
+            );
         }
-      }
-      if (!this.isCurrent(gen)) return false;
+        }
+        if (!this.isCurrent(gen)) return false;
 
-      if (!h.getNonStrikerName()) {
-        const exclude = new Set<string>([h.getStrikerName()].filter(Boolean));
+        // Fresh read — reflects the striker assignment that may have just
+        // happened above, instead of the stale value from loop-top.
+        if (!this.h().getNonStrikerName()) {
+        const exclude = new Set<string>([this.h().getStrikerName()].filter(Boolean));
         const pick = this.pickAvailable(batting, dismissed, exclude);
         if (pick) {
-          await this.announcedClick(
+            await this.announcedClick(
             gen,
             "demo-slot-nonStriker",
             "Open non-striker slot",
             "Now filling the non-striker slot with the next eligible batter.",
             `Non-striker slot opened — ${pick.name} is next in line.`,
             CREW_COLOR
-          );
-          if (!this.isCurrent(gen)) return false;
-          await this.announcedClick(
+            );
+            if (!this.isCurrent(gen)) return false;
+            await this.announcedClick(
             gen,
             `demo-player-${pick.id}`,
             `Pick ${pick.name}`,
             `Selecting ${pick.name} for the non-striker's end.`,
             `${pick.name} is at the non-striker's end.`,
             CREW_COLOR
-          );
+            );
         }
-      }
-      if (!this.isCurrent(gen)) return false;
+        }
+        if (!this.isCurrent(gen)) return false;
 
-      if (!h.getBowlerName()) {
+        // Fresh read again for the same reason.
+        if (!this.h().getBowlerName()) {
         const pick = this.pickAvailable(bowling, new Set(), new Set());
         if (pick) {
-          await this.announcedClick(
+            await this.announcedClick(
             gen,
             "demo-slot-bowler",
             "Open bowler slot",
             "Picking who's got the ball this over.",
             `Bowler slot opened — ${pick.name} will bowl.`,
             CREW_COLOR
-          );
-          if (!this.isCurrent(gen)) return false;
-          await this.announcedClick(
+            );
+            if (!this.isCurrent(gen)) return false;
+            await this.announcedClick(
             gen,
             `demo-player-${pick.id}`,
             `Pick ${pick.name}`,
             `Selecting ${pick.name} to bowl this over.`,
             `${pick.name} is up to bowl.`,
             CREW_COLOR
-          );
+            );
         }
-      }
-      this.legalBallsThisOver = 0;
-      await this.beat(gen, STEP_GAP_MS);
+        }
+        this.legalBallsThisOver = 0;
+        await this.beat(gen, STEP_GAP_MS);
     }
     return false;
-  }
+    }
 
-  // Rotates the bowler at the end of every over — real matches never
-  // let the same bowler bowl consecutive overs, so this cycles through
-  // the bowling squad rather than leaving one bowler in all innings.
   private async changeBowler(gen: number) {
     if (!this.isCurrent(gen)) return;
     const h = this.handleGetter();
@@ -481,9 +498,6 @@ class ScriptedDriver {
     await this.beat(gen, STEP_GAP_MS);
   }
 
-  // Call after every delivery that actually counts as legal (not a
-  // wide or no-ball). When it completes an over, triggers the real
-  // bowler-change flow above.
   private async registerLegalBallAndMaybeChangeBowler(gen: number, isLegal: boolean) {
     if (!isLegal) return;
     this.legalBallsThisOver += 1;
@@ -543,10 +557,14 @@ class ScriptedDriver {
     await this.beat(gen, isMatchEnd ? STEP_GAP_MS + POST_MOMENT_HOLD_MS : STEP_GAP_MS);
   }
 
-  private pickRandomAvailableDismissal(): string | null {
+  private availableDismissalOptions(): string[] {
     const select = document.getElementById("demo-wicket-dismissal-select") as HTMLSelectElement | null;
-    if (!select) return null;
-    const values = Array.from(select.options).map((o) => o.value);
+    if (!select) return [];
+    return Array.from(select.options).map((o) => o.value);
+  }
+
+  private pickRandomAvailableDismissal(): string | null {
+    const values = this.availableDismissalOptions();
     if (values.length === 0) return null;
     return values[randomInt(0, values.length - 1)];
   }
@@ -569,7 +587,19 @@ class ScriptedDriver {
     );
   }
 
-  private async takeAWicket(gen: number, batsman: "striker" | "nonstriker", forcedRunOut: boolean, runsCompleted?: number) {
+  // `forceDismissal` drives the scripted showcase (bowled / caught / lbw
+  // / stumped / hitWicket / caughtAndBowled / runOut, one at a time). If
+  // the forced type isn't actually a valid option in the dialog right
+  // now (e.g. the context restricts it), it's silently skipped in favor
+  // of whatever the dialog's default/random pick is — the showcase never
+  // gets stuck trying to select something that isn't there.
+  private async takeAWicket(
+    gen: number,
+    batsman: "striker" | "nonstriker",
+    forcedRunOut: boolean,
+    runsCompleted?: number,
+    forceDismissal?: string
+  ) {
     if (!this.isCurrent(gen)) return;
     await this.announcedClick(
       gen,
@@ -609,7 +639,8 @@ class ScriptedDriver {
         WICKET_COLOR
       );
     } else {
-      const chosen = this.pickRandomAvailableDismissal();
+      const available = this.availableDismissalOptions();
+      const chosen = forceDismissal && available.includes(forceDismissal) ? forceDismissal : this.pickRandomAvailableDismissal();
       if (chosen && chosen !== "bowled") {
         finalDismissal = chosen;
         this.onLog(`Setting the dismissal to ${chosen[0].toUpperCase() + chosen.slice(1)} — ${dismissalExplainer(chosen)}`);
@@ -634,12 +665,16 @@ class ScriptedDriver {
     await this.beat(gen, STEP_GAP_MS + POST_MOMENT_HOLD_MS);
   }
 
+  // Called AFTER a wicket has genuinely been declined/skipped on a real
+  // free-hit delivery — never before the ball's been bowled. Shows the
+  // dialog, calls out that Run Out is the only valid option here, and
+  // then closes it without recording anything.
   private async demonstrateFreeHitConstraint(gen: number) {
     await this.announcedClick(
       gen,
       "demo-ball-out",
       "Appeal (Free Hit)",
-      "Appealing anyway, just to show what happens when you try to get a wicket on a Free Hit —",
+      "Just to show what an appeal looks like on a Free Hit delivery —",
       "Dialog open — notice everything except Run Out is disabled.",
       WICKET_COLOR
     );
@@ -650,7 +685,7 @@ class ScriptedDriver {
       gen,
       "demo-wicket-skip",
       "Skip",
-      "The batter middled it — closing the dialog without recording a dismissal.",
+      "That run was already scored fair and square — closing the dialog without recording a dismissal.",
       "Dialog closed, no wicket recorded.",
       WICKET_COLOR
     );
@@ -680,13 +715,13 @@ class ScriptedDriver {
     );
     if (!this.isCurrent(gen)) return;
 
-    // Wides and no-balls don't count as legal deliveries — the over
-    // doesn't advance, so no bowler-change check for those.
     const isLegalDelivery = extraValue === "bye" || extraValue === "legBye";
 
     if (extraValue === "noBall") {
       await this.beat(gen, STEP_GAP_MS);
       if (!this.isCurrent(gen)) return;
+
+      // 1. Arm the Free Hit for the NEXT delivery.
       await this.announcedClick(
         gen,
         "demo-free-hit-toggle",
@@ -697,8 +732,11 @@ class ScriptedDriver {
       );
       await this.beat(gen, STEP_GAP_MS);
       if (!this.isCurrent(gen)) return;
-      await this.demonstrateFreeHitConstraint(gen);
-      if (!this.isCurrent(gen)) return;
+
+      // 2. Actually bowl and SCORE the free-hit delivery first — this
+      // is the real "pick the score from the Free Hit ball" step, not
+      // something to be skipped past. The engine reads whatever ball
+      // value is clicked here exactly like any other delivery.
       const strikerName = this.handleGetter()?.getStrikerName() || "The batter";
       const shot = pickWeighted<4 | 6>([[4, 60], [6, 40]]);
       await this.announcedClick(
@@ -711,15 +749,31 @@ class ScriptedDriver {
       );
       await this.beat(gen, STEP_GAP_MS + POST_MOMENT_HOLD_MS);
       if (!this.isCurrent(gen)) return;
-      await this.announcedClick(
-        gen,
-        "demo-free-hit-toggle",
-        "Cancel Free Hit",
-        "Clearing the Free Hit flag — normal dismissal rules apply again from the next delivery.",
-        "Free Hit cleared.",
-        RUN_COLOR
-      );
-      // The free-hit ball itself IS a legal delivery.
+
+      // 3. NOW, on that already-scored free-hit ball, show the
+      // run-out-only constraint as a follow-up appeal — never before
+      // the ball existed.
+      await this.demonstrateFreeHitConstraint(gen);
+      if (!this.isCurrent(gen)) return;
+
+      // 4. Only click "cancel" if the flag is actually still on. Most
+      // engines auto-clear isFreeHit the moment a legal delivery is
+      // recorded (step 2 above already was one) — blindly toggling
+      // again here would just re-arm a brand-new Free Hit instead of
+      // canceling the old one, which is the bug this fixes.
+      if (this.handleGetter()?.isFreeHitActive()) {
+        await this.announcedClick(
+          gen,
+          "demo-free-hit-toggle",
+          "Cancel Free Hit",
+          "Clearing the Free Hit flag — normal dismissal rules apply again from the next delivery.",
+          "Free Hit cleared.",
+          RUN_COLOR
+        );
+      } else {
+        this.onLog("Free Hit auto-cleared the moment that delivery was recorded — no extra toggle needed.");
+      }
+
       await this.registerLegalBallAndMaybeChangeBowler(gen, true);
     } else {
       await this.registerLegalBallAndMaybeChangeBowler(gen, isLegalDelivery);
@@ -757,21 +811,15 @@ class ScriptedDriver {
     await this.registerLegalBallAndMaybeChangeBowler(gen, true);
   }
 
-  // Rare, generic "undo" demonstration — fires (at most once per
-  // innings, low probability) right after whatever delivery just
-  // actually happened, whether that was a run, an extra, or a wicket.
-  // This replaces the old behavior of always forcing a scripted
-  // "score 2" specifically so it could be undone.
-  private async maybeDemoUndo(gen: number, kindLabel: string): Promise<boolean> {
+  private async doUndoDemo(gen: number, kindLabel: string): Promise<boolean> {
     if (!this.isCurrent(gen)) return false;
     const h = this.handleGetter();
     if (!h || !h.canUndo()) return false;
-    if (Math.random() >= UNDO_DEMO_CHANCE) return false;
     await this.announcedClick(
       gen,
       "demo-undo-ball",
       "Undo last ball",
-      `Just to show recovery works on any delivery, not only runs — undoing that last ${kindLabel}.`,
+      `Just to show recovery works, not only on runs — undoing that last ${kindLabel}.`,
       "Last ball undone — score, striker stats, and bowler figures rolled back exactly one delivery.",
       UNDO_COLOR
     );
@@ -779,53 +827,40 @@ class ScriptedDriver {
     return true;
   }
 
-  // Runs deliveries until the innings genuinely ends — all out, overs
-  // complete, or the engine itself flags matchComplete (e.g. target
-  // reached mid-over in the chase) — rather than a fixed ball count.
-  // Showcase coverage (each run value, each extra, a bowled wicket, a
-  // run-out) is force-served as the innings gets close to its natural
-  // end, but no longer DEFINES how long the innings runs.
-  //
-  // A random, rare "manual swap strike" demo beat is also allowed to
-  // fire mid-innings (never as the very first action of a cycle, since
-  // by this point the page has already scrolled to the scoring area
-  // naturally via ensureAssignments' clicks).
-  private async playInnings(gen: number, allowRunOutShowcase: boolean) {
-    const coverage = {
-      runs: new Set<PlainRun>(),
-      extras: new Set<string>(),
-      wicket: false,
-      runOut: false,
-    };
-
-    let safetyBallsBowled = 0;
-    let swapStrikeDemoDone = false;
-    let undoDemoDone = false;
-
-    while (this.isCurrent(gen)) {
+  // Plays boundaries (biased hard toward 4s/6s) until the current
+  // striker's runs cross 50, so the Fifty milestone fires as a genuine,
+  // scripted beat rather than something we just hope happens.
+  private async playMilestonePush(gen: number) {
+    let guard = 0;
+    while (this.isCurrent(gen) && guard < 40) {
+      guard += 1;
+      if (!(await this.readyToScore(gen))) return;
       const h = this.handleGetter();
-      if (!h) break;
-      if (h.isMatchComplete()) break;
-      if (h.noPartnerAvailable()) break;
+      if (!h) return;
+      if ((h.getMaxLegalBalls?.() ?? undefined) !== undefined) {
+        const remaining = (h.getMaxLegalBalls() as number) - h.getLegalBallsBowled();
+        if (remaining <= 10) return; // don't blow the whole innings chasing this
+      }
+      const shot = pickWeighted<PlainRun>([[4, 55], [6, 40], [1, 5]]);
+      await this.playPlainRun(gen, shot);
+      if (!this.isCurrent(gen)) return;
+      // Milestone firing is detected by the real engine (onMilestone),
+      // which the page wires straight to the moment chyron — the driver
+      // doesn't need to check the number itself, just keep feeding
+      // boundaries for a bounded number of balls and then move on.
+      if (guard >= 6) return;
+    }
+  }
 
-      const maxLegalBalls = h.getMaxLegalBalls();
-      const legalBallsBowled = h.getLegalBallsBowled();
-      if (maxLegalBalls !== undefined && legalBallsBowled >= maxLegalBalls) break;
-
-      // Bug-guard: stop even an uncapped (Test-style) innings after a
-      // very generous number of deliveries, so a stuck state can never
-      // spin the driver forever. This should not be reached in normal
-      // T20/ODI play, where getMaxLegalBalls() ends things long before.
-      const safetyCap = maxLegalBalls !== undefined ? maxLegalBalls + LEGAL_BALLS_PER_OVER * 2 : UNCAPPED_FORMAT_SAFETY_BALLS;
-      if (safetyBallsBowled >= safetyCap) break;
-
-      if (!(await this.readyToScore(gen))) return this.handlePausedFlow(gen);
-
-      // Manual "Swap Strike" override — rare, and only after a few
-      // legal deliveries have already been bowled this innings so it
-      // never fires as the very first click of the cycle.
-      if (!swapStrikeDemoDone && safetyBallsBowled >= 3 && Math.random() < SWAP_STRIKE_DEMO_CHANCE) {
-        swapStrikeDemoDone = true;
+  private async runScriptBeat(gen: number, beat: ScriptBeat) {
+    switch (beat.kind) {
+      case "run":
+        await this.playPlainRun(gen, beat.value);
+        return;
+      case "extra":
+        await this.playExtra(gen, beat.extra);
+        return;
+      case "swapStrike":
         await this.announcedClick(
           gen,
           "demo-swap-strike",
@@ -835,70 +870,85 @@ class ScriptedDriver {
           RUN_COLOR
         );
         await this.beat(gen, STEP_GAP_MS);
-        if (!this.isCurrent(gen)) continue;
+        return;
+      case "milestonePush":
+        await this.playMilestonePush(gen);
+        return;
+      case "wicket":
+        await this.takeAWicket(gen, beat.who, beat.forceDismissal === "runOut", beat.runsCompleted, beat.forceDismissal);
+        if (!this.isCurrent(gen)) return;
+        await this.ensureAssignments(gen);
+        return;
+      case "undo":
+        await this.doUndoDemo(gen, "delivery");
+        return;
+      default:
+        return;
+    }
+  }
+
+  // Runs deliveries until the innings genuinely ends — all out, overs
+  // complete, or the engine itself flags matchComplete — never a fixed
+  // ball count. `script`, when provided, is consumed in order first
+  // (one beat per loop iteration); once it's empty, the driver falls
+  // back to normal weighted-random play using `runTable` for the rest
+  // of the innings.
+  private async playInnings(gen: number, script: ScriptBeat[] | null, runTable: Array<[PlainRun, number]>) {
+    const queue = script ? [...script] : [];
+    let safetyBallsBowled = 0;
+    let inningsEndAnnounced = false;
+
+    while (this.isCurrent(gen)) {
+      const h = this.handleGetter();
+      if (!h) break;
+      if (h.isMatchComplete()) break;
+      if (h.noPartnerAvailable()) break;
+
+      const maxLegalBalls = h.getMaxLegalBalls();
+      const legalBallsBowled = h.getLegalBallsBowled();
+      if (maxLegalBalls !== undefined && legalBallsBowled >= maxLegalBalls) {
+        // The innings just finished purely on overs — call that out
+        // explicitly as its own beat, rather than letting the upcoming
+        // "End Innings" / "End Match" click seem to appear out of
+        // nowhere with no context for why it's happening now.
+        if (!inningsEndAnnounced) {
+          inningsEndAnnounced = true;
+          this.onLog(
+            h.isSecondInnings()
+              ? "Overs complete — the chase is over here, wrapping up the match."
+              : "Overs complete — this innings has ended, time to set a target for the chase."
+          );
+          await this.beat(gen, STEP_GAP_MS);
+        }
+        break;
       }
 
-      const ballsRemainingInFormat = maxLegalBalls !== undefined ? maxLegalBalls - legalBallsBowled : undefined;
-      const nearEnd = ballsRemainingInFormat !== undefined && ballsRemainingInFormat <= 8;
+      const safetyCap = maxLegalBalls !== undefined ? maxLegalBalls + LEGAL_BALLS_PER_OVER * 2 : UNCAPPED_FORMAT_SAFETY_BALLS;
+      if (safetyBallsBowled >= safetyCap) break;
 
-      const needsRunCoverage = ([0, 1, 2, 3, 4, 6] as PlainRun[]).find((r) => !coverage.runs.has(r));
-      const needsExtraCoverage = ["wide", "noBall", "bye", "legBye"].find((e) => !coverage.extras.has(e));
+      if (!(await this.readyToScore(gen))) return this.handlePausedFlow(gen);
 
-      if (nearEnd && !coverage.wicket) {
+      if (queue.length > 0) {
+        const beat = queue.shift()!;
+        await this.runScriptBeat(gen, beat);
+        safetyBallsBowled += 1;
+        continue;
+      }
+
+      // Script exhausted — fall back to normal random play for the
+      // rest of the innings, biased by `runTable` (neutral for innings
+      // 1's tail, aggressive/conservative for the innings-2 chase).
+      const delivery = pickDelivery(runTable);
+      if (delivery.type === "wicket") {
         await this.takeAWicket(gen, "striker", false);
-        coverage.wicket = true;
         safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "wicket");
-        if (!(await this.ensureAssignments(gen))) return;
-        continue;
-      }
-      if (allowRunOutShowcase && nearEnd && !coverage.runOut) {
-        await this.takeAWicket(gen, "nonstriker", true);
-        coverage.runOut = true;
-        safetyBallsBowled += 1;
-        if (!(await this.ensureAssignments(gen))) return;
-        continue;
-      }
-      if (ballsRemainingInFormat !== undefined && ballsRemainingInFormat <= 16 && needsExtraCoverage) {
-        await this.playExtra(gen, needsExtraCoverage);
-        coverage.extras.add(needsExtraCoverage);
-        safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "extra");
-        continue;
-      }
-      if (ballsRemainingInFormat !== undefined && ballsRemainingInFormat <= 22 && needsRunCoverage !== undefined) {
-        await this.playPlainRun(gen, needsRunCoverage);
-        coverage.runs.add(needsRunCoverage);
-        safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "run");
-        continue;
-      }
-
-      const delivery = pickDelivery();
-      if (delivery.type === "wicket" && !coverage.wicket) {
-        await this.takeAWicket(gen, "striker", false);
-        coverage.wicket = true;
-        safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "wicket");
-        if (!(await this.ensureAssignments(gen))) return;
-      } else if (delivery.type === "wicket") {
-        // Genuinely allow further wickets once the showcase one has
-        // already happened — a real innings can lose more than one
-        // batter. Random dismissal type each time via takeAWicket.
-        await this.takeAWicket(gen, "striker", false);
-        safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "wicket");
         if (!(await this.ensureAssignments(gen))) return;
       } else if (delivery.type === "extra") {
         await this.playExtra(gen, delivery.extra);
-        coverage.extras.add(delivery.extra);
         safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "extra");
       } else {
         await this.playPlainRun(gen, delivery.value);
-        coverage.runs.add(delivery.value);
         safetyBallsBowled += 1;
-        if (!undoDemoDone) undoDemoDone = await this.maybeDemoUndo(gen, "run");
       }
     }
   }
@@ -908,22 +958,11 @@ class ScriptedDriver {
     this.onLog("Auto-demo: assigning openers");
     if (!(await this.ensureAssignments(gen))) return;
 
-    // Note: the manual "Swap Strike" demo no longer runs here. It now
-    // fires (rarely) from inside playInnings, once real scoring is
-    // already underway — see SWAP_STRIKE_DEMO_CHANCE above.
-
     if (!(await this.readyToScore(gen))) return this.handlePausedFlow(gen);
 
-    // Note: the old guaranteed "score 2, then immediately undo it" beat
-    // is gone. Undo is now demonstrated rarely and generically — see
-    // maybeDemoUndo, called from inside playInnings after whatever
-    // delivery actually happens (run, extra, or wicket) — so most
-    // cycles show no undo at all, and the ones that do show it undoing
-    // something real rather than a delivery invented just to be undone.
-
-    // Innings 1 — runs until it genuinely ends (all out or overs
-    // complete), not a fixed ball count.
-    await this.playInnings(gen, true);
+    // Innings 1 — the full scripted showcase, then real random play
+    // until the innings genuinely ends.
+    await this.playInnings(gen, buildInningsOneScript(), NEUTRAL_RUN_TABLE);
     if (!this.isCurrent(gen)) return;
 
     await this.announcedClick(
@@ -946,12 +985,16 @@ class ScriptedDriver {
       this.onLog("Auto-demo: innings 2 — assigning the chasing openers");
       if (!(await this.ensureAssignments(gen))) return;
 
-      // Innings 2 — same real stopping conditions: all out, overs
-      // complete, OR target reached (the engine flips matchComplete on
-      // its own the instant the winning run lands, and playInnings
-      // checks isMatchComplete() every loop, so the chase stops the
-      // moment it's actually won rather than playing on past that).
-      await this.playInnings(gen, false);
+      // Innings 2 — bias alternates by cycle so both win methods (by
+      // wickets vs by runs) get demonstrated across repeated loops of
+      // the demo, rather than the chase always going the same way.
+      const chaseAggressively = this.cycleCount % 2 === 0;
+      this.onLog(
+        chaseAggressively
+          ? "This chase is being played aggressively — expect the batting side to get there with wickets in hand."
+          : "This chase is being played conservatively — expect the overs to run out and the defending side to win on runs."
+      );
+      await this.playInnings(gen, null, chaseAggressively ? AGGRESSIVE_RUN_TABLE : CONSERVATIVE_RUN_TABLE);
       if (!this.isCurrent(gen)) return;
 
       if (!this.handleGetter()?.isMatchComplete()) {
@@ -1052,14 +1095,6 @@ export default function LiveStatePanelAuto({
   const [mode, setMode] = useState<"demo" | "interactive">(defaultMode);
   const [paused, setPaused] = useState(false);
 
-  // FIX: cursor.x/y from useDemoCursor are absolute VIEWPORT pixels
-  // (getBoundingClientRect, matched to DemoCursor's position:fixed
-  // portal to document.body). DemoCursor's frameWidth/frameHeight must
-  // therefore describe the real viewport — not this wrapper div's own
-  // clientWidth/clientHeight, which is a much smaller local box. Using
-  // the wrong (smaller) frame size previously made the ghost cursor
-  // drift toward the center of that local box instead of tracking the
-  // element it had actually just clicked.
   const [viewport, setViewport] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
     height: typeof window !== "undefined" ? window.innerHeight : 800,

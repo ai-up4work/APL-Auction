@@ -429,11 +429,13 @@ export function LinkBtn({
 
 // ── Small utility button — replaces the old fx-btn / fx-toggle-off class ──
 export function SmallButton({
+  id,
   children,
   onClick,
   style,
   disabled,
 }: {
+  id?: string;
   children: React.ReactNode;
   onClick: () => void;
   style?: React.CSSProperties;
@@ -442,6 +444,7 @@ export function SmallButton({
   const [hovered, setHovered] = useState(false);
   return (
     <button
+      id={id}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -464,12 +467,15 @@ export function SmallButton({
 }
 
 // ── The big orange CTA — replaces talk-btn ──
+// ── The big orange CTA — replaces talk-btn ──
 export function PrimaryButton({
+  id,
   children,
   onClick,
   minWidth,
   disabled,
 }: {
+  id?: string;
   children: React.ReactNode;
   onClick: () => void;
   minWidth?: number;
@@ -477,6 +483,7 @@ export function PrimaryButton({
 }) {
   return (
     <button
+      id={id}
       onClick={onClick}
       disabled={disabled}
       className="py-2.5 px-6 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all hover:-translate-y-0.5"

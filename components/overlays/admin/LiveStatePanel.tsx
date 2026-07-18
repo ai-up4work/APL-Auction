@@ -1,4 +1,4 @@
-// app/components/overlays/admin/LiveStatePanel.tsx
+// application/components/overlays/admin/LiveStatePanel.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from "react";
@@ -45,28 +45,23 @@ function ViewportPortal({ children }: { children: React.ReactNode }) {
 
 type PlayerRole = "striker" | "nonStriker" | "bowler";
 
-// `demoDim` is purely cosmetic (dims the row while auto-demo drives the
-// match). It NEVER blocks a click — real humans are blocked at the
-// pointer-events level on the panel root (see LiveStatePanel's
-// `readOnly` handling below), and the auto-demo driver clicks these
-// same elements for real via element.click(), which ignores
-// pointer-events entirely. Keeping demoDim separate from any click-lock
-// means this component never has to know whether a click is "real" or
-// scripted — it just responds to clicks, same as always.
+// NEW — added `disabled` so the automatic wrapper can freeze the
+// carousel without duplicating this component. Every existing lock
+// reason (dismissed, already in a role) still applies on top of this.
 function PlayerCarousel({
   players,
   onSelect,
   emptyLabel,
   dismissedNames,
   roleByName,
-  demoDim,
+  disabled,
 }: {
   players: SquadPlayer[];
   onSelect: (p: SquadPlayer) => void;
   emptyLabel?: string;
   dismissedNames?: Set<string>;
   roleByName?: Map<string, { role: PlayerRole; locked?: boolean }>;
-  demoDim?: boolean;
+  disabled?: boolean;
 }) {
   if (players.length === 0) {
     return (
@@ -95,12 +90,12 @@ function PlayerCarousel({
   }
 
   return (
-    <div className="carousel-row" id="demo-player-carousel">
+    <div className="carousel-row">
       {players.map((p) => {
         const isOut = !!dismissedNames?.has(p.name);
         const roleInfo = roleByName?.get(p.name);
         const isAlreadySelected = !!roleInfo;
-        const isLocked = isOut || isAlreadySelected;
+        const isLocked = isOut || isAlreadySelected || !!disabled;
         const roleLabel =
           roleInfo?.role === "striker"
             ? "On Strike"
@@ -113,7 +108,6 @@ function PlayerCarousel({
         return (
           <button
             key={p.id}
-            id={`demo-player-${p.id}`}
             type="button"
             draggable={!isLocked}
             disabled={isLocked}
@@ -131,6 +125,8 @@ function PlayerCarousel({
                 ? `${p.name} — already out this innings`
                 : isAlreadySelected
                 ? `${p.name} — currently ${roleLabel}`
+                : disabled
+                ? `${p.name} — auto-demo is driving this match`
                 : p.name
             }
             style={
@@ -152,8 +148,8 @@ function PlayerCarousel({
                     borderRadius: 10,
                     background: "rgba(76,175,80,0.08)",
                   }
-                : demoDim
-                ? { opacity: 0.75 }
+                : disabled
+                ? { opacity: 0.45, cursor: "not-allowed" }
                 : undefined
             }
           >
@@ -187,10 +183,9 @@ function PlayerCarousel({
   );
 }
 
-// `demoDim` — same cosmetic-only contract as PlayerCarousel above:
-// dims the slot while auto-demo is driving, but never blocks a click.
+// NEW — `readOnly` disables activation/assign/clear/drag-drop without
+// touching any of the visual logic.
 function CrewSlot({
-  id,
   title,
   accentColor,
   active,
@@ -206,9 +201,8 @@ function CrewSlot({
   dismissedNames,
   blockedName,
   noReplacement,
-  demoDim,
+  readOnly,
 }: {
-  id?: string;
   title: string;
   accentColor?: string;
   active: boolean;
@@ -224,14 +218,14 @@ function CrewSlot({
   dismissedNames?: Set<string>;
   blockedName?: string;
   noReplacement?: boolean;
-  demoDim?: boolean;
+  readOnly?: boolean;
 }) {
   const isEmpty = !displayName;
-  const effectivelyLocked = !!locked;
+  const effectivelyLocked = !!locked || !!readOnly;
 
   if (noReplacement && isEmpty) {
     return (
-      <div id={id} className="crew-slot crew-slot-no-replacement">
+      <div className="crew-slot crew-slot-no-replacement">
         <div className="crew-slot-header">
           <Eyebrow color="var(--color-outline)">{title}</Eyebrow>
         </div>
@@ -249,7 +243,6 @@ function CrewSlot({
 
   return (
     <div
-      id={id}
       className={`crew-slot ${active ? "is-active" : ""}`}
       onClick={effectivelyLocked ? undefined : onActivate}
       onDragOver={(e) => !effectivelyLocked && e.preventDefault()}
@@ -264,7 +257,7 @@ function CrewSlot({
         onAssign(player);
       }}
       style={{
-        opacity: effectivelyLocked ? 0.6 : demoDim ? 0.85 : 1,
+        opacity: effectivelyLocked ? 0.6 : 1,
         cursor: effectivelyLocked ? "not-allowed" : "pointer",
         border: isEmpty ? "1px dashed rgba(217,83,79,0.45)" : undefined,
         background: isEmpty ? "rgba(217,83,79,0.05)" : undefined,
@@ -280,7 +273,6 @@ function CrewSlot({
           {!isEmpty && onClear && !effectivelyLocked && (
             <button
               type="button"
-              id={id ? `${id}-clear` : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 onClear();
@@ -336,7 +328,6 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
 }
 
 function BatsmanOutOption({
-  id,
   label,
   name,
   runs,
@@ -344,7 +335,6 @@ function BatsmanOutOption({
   selected,
   onClick,
 }: {
-  id?: string;
   label: string;
   name: string;
   runs: number;
@@ -354,7 +344,6 @@ function BatsmanOutOption({
 }) {
   return (
     <button
-      id={id}
       type="button"
       onClick={onClick}
       className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg text-left transition-all flex-1"
@@ -376,19 +365,12 @@ function BatsmanOutOption({
   );
 }
 
-// `readOnly` here only sets pointer-events: none on the backdrop, since
-// this dialog is rendered via ViewportPortal (createPortal to
-// document.body) and therefore sits OUTSIDE any pointer-events lock
-// applied to the main panel body. This is the one place that lock has
-// to be applied a second time, deliberately, rather than inherited.
 function WicketDetailDialog({
   pending,
   onResolve,
-  readOnly,
 }: {
   pending: PendingWicket;
   onResolve: (batsmanOut: "striker" | "nonStriker", fire: boolean, dismissalType: DismissalType, fielder: string, runsCompleted: number) => void;
-  readOnly?: boolean;
 }) {
   const [batsmanOut, setBatsmanOut] = useState<"striker" | "nonStriker">("striker");
   const options = getValidDismissalOptions(pending.extraType, pending.isFreeHitActive);
@@ -398,18 +380,13 @@ function WicketDetailDialog({
   const [runsCompleted, setRunsCompleted] = useState(0);
 
   return (
-    <div
-      className="scorer-dialog-backdrop"
-      style={{ pointerEvents: readOnly ? "none" : undefined }}
-      onClick={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)}
-    >
+    <div className="scorer-dialog-backdrop" onClick={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)}>
       <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <span className="text-[11px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
             Wicket Detail
           </span>
           <button
-            id="demo-wicket-skip"
             type="button"
             onClick={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)}
             className="text-[11px]"
@@ -440,31 +417,14 @@ function WicketDetailDialog({
         <div className="flex flex-col gap-1.5 mb-3">
           <FieldLabel>Batsman Out</FieldLabel>
           <div className="flex gap-2">
-            <BatsmanOutOption
-              id="demo-wicket-pick-striker"
-              label="Striker"
-              name={pending.strikerBefore.name}
-              runs={pending.strikerBefore.runs}
-              balls={pending.strikerBefore.balls}
-              selected={batsmanOut === "striker"}
-              onClick={() => setBatsmanOut("striker")}
-            />
-            <BatsmanOutOption
-              id="demo-wicket-pick-nonstriker"
-              label="Non-Striker"
-              name={pending.nonStrikerBefore.name}
-              runs={pending.nonStrikerBefore.runs}
-              balls={pending.nonStrikerBefore.balls}
-              selected={batsmanOut === "nonStriker"}
-              onClick={() => setBatsmanOut("nonStriker")}
-            />
+            <BatsmanOutOption label="Striker" name={pending.strikerBefore.name} runs={pending.strikerBefore.runs} balls={pending.strikerBefore.balls} selected={batsmanOut === "striker"} onClick={() => setBatsmanOut("striker")} />
+            <BatsmanOutOption label="Non-Striker" name={pending.nonStrikerBefore.name} runs={pending.nonStrikerBefore.runs} balls={pending.nonStrikerBefore.balls} selected={batsmanOut === "nonStriker"} onClick={() => setBatsmanOut("nonStriker")} />
           </div>
         </div>
 
         <div className="flex flex-col gap-1.5 mb-3">
           <FieldLabel>Dismissal</FieldLabel>
           <select
-            id="demo-wicket-dismissal-select"
             value={dismissalType}
             disabled={options.length === 1}
             onChange={(e) => setDismissalType(e.target.value as DismissalType)}
@@ -486,7 +446,6 @@ function WicketDetailDialog({
               {[0, 1, 2, 3].map((n) => (
                 <button
                   key={n}
-                  id={`demo-runs-completed-${n}`}
                   type="button"
                   onClick={() => setRunsCompleted(n)}
                   className="flex-1 py-2 rounded-lg text-sm font-bold"
@@ -507,7 +466,6 @@ function WicketDetailDialog({
         <div className="flex flex-col gap-1.5 mb-4">
           <FieldLabel>Fielder (if any)</FieldLabel>
           <input
-            id="demo-wicket-fielder-input"
             value={fielder}
             onChange={(e) => setFielder(e.target.value)}
             placeholder="Fielder name"
@@ -517,7 +475,6 @@ function WicketDetailDialog({
         </div>
 
         <button
-          id="demo-wicket-fire"
           type="button"
           onClick={() => onResolve(batsmanOut, true, dismissalType, fielder, runsCompleted)}
           className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
@@ -535,16 +492,14 @@ function EndInningsDialog({
   isSecondInnings,
   onConfirm,
   onCancel,
-  readOnly,
 }: {
   currentRuns: number;
   isSecondInnings: boolean;
   onConfirm: () => void;
   onCancel: () => void;
-  readOnly?: boolean;
 }) {
   return (
-    <div className="scorer-dialog-backdrop" style={{ pointerEvents: readOnly ? "none" : undefined }} onClick={onCancel}>
+    <div className="scorer-dialog-backdrop" onClick={onCancel}>
       <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <span className="text-[11px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
@@ -567,7 +522,6 @@ function EndInningsDialog({
         )}
         <div className="flex gap-2">
           <button
-            id="demo-cancel-end-innings"
             type="button"
             onClick={onCancel}
             className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
@@ -581,7 +535,6 @@ function EndInningsDialog({
             Cancel
           </button>
           <button
-            id="demo-confirm-end-innings"
             type="button"
             onClick={onConfirm}
             className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
@@ -595,9 +548,9 @@ function EndInningsDialog({
   );
 }
 
-function RestartMatchDialog({ onConfirm, onCancel, readOnly }: { onConfirm: () => void; onCancel: () => void; readOnly?: boolean }) {
+function RestartMatchDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
-    <div className="scorer-dialog-backdrop" style={{ pointerEvents: readOnly ? "none" : undefined }} onClick={onCancel}>
+    <div className="scorer-dialog-backdrop" onClick={onCancel}>
       <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <span
@@ -615,7 +568,6 @@ function RestartMatchDialog({ onConfirm, onCancel, readOnly }: { onConfirm: () =
         </p>
         <div className="flex gap-2">
           <button
-            id="demo-cancel-restart"
             type="button"
             onClick={onCancel}
             className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
@@ -629,7 +581,6 @@ function RestartMatchDialog({ onConfirm, onCancel, readOnly }: { onConfirm: () =
             Cancel
           </button>
           <button
-            id="demo-confirm-restart"
             type="button"
             onClick={onConfirm}
             className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
@@ -692,13 +643,13 @@ function MatchOverScreen({
 
       <div className="match-over-actions">
         {canUndo && (
-          <button id="demo-match-over-undo" type="button" className="match-over-btn match-over-btn-undo" onClick={onUndo}>
+          <button type="button" className="match-over-btn match-over-btn-undo" onClick={onUndo}>
             <Undo2 size={14} strokeWidth={2.4} />
             Undo &amp; Keep Scoring
           </button>
         )}
         {onRestart && (
-          <button id="demo-match-over-restart" type="button" className="match-over-btn match-over-btn-restart" onClick={onRestart}>
+          <button type="button" className="match-over-btn match-over-btn-restart" onClick={onRestart}>
             <RotateCcw size={14} strokeWidth={2.4} />
             Restart Match
           </button>
@@ -708,31 +659,29 @@ function MatchOverScreen({
   );
 }
 
-// Trimmed to STATE READS ONLY. The auto-demo driver no longer calls
-// engine functions through this handle — it clicks the real, visible
-// buttons (by id) exactly like a human would, via useDemoCursor. This
-// handle exists purely so the driver can decide WHAT to click next
-// (e.g. "are controls locked, so I should go pick a striker" or "is the
-// match already over, so I should stop bowling"), never to bypass the
-// UI to make something happen.
+// NEW — imperative handle so an external driver (LiveStatePanelAuto) can
+// call the same engine functions the real UI buttons call, and can read
+// current battingSquad/bowlingSquad without duplicating the toss/innings
+// math that decides which team is which.
 export interface LiveStatePanelHandle {
+  recordBall: (runs: 0 | 1 | 2 | 3 | 4 | 6) => void;
+  recordWicket: () => void;
+  resolveWicket: (
+    batsmanOut: "striker" | "nonStriker",
+    fire: boolean,
+    dismissalType: DismissalType,
+    fielder: string,
+    runsCompleted: number
+  ) => void;
+  assignPlayer: (slot: "striker" | "nonStriker" | "bowler", player: SquadPlayer) => void;
+  endInnings: () => void;
+  undo: () => void;
+  canUndo: () => boolean;
   isControlsLocked: () => boolean;
   isMatchComplete: () => boolean;
   hasPendingWicket: () => boolean;
-  noPartnerAvailable: () => boolean;
-  isSecondInnings: () => boolean;
-  canUndo: () => boolean;
   getBattingSquad: () => SquadPlayer[];
   getBowlingSquad: () => SquadPlayer[];
-  // Names already dismissed this innings — the driver excludes these
-  // when picking a replacement so it never retries an out player.
-  getDismissedNames: () => Set<string>;
-  // Current occupants of each crew slot ("" when empty) — the driver
-  // excludes whoever is already in the *other* batting slot so it
-  // never tries to assign the same player twice.
-  getStrikerName: () => string;
-  getNonStrikerName: () => string;
-  getBowlerName: () => string;
 }
 
 export interface LiveStatePanelProps {
@@ -767,12 +716,10 @@ export interface LiveStatePanelProps {
   }) => void;
   onEngineStateChange?: (state: EngineSyncState) => void;
   initialEngineState?: EngineSyncState | null;
-  // When true: the panel keeps working exactly as normal — every
-  // handler still fires — but (a) real pointer input is locked out via
-  // CSS pointer-events (a script's element.click() ignores this, so the
-  // auto-demo driver can still operate every control for real), and
-  // (b) controls render slightly dimmed as a visual cue that something
-  // else is driving.
+  // NEW — when true, every manual control (ball pad, carousel, crew
+  // slots, undo, end innings/match, restart, free-hit toggle) is
+  // disabled. The engine itself keeps working — LiveStatePanelAuto
+  // drives it through the ref below.
   readOnly?: boolean;
 }
 
@@ -864,32 +811,27 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
     initialEngineState,
   });
 
- useImperativeHandle(
+  // NEW — the imperative handle. Calls the exact same engine functions
+  // the buttons below call, so an external driver can't put the engine
+  // in a state the UI itself couldn't reach.
+  useImperativeHandle(
     ref,
     () => ({
+      recordBall: (runs) => engine.recordBall(runs),
+      recordWicket: () => engine.recordWicket(),
+      resolveWicket: (batsmanOut, fire, dismissalType, fielder, runsCompleted) =>
+        engine.resolveWicket(batsmanOut, fire, dismissalType, fielder, runsCompleted),
+      assignPlayer: (slot, player) => engine.assignPlayer(slot, player),
+      endInnings: () => engine.endInnings(),
+      undo: () => engine.undo(),
+      canUndo: () => engine.canUndo,
       isControlsLocked: () => engine.assignmentsMissing(),
       isMatchComplete: () => liveState.matchComplete === true,
       hasPendingWicket: () => !!engine.pendingWicket,
-      noPartnerAvailable: () => !!engine.noPartnerAvailable,
-      isSecondInnings: () => (liveState.inningsNumber ?? 1) === 2,
-      canUndo: () => engine.canUndo,
       getBattingSquad: () => battingSquad,
       getBowlingSquad: () => bowlingSquad,
-      getDismissedNames: () => engine.dismissedPlayers,
-      getStrikerName: () => liveState.striker.name,
-      getNonStrikerName: () => liveState.nonStriker.name,
-      getBowlerName: () => liveState.bowler.name,
     }),
-    [
-      engine,
-      liveState.matchComplete,
-      liveState.inningsNumber,
-      liveState.striker.name,
-      liveState.nonStriker.name,
-      liveState.bowler.name,
-      battingSquad,
-      bowlingSquad,
-    ]
+    [engine, liveState.matchComplete, battingSquad, bowlingSquad]
   );
 
   const [showEndInningsConfirm, setShowEndInningsConfirm] = useState(false);
@@ -1363,7 +1305,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
       </ViewportPortal>
       {engine.pendingWicket && (
         <ViewportPortal>
-          <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} readOnly={readOnly} />
+          <WicketDetailDialog pending={engine.pendingWicket} onResolve={readOnly ? () => {} : engine.resolveWicket} />
         </ViewportPortal>
       )}
       {showEndInningsConfirm && (
@@ -1373,10 +1315,10 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
             isSecondInnings={isSecondInnings}
             onCancel={() => setShowEndInningsConfirm(false)}
             onConfirm={() => {
+              if (readOnly) return;
               engine.endInnings();
               setShowEndInningsConfirm(false);
             }}
-            readOnly={readOnly}
           />
         </ViewportPortal>
       )}
@@ -1385,55 +1327,49 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           <RestartMatchDialog
             onCancel={() => setShowRestartConfirm(false)}
             onConfirm={() => {
+              if (readOnly) return;
               engine.resetEngineState();
               onRestartMatch?.();
               setShowRestartConfirm(false);
             }}
-            readOnly={readOnly}
           />
         </ViewportPortal>
       )}
 
-      {/* This is the ONLY place `readOnly` blocks real interaction — via
-          pointer-events, not via disabling handlers. A human's mouse
-          can't hit-test through pointer-events: none, but a script's
-          element.click() ignores it completely, so the auto-demo driver
-          keeps working perfectly through this exact wrapper. */}
-      <div id="demo-panel-root" style={{ pointerEvents: readOnly ? "none" : undefined }}>
-        {liveState.matchComplete ? (
-          <MatchOverScreen
-            winningTeamName={liveState.matchResult?.winningTeamName}
-            winningTeamLogo={winningTeamLogo}
-            margin={liveState.matchResult?.margin}
-            method={liveState.matchResult?.method}
-            canUndo={engine.canUndo}
-            onUndo={engine.undo}
-            onRestart={onRestartMatch ? () => setShowRestartConfirm(true) : undefined}
-          />
-        ) : (
-          <>
-            {controlsLocked && !engine.noPartnerAvailable && (
-              <div className="assignment-needed-banner">
-                ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
-                after starting a new innings.
-              </div>
-            )}
+      {liveState.matchComplete ? (
+        <MatchOverScreen
+          winningTeamName={liveState.matchResult?.winningTeamName}
+          winningTeamLogo={winningTeamLogo}
+          margin={liveState.matchResult?.margin}
+          method={liveState.matchResult?.method}
+          canUndo={!readOnly && engine.canUndo}
+          onUndo={engine.undo}
+          onRestart={onRestartMatch && !readOnly ? () => setShowRestartConfirm(true) : undefined}
+        />
+      ) : (
+        <>
+          {controlsLocked && !engine.noPartnerAvailable && (
+            <div className="assignment-needed-banner">
+              ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
+              after starting a new innings.
+            </div>
+          )}
 
-            {engine.noPartnerAvailable && (
-              <div className="innings-status-card">
-                <span className="innings-status-icon-badge">
-                  <AlertTriangle size={20} strokeWidth={2.2} />
-                </span>
-                <div className="innings-status-text">
-                  <div className="innings-status-eyebrow">
-                    <span className="innings-status-dot" />
-                    <span className="innings-status-eyebrow-label">Last Man Batting</span>
-                  </div>
-                  <div className="innings-status-title">No replacement left in the squad</div>
-                  <div className="innings-status-sub">Wrap up {isSecondInnings ? "the match" : "this innings"} whenever you're ready.</div>
+          {engine.noPartnerAvailable && (
+            <div className="innings-status-card">
+              <span className="innings-status-icon-badge">
+                <AlertTriangle size={20} strokeWidth={2.2} />
+              </span>
+              <div className="innings-status-text">
+                <div className="innings-status-eyebrow">
+                  <span className="innings-status-dot" />
+                  <span className="innings-status-eyebrow-label">Last Man Batting</span>
                 </div>
+                <div className="innings-status-title">No replacement left in the squad</div>
+                <div className="innings-status-sub">Wrap up {isSecondInnings ? "the match" : "this innings"} whenever you're ready.</div>
+              </div>
+              {!readOnly && (
                 <button
-                  id="demo-open-end-innings"
                   type="button"
                   className="innings-status-btn"
                   onClick={() => setShowEndInningsConfirm(true)}
@@ -1441,244 +1377,238 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
                   {isSecondInnings ? "End Match" : "End Innings"}
                   <ArrowRight size={14} strokeWidth={2.5} />
                 </button>
-              </div>
-            )}
-
-            <div className="scoreboard-strip">
-              <div className="scoreboard-main">
-                <span className="scoreboard-runs">{liveState.score.runs}</span>
-                <span className="scoreboard-wkts">/{liveState.score.wickets}</span>
-              </div>
-              <div className="scoreboard-meta">
-                <span>{liveState.score.overs}.{liveState.score.balls} ov</span>
-                <span>·</span>
-                <span>RR {runRate}</span>
-                <span>·</span>
-                <span>{battingTeamLabel} batting</span>
-                {isSecondInnings && liveState.target !== undefined && (
-                  <>
-                    <span>·</span>
-                    <span>Target {liveState.target}</span>
-                    {runsNeeded !== undefined && (
-                      <>
-                        <span>·</span>
-                        <span>
-                          Need {runsNeeded}
-                          {ballsRemaining !== undefined ? ` off ${ballsRemaining}` : ""}
-                        </span>
-                      </>
-                    )}
-                    {requiredRunRate && (
-                      <>
-                        <span>·</span>
-                        <span>RRR {requiredRunRate}</span>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-              {!engine.noPartnerAvailable && (
-                <SmallButton
-                  id="demo-open-end-innings"
-                  onClick={() => setShowEndInningsConfirm(true)}
-                  style={{ marginLeft: "auto", color: "var(--color-error)" }}
-                >
-                  {isSecondInnings ? "End Match" : "End Innings"}
-                </SmallButton>
               )}
             </div>
+          )}
 
-            <div>
-              <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
-
-              <div className="flex flex-col md:flex-row items-stretch gap-3">
-                <div className="flex-1 min-w-0">
-                  <CrewSlot
-                    id="demo-slot-striker"
-                    title="Striker *"
-                    accentColor="#E8C468"
-                    active={engine.activeSlot === "striker"}
-                    onActivate={() => engine.setActiveSlot("striker")}
-                    displayName={liveState.striker.name}
-                    imageUrl={liveState.striker.imageUrl}
-                    statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
-                    allPlayers={battingSquad}
-                    onAssign={(p) => engine.assignPlayer("striker", p)}
-                    onClear={() => engine.clearSlot("striker")}
-                    placeholder="Select striker"
-                    dismissedNames={engine.dismissedPlayers}
-                    blockedName={liveState.nonStriker.name || undefined}
-                    noReplacement={strikerNeedsReplacement}
-                    demoDim={readOnly}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  id="demo-swap-strike"
-                  onClick={engine.swapStrike}
-                  className="swap-strike-btn"
-                  title="Swap Strike"
-                  aria-label="Swap strike between batters"
-                  style={readOnly ? { opacity: 0.75 } : undefined}
-                >
-                  ⇄
-                </button>
-
-                <div className="flex-1 min-w-0">
-                  <CrewSlot
-                    id="demo-slot-nonStriker"
-                    title="Non-Striker"
-                    active={engine.activeSlot === "nonStriker"}
-                    onActivate={() => engine.setActiveSlot("nonStriker")}
-                    displayName={liveState.nonStriker.name}
-                    imageUrl={liveState.nonStriker.imageUrl}
-                    statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
-                    allPlayers={battingSquad}
-                    onAssign={(p) => engine.assignPlayer("nonStriker", p)}
-                    onClear={() => engine.clearSlot("nonStriker")}
-                    placeholder="Select non-striker"
-                    dismissedNames={engine.dismissedPlayers}
-                    blockedName={liveState.striker.name || undefined}
-                    noReplacement={nonStrikerNeedsReplacement}
-                    demoDim={readOnly}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <CrewSlot
-                  id="demo-slot-bowler"
-                  title={`Bowler (${bowlingTeamLabel})`}
-                  active={engine.activeSlot === "bowler"}
-                  onActivate={() => engine.setActiveSlot("bowler")}
-                  displayName={liveState.bowler.name}
-                  imageUrl={liveState.bowler.imageUrl}
-                  statLine={liveState.bowler.name ? `${liveState.bowler.overs}.${liveState.bowler.balls}-${liveState.bowler.maidens}-${liveState.bowler.runs}-${liveState.bowler.wickets}` : undefined}
-                  allPlayers={bowlingSquad}
-                  onAssign={(p) => engine.assignPlayer("bowler", p)}
-                  placeholder="Select bowler"
-                  demoDim={readOnly}
-                />
-              </div>
-
-              <div className="mt-3">
-                <Eyebrow className="block mb-1">{engine.activeSlot === "bowler" ? `Pick from ${bowlingTeamLabel}` : `Pick from ${battingTeamLabel}`}</Eyebrow>
-                <PlayerCarousel
-                  players={engine.activeSlot === "bowler" ? bowlingSquad : battingSquad}
-                  onSelect={(p) => engine.assignPlayer(engine.activeSlot, p)}
-                  emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in the Fix a Mistake section below."
-                  dismissedNames={engine.activeSlot === "bowler" ? undefined : engine.dismissedPlayers}
-                  roleByName={engine.activeSlot === "bowler" ? bowlingRoleMap : battingRoleMap}
-                  demoDim={readOnly}
-                />
-              </div>
-
-              <div className="flex items-center gap-2 mt-3">
-                <SmallButton id="demo-new-partnership" onClick={engine.newPartnership}>
-                  New Partnership
-                </SmallButton>
-              </div>
+          <div className="scoreboard-strip">
+            <div className="scoreboard-main">
+              <span className="scoreboard-runs">{liveState.score.runs}</span>
+              <span className="scoreboard-wkts">/{liveState.score.wickets}</span>
             </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Eyebrow>This Ball</Eyebrow>
-                <div className="flex items-center gap-2">
-                  {engine.canUndo && (
-                    <SmallButton id="demo-undo-ball" onClick={engine.undo} style={{ color: "var(--color-warning)" }}>
-                      ↶ Undo Last Ball
-                    </SmallButton>
+            <div className="scoreboard-meta">
+              <span>{liveState.score.overs}.{liveState.score.balls} ov</span>
+              <span>·</span>
+              <span>RR {runRate}</span>
+              <span>·</span>
+              <span>{battingTeamLabel} batting</span>
+              {isSecondInnings && liveState.target !== undefined && (
+                <>
+                  <span>·</span>
+                  <span>Target {liveState.target}</span>
+                  {runsNeeded !== undefined && (
+                    <>
+                      <span>·</span>
+                      <span>
+                        Need {runsNeeded}
+                        {ballsRemaining !== undefined ? ` off ${ballsRemaining}` : ""}
+                      </span>
+                    </>
                   )}
-                  <button
-                    type="button"
-                    id="demo-free-hit-toggle"
-                    onClick={() => engine.setIsFreeHit((v) => !v)}
-                    className={`free-hit-toggle ${engine.isFreeHit ? "is-active" : "is-inactive"}`}
-                    title={engine.isFreeHit ? "Free Hit is active — tap to cancel" : "Tap to manually mark this ball a Free Hit"}
-                    style={readOnly ? { opacity: 0.85 } : undefined}
-                  >
-                    <span className="free-hit-toggle-track">
-                      <span className="free-hit-toggle-thumb" />
-                    </span>
-                    <span className="free-hit-toggle-label">
-                      <span className="free-hit-toggle-title">Free Hit</span>
-                      <span className="free-hit-toggle-state">{engine.isFreeHit ? "Active" : "Off"}</span>
-                    </span>
-                  </button>
-                </div>
+                  {requiredRunRate && (
+                    <>
+                      <span>·</span>
+                      <span>RRR {requiredRunRate}</span>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            {!engine.noPartnerAvailable && !readOnly && (
+              <SmallButton
+                onClick={() => setShowEndInningsConfirm(true)}
+                style={{ marginLeft: "auto", color: "var(--color-error)" }}
+              >
+                {isSecondInnings ? "End Match" : "End Innings"}
+              </SmallButton>
+            )}
+          </div>
+
+          <div>
+            <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
+
+            <div className="flex flex-col md:flex-row items-stretch gap-3">
+              <div className="flex-1 min-w-0">
+                <CrewSlot
+                  title="Striker *"
+                  accentColor="#E8C468"
+                  active={engine.activeSlot === "striker"}
+                  onActivate={() => engine.setActiveSlot("striker")}
+                  displayName={liveState.striker.name}
+                  imageUrl={liveState.striker.imageUrl}
+                  statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
+                  allPlayers={battingSquad}
+                  onAssign={(p) => engine.assignPlayer("striker", p)}
+                  onClear={() => engine.clearSlot("striker")}
+                  placeholder="Select striker"
+                  dismissedNames={engine.dismissedPlayers}
+                  blockedName={liveState.nonStriker.name || undefined}
+                  noReplacement={strikerNeedsReplacement}
+                  readOnly={readOnly}
+                />
               </div>
 
-              <div className="ball-controls-row">
-                <div className="ball-controls-extras">
-                  <span className="ball-controls-label">Extra</span>
-                  <div id="demo-extras-row">
-                    <SegmentedControl options={EXTRA_OPTIONS} value={engine.extraType} onChange={(v) => engine.setExtraType(v as ExtraType)} />
-                  </div>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={readOnly ? undefined : engine.swapStrike}
+                disabled={readOnly}
+                className="swap-strike-btn"
+                title="Swap Strike"
+                aria-label="Swap strike between batters"
+                style={readOnly ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+              >
+                ⇄
+              </button>
 
-              <div className="ball-pad" style={readOnly ? { opacity: 0.7 } : undefined}>
-                {[0, 1, 2, 3, 4, 6].map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    id={`demo-ball-${r}`}
-                    className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`}
-                    onClick={() => engine.recordBall(r as 0 | 1 | 2 | 3 | 4 | 6)}
-                  >
-                    {r}
-                  </button>
-                ))}
-                <button type="button" id="demo-ball-out" className="ball-btn ball-btn-wicket" onClick={engine.recordWicket}>
-                  OUT
-                </button>
+              <div className="flex-1 min-w-0">
+                <CrewSlot
+                  title="Non-Striker"
+                  active={engine.activeSlot === "nonStriker"}
+                  onActivate={() => engine.setActiveSlot("nonStriker")}
+                  displayName={liveState.nonStriker.name}
+                  imageUrl={liveState.nonStriker.imageUrl}
+                  statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
+                  allPlayers={battingSquad}
+                  onAssign={(p) => engine.assignPlayer("nonStriker", p)}
+                  onClear={() => engine.clearSlot("nonStriker")}
+                  placeholder="Select non-striker"
+                  dismissedNames={engine.dismissedPlayers}
+                  blockedName={liveState.striker.name || undefined}
+                  noReplacement={nonStrikerNeedsReplacement}
+                  readOnly={readOnly}
+                />
               </div>
-              <p className="text-[9px] mt-2" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
-                {readOnly
-                  ? "Auto-demo is currently driving this match — switch to \"Try It Yourself\" to take over scoring."
-                  : <>Pick an extra type first if this ball is a wide / no ball / bye / leg bye. Fours, sixes, and fifty/hundred milestones
-                  fire automatically. Tap OUT to record a wicket — you&apos;ll be asked who was out, the dismissal, and (for a run out)
-                  how many runs were completed. Innings/match completion (all out, overs up, or target reached) is now detected
-                  automatically, and the Match Won graphic fires the instant the match completes.</>}
-              </p>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="summary-tile">
-                <FieldLabel>Partnership</FieldLabel>
-                <span className="summary-tile-value">{liveState.partnership.runs} ({liveState.partnership.balls})</span>
-              </div>
-              <div className="summary-tile">
-                <FieldLabel>Match 4s / 6s</FieldLabel>
-                <span className="summary-tile-value">{liveState.matchBoundaries.fours} / {liveState.matchBoundaries.sixes}</span>
-              </div>
-              <div className="summary-tile">
-                <FieldLabel>Tourn. 4s / 6s</FieldLabel>
-                <span className="summary-tile-value">{liveState.tournamentBoundaries.fours} / {liveState.tournamentBoundaries.sixes}</span>
-              </div>
-              <div className="summary-tile">
-                <FieldLabel>Bowler Figures</FieldLabel>
-                <span className="summary-tile-value">{liveState.bowler.overs}.{liveState.bowler.balls}-{liveState.bowler.maidens}-{liveState.bowler.runs}-{liveState.bowler.wickets}</span>
-              </div>
+            <div className="mt-3">
+              <CrewSlot
+                title={`Bowler (${bowlingTeamLabel})`}
+                active={engine.activeSlot === "bowler"}
+                onActivate={() => engine.setActiveSlot("bowler")}
+                displayName={liveState.bowler.name}
+                imageUrl={liveState.bowler.imageUrl}
+                statLine={liveState.bowler.name ? `${liveState.bowler.overs}.${liveState.bowler.balls}-${liveState.bowler.maidens}-${liveState.bowler.runs}-${liveState.bowler.wickets}` : undefined}
+                allPlayers={bowlingSquad}
+                onAssign={(p) => engine.assignPlayer("bowler", p)}
+                placeholder="Select bowler"
+                readOnly={readOnly}
+              />
+            </div>
+
+            <div className="mt-3">
+              <Eyebrow className="block mb-1">{engine.activeSlot === "bowler" ? `Pick from ${bowlingTeamLabel}` : `Pick from ${battingTeamLabel}`}</Eyebrow>
+              <PlayerCarousel
+                players={engine.activeSlot === "bowler" ? bowlingSquad : battingSquad}
+                onSelect={(p) => engine.assignPlayer(engine.activeSlot, p)}
+                emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in the Fix a Mistake section below."
+                dismissedNames={engine.activeSlot === "bowler" ? undefined : engine.dismissedPlayers}
+                roleByName={engine.activeSlot === "bowler" ? bowlingRoleMap : battingRoleMap}
+                disabled={readOnly}
+              />
             </div>
 
             {!readOnly && (
-              <ManualCorrectionPanel
-                liveState={liveState}
-                setLiveState={setLiveState}
-                setLiveDirty={setLiveDirty}
-                patchLive={engine.patchLive}
-              />
+              <div className="flex items-center gap-2 mt-3">
+                <SmallButton onClick={engine.newPartnership}>New Partnership</SmallButton>
+              </div>
             )}
-          </>
-        )}
+          </div>
 
-        <div className="flex justify-end">
-          <PrimaryButton id="demo-push-live-state" onClick={onPush} minWidth={180}>
-            {pushLabel}
-          </PrimaryButton>
-        </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Eyebrow>This Ball</Eyebrow>
+              <div className="flex items-center gap-2">
+                {engine.canUndo && !readOnly && (
+                  <SmallButton onClick={engine.undo} style={{ color: "var(--color-warning)" }}>
+                    ↶ Undo Last Ball
+                  </SmallButton>
+                )}
+                <button
+                  type="button"
+                  onClick={() => !readOnly && engine.setIsFreeHit((v) => !v)}
+                  disabled={readOnly}
+                  className={`free-hit-toggle ${engine.isFreeHit ? "is-active" : "is-inactive"}`}
+                  title={engine.isFreeHit ? "Free Hit is active — tap to cancel" : "Tap to manually mark this ball a Free Hit"}
+                  style={readOnly ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                >
+                  <span className="free-hit-toggle-track">
+                    <span className="free-hit-toggle-thumb" />
+                  </span>
+                  <span className="free-hit-toggle-label">
+                    <span className="free-hit-toggle-title">Free Hit</span>
+                    <span className="free-hit-toggle-state">{engine.isFreeHit ? "Active" : "Off"}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="ball-controls-row">
+              <div className="ball-controls-extras">
+                <span className="ball-controls-label">Extra</span>
+                <SegmentedControl options={EXTRA_OPTIONS} value={engine.extraType} onChange={(v) => !readOnly && engine.setExtraType(v as ExtraType)} />
+              </div>
+            </div>
+
+            <div className="ball-pad" style={readOnly ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
+              {[0, 1, 2, 3, 4, 6].map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  disabled={readOnly}
+                  className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`}
+                  onClick={() => engine.recordBall(r)}
+                >
+                  {r}
+                </button>
+              ))}
+              <button type="button" disabled={readOnly} className="ball-btn ball-btn-wicket" onClick={engine.recordWicket}>
+                OUT
+              </button>
+            </div>
+            <p className="text-[9px] mt-2" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+              {readOnly
+                ? "Auto-demo is currently driving this match — switch to \"Try It Yourself\" to take over scoring."
+                : <>Pick an extra type first if this ball is a wide / no ball / bye / leg bye. Fours, sixes, and fifty/hundred milestones
+                fire automatically. Tap OUT to record a wicket — you&apos;ll be asked who was out, the dismissal, and (for a run out)
+                how many runs were completed. Innings/match completion (all out, overs up, or target reached) is now detected
+                automatically, and the Match Won graphic fires the instant the match completes.</>}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="summary-tile">
+              <FieldLabel>Partnership</FieldLabel>
+              <span className="summary-tile-value">{liveState.partnership.runs} ({liveState.partnership.balls})</span>
+            </div>
+            <div className="summary-tile">
+              <FieldLabel>Match 4s / 6s</FieldLabel>
+              <span className="summary-tile-value">{liveState.matchBoundaries.fours} / {liveState.matchBoundaries.sixes}</span>
+            </div>
+            <div className="summary-tile">
+              <FieldLabel>Tourn. 4s / 6s</FieldLabel>
+              <span className="summary-tile-value">{liveState.tournamentBoundaries.fours} / {liveState.tournamentBoundaries.sixes}</span>
+            </div>
+            <div className="summary-tile">
+              <FieldLabel>Bowler Figures</FieldLabel>
+              <span className="summary-tile-value">{liveState.bowler.overs}.{liveState.bowler.balls}-{liveState.bowler.maidens}-{liveState.bowler.runs}-{liveState.bowler.wickets}</span>
+            </div>
+          </div>
+
+          {!readOnly && (
+            <ManualCorrectionPanel
+              liveState={liveState}
+              setLiveState={setLiveState}
+              setLiveDirty={setLiveDirty}
+              patchLive={engine.patchLive}
+            />
+          )}
+        </>
+      )}
+
+      <div className="flex justify-end">
+        <PrimaryButton onClick={onPush} minWidth={180} disabled={readOnly}>
+          {pushLabel}
+        </PrimaryButton>
       </div>
     </DrawerSection>
   );

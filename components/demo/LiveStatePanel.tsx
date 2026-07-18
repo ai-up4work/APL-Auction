@@ -45,14 +45,6 @@ function ViewportPortal({ children }: { children: React.ReactNode }) {
 
 type PlayerRole = "striker" | "nonStriker" | "bowler";
 
-// `demoDim` is purely cosmetic (dims the row while auto-demo drives the
-// match). It NEVER blocks a click — real humans are blocked at the
-// pointer-events level on the panel root (see LiveStatePanel's
-// `readOnly` handling below), and the auto-demo driver clicks these
-// same elements for real via element.click(), which ignores
-// pointer-events entirely. Keeping demoDim separate from any click-lock
-// means this component never has to know whether a click is "real" or
-// scripted — it just responds to clicks, same as always.
 function PlayerCarousel({
   players,
   onSelect,
@@ -187,8 +179,6 @@ function PlayerCarousel({
   );
 }
 
-// `demoDim` — same cosmetic-only contract as PlayerCarousel above:
-// dims the slot while auto-demo is driving, but never blocks a click.
 function CrewSlot({
   id,
   title,
@@ -376,11 +366,6 @@ function BatsmanOutOption({
   );
 }
 
-// `readOnly` here only sets pointer-events: none on the backdrop, since
-// this dialog is rendered via ViewportPortal (createPortal to
-// document.body) and therefore sits OUTSIDE any pointer-events lock
-// applied to the main panel body. This is the one place that lock has
-// to be applied a second time, deliberately, rather than inherited.
 function WicketDetailDialog({
   pending,
   onResolve,
@@ -708,13 +693,6 @@ function MatchOverScreen({
   );
 }
 
-// Trimmed to STATE READS ONLY. The auto-demo driver no longer calls
-// engine functions through this handle — it clicks the real, visible
-// buttons (by id) exactly like a human would, via useDemoCursor. This
-// handle exists purely so the driver can decide WHAT to click next
-// (e.g. "are controls locked, so I should go pick a striker" or "is the
-// match already over, so I should stop bowling"), never to bypass the
-// UI to make something happen.
 export interface LiveStatePanelHandle {
   isControlsLocked: () => boolean;
   isMatchComplete: () => boolean;
@@ -722,17 +700,15 @@ export interface LiveStatePanelHandle {
   noPartnerAvailable: () => boolean;
   isSecondInnings: () => boolean;
   canUndo: () => boolean;
+  isFreeHitActive: () => boolean;   // <-- added
   getBattingSquad: () => SquadPlayer[];
   getBowlingSquad: () => SquadPlayer[];
-  // Names already dismissed this innings — the driver excludes these
-  // when picking a replacement so it never retries an out player.
   getDismissedNames: () => Set<string>;
-  // Current occupants of each crew slot ("" when empty) — the driver
-  // excludes whoever is already in the *other* batting slot so it
-  // never tries to assign the same player twice.
   getStrikerName: () => string;
   getNonStrikerName: () => string;
   getBowlerName: () => string;
+  getMaxLegalBalls: () => number | undefined;
+  getLegalBallsBowled: () => number;
 }
 
 export interface LiveStatePanelProps {
@@ -767,12 +743,6 @@ export interface LiveStatePanelProps {
   }) => void;
   onEngineStateChange?: (state: EngineSyncState) => void;
   initialEngineState?: EngineSyncState | null;
-  // When true: the panel keeps working exactly as normal — every
-  // handler still fires — but (a) real pointer input is locked out via
-  // CSS pointer-events (a script's element.click() ignores this, so the
-  // auto-demo driver can still operate every control for real), and
-  // (b) controls render slightly dimmed as a visual cue that something
-  // else is driving.
   readOnly?: boolean;
 }
 
@@ -864,7 +834,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
     initialEngineState,
   });
 
- useImperativeHandle(
+  useImperativeHandle(
     ref,
     () => ({
       isControlsLocked: () => engine.assignmentsMissing(),
@@ -873,12 +843,15 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
       noPartnerAvailable: () => !!engine.noPartnerAvailable,
       isSecondInnings: () => (liveState.inningsNumber ?? 1) === 2,
       canUndo: () => engine.canUndo,
+      isFreeHitActive: () => engine.isFreeHit,   // <-- added
       getBattingSquad: () => battingSquad,
       getBowlingSquad: () => bowlingSquad,
       getDismissedNames: () => engine.dismissedPlayers,
       getStrikerName: () => liveState.striker.name,
       getNonStrikerName: () => liveState.nonStriker.name,
       getBowlerName: () => liveState.bowler.name,
+      getMaxLegalBalls: () => (maxOvers !== undefined ? maxOvers * 6 : undefined),
+      getLegalBallsBowled: () => liveState.score.overs * 6 + liveState.score.balls,
     }),
     [
       engine,
@@ -887,6 +860,9 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
       liveState.striker.name,
       liveState.nonStriker.name,
       liveState.bowler.name,
+      liveState.score.overs,
+      liveState.score.balls,
+      maxOvers,
       battingSquad,
       bowlingSquad,
     ]
@@ -1394,11 +1370,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
         </ViewportPortal>
       )}
 
-      {/* This is the ONLY place `readOnly` blocks real interaction — via
-          pointer-events, not via disabling handlers. A human's mouse
-          can't hit-test through pointer-events: none, but a script's
-          element.click() ignores it completely, so the auto-demo driver
-          keeps working perfectly through this exact wrapper. */}
       <div id="demo-panel-root" style={{ pointerEvents: readOnly ? "none" : undefined }}>
         {liveState.matchComplete ? (
           <MatchOverScreen
