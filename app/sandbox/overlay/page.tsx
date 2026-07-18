@@ -30,36 +30,17 @@
 // with its own document (loaded via iframe) is what keeps those portals
 // contained, and app/sandbox/overlay/lib/sandboxBus.ts (a
 // BroadcastChannel) is what re-syncs this page's live state into that
-// iframe's document without a server round trip. This reintroduces the
-// second route + cross-document channel an earlier version of this file
-// deliberately removed — that tradeoff is intentional this time,
-// specifically to keep the overlay components themselves untouched
-// rather than special-casing them for scaled rendering.
+// iframe's document without a server round trip.
 //
-// NOTE on the monitor iframe's lifecycle: LivePreviewMonitor only
-// renders in the "control" branch below, so it (and its <iframe>) is
-// destroyed and rebuilt every time you flip to Live and back. This page
-// component itself does NOT unmount on that switch — it just swaps
-// which JSX branch it returns — so liveState/channels/weatherData here
-// stay intact the whole time. The freshly-remounted iframe re-requests
-// a snapshot on mount (see /preview/page.tsx), and the "requestState"
-// handler below MUST answer with a live-updating ref
-// (stateSnapshotRef), not the plain closed-over state variables — a
-// handler set up once in a mount-only effect would otherwise always
-// answer with whatever those variables were at first mount, which is
-// exactly the bug where the monitor comes back showing only the
-// default-on channel (Score Bar) after a round trip through Live, even
-// though every toggle you made is still sitting right there in this
-// page's own state.
-//
-// On a moment firing, the monitor transitions into a clearly-different
-// "On Air" state (glowing ring, pulsing dot, slight scale-up) with an
-// eased CSS transition so the change reads as deliberate, not a snap.
-// It then HOLDS that featured state for MOMENT_AUTO_REVERT_MS[moment] —
-// matched to how long each celebration actually plays — before easing
-// back down to the normal "Live Preview" state. Firing a new moment
-// while one is already featured just resets the hold (see
-// featurePreview()), so it can never get stuck mid-transition.
+// Scoring console: now rendered via <LiveStatePanelAuto>, which wraps
+// the real <LiveStatePanel> (unchanged engine/graphics) with a scripted
+// "watch it run" driver plus its own Pause Demo / Try It Yourself
+// controls — see components/overlays/admin/LiveStatePanelAuto.tsx. The
+// wrapper owns mode + pause state internally; this page just hands it
+// the same callbacks it always passed to LiveStatePanel directly, plus
+// onRestartMatch (required — the driver calls it once per demo cycle)
+// and logEvent (so demo-driven completions show up in the Event Feed
+// like everything else).
 
 "use client";
 
@@ -67,7 +48,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { DismissalType } from "@/hooks/useLiveScoringEngine";
 import type { MomentPayload } from "@/lib/overlayBus";
 
-import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
+import LiveStatePanelAuto from "@/components/demo/LiveStatePanelAuto";
 import BroadcastSurface from "@/components/demo/BroadcastSurface";
 import { connectSandboxBus, type SandboxChannels } from "./lib/sandBoxBus";
 
@@ -309,11 +290,6 @@ function MomentChyron({ fired }: { fired: FiredMoment | null }) {
   if (!fired) return null;
   const meta = MOMENT_META[fired.moment];
   return (
-    // top-[190px] clears the console header (44px) + the control deck
-    // below it (channel pills row + weather row + event feed strip,
-    // ~140px combined) with a small buffer — it used to sit at top-16
-    // (64px), which landed squarely on top of the "On Air Channels"
-    // pill row and hid whichever channels happened to be underneath it.
     <div className="pointer-events-none fixed top-[190px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center max-w-[560px] w-[92%]">
       <div
         key={fired.id}
@@ -354,14 +330,7 @@ function MomentChyron({ fired }: { fired: FiredMoment | null }) {
 
 /* ------------------------------------------------------------------ */
 /*  Live Preview Monitor — the small, always-on replica of the real    */
-/*  broadcast surface, embedded directly in the Control view. Backed    */
-/*  by an <iframe> loading /sandbox/overlay/preview (its own document,  */
-/*  so overlay portals land correctly instead of escaping a scaled div) */
-/*  scaled down visually via a CSS transform on its wrapper. On a       */
-/*  moment it transitions into a clearly distinct "On Air" state        */
-/*  (glowing ring + pulsing dot + slight scale-up), holds there, then    */
-/*  eases back — see featurePreview() in the page component for the     */
-/*  enter/hold/revert timing.                                           */
+/*  broadcast surface, embedded directly in the Control view.          */
 /* ------------------------------------------------------------------ */
 
 function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload["moment"] | null }) {
@@ -370,12 +339,6 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
 
   return (
     <div className="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-1.5 pointer-events-none">
-      {/* The monitor frame. The scale-up + glow transition is the "clear
-          transition" the enter/hold/revert cycle hinges on — 500ms
-          eased both ways so entering and leaving read as deliberate
-          rather than a snap-cut. Duration of the hold in between is
-          controlled entirely by the caller via featuredMoment's
-          lifetime (see featurePreview()). */}
       <div
         className="relative overflow-hidden rounded-md transition-all duration-500 ease-out"
         style={{
@@ -388,12 +351,6 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
           background: "#000",
         }}
       >
-        {/* Fixed-size wrapper at native broadcast resolution, scaled
-            down to the monitor's footprint. The iframe's OWN width/
-            height stay at STAGE_WIDTH/STAGE_HEIGHT — the transform only
-            changes how big it looks, not its internal layout viewport —
-            so /preview's "fixed inset-0" content lays out exactly like
-            the real Live view, just shrunk on screen. */}
         <div
           style={{
             width: STAGE_WIDTH,
@@ -424,15 +381,7 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
 }
 
 // ── Weather condition dropdown — a themed replacement for the native
-// <select>. Native selects can only be styled up to the closed trigger;
-// the OPEN option list is rendered by the browser/OS itself and ignores
-// app CSS entirely, which is exactly why it was showing up as a plain
-// white system list against this dark console. This rebuilds it as a
-// regular button + absolutely-positioned panel so every pixel of it —
-// trigger and open list both — follows the same dark/mono/gold language
-// as the rest of the control deck (Pill's active-state treatment, same
-// glass-panel look as the monitor frame). Closes on outside click,
-// Escape, or picking an option.
+// <select>.
 function WeatherConditionSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -529,49 +478,15 @@ export default function OverlaySandboxPage() {
   const [firedMoment, setFiredMoment] = useState<FiredMoment | null>(null);
   const momentIdRef = useRef(0);
 
-  // Which moment (if any) the Live Preview Monitor should currently be
-  // "featuring" — i.e. showing its glowing On Air state for. Separate
-  // from firedMoment (which only drives the chyron + event log) so the
-  // monitor's enter/hold/revert cycle can be reasoned about on its own.
   const [featuredMoment, setFeaturedMoment] = useState<MomentPayload["moment"] | null>(null);
   const previewRevertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Bus connection to the monitor iframe's separate document. Kept in a
-  // ref (not state) since it's an imperative handle, not something that
-  // should trigger a re-render.
   const busRef = useRef<ReturnType<typeof connectSandboxBus> | null>(null);
 
-  // Timers for auto-off channels — see AUTO_OFF_CHANNEL_DURATIONS. Keyed
-  // per-channel so Match Intro and Scorecard (or any future timed
-  // channel) can each hold their own independent timer without
-  // stepping on each other.
   const autoOffTimersRef = useRef<Partial<Record<keyof SandboxChannels, ReturnType<typeof setTimeout>>>>({});
 
-  // Whether the Match 4s/6s channel has already been auto-enabled for
-  // the CURRENT innings. Fires exactly once — on the first four or six
-  // of an innings, matchBoundaries gets turned on automatically (if it
-  // isn't already). After that, this flag stops it from re-forcing the
-  // channel back on, so the operator's own manual toggle is respected
-  // for the rest of the innings — it behaves like a default that only
-  // applies once. Reset to false on a new innings / restart so the next
-  // innings gets its own "first boundary" moment.
   const matchBoundariesAutoEnabledRef = useRef(false);
 
-  // Always-current snapshot of everything the monitor iframe needs to
-  // render. This exists specifically so the "requestState" responder in
-  // the mount-only effect below never answers from a stale closure.
-  // That effect runs exactly once (empty deps) and sets up a message
-  // handler; without this ref, that handler would forever close over
-  // matchSetup/liveState/weatherData/channels as they were at the very
-  // first render, and would keep answering every future requestState
-  // with those original values. That's the exact bug where flipping to
-  // Live and back destroys + remounts the monitor's iframe (see
-  // LivePreviewMonitor — it isn't rendered in the "live" branch), the
-  // iframe re-asks "what's current?" on mount, and it used to get told
-  // "the initial defaults" instead of whatever channels/liveState this
-  // page's own state currently holds — so the monitor came back showing
-  // only the Score Bar (the one channel that's on by default) even
-  // though the real page still had everything else toggled on.
   const stateSnapshotRef = useRef({ matchSetup, liveState, weatherData, channels });
 
   function clearPreviewRevert() {
@@ -581,12 +496,6 @@ export default function OverlaySandboxPage() {
     }
   }
 
-  // Enter → hold → revert. Entering is instant (the CSS transition on
-  // the monitor itself is what makes it *look* smooth); the hold length
-  // is however long that moment's celebration actually plays for; the
-  // revert is the same CSS transition easing back down. A new moment
-  // firing mid-hold just resets the timer to the new moment, so back-to-
-  // back boundaries never get cut short awkwardly.
   function featurePreview(moment: MomentPayload["moment"]) {
     clearPreviewRevert();
     setFeaturedMoment(moment);
@@ -605,22 +514,6 @@ export default function OverlaySandboxPage() {
     []
   );
 
-  // Set up the bus once on mount: respond to the monitor iframe's
-  // initial "requestState" with a fresh snapshot, and send one
-  // proactively right away too, in case the iframe's own requestState
-  // message beats this listener into existence (unlikely, but free to
-  // guard against).
-  //
-  // IMPORTANT: the requestState responder reads stateSnapshotRef.current
-  // — NOT the matchSetup/liveState/weatherData/channels variables in
-  // this closure directly. Those variables are only ever what they were
-  // at the moment this effect ran (mount), because the effect has an
-  // empty dependency array and is deliberately not re-created on every
-  // state change (that's the job of the second effect below). Reading
-  // them directly here would mean every "requestState" — including the
-  // one the monitor iframe sends every time it remounts after a Flip to
-  // Live → Back to Controls round trip — gets answered with whatever
-  // state existed on the very first render, not the current state.
   useEffect(() => {
     const bus = connectSandboxBus();
     busRef.current = bus;
@@ -638,33 +531,15 @@ export default function OverlaySandboxPage() {
       bus.close();
       busRef.current = null;
     };
-    // Intentionally only on mount — the effect below keeps the ref (and
-    // the iframe) in sync on every subsequent change instead of
-    // re-subscribing here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-sync the monitor iframe's document any time state it needs to
-  // render changes — it has no other way to find out, since it's a
-  // separate document/window from this page. This is also the ONLY
-  // place stateSnapshotRef gets updated, which is what keeps the
-  // requestState responder above answering with live data instead of
-  // mount-time data.
   useEffect(() => {
     stateSnapshotRef.current = { matchSetup, liveState, weatherData, channels };
     busRef.current?.send({ type: "state", data: stateSnapshotRef.current });
   }, [matchSetup, liveState, weatherData, channels]);
 
   function goLive() {
-    // Push a history entry marking "we're in Live view" BEFORE switching
-    // state. Without this, Live/Control is pure React state — the
-    // browser is still sitting on whatever history entry it was on when
-    // /sandbox/overlay first loaded. On mobile especially, a single
-    // back-swipe from Live would then skip straight past this page
-    // entirely (to a different site, or close the tab if there's no
-    // prior entry) instead of just backing out of the broadcast view.
-    // Pushing this marker gives the back button something of ours to
-    // consume first.
     if (typeof window !== "undefined") {
       window.history.pushState({ sandboxOverlayLive: true }, "");
     }
@@ -672,14 +547,6 @@ export default function OverlaySandboxPage() {
   }
 
   function backToControls() {
-    // If we're on the history entry goLive() pushed, go back through it
-    // rather than calling setView directly — that pops the marker AND
-    // fires the popstate listener below (which does the actual
-    // setView("control")), so there's exactly one code path for "how do
-    // we get back to Controls," whether it's triggered by this button
-    // or the browser's own back button. Falls back to a plain setView
-    // for the rare case there's no pushed marker to unwind (e.g. this
-    // got called without goLive ever having run).
     if (typeof window !== "undefined" && (window.history.state as any)?.sandboxOverlayLive) {
       window.history.back();
     } else {
@@ -687,13 +554,6 @@ export default function OverlaySandboxPage() {
     }
   }
 
-  // Catches the browser/phone back button (or trackpad back-gesture)
-  // while in Live view and routes it to Controls instead of letting it
-  // fall through to whatever the browser would otherwise show — the
-  // page before this one in history, or closing the tab if there isn't
-  // one. Also fires (harmlessly) if popstate happens for some other
-  // reason while already in Controls, since landing on Controls is a
-  // no-op there.
   useEffect(() => {
     function onPopState() {
       setView("control");
@@ -706,9 +566,6 @@ export default function OverlaySandboxPage() {
     setLog((prev) => [`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  ${label}`, ...prev].slice(0, 14));
   }
 
-  // Body background: normal app background in "control" view. In "live"
-  // view the video backdrop covers the frame, so this is just a safe
-  // fallback color while it buffers.
   useEffect(() => {
     document.body.style.background = view === "live" ? "#000" : "";
     return () => {
@@ -722,17 +579,8 @@ export default function OverlaySandboxPage() {
     setFiredMoment({ id: momentIdRef.current, moment: payload.moment, text });
     logEvent(`Moment: ${payload.moment.toUpperCase()}${payload.player ? ` — ${payload.player}` : ""}`);
 
-    // No auto-flipping the whole tab to Live — the scorer stays on the
-    // control deck. The Live Preview Monitor picks up the moment
-    // instead, transitioning into its On Air state.
     featurePreview(payload.moment);
 
-    // Trigger the celebration in THIS window (covers the full-screen
-    // Live view, which renders <BroadcastSurface> directly in this same
-    // document) AND broadcast it over the bus so the monitor iframe's
-    // separate window/document triggers its own copy too — a window-
-    // scoped global function call in this document never reaches a
-    // different document's window on its own.
     (window as any).triggerBoundaryCelebration?.(payload.moment, payload);
     busRef.current?.send({ type: "moment", moment: payload.moment, payload });
   }
@@ -744,9 +592,6 @@ export default function OverlaySandboxPage() {
   }
 
   function handleBoundary(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
-    // First boundary of the innings: turn Match 4s/6s on automatically
-    // if it isn't already, then leave it alone for the rest of the
-    // innings — the operator's own toggling takes over from here.
     if (!matchBoundariesAutoEnabledRef.current) {
       matchBoundariesAutoEnabledRef.current = true;
       if (!channels.matchBoundaries) {
@@ -849,13 +694,6 @@ export default function OverlaySandboxPage() {
     setChannels((prev) => ({ ...prev, [key]: !prev[key] }));
     logEvent(`${CHANNEL_LABELS[key]} ${turningOn ? "shown" : "hidden"}`);
 
-    // Channels listed in AUTO_OFF_CHANNEL_DURATIONS are timed graphics
-    // (Match Intro, Scorecard) rather than persistent ones — turning
-    // one on also arms a timer that flips it back off once its display
-    // window is up. Toggling it off manually (or back on again) before
-    // that clears/resets the timer, same idea as featurePreview() above
-    // for the monitor's on-air hold. Every channel NOT in that map
-    // (Score Bar included) is purely manual: no timer, ever.
     const autoOffMs = AUTO_OFF_CHANNEL_DURATIONS[key];
     if (autoOffMs !== undefined) {
       const existing = autoOffTimersRef.current[key];
@@ -873,10 +711,7 @@ export default function OverlaySandboxPage() {
     }
   }
 
-  // ── LIVE VIEW — the actual broadcast surface, same tab, same document
-  //     (so its overlay portals land on this real page directly — no
-  //     iframe needed here, only the small Control-view monitor needs
-  //     one). ────────────────────────────────────────────────────────
+  // ── LIVE VIEW ──────────────────────────────────────────────────────
   if (view === "live") {
     return (
       <div className="fixed inset-0" style={{ background: "#000" }}>
@@ -884,14 +719,6 @@ export default function OverlaySandboxPage() {
 
         <BroadcastSurface channels={channels} liveState={liveState} weatherData={weatherData} matchSetup={matchSetup} />
 
-        {/* Positioned at the vertical center of the left edge rather
-            than the top-left corner — the top-left corner is where the
-            Tournament Logo channel renders, and this button was sitting
-            directly on top of it. Center-left is clear of that overlay
-            (and of the score bar at the bottom) no matter how tall the
-            logo happens to render. Kept compact and low-contrast by
-            default, brightening only on hover, so it doesn't compete
-            with the broadcast graphics for attention. */}
         <button
           type="button"
           onClick={backToControls}
@@ -909,9 +736,6 @@ export default function OverlaySandboxPage() {
           Back to Controls
         </button>
 
-        {/* Same reasoning mirrored on the right edge, vertically
-            centered opposite the Back to Controls tab — the top-right
-            corner is where the Weather channel renders. */}
         <div
           className="fixed top-1/2 right-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] opacity-70 hover:opacity-100 transition-opacity"
           style={{
@@ -935,7 +759,7 @@ export default function OverlaySandboxPage() {
     );
   }
 
-  // ── CONTROL VIEW — broadcast-console styled scorer + control deck ───
+  // ── CONTROL VIEW ─────────────────────────────────────────────────────
   const scoreReadout = `${liveState.score.runs}/${liveState.score.wickets} (${liveState.score.overs}.${liveState.score.balls})`;
   const inningsLabel = liveState.matchComplete
     ? "Match Complete"
@@ -970,8 +794,6 @@ export default function OverlaySandboxPage() {
         }
       `}</style>
 
-      {/* Ambient scanline + top radial glow texture — same treatment as
-          the other two sandboxes, so all three read as one console. */}
       <div
         className="pointer-events-none absolute inset-0 z-0 overlay-sandbox-scanlines"
         style={{
@@ -1080,17 +902,6 @@ export default function OverlaySandboxPage() {
       </div>
 
       {/* ── Control deck ─────────────────────────────────────────── */}
-      {/* z-20, not z-10: the Scoring Console below is also position:
-          relative with its own z-index (see "Scoring console" comment
-          further down). Two sibling stacking contexts tied on z-index
-          paint in DOM order — later wins — so at z-10/z-10 the console
-          (later in the markup) was painting over anything from this
-          deck that extended past its own edge, including the open
-          weather dropdown despite that dropdown's own z-50 (which only
-          wins comparisons *inside* this deck's stacking context, not
-          against a sibling one). Bumping the deck itself to z-20 settles
-          that tie so the whole deck — dropdown included — stays on top,
-          regardless of DOM order. */}
       <div
         className="shrink-0 relative z-20"
         style={{ background: "rgba(10,10,10,0.35)", borderBottom: "1px solid var(--color-border-overlay)" }}
@@ -1127,9 +938,6 @@ export default function OverlaySandboxPage() {
           </ControlCluster>
         </div>
 
-        {/* Event feed — same compact glass-strip treatment as the
-            brackets sandbox's roster strip, swapped for a scrolling
-            mono event log instead of team chips. */}
         <div
           className="flex items-start gap-3 px-5 py-2.5"
           style={{ background: "rgba(0,0,0,0.22)", borderTop: "1px solid var(--color-border-overlay)" }}
@@ -1165,13 +973,10 @@ export default function OverlaySandboxPage() {
 
       <MomentChyron fired={firedMoment} />
 
-      {/* ── Scoring console — fills remaining space, scrolls
-            independently under the fixed header/control deck. Stays at
-            z-10, one below the Control Deck's z-20 above — see the
-            comment on that deck for why the relative order between
-            these two matters (it's not just visual layering, it's
-            which one wins DOM-order ties for anything that pops out of
-            its own box, like the weather dropdown). ── */}
+      {/* ── Scoring console — now backed by LiveStatePanelAuto, which
+            owns the demo/interactive toggle and pause/resume itself and
+            renders LiveStatePanel underneath with the same props this
+            page always passed it. ── */}
       <div className="flex-1 min-h-0 overflow-auto relative z-10 px-5 py-5">
         <div
           className="rounded-xl p-5"
@@ -1181,7 +986,7 @@ export default function OverlaySandboxPage() {
             boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
           }}
         >
-          <LiveStatePanel
+          <LiveStatePanelAuto
             matchId={null}
             liveState={liveState}
             setLiveState={setLiveState}
@@ -1200,13 +1005,12 @@ export default function OverlaySandboxPage() {
             onRestartMatch={restartMatch}
             initialEngineState={engineSyncState}
             onEngineStateChange={setEngineSyncState}
+            logEvent={logEvent}
+            defaultMode="demo"
           />
         </div>
       </div>
 
-      {/* Always-on iframe-backed monitor, scaled down to a corner box —
-          see LivePreviewMonitor above for the enter/hold/revert timing
-          on moments. */}
       <LivePreviewMonitor featuredMoment={featuredMoment} />
     </div>
   );

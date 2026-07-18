@@ -1,7 +1,16 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+// Floating "ghost cursor" for the auto-demo driver. Portaled straight
+// to document.body and positioned with `position: fixed` in real
+// viewport coordinates, at a z-index above every modal in the app
+// (WicketDetailDialog / EndInningsDialog / RestartMatchDialog all sit
+// at z-index 9000 via ViewportPortal). Previously this rendered inside
+// LiveStatePanelAuto's own wrapper at a lower stacking level, so it was
+// invisible any time a dialog was open — the click was genuinely
+// landing, you just couldn't see it happen.
 
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface CursorState {
   x: number;
@@ -12,121 +21,103 @@ export interface CursorState {
   label: string;
 }
 
-// Frame dimensions the cursor coordinates are expressed in
-const FRAME_W = 390;
-const FRAME_H = 650;
-const LABEL_FLIP_MARGIN = 90;
+const CURSOR_Z_INDEX = 999999;
 
-type DemoCursorProps = {
-  cursor?: CursorState;
-};
+export default function DemoCursor({
+  cursor,
+}: {
+  cursor: CursorState;
+  // Accepted for backward compatibility with existing call sites.
+  // No longer used for positioning now that the cursor is
+  // viewport-fixed rather than scaled relative to a frame.
+  frameWidth?: number;
+  frameHeight?: number;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted || typeof document === "undefined" || !cursor.visible) return null;
 
-export default function DemoCursor({ cursor }: DemoCursorProps) {
-  if (!cursor || !cursor.visible) return null;
-
-  const flipX = cursor.x > FRAME_W - LABEL_FLIP_MARGIN;
-  const flipY = cursor.y > FRAME_H - LABEL_FLIP_MARGIN;
-
-  return (
-    <motion.div
-      className="pointer-events-none absolute z-[500]"
-      animate={{
-        x: cursor.x,
-        y: cursor.y,
-      }}
-      transition={{
-        type: "spring",
-        stiffness: 42,
-        damping: 16,
-        mass: 1.1,
-      }}
+  return createPortal(
+    <div
+      aria-hidden
       style={{
-        left: 0,
+        position: "fixed",
         top: 0,
+        left: 0,
+        transform: `translate(${cursor.x}px, ${cursor.y}px)`,
+        transition: "transform 1.1s cubic-bezier(0.22, 1, 0.36, 1)",
+        pointerEvents: "none",
+        zIndex: CURSOR_Z_INDEX,
+        willChange: "transform",
       }}
     >
-      <div className="relative -translate-x-1 -translate-y-1">
-
-        {/* Cursor arrow */}
+      <div style={{ position: "relative", transform: "translate(-6px, -6px)" }}>
         <svg
-          width="22"
-          height="22"
-          viewBox="0 0 22 22"
+          width="26"
+          height="26"
+          viewBox="0 0 26 26"
           style={{
-            filter:
-              "drop-shadow(0 2px 4px rgba(0,0,0,0.6))",
+            filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))",
+            transform: cursor.clicking ? "scale(0.85)" : "scale(1)",
+            transition: "transform 140ms ease-out",
           }}
         >
           <path
-            d="M2 2 L2 18 L7 14 L10 20 L13 18.5 L10 12.5 L16 12.5 Z"
+            d="M4 2 L4 20 L9 15.5 L12.5 22.5 L15.5 21 L12 14 L18.5 14 Z"
             fill={cursor.color}
-            stroke="#000000"
+            stroke="rgba(0,0,0,0.55)"
             strokeWidth="1"
+            strokeLinejoin="round"
           />
         </svg>
 
-
-        {/* Click animation */}
-        <AnimatePresence>
-          {cursor.clicking && (
-            <motion.span
-              initial={{
-                scale: 0.4,
-                opacity: 0.9,
-              }}
-              animate={{
-                scale: 2.2,
-                opacity: 0,
-              }}
-              exit={{
-                opacity: 0,
-              }}
-              transition={{
-                duration: 0.75,
-                ease: "easeOut",
-              }}
-              className="absolute left-0 top-0 w-5 h-5 rounded-full"
-              style={{
-                border: `2px solid ${cursor.color}`,
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-
-        {/* Cursor label */}
-        <div
-          className="absolute whitespace-nowrap px-2 py-1 rounded-md text-[10px] font-bold uppercase font-mono flex items-center gap-1"
-          style={{
-            letterSpacing: "0.1em",
-            background: "rgba(0,0,0,0.92)",
-            color: cursor.color,
-            border: `1px solid ${cursor.color}66`,
-            boxShadow:
-              "0 2px 10px rgba(0,0,0,0.5)",
-
-            left: flipX ? "auto" : 20,
-            right: flipX ? 20 : "auto",
-
-            top: flipY ? "auto" : 16,
-            bottom: flipY ? 16 : "auto",
-
-            flexDirection: flipX
-              ? "row-reverse"
-              : "row",
-          }}
-        >
+        {cursor.clicking && (
           <span
-            className="w-1 h-1 rounded-full shrink-0"
             style={{
-              background: cursor.color,
+              position: "absolute",
+              top: 4,
+              left: 4,
+              width: 18,
+              height: 18,
+              borderRadius: "999px",
+              border: `2px solid ${cursor.color}`,
+              animation: "demoCursorPulse 480ms ease-out",
             }}
           />
+        )}
 
-          {cursor.label}
-        </div>
-
+        {cursor.label && (
+          <span
+            style={{
+              position: "absolute",
+              top: 24,
+              left: 20,
+              whiteSpace: "nowrap",
+              fontFamily: "var(--font-label-mono, ui-monospace, monospace)",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#fff",
+              background: "rgba(8,8,8,0.9)",
+              border: `1px solid ${cursor.color}`,
+              borderRadius: 5,
+              padding: "3px 7px",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+            }}
+          >
+            {cursor.label}
+          </span>
+        )}
       </div>
-    </motion.div>
+
+      <style jsx global>{`
+        @keyframes demoCursorPulse {
+          0% { transform: scale(0.4); opacity: 0.9; }
+          100% { transform: scale(1.9); opacity: 0; }
+        }
+      `}</style>
+    </div>,
+    document.body
   );
 }

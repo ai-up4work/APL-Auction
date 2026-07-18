@@ -1,4 +1,4 @@
-// app/components/overlays/admin/LiveStatePanel.tsx
+// app/components/demo/LiveStatePanel.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from "react";
@@ -1489,7 +1489,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
             </div>
 
             <div>
-              <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
+              <Eyebrow className="block mt-2 mb-2">Who&apos;s Involved</Eyebrow>
 
               <div className="flex flex-col md:flex-row items-stretch gap-3">
                 <div className="flex-1 min-w-0">
