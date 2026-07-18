@@ -55,6 +55,16 @@ const CYCLE_RESTART_GAP_MS = 2200;
 const COMMENTARY_LEAD_MS = 350;
 const POST_MOMENT_HOLD_MS = 2000;
 
+// How long to hold on the Match Intro / Scorecard graphics before
+// carrying on with the rest of the script. These are broadcast-side
+// overlays (not part of the scoring UI itself), so the driver doesn't
+// need to wait for their full on-screen duration — just a beat long
+// enough that a viewer sees them land before the next thing happens.
+// The channels themselves auto-hide on their own timers (see
+// AUTO_OFF_CHANNEL_DURATIONS in page.tsx) independent of this.
+const MATCH_INTRO_BEAT_MS = 1800;
+const SCORECARD_BEAT_MS = 1800;
+
 const LEGAL_BALLS_PER_OVER = 6;
 
 const UNCAPPED_FORMAT_SAFETY_BALLS = 40 * 6;
@@ -204,6 +214,34 @@ function buildInningsOneScript(): ScriptBeat[] {
   ];
 }
 
+// What the innings-playing loop actually stopped for. This is the key
+// piece of information the old driver was missing — it used to always
+// assume "we need to open the End Innings/End Match dialog" whenever
+// playInnings returned, regardless of why. In reality:
+//
+//  - "matchComplete": the real scoring engine (useLiveScoringEngine's
+//    checkAutoEndConditions) already detected the finish (target
+//    reached, or all-out/overs-done on the 2nd innings) and has ALREADY
+//    flipped liveState.matchComplete + computed the result. The
+//    MatchOverScreen is already showing. There is nothing to click.
+//  - "oversDone": same engine, same auto-detection, but for the END OF
+//    INNINGS 1 (overs used up or all out with overs still to bowl in
+//    the format). The engine has ALREADY moved inningsNumber to 2 and
+//    reset the scoreboard. Clicking "End Innings" again here would hit
+//    a button that has since silently become "End Match" (because
+//    isSecondInnings() is now true) and would fire a second, bogus
+//    result off the freshly-reset (0-run) 2nd innings scoreboard. This
+//    was the actual cause of the "wins by 1 ball" phantom banner.
+//  - "noPartner": the ONE case the engine's own auto-detection can't
+//    resolve by itself — the batting squad has run out of eligible
+//    batters before all 10 wickets have fallen (e.g. a smaller squad).
+//    This is the only reason the driver should ever open the End
+//    Innings/End Match dialog itself.
+//  - "safetyCap" / "notCurrent": the loop's own runaway-guard tripped,
+//    or the driver was stopped/reset mid-innings. Nothing to click;
+//    just unwind.
+type InningsExitReason = "matchComplete" | "noPartner" | "oversDone" | "safetyCap" | "notCurrent";
+
 class ScriptedDriver {
   private handleGetter: () => LiveStatePanelHandle | null;
   private cursorCtl: ReturnType<typeof useDemoCursor>;
@@ -349,6 +387,45 @@ class ScriptedDriver {
     if (!this.isCurrent(gen)) return false;
     if (ok) this.onLog(after);
     return ok;
+  }
+
+  // NEW — fires the Match Intro channel at the start of a match cycle.
+  // This clicks the same Pill in the Control deck a human would tap
+  // (id="demo-channel-matchIntro", wired up in page.tsx). The channel
+  // auto-hides itself on its own timer (see AUTO_OFF_CHANNEL_DURATIONS
+  // in page.tsx) — the driver just needs to hold here long enough for
+  // a viewer to actually see it land before scoring starts.
+  private async showMatchIntro(gen: number) {
+    if (!this.isCurrent(gen)) return;
+    const ok = await this.announcedClick(
+      gen,
+      "demo-channel-matchIntro",
+      "Show Match Intro",
+      "New match starting — cueing the Match Intro sequence before a ball's bowled.",
+      "Match Intro is live — it'll clear itself once the animation finishes.",
+      FLOW_COLOR
+    );
+    if (!ok) return;
+    await this.beat(gen, MATCH_INTRO_BEAT_MS);
+  }
+
+  // NEW — fires the Scorecard channel. Used both at the innings break
+  // (before the chase starts) and once the match has actually finished,
+  // so the full scorecard gets shown at both of the moments a broadcast
+  // would actually want it, not just left as a channel nobody ever
+  // toggles.
+  private async showScorecard(gen: number) {
+    if (!this.isCurrent(gen)) return;
+    const ok = await this.announcedClick(
+      gen,
+      "demo-channel-matchScorecard",
+      "Show Scorecard",
+      "Bringing up the full scorecard for a beat before play continues.",
+      "Scorecard is on air — it'll auto-hide shortly.",
+      FLOW_COLOR
+    );
+    if (!ok) return;
+    await this.beat(gen, SCORECARD_BEAT_MS);
   }
 
   // Commentary for a plain (non-extra, non-wicket) run value. Only runs
@@ -550,6 +627,11 @@ class ScriptedDriver {
     return false;
   }
 
+  // Opens and confirms the End Innings/End Match dialog — the ONLY
+  // caller of this should be `closeOutInnings` below, and only when
+  // playInnings reported "noPartner" as its exit reason. See the
+  // InningsExitReason comment for exactly why every other exit reason
+  // must NOT reach this method.
   private async endCurrentInningsOrMatch(gen: number, label: string) {
     if (!this.isCurrent(gen)) return;
     const isMatchEnd = label.toLowerCase().includes("match");
@@ -558,8 +640,8 @@ class ScriptedDriver {
       "demo-open-end-innings",
       label,
       isMatchEnd
-        ? "Innings is done — opening the confirmation to end the match and compute the result."
-        : "Overs are up — opening the confirmation to close out this innings and set a target.",
+        ? "No replacement left in the squad — opening the confirmation to end the match and compute the result."
+        : "No replacement left in the squad — opening the confirmation to close out this innings and set a target.",
       "Confirmation dialog open — reviewing the details before committing.",
       FLOW_COLOR
     );
@@ -576,6 +658,27 @@ class ScriptedDriver {
       FLOW_COLOR
     );
     await this.beat(gen, isMatchEnd ? STEP_GAP_MS + POST_MOMENT_HOLD_MS : STEP_GAP_MS);
+  }
+
+  // FIX — this is the single gate every post-innings call now goes
+  // through. `reason` is whatever playInnings() actually returned:
+  //
+  //  - "noPartner": the engine could NOT auto-resolve this on its own
+  //    (squad exhaustion before 10 wickets) — this is the one case that
+  //    genuinely needs the manual End Innings/End Match dialog click.
+  //  - anything else ("matchComplete", "oversDone", "safetyCap",
+  //    "notCurrent"): the real scoring engine has either already closed
+  //    this out automatically, or there's nothing sensible to click —
+  //    so this is a deliberate no-op. Previously the driver called
+  //    endCurrentInningsOrMatch() unconditionally after every
+  //    playInnings() return, which on an "oversDone" exit meant
+  //    clicking a button that had silently become "End Match" (because
+  //    the engine already flipped to innings 2) and firing a second,
+  //    bogus result off the freshly-reset scoreboard.
+  private async closeOutInnings(gen: number, reason: InningsExitReason, dialogLabel: string) {
+    if (!this.isCurrent(gen)) return;
+    if (reason !== "noPartner") return;
+    await this.endCurrentInningsOrMatch(gen, dialogLabel);
   }
 
   private availableDismissalOptions(): string[] {
@@ -945,24 +1048,38 @@ class ScriptedDriver {
   // (one beat per loop iteration); once it's empty, the driver falls
   // back to normal weighted-random play using `runTable` for the rest
   // of the innings.
-  private async playInnings(gen: number, script: ScriptBeat[] | null, runTable: Array<[PlainRun, number]>) {
+  //
+  // FIX: previously this returned void, and every caller assumed "it
+  // returned, so I must now open the End Innings/End Match dialog."
+  // That assumption was wrong whenever the real engine had already
+  // auto-closed the innings/match out from underneath the loop (which
+  // happens on every overs-done or all-out finish, since
+  // checkAutoEndConditions runs synchronously inside every recordBall/
+  // resolveWicket call — before this loop's own next iteration even
+  // gets to look at the state). Now it reports WHY it stopped, so the
+  // caller (closeOutInnings) can tell the difference between "already
+  // handled by the engine, nothing to click" and "the engine couldn't
+  // resolve this on its own (no partner left), please open the dialog."
+  private async playInnings(gen: number, script: ScriptBeat[] | null, runTable: Array<[PlainRun, number]>): Promise<InningsExitReason> {
     const queue = script ? [...script] : [];
     let safetyBallsBowled = 0;
     let inningsEndAnnounced = false;
 
     while (this.isCurrent(gen)) {
       const h = this.handleGetter();
-      if (!h) break;
-      if (h.isMatchComplete()) break;
-      if (h.noPartnerAvailable()) break;
+      if (!h) return "notCurrent";
+      if (h.isMatchComplete()) return "matchComplete";
+      if (h.noPartnerAvailable()) return "noPartner";
 
       const maxLegalBalls = h.getMaxLegalBalls();
       const legalBallsBowled = h.getLegalBallsBowled();
       if (maxLegalBalls !== undefined && legalBallsBowled >= maxLegalBalls) {
-        // The innings just finished purely on overs — call that out
-        // explicitly as its own beat, rather than letting the upcoming
-        // "End Innings" / "End Match" click seem to appear out of
-        // nowhere with no context for why it's happening now.
+        // The innings just finished purely on overs. By the time we
+        // observe this, the engine's own auto-detection has ALREADY
+        // run (it fires inside the very last recordBall/resolveWicket
+        // call that pushed the count to this limit) — so inningsNumber
+        // or matchComplete has already flipped. This is purely a "stop
+        // looping" signal for us, not a "go click something" signal.
         if (!inningsEndAnnounced) {
           inningsEndAnnounced = true;
           this.onLog(
@@ -972,13 +1089,22 @@ class ScriptedDriver {
           );
           await this.beat(gen, STEP_GAP_MS);
         }
-        break;
+        return "oversDone";
       }
 
       const safetyCap = maxLegalBalls !== undefined ? maxLegalBalls + LEGAL_BALLS_PER_OVER * 2 : UNCAPPED_FORMAT_SAFETY_BALLS;
-      if (safetyBallsBowled >= safetyCap) break;
+      if (safetyBallsBowled >= safetyCap) return "safetyCap";
 
-      if (!(await this.readyToScore(gen))) return this.handlePausedFlow(gen);
+      if (!(await this.readyToScore(gen))) {
+        // readyToScore only returns false for the same conditions we
+        // already check at the top of this very loop (matchComplete,
+        // noPartnerAvailable) or because the driver was stopped/reset.
+        // Loop back around instead of duplicating that logic here —
+        // the top-of-loop checks above will report the correct reason
+        // on the next pass, or the `while (this.isCurrent(gen))` guard
+        // will end the loop naturally if we were stopped.
+        continue;
+      }
 
       if (queue.length > 0) {
         const beat = queue.shift()!;
@@ -994,7 +1120,7 @@ class ScriptedDriver {
       if (delivery.type === "wicket") {
         await this.takeAWicket(gen, "striker", false);
         safetyBallsBowled += 1;
-        if (!(await this.ensureAssignments(gen))) return;
+        if (!(await this.ensureAssignments(gen))) return "notCurrent";
       } else if (delivery.type === "extra") {
         await this.playExtra(gen, delivery.extra);
         safetyBallsBowled += 1;
@@ -1003,39 +1129,58 @@ class ScriptedDriver {
         safetyBallsBowled += 1;
       }
     }
+    return "notCurrent";
   }
 
   private async runOneMatchCycle(gen: number) {
     this.legalBallsThisOver = 0;
+
+    // NEW — Match Intro graphic before the very first ball of the cycle.
+    await this.showMatchIntro(gen);
+    if (!this.isCurrent(gen)) return;
+
     this.onLog("Auto-demo: assigning openers");
     if (!(await this.ensureAssignments(gen))) return;
-
-    if (!(await this.readyToScore(gen))) return this.handlePausedFlow(gen);
+    if (!this.isCurrent(gen)) return;
 
     // Innings 1 — the full scripted showcase, then real random play
     // until the innings genuinely ends.
-    await this.playInnings(gen, buildInningsOneScript(), NEUTRAL_RUN_TABLE);
+    const innings1Reason = await this.playInnings(gen, buildInningsOneScript(), NEUTRAL_RUN_TABLE);
     if (!this.isCurrent(gen)) return;
 
-    await this.announcedClick(
-      gen,
-      "demo-new-partnership",
-      "Mark new partnership",
-      "Resetting the partnership counter — a fresh pair is at the crease, so the joint runs/balls tally starts again from zero.",
-      "New partnership marked.",
-      FLOW_COLOR
-    );
-    await this.beat(gen, STEP_GAP_MS);
-
+    // FIX: only opens the dialog if the engine genuinely couldn't
+    // resolve innings 1 on its own (noPartner). Every other reason
+    // means the engine already transitioned to innings 2 (or, in an
+    // edge case, straight to matchComplete) by itself.
+    await this.closeOutInnings(gen, innings1Reason, "End this innings");
     if (!this.isCurrent(gen)) return;
-    if (this.handleGetter()?.isSecondInnings()) {
-      await this.endCurrentInningsOrMatch(gen, "End the match");
-    } else {
-      await this.endCurrentInningsOrMatch(gen, "End this innings");
+
+    // "Who's Involved"/"New Partnership" only exist while the match is
+    // still live — once matchComplete is true the panel has swapped to
+    // MatchOverScreen and that button is gone from the DOM.
+    if (!this.handleGetter()?.isMatchComplete()) {
+      await this.announcedClick(
+        gen,
+        "demo-new-partnership",
+        "Mark new partnership",
+        "Resetting the partnership counter — a fresh pair is at the crease, so the joint runs/balls tally starts again from zero.",
+        "New partnership marked.",
+        FLOW_COLOR
+      );
+      await this.beat(gen, STEP_GAP_MS);
+    }
+    if (!this.isCurrent(gen)) return;
+
+    if (this.handleGetter()?.isSecondInnings() && !this.handleGetter()?.isMatchComplete()) {
+      // NEW — Scorecard graphic at the innings break, before the chase
+      // begins.
+      await this.showScorecard(gen);
+      if (!this.isCurrent(gen)) return;
 
       this.legalBallsThisOver = 0;
       this.onLog("Auto-demo: innings 2 — assigning the chasing openers");
       if (!(await this.ensureAssignments(gen))) return;
+      if (!this.isCurrent(gen)) return;
 
       // Innings 2 — bias alternates by cycle so both win methods (by
       // wickets vs by runs) get demonstrated across repeated loops of
@@ -1046,16 +1191,21 @@ class ScriptedDriver {
           ? "This chase is being played aggressively — expect the batting side to get there with wickets in hand."
           : "This chase is being played conservatively — expect the overs to run out and the defending side to win on runs."
       );
-      await this.playInnings(gen, null, chaseAggressively ? AGGRESSIVE_RUN_TABLE : CONSERVATIVE_RUN_TABLE);
+      const innings2Reason = await this.playInnings(gen, null, chaseAggressively ? AGGRESSIVE_RUN_TABLE : CONSERVATIVE_RUN_TABLE);
       if (!this.isCurrent(gen)) return;
 
-      if (!this.handleGetter()?.isMatchComplete()) {
-        await this.endCurrentInningsOrMatch(gen, "End the match");
-      }
+      await this.closeOutInnings(gen, innings2Reason, "End the match");
+      if (!this.isCurrent(gen)) return;
     }
 
     await this.waitForMatchComplete(gen);
     if (!this.isCurrent(gen)) return;
+
+    // NEW — Scorecard graphic once the match has actually finished,
+    // shown before the Undo/Restart showcase steps.
+    await this.showScorecard(gen);
+    if (!this.isCurrent(gen)) return;
+
     await this.announcedClick(
       gen,
       "demo-match-over-undo",
@@ -1068,6 +1218,12 @@ class ScriptedDriver {
 
     if (!this.isCurrent(gen)) return;
     if (!this.handleGetter()?.isMatchComplete()) {
+      // We're intentionally back in live scoring after the Undo demo —
+      // this click is deliberate (showing the manual End Match path),
+      // not a duplicate of any auto-detected close-out, since we just
+      // proved above (via waitForMatchComplete) that the match really
+      // was complete before Undo reverted it, and the button is only
+      // hidden once matchComplete flips back to true.
       await this.endCurrentInningsOrMatch(gen, "End the match");
       await this.waitForMatchComplete(gen);
     }
@@ -1091,31 +1247,6 @@ class ScriptedDriver {
       "Match restarted — looping back to the start.",
       RUN_COLOR
     );
-  }
-
-  private async handlePausedFlow(gen: number) {
-    if (!this.isCurrent(gen)) return;
-    const h = this.handleGetter();
-    if (!h) return;
-    if (h.isMatchComplete()) {
-      await this.waitForMatchComplete(gen);
-      if (!this.isCurrent(gen)) return;
-      await this.announcedClick(
-        gen,
-        "demo-match-over-restart",
-        "Restart the match",
-        "Match wrapped up early this cycle — opening the restart confirmation.",
-        "Restart dialog open.",
-        RUN_COLOR
-      );
-      await this.beat(gen, DIALOG_SETTLE_MS);
-      if (!this.isCurrent(gen)) return;
-      await this.announcedClick(gen, "demo-confirm-restart", "Confirm restart", "Confirming the restart.", "Match restarted.", RUN_COLOR);
-      return;
-    }
-    if (h.noPartnerAvailable()) {
-      await this.endCurrentInningsOrMatch(gen, h.isSecondInnings() ? "End the match" : "End this innings");
-    }
   }
 
   private async waitForMatchComplete(gen: number) {

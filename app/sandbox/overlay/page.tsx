@@ -41,6 +41,23 @@
 // onRestartMatch (required — the driver calls it once per demo cycle)
 // and logEvent (so demo-driven completions show up in the Event Feed
 // like everything else).
+//
+// FIX (channel pills need stable DOM ids): the ScriptedDriver drives
+// real DOM elements by `id="demo-xxx"` lookup (see useDemoCursor.ts). It
+// now scripts firing the Match Intro and Scorecard channels as part of
+// the demo (see LiveStatePanelAuto.tsx's showMatchIntro/showScorecard),
+// which requires those two specific Pill buttons to be individually
+// addressable. Every other channel pill is left without an id since the
+// script never needs to click them directly (matchBoundaries gets
+// turned on programmatically via setChannels on the first boundary,
+// same as before).
+//
+// FIX (chyron never cleared): <MomentChyron> used to render forever
+// once a moment fired — there was a revert timer for the little Live
+// Preview Monitor (<LivePreviewMonitor>) but nothing ever cleared
+// `firedMoment` itself, so the last moment's chyron just sat on screen
+// until the next moment overwrote it. It now reverts on the same
+// per-moment timing table as the preview monitor.
 
 "use client";
 
@@ -74,6 +91,16 @@ const CHANNEL_LABELS: Record<keyof SandboxChannels, string> = {
   matchIntro: "Match Intro",
   tournamentLogo: "Tournament Logo",
   matchScorecard: "Scorecard",
+};
+
+// DOM ids the ScriptedDriver clicks directly for the two channels it
+// scripts (Match Intro at the start of a cycle, Scorecard at the
+// innings break and at match end). Every other channel key maps to
+// `undefined` and gets no id, since nothing ever needs to click them
+// programmatically.
+const CHANNEL_DEMO_IDS: Partial<Record<keyof SandboxChannels, string>> = {
+  matchIntro: "demo-channel-matchIntro",
+  matchScorecard: "demo-channel-matchScorecard",
 };
 
 const FONT_BODY = "var(--font-body, 'Inter', ui-sans-serif, system-ui, sans-serif)";
@@ -199,11 +226,13 @@ function ControlCluster({ label, children }: { label: string; children: React.Re
 }
 
 function Pill({
+  id,
   active,
   onClick,
   children,
   title,
 }: {
+  id?: string;
   active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
@@ -211,6 +240,7 @@ function Pill({
 }) {
   return (
     <button
+      id={id}
       type="button"
       onClick={onClick}
       title={title}
@@ -478,6 +508,12 @@ export default function OverlaySandboxPage() {
   const [firedMoment, setFiredMoment] = useState<FiredMoment | null>(null);
   const momentIdRef = useRef(0);
 
+  // FIX: revert timer for the big floating chyron — previously only
+  // the small Live Preview Monitor had one (previewRevertTimerRef
+  // below); the chyron itself never cleared, so it just sat there
+  // until the next moment overwrote it.
+  const firedRevertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [featuredMoment, setFeaturedMoment] = useState<MomentPayload["moment"] | null>(null);
   const previewRevertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -496,6 +532,13 @@ export default function OverlaySandboxPage() {
     }
   }
 
+  function clearFiredRevert() {
+    if (firedRevertTimerRef.current) {
+      clearTimeout(firedRevertTimerRef.current);
+      firedRevertTimerRef.current = null;
+    }
+  }
+
   function featurePreview(moment: MomentPayload["moment"]) {
     clearPreviewRevert();
     setFeaturedMoment(moment);
@@ -506,6 +549,7 @@ export default function OverlaySandboxPage() {
   }
 
   useEffect(() => clearPreviewRevert, []);
+  useEffect(() => clearFiredRevert, []);
 
   useEffect(
     () => () => {
@@ -578,6 +622,18 @@ export default function OverlaySandboxPage() {
     momentIdRef.current += 1;
     setFiredMoment({ id: momentIdRef.current, moment: payload.moment, text });
     logEvent(`Moment: ${payload.moment.toUpperCase()}${payload.player ? ` — ${payload.player}` : ""}`);
+
+    // FIX: the chyron used to have no revert of its own — it relied on
+    // the *next* moment's setFiredMoment() call to overwrite it, so
+    // between moments it just sat on screen indefinitely. Give it the
+    // same auto-revert treatment as the Live Preview Monitor below,
+    // using the same per-moment-type timing table so both go away in
+    // sync.
+    clearFiredRevert();
+    firedRevertTimerRef.current = setTimeout(() => {
+      firedRevertTimerRef.current = null;
+      setFiredMoment(null);
+    }, MOMENT_AUTO_REVERT_MS[payload.moment] ?? 3500);
 
     featurePreview(payload.moment);
 
@@ -909,7 +965,7 @@ export default function OverlaySandboxPage() {
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
           <ControlCluster label="On Air Channels">
             {(Object.keys(CHANNEL_LABELS) as (keyof SandboxChannels)[]).map((key) => (
-              <Pill key={key} active={channels[key]} onClick={() => toggleChannel(key)}>
+              <Pill key={key} id={CHANNEL_DEMO_IDS[key]} active={channels[key]} onClick={() => toggleChannel(key)}>
                 {CHANNEL_LABELS[key]}
               </Pill>
             ))}
