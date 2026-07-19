@@ -5,39 +5,42 @@
 // ---------------------------------------------------------------------------
 // A fully offline showcase of every overlay component, driven entirely by
 // useDemoBroadcastData() — a ball-by-ball simulation that runs in memory.
-// There's no admin panel, no Supabase, no auctionId/matchId wiring.
+// There's no admin panel, no Supabase, no auctionId/matchId wiring (except
+// PointsTable, see its own note below).
 //
 // Layout notes:
 //
-// 1. Not everything is on screen all the time. Only the tournament logo,
-//    weather, and the live score bar are "always on" (as they would be on
-//    a real broadcast). Boundaries / run-rate / partnership share ONE
-//    slot and take turns — one is visible for a few seconds, fades out,
-//    then the next fades in. That's what stops the corner from turning
-//    into a stack of overlapping cards.
+// 1. Not everything is on screen all the time. Only the tournament logo
+//    is "always on" (as it would be on a real broadcast). Weather, the
+//    live score bar, and the rotating dock (boundaries / run-rate /
+//    partnership / bowling figures) are each independently toggleable
+//    from the header now — see "Header trigger buttons" below.
 //
 // 2. Boundaries and run-rate dock FLUSH against the live score bar's
 //    right edge (SCORE_BAR_DOCK_BOTTOM / SCORE_BAR_DOCK_RIGHT below)
 //    instead of each component's own default offset — reads as one
 //    piece of broadcast furniture rather than a card floating loose
-//    above it. Partnership instead lines up with the score bar's own
-//    BOTTOM edge (SCORE_BAR_BOTTOM_EDGE) and is horizontally CENTERED
-//    (`center` prop) rather than right-docked — it reads as its own
-//    centered moment, not a corner card. Because it sits at the same
-//    height as the score bar, the two are never shown at once: the
-//    score bar hides and Partnership takes over, staged as a proper
-//    crossfade (see "LiveScoreBar <-> Partnership crossfade staging"
-//    below) rather than both firing their animations at the same
-//    instant — which used to look like the two colliding mid-transition.
-//    Still respects the manual "Score bar" toggle in Demo Controls —
-//    turning that off keeps it off regardless of what's active.
+//    above it. Bowling figures docks at the same point (it's a
+//    right-aligned corner card, same family as Boundaries/Run Rate —
+//    unlike Partnership, it doesn't need the score-bar-hides staging).
+//    Partnership instead lines up with the score bar's own BOTTOM edge
+//    (SCORE_BAR_BOTTOM_EDGE) and is horizontally CENTERED (`center`
+//    prop) rather than right-docked — it reads as its own centered
+//    moment, not a corner card. Because it sits at the same height as
+//    the score bar, the two are never shown at once: the score bar
+//    hides and Partnership takes over, staged as a proper crossfade
+//    (see "LiveScoreBar <-> Partnership crossfade staging" below)
+//    rather than both firing their animations at the same instant —
+//    which used to look like the two colliding mid-transition. Still
+//    respects the manual "Score bar" toggle — turning that off keeps
+//    it off regardless of what's active.
 //
 //    NOTE: SCORE_BAR_BOTTOM_EDGE and SCORE_BAR_DOCK_BOTTOM are two
 //    different offsets for two different jobs — the former is
 //    LiveScoreBar's own bottom padding (for Partnership to match its
 //    bottom edge), the latter is the bar's rendered height + a margin
-//    (for Boundaries/Run Rate to dock above its top edge). Don't
-//    conflate them when tuning.
+//    (for Boundaries/Run Rate/Bowling to dock above its top edge).
+//    Don't conflate them when tuning.
 //
 //    NOTE: SCORE_BAR_DOCK_BOTTOM is tuned by eye against LiveScoreBar's
 //    current rendered height. If that component's height ever changes
@@ -47,28 +50,60 @@
 //
 // 3. The celebration graphics (four/six/wicket/fifty/etc.) do NOT fire
 //    automatically as the simulation plays — `celebrate` defaults to
-//    false in the hook. The header toolbar's moment buttons are the only
-//    thing that pops a celebration up on demand.
+//    false in the hook. The header toolbar's Moments dropdown is the
+//    only thing that pops a celebration up on demand (besides the
+//    "Auto celebrations" toggle in Demo Controls).
 //
-// 4. Demo Controls used to live at fixed bottom-left, which put it right
-//    on top of the live score bar. It's now a dropdown hanging off a
-//    gear icon at the end of the top header toolbar, so nothing floats
-//    over the score bar anymore.
+// 4. Demo Controls (play/pause/step/reset/boundaries-card-mode/auto-
+//    celebrations) lives in its own dropdown off a gear icon, since
+//    those aren't "overlays" so much as simulation controls. Every
+//    actual OVERLAY component now has its own direct trigger button in
+//    the header row — see "Header trigger buttons" below — instead of
+//    some being reachable only through a buried Preview list.
 //
-// 5. Boundaries / run-rate / partnership previously had NO manual trigger
-//    at all — every other overlay in the toolbar (Toss, Scorecard, Fall
-//    of Wickets, Points Table, Match Intro) ships its own click-to-open
-//    button, but these three could only be seen by waiting for the
-//    rotation to land on them, and Partnership couldn't be previewed at
-//    all until there was an actual pair at the crease. The "Preview"
-//    row in Demo Controls below lets you force any one of the three into
-//    the dock (pausing rotation) or go back to "Auto".
+// 5. Header trigger buttons — every overlay gets a same-row button now:
+//      - CricketMatchIntro, TossGraphic, CricketScorecard,
+//        FallOfWicketsStrip, PointsTable: unchanged, each opens its own
+//        modal/graphic via its own click handler (as before).
+//      - Weather, Score bar: simple on/off toggle buttons (these are
+//        "always could be on" pieces of broadcast furniture, not
+//        one-shot moments), highlighted gold when active.
+//      - Boundaries, Run Rate, Partnership, Bowling: these still share
+//        the ONE rotating dock point (see note 2) since showing two
+//        corner cards at once was never the intent — clicking one of
+//        these buttons pins it into the dock (pausing auto-rotation),
+//        same mechanism the old buried "Preview" row used, just now
+//        surfaced as first-class header buttons instead of hidden in
+//        the Demo dropdown. Clicking the same one again releases the
+//        pin back to Auto. Partnership/Bowling stay disabled until
+//        hasPartnership/hasBowler are true, same gating as before.
+//
+// 6. Bowling figures — data comes straight from useDemoBroadcastData's
+//    liveState.bowler (the sim already tracks overs/maidens/runs/
+//    wickets ball-by-ball, see advanceOneBall in the hook). No backend
+//    involved: fieldingTeam is derived locally by elimination against
+//    battingTeam/matchSetup, exactly the same way it's already done for
+//    the "Bowling vs X" label. Gated behind hasBowler the same way
+//    Partnership is gated behind hasPartnership, so the dock never
+//    fades in to an empty card before the sim has picked a bowler.
+//
+// 7. PointsTable is the one overlay that ISN'T backed by the demo sim —
+//    it reads live from Supabase via usePointsTableLedger("demo-auction"),
+//    which has no real corresponding row, so it's expected to render its
+//    own empty/loading state (or surface a Supabase error if e.g. RLS
+//    denies the anon role — a separate, already-flagged concern). Left
+//    wired up and untouched per earlier instruction not to modify
+//    PointsTable.jsx itself.
 // ---------------------------------------------------------------------------
 
 import React, { useEffect, useRef, useState } from "react";
 import {
   Award,
   ChevronUp,
+  CircleDot,
+  CloudSun,
+  Gauge,
+  PanelBottom,
   Pause,
   Play,
   PartyPopper,
@@ -76,7 +111,9 @@ import {
   Settings,
   ShieldCheck,
   SkipForward,
+  Target,
   Trophy,
+  Users,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -95,30 +132,23 @@ import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 import TossGraphic from "@/components/overlays/Tossgraphic";
 import RunRatePanel from "@/components/overlays/Runratepanel";
 import PartnershipTracker from "@/components/overlays/Partnershiptracker";
+import BowlingFiguresPanel from "@/components/overlays/Bowlingfigurespanel";
 import FallOfWicketsStrip from "@/components/overlays/Fallofwicketsstrip";
 
 type BoundariesMode = "match" | "tournament";
-type SlotItem = "boundaries" | "runrate" | "partnership";
-// Was referenced by fireMoment() below (as a parameter type and as the key
-// type of the payloads Record) but never actually declared anywhere in this
-// file — TypeScript would fail on "Cannot find name 'MomentType'" at both
-// usages, and once that error hits, the type-checker's state is already
-// broken for the rest of the file, which is why unrelated JSX below (the
-// TossGraphic/CricketMatchIntro/etc. calls) can start showing spurious
-// "doesn't accept these props" errors too. The union here just has to match
-// the keys actually used in the `payloads` object further down.
+type SlotItem = "boundaries" | "runrate" | "partnership" | "bowling";
 type MomentType = "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
 
-const SLOT_ITEMS: SlotItem[] = ["boundaries", "runrate", "partnership"];
+const SLOT_ITEMS: SlotItem[] = ["boundaries", "runrate", "partnership", "bowling"];
 const SLOT_DWELL_MS = 6000; // how long each card stays up
 const SLOT_GAP_MS = 1400; // how long the corner stays empty between cards
 const SLOT_EXIT_MS = 300; // must match the component's own exit animation length
 
 // Partnership renders centered at the score bar's own vertical level, so
-// unlike Boundaries/Run Rate (which just dock a fresh card next to an
-// always-visible score bar), swapping to/from Partnership means the score
-// bar itself has to get out of the way first. Firing both animations at
-// once looked like the two overlays colliding mid-transition, so instead
+// unlike Boundaries/Run Rate/Bowling (which just dock a fresh card next to
+// an always-visible score bar), swapping to/from Partnership means the
+// score bar itself has to get out of the way first. Firing both animations
+// at once looked like the two overlays colliding mid-transition, so instead
 // we stage them: fully exit one, THEN enter the other, with a small
 // breathing gap in between rather than a hard cut.
 //
@@ -131,50 +161,25 @@ const LIVESCORE_EXIT_MS = 650;
 const PARTNERSHIP_EXIT_MS = 280;
 const CROSSFADE_GAP_MS = 120; // brief pause of "nothing" so the swap doesn't feel like a hard cut
 
-// Data-driven list backing the "Preview" row in Demo Controls — lets you
-// force any one dock item into view without waiting for the rotation.
-// "auto" isn't in here; it's rendered as its own separate button since it
-// resets to the live rotation instead of pinning a specific item.
-const SLOT_PREVIEW_ITEMS: { value: SlotItem; label: string }[] = [
-  { value: "boundaries", label: "Boundaries" },
-  { value: "runrate", label: "Run Rate" },
-  { value: "partnership", label: "Partnership" },
+// Header trigger buttons for the four dock items that share the one
+// rotating slot. Kept as data so the header JSX stays a .map() instead
+// of four near-identical buttons — same idiom MOMENT_BUTTONS already
+// uses below.
+const DOCK_TRIGGER_BUTTONS: { value: SlotItem; label: string; icon: typeof Target }[] = [
+  { value: "boundaries", label: "Boundaries", icon: Target },
+  { value: "runrate", label: "Run Rate", icon: Gauge },
+  { value: "partnership", label: "Partnership", icon: Users },
+  { value: "bowling", label: "Bowling", icon: CircleDot },
 ];
 
 // Shared dock point for the rotating slot, sitting just above the live
 // score bar. Fixed px, not vw/%, so the two stay pixel-aligned regardless
 // of viewport width instead of drifting apart the way two independently
 // vw-based offsets would.
-//
-// SCORE_BAR_DOCK_BOTTOM has a small gap built in (score bar height + a
-// margin) rather than sitting flush — flush read as the two overlapping/
-// touching, which looked like a layout bug rather than intentional
-// docking. Bump the margin below if it still looks too tight.
-// SCORE_BAR_DOCK_RIGHT is also passed to LiveScoreBar itself (assuming it
-// accepts a `right` inset prop) so the score bar's own right edge lines
-// up with the boundaries/run-rate card sitting above it, instead of each
-// picking its own default width/inset independently.
 const SCORE_BAR_HEIGHT = "132px"; // = LiveScoreBar's rendered height, by eye — adjust if that changes
 const SCORE_BAR_DOCK_MARGIN = "16px"; // visible gap between the dock and the score bar's top edge
 const SCORE_BAR_DOCK_BOTTOM = `calc(${SCORE_BAR_HEIGHT} + ${SCORE_BAR_DOCK_MARGIN})`;
-// LiveScoreBar's own bottom edge — separate from SCORE_BAR_DOCK_BOTTOM
-// above, which docks Boundaries/Run Rate ABOVE the bar (flush with its
-// TOP edge). Partnership instead needs to line up with the bar's BOTTOM
-// edge, which sits inside LiveScoreBar's own `pb-3 sm:pb-5` container
-// padding (12px mobile / 20px sm+) rather than at SCORE_BAR_DOCK_BOTTOM's
-// height. Using the sm+ value here since this is a desktop broadcast
-// layout; if LiveScoreBar's own bottom padding changes, update this to
-// match.
 const SCORE_BAR_BOTTOM_EDGE = "20px";
-// LiveScoreBar doesn't take a right/left prop — it's `fixed inset-x-0`
-// with `items-center`, and the bar itself is a plain `width: 90vw` div,
-// so it's always horizontally CENTERED on screen, never right-anchored.
-// A 90vw-wide centered element has a 5vw margin on each side, so its
-// right edge sits 5vw in from the viewport's right edge. Matching that
-// here (instead of a guessed px value like 24px) is what actually lines
-// the dock up with the score bar's real edge, without touching
-// LiveScoreBar itself. If LiveScoreBar's own width/centering ever
-// changes, this needs to be recalculated the same way.
 const SCORE_BAR_DOCK_RIGHT = "5vw";
 
 // Header toolbar buttons for every celebration MatchMomentOverlay knows how
@@ -196,7 +201,7 @@ const MOMENT_BUTTONS: { type: MomentType; label: string; icon: typeof Zap; accen
 // already supports) before the next one fades in. This is what keeps the
 // dock point to a single card instead of a stacked pile.
 //
-// `paused` freezes the rotation entirely — used when a manual preview
+// `paused` freezes the rotation entirely — used when a manual trigger
 // override is active (see manualSlot state in the page component) so the
 // auto-rotate timers don't fire underneath a pinned item and yank it away
 // mid-preview.
@@ -261,6 +266,7 @@ export default function BroadcastDemoPage() {
     toggleCelebrate,
     matchSetup,
     weather,
+    standings,
     liveState,
     battingTeam,
     runRate,
@@ -277,16 +283,16 @@ export default function BroadcastDemoPage() {
 
   // Manual override for the rotating dock slot. "auto" defers entirely to
   // useRotatingSlot's own timer; picking a specific SlotItem pins that item
-  // on screen (rotation paused) until "Auto" is pressed again or the item
-  // is toggled off elsewhere (e.g. Partnership toggle / no pair at crease).
+  // on screen (rotation paused) until the same header button is pressed
+  // again (toggles back to "auto") or the item is gated off elsewhere
+  // (e.g. Partnership toggle / no pair at crease, or Bowling with no
+  // bowler set yet).
   const [manualSlot, setManualSlot] = useState<SlotItem | "auto">("auto");
 
   // Auto-reveal the toss result once, shortly after the toss is known, then
   // hand control back to TossGraphic's own trigger button by setting `show`
   // back to undefined — so it still opens/closes on click afterward, exactly
-  // like every other modal-style overlay in this toolbar. Previously this
-  // page never passed `show` to TossGraphic at all, so the auto-reveal path
-  // the component supports was dead code from this integration's side.
+  // like every other modal-style overlay in this toolbar.
   const [showToss, setShowToss] = useState<boolean | undefined>(undefined);
   useEffect(() => {
     if (!matchSetup?.tossWinner) return;
@@ -306,22 +312,30 @@ export default function BroadcastDemoPage() {
   const nonStriker = liveState.nonStriker;
   const bowler = liveState.bowler;
   const hasPartnership = !!(striker?.name || nonStriker?.name);
+  // Bowling figures need an actual bowler in the middle of an over — same
+  // "don't dock an empty card" reasoning as hasPartnership above.
+  const hasBowler = !!bowler?.name;
+  // BowlingFiguresPanel needs the FIELDING side, not the batting one — the
+  // hook only hands back `battingTeam`, so derive the other one from
+  // matchSetup by elimination (whichever of teamA/teamB isn't currently
+  // batting).
+  const fieldingTeam =
+    matchSetup?.teamA?.shortCode === battingTeam?.shortCode ? matchSetup?.teamB : matchSetup?.teamA;
 
-  // If a manual Partnership preview is pinned but the pair-at-crease
-  // condition that would normally gate it stops being true (e.g. a wicket
-  // falls while you're previewing it), fall back to Auto instead of
-  // silently rendering nothing.
+  // If a manual Partnership/Bowling pin is active but the condition that
+  // gates it stops being true (e.g. a wicket falls mid-preview), fall
+  // back to Auto instead of silently rendering nothing.
   useEffect(() => {
     if (manualSlot === "partnership" && !hasPartnership) {
       setManualSlot("auto");
     }
-  }, [manualSlot, hasPartnership]);
+    if (manualSlot === "bowling" && !hasBowler) {
+      setManualSlot("auto");
+    }
+  }, [manualSlot, hasPartnership, hasBowler]);
 
   // Fires a celebration on demand, using whoever is actually at the
-  // crease/bowling right now for a realistic payload — this is our own
-  // trigger, wired to MatchMomentOverlay's global hook, so it can live
-  // anywhere on the page (the header toolbar) instead of being stuck
-  // wherever that component hardcodes its own demo buttons.
+  // crease/bowling right now for a realistic payload.
   function fireMoment(type: MomentType) {
     if (typeof window === "undefined" || !(window as any).triggerBoundaryCelebration) return;
     const batterName = striker?.name || "Batter";
@@ -343,12 +357,23 @@ export default function BroadcastDemoPage() {
     (window as any).triggerBoundaryCelebration(type, payloads[type]);
   }
 
-  // Skip "partnership" in the rotation until there's actually a pair at
-  // the crease, so the dock point doesn't fade in to an empty card — and
-  // also respect the manual "Partnership" toggle in Demo Controls, for
-  // whenever you want to preview boundaries/run-rate on their own.
-  const activeItems =
-    hasPartnership && showPartnership ? SLOT_ITEMS : (["boundaries", "runrate"] as SlotItem[]);
+  // Clicking a dock trigger button pins that item (pausing rotation);
+  // clicking the SAME one again releases back to Auto, same toggle
+  // behavior as the toolbar's other on/off buttons.
+  function handleDockTriggerClick(value: SlotItem) {
+    setManualSlot((prev) => (prev === value ? "auto" : value));
+  }
+
+  // Which items are eligible for the rotation right now. Boundaries/
+  // Run Rate are always eligible. Partnership only joins once there's a
+  // pair at the crease AND the manual toggle allows it. Bowling only
+  // joins once the sim has actually assigned a bowler.
+  const activeItems: SlotItem[] = [
+    "boundaries",
+    "runrate",
+    ...(hasPartnership && showPartnership ? (["partnership"] as SlotItem[]) : []),
+    ...(hasBowler ? (["bowling"] as SlotItem[]) : []),
+  ];
   const slot = useRotatingSlot(activeItems, SLOT_DWELL_MS, SLOT_GAP_MS, SLOT_EXIT_MS, manualSlot !== "auto");
 
   // Effective dock item/closing state: a manual pin wins over whatever the
@@ -358,20 +383,10 @@ export default function BroadcastDemoPage() {
   const effectiveClosing = manualSlot === "auto" ? slot.closing : false;
 
   // ---- LiveScoreBar <-> Partnership crossfade staging ----------------
-  // Rather than flipping LiveScoreBar's `show` and rendering
-  // PartnershipTracker off the same `effectiveActiveItem` flag (which
-  // fires both components' animations at the exact same instant), this
-  // drives two independent, staggered states:
-  //   scoreBarShown       — what's actually passed to LiveScoreBar's `show`
-  //   partnershipShown     — whether PartnershipTracker is rendered at all
-  //   partnershipClosing   — the `closing` prop passed to it
-  // wantsPartnership flipping true hides the score bar immediately, then
-  // waits out LiveScoreBar's own exit animation (+ a small gap) before
-  // revealing Partnership. Flipping false plays Partnership's own exit
-  // animation first, then waits out that (+ a small gap) before bringing
-  // the score bar back. Works the same whether the swap came from the
-  // auto-rotation or a manual Preview click, since both just change
-  // effectiveActiveItem.
+  // See note 2 at the top of the file for the full reasoning. Bowling
+  // doesn't need this staging — it docks in the same corner as
+  // Boundaries/Run Rate, above an always-visible score bar, so it can
+  // render/unmount directly off effectiveActiveItem.
   const wantsPartnership = effectiveActiveItem === "partnership";
   const [scoreBarShown, setScoreBarShown] = useState(!wantsPartnership);
   const [partnershipShown, setPartnershipShown] = useState(wantsPartnership);
@@ -385,29 +400,18 @@ export default function BroadcastDemoPage() {
     let returnTimer: ReturnType<typeof setTimeout> | undefined;
 
     if (wantsPartnership) {
-      // Step 1: score bar exits now (LiveScoreBar plays its own ~650ms
-      // fade/scale-out). Step 2: only once that's had time to fully
-      // clear, reveal Partnership — so it never pops in over a score bar
-      // that's still mid-exit.
       setScoreBarShown(false);
       enterTimer = setTimeout(() => {
         setPartnershipClosing(false);
         setPartnershipShown(true);
       }, LIVESCORE_EXIT_MS + CROSSFADE_GAP_MS);
     } else if (partnershipShownRef.current) {
-      // Leaving Partnership: play ITS exit animation first (280ms), THEN
-      // unmount it and, after the same short breathing gap, bring the
-      // score bar back — instead of yanking Partnership away and
-      // snapping the score bar in at the same moment.
       setPartnershipClosing(true);
       exitTimer = setTimeout(() => {
         setPartnershipShown(false);
         returnTimer = setTimeout(() => setScoreBarShown(true), CROSSFADE_GAP_MS);
       }, PARTNERSHIP_EXIT_MS);
     } else {
-      // Neither on screen nor mid-exit — just make sure the score bar is
-      // showing (covers first mount / rapid re-toggles before either
-      // timer above fired).
       setScoreBarShown(true);
     }
 
@@ -430,7 +434,7 @@ export default function BroadcastDemoPage() {
           src="/sample-match-footage.mp4"
         />
 
-      {/* ---- Always-on overlays — logo, weather, score bar ---- */}
+      {/* ---- Always-on overlay — tournament logo ---- */}
       <TournamentLogoDisplay
         name={matchSetup.tournamentName}
         edition={[matchSetup.season && `SEASON ${matchSetup.season}`, matchSetup.format].filter(Boolean).join(" · ")}
@@ -446,13 +450,11 @@ export default function BroadcastDemoPage() {
         matchSetup={matchSetup}
       />
 
-      {/* ---- One rotating dock point instead of three stacked cards,
-          locked flush against the live score bar's top-right edge (see
-          SCORE_BAR_DOCK_BOTTOM/RIGHT above) so it reads as one piece of
-          furniture with the score bar instead of a card floating loose
-          in the video. Only ever one of these is on screen at a time.
-          Driven by effectiveActiveItem/effectiveClosing so a manual
-          Preview selection (Demo Controls) overrides the auto rotation. ---- */}
+      {/* ---- One rotating dock point instead of four stacked cards,
+          locked flush against the live score bar's top-right edge. Only
+          ever one of these is on screen at a time. Driven by
+          effectiveActiveItem/effectiveClosing so a header trigger
+          override overrides the auto rotation. ---- */}
       {effectiveActiveItem === "boundaries" &&
         (boundariesMode === "match" ? (
           <MatchBoundaries
@@ -484,6 +486,20 @@ export default function BroadcastDemoPage() {
         />
       )}
 
+      {/* Bowling figures — data pulled straight from
+          useDemoBroadcastData's liveState.bowler/score, no fetch. */}
+      {effectiveActiveItem === "bowling" && hasBowler && (
+        <BowlingFiguresPanel
+          bowler={bowler}
+          team={fieldingTeam}
+          opponent={{ shortCode: battingTeam?.shortCode }}
+          battingScore={liveState.score}
+          closing={effectiveClosing}
+          bottom={SCORE_BAR_DOCK_BOTTOM}
+          right={SCORE_BAR_DOCK_RIGHT}
+        />
+      )}
+
       {partnershipShown && hasPartnership && (
         <PartnershipTracker
           runs={liveState.partnership.runs}
@@ -497,23 +513,23 @@ export default function BroadcastDemoPage() {
       )}
 
       {/* Celebration queue — off by default (celebrate: false above), so
-          nothing fires just from the sim ticking. Its own demo buttons are
-          meant to be hidden via hideDemoButtons since the header toolbar's
-          moment buttons are the single intended trigger surface — but if
-          you're still seeing "TEST FOUR / TEST SIX / ..." pills floating
-          bottom-left, that prop isn't wired up on this component yet and
-          it needs a look. */}
+          nothing fires just from the sim ticking. The header's Moments
+          dropdown is the intended trigger surface. */}
       <MatchMomentOverlay logoSrc={matchSetup.tournamentLogoUrl} hideDemoButtons />
 
-      {/* ---- Modal-style overlays + celebration triggers + demo controls,
-          all in one header toolbar. Each overlay ships its own trigger
-          button; the moment buttons call fireMoment() directly; the gear
-          icon at the end opens the sim controls as a dropdown instead of
-          a separate fixed panel — nothing here floats over the score bar. ---- */}
+      {/* ---- Header toolbar — every overlay component gets its own
+          trigger button here now, grouped by kind:
+            1. Modal/graphic overlays (own click-to-open, unchanged)
+            2. Furniture toggles (Weather, Score bar — plain on/off)
+            3. Dock triggers (Boundaries/Run Rate/Partnership/Bowling —
+               pin into the shared rotating slot, click again to release)
+            4. Moments dropdown (celebration one-shots)
+            5. Demo Controls dropdown (sim play/pause/step/reset + misc) ---- */}
       <div
         className="fixed top-5 left-1/2 -translate-x-1/2 z-[95] flex items-center gap-1 rounded-xl px-2 py-1.5 flex-wrap justify-center max-w-[92vw]"
         style={{ background: "rgba(8,8,10,0.72)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(6px)" }}
       >
+        {/* ---- Modal / graphic overlays ---- */}
         <CricketMatchIntro matchSetup={matchSetup} />
         <TossGraphic
           show={showToss}
@@ -530,23 +546,64 @@ export default function BroadcastDemoPage() {
           liveState={liveState}
           sandboxInningsCards={scorecardInnings}
         />
-        <FallOfWicketsStrip
+        {/* <FallOfWicketsStrip
           wickets={wickets}
           inningsLabel={liveState.inningsNumber === 1 ? "1st Innings" : "2nd Innings"}
+        /> */}
+        {/* PointsTable — untouched (see note 7 above); still reads live
+            from Supabase for "demo-auction" rather than the sim's own
+            `standings`/DEMO_STANDINGS data. */}
+        {/* <PointsTable auctionId="demo-auction" /> */}
+
+        <div className="w-px h-5 mx-1 shrink-0" style={{ background: "rgba(255,255,255,0.15)" }} />
+
+        {/* ---- Furniture toggles — Weather / Score bar ---- */}
+        <ToolbarToggleButton
+          label="Weather"
+          icon={CloudSun}
+          active={showWeather}
+          onClick={() => setShowWeather((v) => !v)}
         />
-        {/* PointsTable reads standings live via usePointsTableLedger(auctionId)
-            from Supabase — there's no prop override for offline data, so in
-            a fully backend-free demo it renders its own empty/loading state.
-            Still wired up so the trigger sits with the rest of the toolbar. */}
-        <PointsTable auctionId="demo-auction" />
+        <ToolbarToggleButton
+          label="Score Bar"
+          icon={PanelBottom}
+          active={showScoreBar}
+          onClick={() => setShowScoreBar((v) => !v)}
+        />
+
+        <div className="w-px h-5 mx-1 shrink-0" style={{ background: "rgba(255,255,255,0.15)" }} />
+
+        {/* ---- Dock triggers — Boundaries / Run Rate / Partnership /
+            Bowling. These share one dock point (see note 2), so clicking
+            one pins it (pausing auto-rotation) and clicking the same one
+            again releases back to Auto — same pattern as the furniture
+            toggles above, just gated by hasPartnership/hasBowler where
+            relevant. ---- */}
+        {DOCK_TRIGGER_BUTTONS.map(({ value, label, icon }) => {
+          const disabled = (value === "partnership" && !hasPartnership) || (value === "bowling" && !hasBowler);
+          return (
+            <ToolbarToggleButton
+              key={value}
+              label={label}
+              icon={icon}
+              active={manualSlot === value}
+              disabled={disabled}
+              title={
+                value === "partnership" && disabled
+                  ? "Needs a pair at the crease"
+                  : value === "bowling" && disabled
+                  ? "Needs an assigned bowler"
+                  : undefined
+              }
+              onClick={() => handleDockTriggerClick(value)}
+            />
+          );
+        })}
 
         <div className="w-px h-5 mx-1 shrink-0" style={{ background: "rgba(255,255,255,0.15)" }} />
 
         {/* ---- Moments — the 7 celebration triggers live inside one
-            dropdown instead of as 7 separate boxed buttons in the nav.
-            Trigger itself is flat/plain to match the other nav items
-            (Match Center, Toss, ...); only the open panel gets chip
-            styling, same as Demo below. ---- */}
+            dropdown instead of as 7 separate boxed buttons in the nav. ---- */}
         <div className="relative shrink-0">
           <button
             onClick={() => setMomentsOpen((v) => !v)}
@@ -579,9 +636,10 @@ export default function BroadcastDemoPage() {
 
         <div className="w-px h-5 mx-1 shrink-0" style={{ background: "rgba(255,255,255,0.15)" }} />
 
-        {/* ---- Demo Controls — a dropdown off the header instead of a
-            fixed bottom-left panel, so it never sits over the score bar.
-            Trigger is flat/plain, same reasoning as Moments above. ---- */}
+        {/* ---- Demo Controls — simulation controls only now (play/pause/
+            step/reset, boundaries-card mode, partnership on/off, auto
+            celebrations) — the dock-item previews that used to live here
+            have moved up to first-class header buttons above. ---- */}
         <div className="relative shrink-0">
           <button
             onClick={() => setDockOpen((v) => !v)}
@@ -637,8 +695,6 @@ export default function BroadcastDemoPage() {
 
               <div className="h-px my-1" style={{ background: "rgba(255,255,255,0.08)" }} />
 
-              <ToggleRow label="Weather" checked={showWeather} onChange={setShowWeather} />
-              <ToggleRow label="Score bar" checked={showScoreBar} onChange={setShowScoreBar} />
               <ToggleRow
                 label="Partnership"
                 checked={showPartnership}
@@ -649,60 +705,8 @@ export default function BroadcastDemoPage() {
                 label="Auto celebrations"
                 checked={celebrate}
                 onChange={toggleCelebrate}
-                hint="off = trigger manually above"
+                hint="off = trigger manually via Moments"
               />
-
-              <div className="h-px my-1" style={{ background: "rgba(255,255,255,0.08)" }} />
-
-              {/* ---- Preview — manually pin one dock item into view so
-                  Boundaries / Run Rate / Partnership can be inspected on
-                  demand, same as every other overlay's own trigger button,
-                  instead of waiting on the rotation. Selecting a pinned
-                  item also pauses useRotatingSlot's timers (see `paused`
-                  above) so it doesn't get yanked away mid-preview. ---- */}
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.55)" }}>
-                  Preview
-                </span>
-                <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.35)" }}>
-                  pins the dock item
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                <button
-                  onClick={() => setManualSlot("auto")}
-                  className="px-2 py-1 rounded-md text-[9px] font-bold uppercase"
-                  style={{
-                    background: manualSlot === "auto" ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.06)",
-                    color: manualSlot === "auto" ? "#F2C766" : "rgba(255,255,255,0.6)",
-                  }}
-                >
-                  Auto
-                </button>
-                {SLOT_PREVIEW_ITEMS.map(({ value, label }) => {
-                  const disabled = value === "partnership" && !hasPartnership;
-                  return (
-                    <button
-                      key={value}
-                      onClick={() => !disabled && setManualSlot(value)}
-                      disabled={disabled}
-                      title={disabled ? "Needs a pair at the crease" : undefined}
-                      className="px-2 py-1 rounded-md text-[9px] font-bold uppercase"
-                      style={{
-                        background: manualSlot === value ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.06)",
-                        color: disabled
-                          ? "rgba(255,255,255,0.25)"
-                          : manualSlot === value
-                          ? "#F2C766"
-                          : "rgba(255,255,255,0.6)",
-                        cursor: disabled ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
 
               <div className="h-px my-1" style={{ background: "rgba(255,255,255,0.08)" }} />
 
@@ -728,14 +732,63 @@ export default function BroadcastDemoPage() {
               </div>
 
               <p className="text-[9px] leading-relaxed mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-                Boundaries / run-rate / partnership share one dock point and rotate automatically — use
-                Preview above to pin one, or Auto to go back to rotation.
+                Boundaries / run-rate / partnership / bowling share one dock point — use their header
+                buttons to pin one, click again to go back to Auto rotation.
               </p>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// Shared toolbar button for the furniture toggles (Weather, Score Bar)
+// and the dock triggers (Boundaries, Run Rate, Partnership, Bowling) —
+// same visual language (icon + label, gold when active) whether it's a
+// persistent on/off toggle or a "pin into the dock" trigger.
+function ToolbarToggleButton({
+  label,
+  icon: Icon,
+  active,
+  disabled = false,
+  title,
+  onClick,
+}: {
+  label: string;
+  icon: typeof Zap;
+  active: boolean;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={() => !disabled && onClick()}
+      disabled={disabled}
+      title={title}
+      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg"
+      style={{
+        background: active ? "rgba(201,151,31,0.22)" : "transparent",
+        border: active ? "1px solid rgba(201,151,31,0.4)" : "1px solid transparent",
+        opacity: disabled ? 0.35 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
+      }}
+      onMouseEnter={(e) => {
+        if (!active && !disabled) e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <Icon className="w-3.5 h-3.5" style={{ color: active ? "#F2C766" : "rgba(255,255,255,0.75)" }} />
+      <span
+        className="text-[11px] font-bold uppercase tracking-wide"
+        style={{ color: active ? "#F2C766" : "white" }}
+      >
+        {label}
+      </span>
+    </button>
   );
 }
 
@@ -776,8 +829,9 @@ function ToggleRow({
 }
 
 // Small pill button used for the header's celebration triggers (four, six,
-// wicket, fifty, hundred, maiden, match won). Kept separate from ToggleRow
-// since these are one-shot actions, not persistent on/off state.
+// wicket, fifty, hundred, maiden, match won). Kept separate from
+// ToolbarToggleButton/ToggleRow since these are one-shot actions, not
+// persistent on/off state.
 function MomentButton({
   label,
   icon: Icon,
