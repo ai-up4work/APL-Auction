@@ -58,6 +58,22 @@
 // `firedMoment` itself, so the last moment's chyron just sat on screen
 // until the next moment overwrote it. It now reverts on the same
 // per-moment timing table as the preview monitor.
+//
+// FIX (scorecard channel showed nothing): CricketScorecard needs a full
+// innings card (every out batter's final line, every finished bowler's
+// final figures), but liveState only ever tracks the CURRENT
+// striker/non-striker/bowler — once someone's out or a bowler's spell
+// ends, their numbers vanish from liveState with nothing snapshotting
+// them first. battingCardRef/bowlingCardRef now accumulate those frozen
+// lines as they happen (handleWicket pushes the dismissed batter;
+// the bowler-change effect pushes the outgoing bowler's final figures),
+// buildCurrentInningsSnapshot() merges the frozen lines with whoever's
+// still live, and inningsCards gets populated at the two points a card
+// is actually "final" — innings break (handleInningsEnd) and match end
+// (handleMatchComplete) — then threaded through to BroadcastSurface and
+// the sandbox bus so the Live Preview Monitor's iframe gets it too.
+// restartMatch() clears all of this alongside the rest of liveState so
+// a fresh match doesn't inherit the previous one's card.
 
 "use client";
 
@@ -410,6 +426,84 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
   );
 }
 
+// ── Score Corner Bar — small, always-on fixed readout mirroring the
+// Live Preview Monitor's placement/visual language, but anchored to the
+// OPPOSITE corner (bottom-left vs the monitor's bottom-right) so the two
+// never overlap or crowd each other regardless of viewport width. Unlike
+// the monitor (an iframe replica of the real broadcast surface), this is
+// just a plain fixed div reading straight off local state — no iframe,
+// no bus round trip needed, since it's rendered in the same document.
+const SCORE_CORNER_MAX_WIDTH = 340;
+
+function ScoreCornerBar({
+  scoreReadout,
+  runRate,
+  battingLabel,
+  inningsLabel,
+  target,
+  runsNeeded,
+  ballsRemaining,
+}: {
+  scoreReadout: string;
+  runRate: string;
+  battingLabel: string;
+  inningsLabel: string;
+  target?: number;
+  runsNeeded?: number;
+  ballsRemaining?: number;
+}) {
+  return (
+    <div
+      className="fixed bottom-4 left-4 z-30 flex flex-col gap-1.5 rounded-md px-4 py-3 pointer-events-none"
+      style={{
+        maxWidth: SCORE_CORNER_MAX_WIDTH,
+        background: "rgba(8,8,8,0.88)",
+        backdropFilter: "blur(10px)",
+        border: "1px solid var(--color-border-overlay)",
+        boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
+      }}
+    >
+      <div className="flex items-center gap-2.5">
+        <span
+          className="text-[15px] tabular-nums font-bold px-2 py-0.5 rounded-[2px] shrink-0"
+          style={{
+            fontFamily: "var(--font-headline-lg)",
+            fontStyle: "italic",
+            color: "var(--color-theme-orange)",
+            background: "rgba(0,0,0,0.35)",
+            border: "1px solid var(--color-border-overlay)",
+          }}
+        >
+          {scoreReadout}
+        </span>
+        <span
+          className="text-[9px] font-semibold uppercase truncate"
+          style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.08em", color: "var(--color-outline)" }}
+        >
+          {inningsLabel}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+        <span
+          className="text-[10px] truncate"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
+        >
+          {battingLabel} batting · RR {runRate}
+        </span>
+        {target !== undefined && (
+          <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+            Target {target}
+            {runsNeeded !== undefined && ballsRemaining !== undefined && (
+              <> · Need {runsNeeded} off {ballsRemaining}</>
+            )}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Weather condition dropdown — a themed replacement for the native
 // <select>.
 function WeatherConditionSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -492,6 +586,28 @@ function WeatherConditionSelect({ value, onChange }: { value: string; onChange: 
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Scorecard accumulation types — see the header comment above for    */
+/*  why this can't just read straight off liveState.                  */
+/* ------------------------------------------------------------------ */
+
+interface CardBatterLine { name: string; runs: number; balls: number; out?: string; }
+interface CardBowlerLine { name: string; overs: string; figures: string; }
+interface InningsCardSnapshot {
+  label: string;
+  score: string;
+  overs: string;
+  batting: CardBatterLine[];
+  bowling: CardBowlerLine[];
+}
+type SandboxInningsCards = { 1?: InningsCardSnapshot; 2?: InningsCardSnapshot };
+
+const DISMISSAL_SHORT: Record<string, string> = {
+  bowled: "b", caught: "c", lbw: "lbw", runOut: "run out", stumped: "st",
+  hitWicket: "hit wkt", caughtAndBowled: "c & b", retired: "retired",
+  obstructingField: "obstructed", timedOut: "timed out",
+};
+
 export default function OverlaySandboxPage() {
   const matchSetup = HARDCODED_MATCH_SETUP;
 
@@ -523,7 +639,16 @@ export default function OverlaySandboxPage() {
 
   const matchBoundariesAutoEnabledRef = useRef(false);
 
-  const stateSnapshotRef = useRef({ matchSetup, liveState, weatherData, channels });
+  // ── Scorecard accumulation state/refs ─────────────────────────────
+  const battingCardRef = useRef<Record<1 | 2, CardBatterLine[]>>({ 1: [], 2: [] });
+  const bowlingCardRef = useRef<Record<1 | 2, CardBowlerLine[]>>({ 1: [], 2: [] });
+  const prevBowlerRef = useRef<typeof liveState.bowler | null>(null);
+  const prevBowlerInningsRef = useRef<1 | 2>(1);
+  const [inningsCards, setInningsCards] = useState<SandboxInningsCards>({});
+
+  const currentInnings = ((liveState.inningsNumber ?? 1) as 1 | 2);
+
+  const stateSnapshotRef = useRef({ matchSetup, liveState, weatherData, channels, inningsCards });
 
   function clearPreviewRevert() {
     if (previewRevertTimerRef.current) {
@@ -579,9 +704,44 @@ export default function OverlaySandboxPage() {
   }, []);
 
   useEffect(() => {
-    stateSnapshotRef.current = { matchSetup, liveState, weatherData, channels };
+    stateSnapshotRef.current = { matchSetup, liveState, weatherData, channels, inningsCards };
     busRef.current?.send({ type: "state", data: stateSnapshotRef.current });
-  }, [matchSetup, liveState, weatherData, channels]);
+  }, [matchSetup, liveState, weatherData, channels, inningsCards]);
+
+  // Freezes a bowler's figures into the card the instant the bowler slot
+  // changes to someone else — liveState only ever holds ONE bowler at a
+  // time, so this is the only point their final figures can be captured
+  // before they're overwritten.
+  useEffect(() => {
+    const prev = prevBowlerRef.current;
+    const bowledAnything = !!prev && (prev.overs > 0 || prev.balls > 0);
+    if (prev && bowledAnything && prev.name && prev.name !== liveState.bowler.name) {
+      bowlingCardRef.current[prevBowlerInningsRef.current].push({
+        name: prev.name,
+        overs: `${prev.overs}.${prev.balls}`,
+        figures: `${prev.wickets}-${prev.runs}`,
+      });
+    }
+    prevBowlerRef.current = liveState.bowler;
+    prevBowlerInningsRef.current = currentInnings;
+  }, [liveState.bowler, currentInnings]);
+
+  function buildCurrentInningsSnapshot(inn: 1 | 2, label: string): InningsCardSnapshot {
+    const batting = [...battingCardRef.current[inn]];
+    const bowling = [...bowlingCardRef.current[inn]];
+    if (currentInnings === inn) {
+      if (liveState.striker.name) batting.push({ name: liveState.striker.name, runs: liveState.striker.runs, balls: liveState.striker.balls });
+      if (liveState.nonStriker.name) batting.push({ name: liveState.nonStriker.name, runs: liveState.nonStriker.runs, balls: liveState.nonStriker.balls });
+      if (liveState.bowler.name) bowling.push({ name: liveState.bowler.name, overs: `${liveState.bowler.overs}.${liveState.bowler.balls}`, figures: `${liveState.bowler.wickets}-${liveState.bowler.runs}` });
+    }
+    return {
+      label,
+      score: `${liveState.score.runs}/${liveState.score.wickets}`,
+      overs: `${liveState.score.overs}.${liveState.score.balls}`,
+      batting,
+      bowling,
+    };
+  }
 
   function goLive() {
     if (typeof window !== "undefined") {
@@ -662,6 +822,10 @@ export default function OverlaySandboxPage() {
     fireMoment({ moment, player: batter.label ?? batter.name ?? "Batter", score: `${batter.runs}(${batter.balls})` });
   }
 
+  // FIX: this used to only fire the chyron/moment — the dismissed
+  // batter's final line never made it into battingCardRef, so they'd
+  // silently disappear from the scorecard the instant the next batter
+  // walked in and overwrote liveState.striker/nonStriker.
   function handleWicket(payload: {
     batsmanOut: "striker" | "nonStriker";
     batter: { name: string; runs: number; balls: number };
@@ -669,6 +833,13 @@ export default function OverlaySandboxPage() {
     fielder: string;
     bowlerName: string;
   }) {
+    battingCardRef.current[currentInnings].push({
+      name: payload.batter.name || (payload.batsmanOut === "striker" ? "Striker" : "Non-striker"),
+      runs: payload.batter.runs,
+      balls: payload.batter.balls,
+      out: DISMISSAL_SHORT[payload.dismissalType] ?? payload.dismissalType,
+    });
+
     fireMoment({
       moment: "wicket",
       batsmanOut: payload.batsmanOut,
@@ -702,15 +873,27 @@ export default function OverlaySandboxPage() {
     });
   }
 
+  // FIX: now freezes the 1st innings card into inningsCards and resets
+  // the 2nd innings ledger so the chase starts from a clean slate.
   function handleInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
     matchBoundariesAutoEnabledRef.current = false;
+    setInningsCards((prev) => ({ ...prev, 1: buildCurrentInningsSnapshot(1, "1st Innings") }));
+    battingCardRef.current[2] = [];
+    bowlingCardRef.current[2] = [];
+    prevBowlerRef.current = null;
     logEvent(`Innings ended — target set to ${payload.target}`);
   }
 
+  // FIX: now freezes the 2nd innings card into inningsCards so the
+  // Scorecard channel has both innings once the match is over.
   function handleMatchComplete(result: { winningTeamName: string; margin: string; method: "batting" | "bowling" | "tie" | "runs" | "wickets" }) {
+    setInningsCards((prev) => ({ ...prev, 2: buildCurrentInningsSnapshot(2, "2nd Innings") }));
     logEvent(`Match complete — ${result.winningTeamName} ${result.margin}`);
   }
 
+  // FIX: clears the scorecard accumulation (refs + inningsCards state)
+  // alongside the rest of liveState, so a restarted match doesn't carry
+  // over the previous match's batting/bowling cards.
   function restartMatch() {
     setLiveState((prev) => ({
       score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
@@ -727,6 +910,10 @@ export default function OverlaySandboxPage() {
       matchResult: undefined,
       thisOver: [],
     }));
+    battingCardRef.current = { 1: [], 2: [] };
+    bowlingCardRef.current = { 1: [], 2: [] };
+    prevBowlerRef.current = null;
+    setInningsCards({});
     setLiveDirty(true);
     setEngineSyncState(null);
     matchBoundariesAutoEnabledRef.current = false;
@@ -773,7 +960,13 @@ export default function OverlaySandboxPage() {
       <div className="fixed inset-0" style={{ background: "#000" }}>
         <ScrollbarTheme />
 
-        <BroadcastSurface channels={channels} liveState={liveState} weatherData={weatherData} matchSetup={matchSetup} />
+        <BroadcastSurface
+          channels={channels}
+          liveState={liveState}
+          weatherData={weatherData}
+          matchSetup={matchSetup}
+          inningsCards={inningsCards}
+        />
 
         <button
           type="button"
@@ -822,6 +1015,27 @@ export default function OverlaySandboxPage() {
     : liveState.target !== undefined
     ? `Innings ${liveState.inningsNumber ?? 2} · Chasing ${liveState.target}`
     : `Innings ${liveState.inningsNumber ?? 1}`;
+
+  // Corner bar derived figures. Run rate is recomputed here rather than
+  // shared with LiveStatePanel's own internal scoreboard strip — this
+  // page has no access to that component's local runRate calculation,
+  // but has everything it needs in liveState to compute the same value
+  // independently. battingLabel falls back to the fixture matchup string
+  // since the actual toss-derived "who's currently batting" logic lives
+  // inside LiveStatePanel's battingTeamKey memo and isn't exposed
+  // outward — swap this for a real team name if that's ever lifted up.
+  const cornerRunRate =
+    liveState.score.overs + liveState.score.balls / 6 > 0
+      ? (liveState.score.runs / (liveState.score.overs + liveState.score.balls / 6)).toFixed(2)
+      : "0.00";
+  const cornerBattingLabel = `${matchSetup.teamA.shortCode} vs ${matchSetup.teamB.shortCode}`;
+  const cornerRunsNeeded =
+    liveState.target !== undefined ? Math.max(0, liveState.target - liveState.score.runs) : undefined;
+  const maxOversByFormatLocal: Record<string, number | undefined> = { T20: 20, ODI: 50, Test: undefined };
+  const cornerMaxOvers = matchSetup.format ? maxOversByFormatLocal[matchSetup.format] : undefined;
+  const cornerTotalBalls = cornerMaxOvers !== undefined ? cornerMaxOvers * 6 : undefined;
+  const cornerBallsBowled = liveState.score.overs * 6 + liveState.score.balls;
+  const cornerBallsRemaining = cornerTotalBalls !== undefined ? Math.max(0, cornerTotalBalls - cornerBallsBowled) : undefined;
 
   return (
     <div className="h-screen w-screen overflow-hidden relative flex flex-col" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
@@ -1068,6 +1282,16 @@ export default function OverlaySandboxPage() {
       </div>
 
       <LivePreviewMonitor featuredMoment={featuredMoment} />
+
+      <ScoreCornerBar
+        scoreReadout={scoreReadout}
+        runRate={cornerRunRate}
+        battingLabel={cornerBattingLabel}
+        inningsLabel={inningsLabel}
+        target={liveState.target}
+        runsNeeded={cornerRunsNeeded}
+        ballsRemaining={cornerBallsRemaining}
+      />
     </div>
   );
 }

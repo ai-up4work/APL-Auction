@@ -295,6 +295,7 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         matchId={matchId}
         matchSetup={state.matchSetup ?? undefined}
         liveState={state.liveState ?? undefined}
+        sandboxInningsCards={undefined}
       />
 
       <CricketMatchIntro

@@ -175,40 +175,35 @@ function TeamInnings({ team, innings, closing, delay, variant }) {
   );
 }
 
-export default function CricketScorecard({
-  show,
-  hideTrigger = false,
-  matchId,
-  matchSetup = {},
-  liveState = {},
-}) {
-  const { mounted, open, closing, toggle, closePanel } = useOverlayPanel(show, EXIT_DURATION_MS, {
-    defaultOpen: false,
-    escapeToClose: true,
-  });
+export default function CricketScorecard({ show, hideTrigger = false, matchId, matchSetup = {}, liveState = {}, sandboxInningsCards }) {
+  const { mounted, open, closing, toggle, closePanel } = useOverlayPanel(show, EXIT_DURATION_MS, { defaultOpen: false, escapeToClose: true });
 
-  const { balls } = useBallsLedger(matchId, mounted);
+  // Skip the ledger fetch entirely once sandbox data is supplied — it'll
+  // always come back empty for matchId=null anyway.
+  const { balls } = useBallsLedger(matchId, mounted && !sandboxInningsCards);
 
-  // Destructure matchSetup with fallbacks
-  const {
-    teamA,
-    teamB,
-    tournamentLogoUrl,
-    tournamentName,
-  } = matchSetup;
-
-  // Destructure liveState
-  const {
-    inningsNumber = 1,
-    matchComplete = false,
-    matchResult,
-  } = liveState;
+  const { teamA, teamB, tournamentLogoUrl, tournamentName } = matchSetup;
+  const { inningsNumber = 1, matchComplete = false, matchResult } = liveState;
 
   const innings1Label = inningsNumber === 2 || matchComplete ? "1st Innings" : "1st Innings (in progress)";
   const innings2Label = "2nd Innings";
 
-  const inningsA = buildInningsCard(balls, 1, innings1Label);
-  const inningsB = buildInningsCard(balls, 2, innings2Label);
+  function fallback(snap, label) {
+    return {
+      label: snap?.label ?? label,
+      score: snap?.score ?? "0/0",
+      overs: snap?.overs ?? "0.0",
+      batting: snap?.batting ?? [],
+      bowling: snap?.bowling ?? [],
+    };
+  }
+
+  const inningsA = sandboxInningsCards
+    ? fallback(sandboxInningsCards[1], innings1Label)
+    : buildInningsCard(balls, 1, innings1Label);
+  const inningsB = sandboxInningsCards
+    ? fallback(sandboxInningsCards[2], innings2Label)
+    : buildInningsCard(balls, 2, innings2Label);
 
   const resultLine = matchComplete && matchResult
     ? `${matchResult.winningTeamName} ${matchResult.margin}`

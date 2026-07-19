@@ -20,6 +20,12 @@
 //
 // Not supported in some very old browsers, but fine for every modern
 // evergreen browser this sandbox is meant to run in.
+//
+// SandboxInningsCards lives here (not in page.tsx) because it's part of
+// the shared state contract: page.tsx builds it, sends it over the bus
+// inside SandboxState, and preview/page.tsx reads it back off the bus
+// to hand to its own <BroadcastSurface>. Both call sites import the
+// same type from here instead of each declaring their own shape.
 
 "use client";
 
@@ -35,11 +41,40 @@ export interface SandboxChannels {
   matchScorecard: boolean;
 }
 
+// Accumulated scorecard data for one innings — see page.tsx's header
+// comment for why this can't be derived from liveState alone (it only
+// ever tracks the CURRENT striker/non-striker/bowler; anyone dismissed
+// or rotated out vanishes from it unless something snapshots them
+// first).
+export interface CardBatterLine {
+  name: string;
+  runs: number;
+  balls: number;
+  out?: string;
+}
+
+export interface CardBowlerLine {
+  name: string;
+  overs: string;
+  figures: string;
+}
+
+export interface InningsCardSnapshot {
+  label: string;
+  score: string;
+  overs: string;
+  batting: CardBatterLine[];
+  bowling: CardBowlerLine[];
+}
+
+export type SandboxInningsCards = { 1?: InningsCardSnapshot; 2?: InningsCardSnapshot };
+
 export interface SandboxState {
   matchSetup: MatchSetup;
   liveState: LiveState;
   weatherData: WeatherData;
   channels: SandboxChannels;
+  inningsCards: SandboxInningsCards;
 }
 
 export type SandboxMessage =

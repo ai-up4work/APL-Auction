@@ -36,18 +36,14 @@ import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 import CricketScorecard from "@/components/overlays/CricketScorecard";
 
 import { useOverlayVisibility } from "@/app/sandbox/overlay/lib/useOverlayVisibility";
-import type { SandboxChannels } from "@/app/sandbox/overlay/lib/sandBoxBus";
+import type { SandboxChannels, SandboxInningsCards } from "@/app/sandbox/overlay/lib/sandBoxBus";
 
 export interface BroadcastSurfaceProps {
   channels: SandboxChannels;
   liveState: LiveState;
   weatherData: WeatherData;
   matchSetup: MatchSetup;
-  // The full-screen Live view wants the hardcoded backdrop video; the
-  // tiny monitor iframe also wants it (that's the whole point — it's a
-  // faithful miniature of the real thing), so this defaults to on, but
-  // stays a prop in case a future call site needs it off (e.g. dropped
-  // behind real match video instead of the sandbox's placeholder clip).
+  inningsCards?: SandboxInningsCards;
   showVideoBackdrop?: boolean;
 }
 
@@ -56,6 +52,7 @@ export default function BroadcastSurface({
   liveState,
   weatherData,
   matchSetup,
+  inningsCards,
   showVideoBackdrop = true,
 }: BroadcastSurfaceProps) {
   // Each consumer of this component computes its OWN fade timing off of
@@ -118,10 +115,20 @@ export default function BroadcastSurface({
         />
       )}
 
-      {/* matchId={null} — no real balls ledger in the sandbox, so this
-          shows team names/score with empty batting/bowling lists rather
-          than real ball-by-ball figures. */}
-      <CricketScorecard show={channels.matchScorecard} hideTrigger matchId={null} matchSetup={matchSetup} liveState={liveState} />
+      {/* matchId={null} — no real balls ledger in the sandbox, so without
+          sandboxInningsCards this would show team names/score with empty
+          batting/bowling lists rather than real figures. sandboxInningsCards
+          is the accumulated-card data built in page.tsx (see its header
+          comment) — CricketScorecard should prefer it over trying to derive
+          anything from matchId/liveState directly when it's provided. */}
+      <CricketScorecard
+        show={channels.matchScorecard}
+        hideTrigger
+        matchId={null}
+        matchSetup={matchSetup}
+        liveState={liveState}
+        sandboxInningsCards={inningsCards}
+      />
     </>
   );
 }
