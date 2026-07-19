@@ -6,20 +6,11 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import { GOLD_BEZEL, ambientGlow, teamBlockClip } from "@/lib/overlayTokens";
 import CricketBall from "@/components/overlays/shared/CricketBall";
-// NOTE: no `import type ... from "@/lib/overlayBus"` here — this file is
-// plain .jsx, and `import type` is TS-only syntax. The shapes of
-// `liveState` / `matchSetup` still come from overlayBus.ts at runtime,
-// we just don't annotate them here. If you want compile-time type
-// checking on this component, rename it to LiveScoreBar.tsx instead and
-// re-add `import type { LiveState, MatchSetup, TeamInfo } from "@/lib/overlayBus";`
 
 const ENTRANCE_MS = 900;
 const EXIT_MS = 650;
 const BALLS_PER_OVER = 6;
 
-// Fallback team shape used before matchSetup has synced in, or if a slot
-// is somehow missing — keeps TeamCrest/TeamBlock from crashing on
-// undefined fields.
 const FALLBACK_TEAM = {
   name: "Team",
   shortCode: "TBD",
@@ -30,10 +21,6 @@ const FALLBACK_TEAM = {
 
 const maxOversByFormat = { T20: 20, ODI: 50, Test: undefined };
 
-// Softens a hex color into an rgba() glow — replaces the hardcoded
-// `colorSoft` field the old local `LIVE` fixture used to carry. Team
-// data now comes from MatchSetup, which only stores a single hex color,
-// so we derive the soft/glow version here instead.
 function softenColor(hex, alpha = 0.18) {
   const clean = (hex || "#c9971f").replace("#", "");
   const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
@@ -43,10 +30,6 @@ function softenColor(hex, alpha = 0.18) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Cricket-ball styled chip — unchanged from the original component,
-// still driven purely by the string value passed in
-// ("0".."6" | "." | "W" | "wd" | "nb"). Kept exactly as-is; no feature
-// change needed here, this part was already correct.
 function BallChip({ value, index = 0, isLatest = false }) {
   const isEmpty = value == null;
   const isWicket = value === "W";
@@ -60,7 +43,7 @@ function BallChip({ value, index = 0, isLatest = false }) {
     ? "radial-gradient(circle at 32% 26%, #fff3d1 0%, #ffcf6b 30%, var(--color-theme-orange) 68%, #8a5c0d 100%)"
     : isExtra
     ? "radial-gradient(circle at 32% 26%, #f3f3f3 0%, #cfcfd2 45%, #8f8f95 85%, #6b6b70 100%)"
-    : undefined; // falls back to CricketBall's default leather gradient
+    : undefined;
 
   const seamColor = isBoundary ? "rgba(58,37,4,0.55)" : "rgba(255,255,255,0.5)";
   const labelColor = isWicket ? "#fff" : isBoundary ? "#3a2504" : isExtra ? "#2b2b2e" : "rgba(255,255,255,0.6)";
@@ -74,7 +57,6 @@ function BallChip({ value, index = 0, isLatest = false }) {
         animationDelay: isEmpty ? "0ms" : `${index * 70}ms`,
       }}
     >
-      {/* Live pulse ring — only on the most recently bowled ball */}
       {isLatest && !isEmpty && (
         <span
           className="absolute -inset-[3px] rounded-full pointer-events-none ball-pulse"
@@ -99,16 +81,11 @@ function BallChip({ value, index = 0, isLatest = false }) {
             {isDot ? "•" : value}
           </span>
         </CricketBall>
-
       )}
     </span>
   );
 }
 
-// Circular medallion crest. `team` now comes from MatchSetup.teamA/teamB
-// (real logoUrl / shortCode fields) instead of the old local TEAM_A/
-// TEAM_B fixture, so we render team.logoUrl with a shortCode fallback
-// (initials-style badge) when no logo has been set yet.
 function TeamCrest({ team, variant }) {
   return (
     <div className="relative w-9 h-9 sm:w-11 sm:h-11 shrink-0">
@@ -148,9 +125,6 @@ function TeamCrest({ team, variant }) {
   );
 }
 
-// One consistent team block: crest anchored to the bar's outer edge, name
-// + opponent label toward the center. Uses team.shortCode (from
-// MatchSetup) instead of the old fixture's team.short.
 const SLANT_PX = 22;
 
 function TeamBlock({ team, opponent, align, variant }) {
@@ -182,18 +156,6 @@ function TeamBlock({ team, opponent, align, variant }) {
   );
 }
 
-/**
- * LiveScoreBar — CHANGED: now fully driven by `liveState` / `matchSetup`
- * props, which come straight off the overlayBus (matchSetup + liveState
- * events are already real-time-synced there via the existing Supabase
- * channel — no second channel needed). Falls back to safe placeholders
- * if either prop hasn't arrived yet, so the bar doesn't crash before the
- * first sync lands.
- *
- * `show`/`hideTrigger` behavior is unchanged from the original —
- * remote-controllable the same way PointsTable is, with the same
- * self-contained-vs-externally-driven `show` prop pattern.
- */
 export default function LiveScoreBar({ show, hideTrigger = false, liveState, matchSetup }) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(show ?? true);
@@ -232,7 +194,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
     else if (!open) openBar();
   }, [open, closing, openBar, closeBar]);
 
-  // External control — only takes effect when `show` is actually passed.
   useEffect(() => {
     if (show === undefined) return;
     if (show) openBar();
@@ -240,10 +201,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  // ── Derive display data from the synced liveState/matchSetup ───────
-  // Same "who's batting right now" logic LiveStatePanel.tsx already
-  // uses (toss winner/decision + current innings number), duplicated
-  // here so the overlay can compute it independently of the admin page.
   const battingTeamKey = useMemo(() => {
     const firstInningsTeamIsA = (() => {
       if (matchSetup?.tossWinner && matchSetup.tossDecision) {
@@ -276,9 +233,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
   const tournamentName = matchSetup?.tournamentName || "";
   const tournamentLogo = matchSetup?.tournamentLogoUrl || "";
 
-  // Pad the current over out to a full 6 balls with hollow placeholders,
-  // sourced from liveState.thisOver (synced via the bus) instead of the
-  // old hardcoded LIVE.thisOver fixture.
   const overChips = useMemo(() => {
     const balls = liveState?.thisOver ?? [];
     return [...balls, ...Array(Math.max(0, BALLS_PER_OVER - balls.length)).fill(null)];
@@ -319,10 +273,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                   : `lsbBarIn ${ENTRANCE_MS}ms cubic-bezier(0.22,1,0.36,1) both`,
               }}
             >
-              {/* Logo badge — only render if a tournament logo has
-                  actually been set in Match Setup; the old version
-                  always rendered TOURNAMENT.logo from the hardcoded
-                  fixture, which doesn't exist anymore. */}
               {tournamentLogo && (
                 <div className="absolute left-1/2 top-0 z-20">
                   <div
@@ -348,8 +298,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                 </div>
               )}
 
-              {/* Ambient glow — team-tinted, sourced from softenColor()
-                  instead of the fixture's hardcoded colorSoft field. */}
               <div
                 className="absolute -inset-4 sm:-inset-5 blur-2xl rounded-[28px] pointer-events-none"
                 style={{
@@ -360,7 +308,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                 }}
               />
 
-              {/* Metallic bezel — unchanged, still from shared overlayTokens */}
               <div
                 className="relative p-[2px] sm:p-[3px] rounded-2xl sm:rounded-[22px]"
                 style={{
@@ -473,56 +420,60 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                     />
                   </div>
 
+                  {/* BOTTOM ROW - UPDATED */}
                   <div
-                    className="relative flex items-center gap-2.5 sm:gap-5 px-3 sm:px-5 py-1.5 sm:py-2"
+                    className="relative flex items-center justify-between px-3 sm:px-5 py-1.5 sm:py-2"
                     style={{ background: "var(--color-surface-container-lowest)" }}
                   >
                     
+                    {/* Left Section: This Over + Overs */}
+                    <div className="flex items-center gap-2.5 sm:gap-5">
+                      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                        <span
+                          className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em]"
+                          style={{ color: "var(--color-outline)" }}
+                        >
+                          This Over
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {overChips.map((b, i) => (
+                            <BallChip key={i} value={b} index={i} isLatest={i === latestBallIndex} />
+                          ))}
+                        </div>
+                      </div>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                      <span
-                        className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em]"
-                        style={{ color: "var(--color-outline)" }}
-                      >
-                        This Over
-                      </span>
-                      <div className="flex items-center gap-1">
-                        {overChips.map((b, i) => (
-                          <BallChip key={i} value={b} index={i} isLatest={i === latestBallIndex} />
-                        ))}
+                      <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
+                        <div
+                          className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-0 sm:py-0"
+                        >
+                          <span
+                            className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
+                            style={{ color: "var(--color-theme-orange)", opacity: 0.85 }}
+                          >
+                            Overs
+                          </span>
+                          <span
+                            className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
+                            style={{ color: "var(--color-on-surface)" }}
+                          >
+                            {oversLabel}
+                            {oversLimit !== undefined && (
+                              <span
+                                className="text-[9px] sm:text-[11px] font-semibold"
+                                style={{ color: "var(--color-outline)" }}
+                              >
+                                /{oversLimit}
+                              </span>
+                            )}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
-                      <div
-                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-0 sm:py-0"
-                      >
-                        <span
-                          className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
-                          style={{ color: "var(--color-theme-orange)", opacity: 0.85 }}
-                        >
-                          Overs
-                        </span>
-                        <span
-                          className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
-                          style={{ color: "var(--color-on-surface)" }}
-                        >
-                          {oversLabel}
-                          {oversLimit !== undefined && (
-                            <span
-                              className="text-[9px] sm:text-[11px] font-semibold"
-                              style={{ color: "var(--color-outline)" }}
-                            >
-                              /{oversLimit}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 min-w-0 text-center hidden sm:block">
+                    {/* Perfectly Centered Middle Section: Live from */}
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[30%] text-center pointer-events-none hidden sm:block">
                       <span
-                        className="text-[9px] font-bold tracking-[0.2em] uppercase truncate"
+                        className="text-[9px] font-bold tracking-[0.2em] uppercase truncate block w-full"
                         style={{ color: "var(--color-on-surface-variant)" }}
                       >
                         Live from <span className="font-bold" style={{ color: "var(--color-theme-orange)" }}>
@@ -531,7 +482,8 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
+                    {/* Right Section: Bowler */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
                       <span
                         className="text-[10px] sm:text-xs font-bold uppercase truncate"
                         style={{ color: "var(--color-on-surface)" }}
@@ -550,6 +502,7 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                       </span>
                     </div>
                   </div>
+
                 </div>
               </div>
             </div>
