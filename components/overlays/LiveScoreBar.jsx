@@ -495,7 +495,7 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
 
                     <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
                       <div
-                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-1 sm:py-1.5"
+                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-0 sm:py-0"
                       >
                         <span
                           className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
