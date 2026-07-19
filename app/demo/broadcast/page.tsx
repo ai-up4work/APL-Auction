@@ -46,6 +46,15 @@ import FallOfWicketsStrip from "@/components/overlays/Fallofwicketsstrip";
 
 type BoundariesMode = "match" | "tournament";
 type SlotItem = "boundaries" | "runrate" | "partnership";
+// Was referenced by fireMoment() below (as a parameter type and as the key
+// type of the payloads Record) but never actually declared anywhere in this
+// file — TypeScript would fail on "Cannot find name 'MomentType'" at both
+// usages, and once that error hits, the type-checker's state is already
+// broken for the rest of the file, which is why unrelated JSX below (the
+// TossGraphic/CricketMatchIntro/etc. calls) can start showing spurious
+// "doesn't accept these props" errors too. The union here just has to match
+// the keys actually used in the `payloads` object further down.
+type MomentType = "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
 
 const SLOT_ITEMS: SlotItem[] = ["boundaries", "runrate", "partnership"];
 const SLOT_DWELL_MS = 6000; // how long each card stays up
@@ -131,6 +140,27 @@ export default function BroadcastDemoPage() {
   const [dockOpen, setDockOpen] = useState(false);
   const [momentsOpen, setMomentsOpen] = useState(false);
 
+  // Auto-reveal the toss result once, shortly after the toss is known, then
+  // hand control back to TossGraphic's own trigger button by setting `show`
+  // back to undefined — so it still opens/closes on click afterward, exactly
+  // like every other modal-style overlay in this toolbar. Previously this
+  // page never passed `show` to TossGraphic at all, so the auto-reveal path
+  // the component supports was dead code from this integration's side.
+  const [showToss, setShowToss] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    if (!matchSetup?.tossWinner) return;
+    const revealDelayMs = 900;
+    const dwellMs = 4500;
+    const t1 = setTimeout(() => setShowToss(true), revealDelayMs);
+    const t2 = setTimeout(() => setShowToss(false), revealDelayMs + dwellMs);
+    const t3 = setTimeout(() => setShowToss(undefined), revealDelayMs + dwellMs + 500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [matchSetup?.tossWinner]);
+
   const striker = liveState.striker;
   const nonStriker = liveState.nonStriker;
   const bowler = liveState.bowler;
@@ -168,16 +198,16 @@ export default function BroadcastDemoPage() {
   const slot = useRotatingSlot(activeItems, SLOT_DWELL_MS, SLOT_GAP_MS, SLOT_EXIT_MS, false);
 
   return (
-    <div className="fixed inset-0 overflow-hidden" style={{ background: "#05070C" }}>
-      {/* Stand-in "broadcast feed" — a dark gradient instead of real match
-          footage, just so the overlays have contrast to sit on. */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle at 30% 20%, rgba(59,139,212,0.12) 0%, transparent 45%), radial-gradient(circle at 75% 75%, rgba(42,157,92,0.1) 0%, transparent 45%), linear-gradient(180deg, #0a1220 0%, #05070c 100%)",
-        }}
-      />
+      <div className="fixed inset-0" style={{ background: "transparent" }}>
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="fixed inset-0 w-full h-full object-cover"
+          style={{ zIndex: 0 }}
+          src="/sample-match-footage.mp4"
+        />
 
       {/* ---- Always-on overlays — logo, weather, score bar ---- */}
       <TournamentLogoDisplay
@@ -240,10 +270,13 @@ export default function BroadcastDemoPage() {
       >
         <CricketMatchIntro matchSetup={matchSetup} />
         <TossGraphic
+          show={showToss}
           teamA={matchSetup.teamA}
           teamB={matchSetup.teamB}
           winner={matchSetup.tossWinner}
           decision={matchSetup.tossDecision}
+          tournamentName={matchSetup.tournamentName}
+          tournamentLogoUrl={matchSetup.tournamentLogoUrl}
         />
         <CricketScorecard
           matchId={null}
