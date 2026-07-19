@@ -178,8 +178,13 @@ function pickDelivery(runTable: Array<[PlainRun, number]>): DeliveryKind {
 // conservatively (the bowling side defends and wins by runs). Over
 // several loops of the demo, both win methods get shown.
 //
-// End of every match: Undo the result -> re-confirm End Match -> Restart
-// Match -> loop back to a fresh Innings 1 script.
+// End of every match: Restart Match -> loop back to a fresh Innings 1
+// script.
+//
+// FIX (no more post-match undo/re-end showcase): this used to also do
+// "Undo the result" -> re-confirm "End Match" as a recovery showcase
+// right before the restart. That's been removed — see the note above
+// runOneMatchCycle's post-match block for why.
 // ------------------------------------------------------------------
 
 type ScriptBeat =
@@ -1203,33 +1208,23 @@ class ScriptedDriver {
     if (!this.isCurrent(gen)) return;
 
     // NEW — Scorecard graphic once the match has actually finished,
-    // shown before the Undo/Restart showcase steps.
+    // shown before wrapping up the cycle.
     await this.showScorecard(gen);
     if (!this.isCurrent(gen)) return;
 
-    await this.announcedClick(
-      gen,
-      "demo-match-over-undo",
-      "Undo the result",
-      "Demonstrating recovery from a mistaken finish — undoing the result puts the match straight back into live scoring.",
-      "Result undone — back to live scoring.",
-      WICKET_COLOR
-    );
-    await this.beat(gen, STEP_GAP_MS);
+    // FIX (removed): this used to also do "Undo the result" -> re-confirm
+    // "End Match" here as a recovery showcase. The problem: engine.undo()
+    // only rolls back the single delivery that triggered auto-completion
+    // (e.g. the winning six, or the wicket that finished the chase).
+    // Manually re-confirming "End Match" from that rolled-back state
+    // computes the result off different numbers than the original
+    // auto-detected finish, which could flip who's declared the winner —
+    // a confusing, misleading thing to show in a demo loop. So we go
+    // straight from the scorecard to the restart showcase instead. The
+    // mid-innings `{ kind: "undo" }` beat (a plain ball undo, not a
+    // match-completion undo) is unaffected and still runs earlier in
+    // innings 1.
 
-    if (!this.isCurrent(gen)) return;
-    if (!this.handleGetter()?.isMatchComplete()) {
-      // We're intentionally back in live scoring after the Undo demo —
-      // this click is deliberate (showing the manual End Match path),
-      // not a duplicate of any auto-detected close-out, since we just
-      // proved above (via waitForMatchComplete) that the match really
-      // was complete before Undo reverted it, and the button is only
-      // hidden once matchComplete flips back to true.
-      await this.endCurrentInningsOrMatch(gen, "End the match");
-      await this.waitForMatchComplete(gen);
-    }
-
-    if (!this.isCurrent(gen)) return;
     await this.announcedClick(
       gen,
       "demo-match-over-restart",

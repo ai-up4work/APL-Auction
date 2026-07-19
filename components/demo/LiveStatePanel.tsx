@@ -751,6 +751,28 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
 ) {
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
+  // FIX (locked-controls UX): a small, self-dismissing error toast shown
+  // whenever a real (non-demo) user tries to score a ball or appeal a
+  // wicket while striker/non-striker/bowler assignments are still
+  // missing. Previously the ball pad and OUT button just silently did
+  // nothing in that state — nothing told the scorer WHY their tap didn't
+  // register.
+  const [lockedNotice, setLockedNotice] = useState(false);
+  const lockedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flashLockedNotice() {
+    setLockedNotice(true);
+    if (lockedNoticeTimerRef.current) clearTimeout(lockedNoticeTimerRef.current);
+    lockedNoticeTimerRef.current = setTimeout(() => setLockedNotice(false), 2200);
+  }
+
+  useEffect(
+    () => () => {
+      if (lockedNoticeTimerRef.current) clearTimeout(lockedNoticeTimerRef.current);
+    },
+    []
+  );
+
   const battingTeamKey: "teamA" | "teamB" = useMemo(() => {
     const firstInningsTeamIsA = (() => {
       if (matchSetup?.tossWinner && matchSetup.tossDecision) {
@@ -858,6 +880,20 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
 
   const controlsLocked = engine.assignmentsMissing();
 
+  // FIX (locked-controls UX): route every scoring action (a run, an
+  // extra, or an appeal) through this guard instead of calling the
+  // engine directly. While `readOnly` (auto-demo mode) is active, the
+  // whole scoring console already sits behind `pointer-events: none` —
+  // see `#demo-panel-root` below — so this guard only matters for a
+  // real, interactive user.
+  function guardedBallAction(action: () => void) {
+    if (controlsLocked) {
+      flashLockedNotice();
+      return;
+    }
+    action();
+  }
+
   const strikerNeedsReplacement = engine.noPartnerAvailable && !liveState.striker.name;
   const nonStrikerNeedsReplacement = engine.noPartnerAvailable && !liveState.nonStriker.name;
 
@@ -913,9 +949,38 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           0%, 100% { box-shadow: 0 0 0 8px rgba(201,151,31,0.08), 0 12px 32px rgba(0,0,0,0.35); }
           50% { box-shadow: 0 0 0 12px rgba(201,151,31,0.14), 0 12px 32px rgba(0,0,0,0.35); }
         }
+        @keyframes lockedNoticeIn {
+          from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
+          to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
 
         .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 9000; animation: scorerBackdropIn 140ms ease-out; padding: 16px; }
         .scorer-dialog { width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--color-surface-container-low); border: 1px solid var(--color-border-overlay); border-radius: 14px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+        .locked-notice-toast {
+          position: fixed;
+          left: 50%;
+          bottom: 32px;
+          transform: translateX(-50%);
+          z-index: 9500;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 16px;
+          border-radius: 10px;
+          font-family: var(--font-label-mono);
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--color-error);
+          background: rgba(217,83,79,0.16);
+          border: 1px solid rgba(217,83,79,0.5);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+          animation: lockedNoticeIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+          pointer-events: none;
+        }
         .ball-controls-row { margin-bottom: 12px; }
         .ball-controls-extras { display: flex; flex-direction: column; gap: 4px; }
         .ball-controls-label { font-family: var(--font-label-mono); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-outline); }
@@ -1342,6 +1407,15 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
         </ViewportPortal>
       )}
 
+      {lockedNotice && (
+        <ViewportPortal>
+          <div className="locked-notice-toast" role="status">
+            <AlertTriangle size={14} strokeWidth={2.4} />
+            Assign striker, non-striker &amp; bowler before scoring
+          </div>
+        </ViewportPortal>
+      )}
+
       <div id="demo-panel-root" style={{ pointerEvents: readOnly ? "none" : undefined }}>
         {liveState.matchComplete ? (
           <MatchOverScreen
@@ -1355,12 +1429,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           />
         ) : (
           <>
-            {controlsLocked && !engine.noPartnerAvailable && (
-              <div className="assignment-needed-banner">
-                ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
-                after starting a new innings.
-              </div>
-            )}
+
 
             {engine.noPartnerAvailable && (
               <div className="innings-status-card">
@@ -1568,16 +1637,21 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
                     type="button"
                     id={`demo-ball-${r}`}
                     className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`}
-                    onClick={() => engine.recordBall(r as 0 | 1 | 2 | 3 | 4 | 6)}
+                    onClick={() => guardedBallAction(() => engine.recordBall(r as 0 | 1 | 2 | 3 | 4 | 6))}
                   >
                     {r}
                   </button>
                 ))}
-                <button type="button" id="demo-ball-out" className="ball-btn ball-btn-wicket" onClick={engine.recordWicket}>
+                <button
+                  type="button"
+                  id="demo-ball-out"
+                  className="ball-btn ball-btn-wicket"
+                  onClick={() => guardedBallAction(engine.recordWicket)}
+                >
                   OUT
                 </button>
               </div>
-              <p className="text-[9px] mt-2" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+              <p className="text-[9px] mt-2 mb-2" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
                 {readOnly
                   ? "Auto-demo is currently driving this match — switch to \"Try It Yourself\" to take over scoring."
                   : <>Pick an extra type first if this ball is a wide / no ball / bye / leg bye. Fours, sixes, and fifty/hundred milestones
