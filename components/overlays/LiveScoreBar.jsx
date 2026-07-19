@@ -99,6 +99,7 @@ function BallChip({ value, index = 0, isLatest = false }) {
             {isDot ? "•" : value}
           </span>
         </CricketBall>
+
       )}
     </span>
   );
@@ -395,38 +396,6 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                       </span>
                     </div>
 
-                    <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
-                      <div
-                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-1 sm:py-1.5"
-                        style={{
-                          background: "linear-gradient(160deg, rgba(201,151,31,0.16) 0%, rgba(201,151,31,0.05) 100%)",
-                          border: "1px solid rgba(201,151,31,0.35)",
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <span
-                          className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
-                          style={{ color: "var(--color-theme-orange)", opacity: 0.85 }}
-                        >
-                          Overs
-                        </span>
-                        <span
-                          className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
-                          style={{ color: "var(--color-on-surface)" }}
-                        >
-                          {oversLabel}
-                          {oversLimit !== undefined && (
-                            <span
-                              className="text-[9px] sm:text-[11px] font-semibold"
-                              style={{ color: "var(--color-outline)" }}
-                            >
-                              /{oversLimit}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
                     <div className="relative z-10 w-px my-2.5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
 
                     <div className="relative z-10 flex-1 flex items-center justify-center sm:justify-between gap-2 sm:gap-3 px-2 sm:px-5 min-w-0">
@@ -508,6 +477,8 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                     className="relative flex items-center gap-2.5 sm:gap-5 px-3 sm:px-5 py-1.5 sm:py-2"
                     style={{ background: "var(--color-surface-container-lowest)" }}
                   >
+                    
+
                     <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                       <span
                         className="text-[7px] sm:text-[8px] font-bold uppercase tracking-[0.18em]"
@@ -519,6 +490,33 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                         {overChips.map((b, i) => (
                           <BallChip key={i} value={b} index={i} isLatest={i === latestBallIndex} />
                         ))}
+                      </div>
+                    </div>
+
+                    <div className="relative z-10 flex items-center pr-2 sm:pr-4 shrink-0">
+                      <div
+                        className="flex flex-col items-center justify-center rounded-lg px-2 sm:px-3 py-1 sm:py-1.5"
+                      >
+                        <span
+                          className="text-[6px] sm:text-[7px] font-bold uppercase tracking-[0.18em]"
+                          style={{ color: "var(--color-theme-orange)", opacity: 0.85 }}
+                        >
+                          Overs
+                        </span>
+                        <span
+                          className="font-heading font-black text-[11px] sm:text-sm tabular-nums leading-none"
+                          style={{ color: "var(--color-on-surface)" }}
+                        >
+                          {oversLabel}
+                          {oversLimit !== undefined && (
+                            <span
+                              className="text-[9px] sm:text-[11px] font-semibold"
+                              style={{ color: "var(--color-outline)" }}
+                            >
+                              /{oversLimit}
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </div>
 
