@@ -477,7 +477,7 @@ export default function BroadcastDemoPage() {
       {effectiveActiveItem === "runrate" && (
         <RunRatePanel
           crr={runRate.crr}
-          target={runRate.target}
+          target={runRate.target ?? null}
           runsNeeded={runRate.runsNeeded}
           ballsRemaining={runRate.ballsRemaining}
           closing={effectiveClosing}
