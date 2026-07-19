@@ -530,7 +530,7 @@ export default function BroadcastDemoPage() {
         style={{ background: "rgba(8,8,10,0.72)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(6px)" }}
       >
         {/* ---- Modal / graphic overlays ---- */}
-        <CricketMatchIntro matchSetup={matchSetup} />
+        <CricketMatchIntro show={undefined} matchSetup={matchSetup} tournament={matchSetup} matchMeta={matchSetup} />
         <TossGraphic
           show={showToss}
           teamA={matchSetup.teamA}
@@ -541,6 +541,7 @@ export default function BroadcastDemoPage() {
           tournamentLogoUrl={matchSetup.tournamentLogoUrl}
         />
         <CricketScorecard
+          show={undefined}
           matchId={null}
           matchSetup={matchSetup}
           liveState={liveState}
