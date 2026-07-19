@@ -45,12 +45,38 @@
 // centered "broadcast" position (`fixed inset-x-0 bottom-0`, `width:
 // 90vw`, `items-center`), it's repositioned to the bottom-left corner
 // and enlarged purely via a scoped global CSS override (see
-// <ScrollbarTheme>-style global <style jsx global> block below) that
-// targets its portaled wrapper by its `aria-live="polite"` attribute —
-// the one identifying hook LiveScoreBar's markup already exposes on
-// that wrapper, and one that's unique on this page (nothing else here
-// renders an aria-live="polite" region). No component code was edited
-// to make this work.
+// <BigScoreBarPositionOverride /> below) that targets its portaled
+// wrapper by its `aria-live="polite"` attribute — the one identifying
+// hook LiveScoreBar's markup already exposes on that wrapper. No
+// component code was edited to make this work.
+//
+// FIX (Live view inherited the Control view's shrunk score bar): the
+// override CSS above is a bare `div[aria-live="polite"] { ... }`
+// selector, injected via a GLOBAL <style jsx global> tag. Global styles
+// aren't scoped to their parent in the DOM — hiding the control view's
+// wrapper with `display: none` does nothing to stop the rule itself
+// from matching, and it matches ANY element with that attribute
+// anywhere in the document. Since both the control view's own
+// <LiveScoreBar> AND the Live view's copy (rendered inside
+// <BroadcastSurface>) are literally the same component portaled to
+// document.body, both expose that exact attribute as siblings under
+// <body> — there's no DOM relationship distinguishing "the admin one"
+// from "the broadcast one". So whenever both were mounted at once (the
+// old code kept the control-view LiveScoreBar mounted at all times,
+// just toggling its own `show` prop, and kept the override's <style>
+// tag mounted unconditionally too), the broadcast surface's real,
+// full-size bar got silently squashed down to the same small
+// bottom-left override meant only for the corner readout in Controls.
+//
+// Fixed by fully UNMOUNTING both the override stylesheet and the
+// control-view's LiveScoreBar instance when not on the control view,
+// instead of just toggling a `show` prop on an always-mounted instance.
+// Neither of them holds state that needs to survive a flip — they're
+// both purely derived from liveState/channels, which live up in this
+// component regardless — so conditional rendering is safe and removes
+// the override CSS from the document entirely while Live is showing,
+// letting BroadcastSurface's LiveScoreBar render at its own real,
+// full "broadcast" size, same as it does on the actual overlay page.
 //
 // Scoring console: now rendered via <LiveStatePanelAuto>, which wraps
 // the real <LiveStatePanel> (unchanged engine/graphics) with a scripted
@@ -94,6 +120,28 @@
 // the sandbox bus so the Live Preview Monitor's iframe gets it too.
 // restartMatch() clears all of this alongside the rest of liveState so
 // a fresh match doesn't inherit the previous one's card.
+//
+// FIX (Flip to Live showed only the video): the live-view wrapper below
+// used to be `fixed inset-0 z-[9500]`. Every real overlay component
+// (WeatherCard, MatchBoundaries, TournamentBoundaries,
+// MatchMomentOverlay, LiveScoreBar, CricketMatchIntro,
+// TournamentLogoDisplay, CricketScorecard) portals straight to
+// document.body via createPortal — none of them are actually DOM
+// descendants of this wrapper div, so they don't inherit its stacking
+// context. But `position: fixed` + an explicit `z-index: 9500` DOES
+// create a new stacking context for this div and everything that IS a
+// real child of it — which is just the <video> backdrop. That put the
+// video's entire stacking context above every portaled overlay
+// (whatever more modest z-index each of those defines internally),
+// hiding all of them behind solid video. There was never a reason for
+// this wrapper to out-rank anything — the control view underneath is
+// hidden via `display: none`, which removes it from paint regardless of
+// z-index — so the fix is simply to drop the z-index override here and
+// let the overlay components' own natural stacking order (already
+// correct on the real, non-sandbox broadcast page) do its job. Only the
+// "Back to Controls" button and the "Sandbox Feed" badge keep an
+// explicit z-index, since those two ARE real children here and need to
+// stay above the video + portaled overlays.
 
 "use client";
 
@@ -275,14 +323,15 @@ function ScrollbarTheme() {
 //     items-center ...` with `aria-live="polite"` on it
 //   - an inner `.lsb-wrap` sized to `width: 90vw`, centered via
 //     `origin-center`
-// aria-live="polite" is the one identifying hook that wrapper exposes,
-// and nothing else on this page renders an aria-live="polite" region —
-// so it's a safe, unique CSS target for repositioning it into the
-// bottom-left corner at a larger fixed width, purely from this page's
-// own stylesheet. This only affects the Control view, since that's the
-// only place this component gets mounted directly (the Live view's copy
-// comes from BroadcastSurface and is meant to stay centered/full-width
-// as designed).
+// aria-live="polite" is the one identifying hook that wrapper exposes.
+// IMPORTANT: this is a global, unscoped selector — it matches ANY
+// aria-live="polite" element in the document, including the Live
+// view's own LiveScoreBar (rendered inside BroadcastSurface). It is
+// only safe to have this mounted while the control-view's LiveScoreBar
+// is the ONLY one on screen — which is why both this component and the
+// control-view LiveScoreBar below are now conditionally rendered
+// together (`{view === "control" && (...)}`) rather than always
+// mounted. Do not mount this while the Live view is showing.
 function BigScoreBarPositionOverride() {
   return (
     <style jsx global>{`
@@ -978,6 +1027,15 @@ export default function OverlaySandboxPage() {
   // it's fully driven by props (liveState/channels/etc.) that live up
   // here in this component either way.
   //
+  // The control-view LiveScoreBar + its position override CSS are ALSO
+  // now conditionally rendered (`{view === "control" && (...)}`) rather
+  // than always-mounted — see the FIX comment on
+  // <BigScoreBarPositionOverride /> above for why: unlike the scoring
+  // panel, neither of these holds state that needs to survive a flip,
+  // and leaving them mounted let their global CSS override silently
+  // squash the Live view's own LiveScoreBar down to the same small
+  // corner size.
+  //
   // One caveat: WicketDetailDialog / EndInningsDialog / RestartMatchDialog
   // inside LiveStatePanel portal straight to document.body (same reason
   // LiveScoreBar does), so `display: none` on their control-view ancestor
@@ -1005,7 +1063,6 @@ export default function OverlaySandboxPage() {
       }}
     >
       <ScrollbarTheme />
-      <BigScoreBarPositionOverride />
       <style jsx global>{`
         @keyframes sandboxFeedPulse {
           0%, 100% { opacity: 1; }
@@ -1259,36 +1316,30 @@ export default function OverlaySandboxPage() {
 
       <LivePreviewMonitor featuredMoment={featuredMoment} />
 
-      {/* Real LiveScoreBar, mounted directly (not through the iframe),
-          untouched component — repositioned/enlarged into the
-          bottom-left corner purely via <BigScoreBarPositionOverride />
-          above. `hideTrigger` keeps its own show/hide toggle button
-          out of the way since visibility here is meant to just track
-          `channels.liveScoreBar`, same source of truth the broadcast
-          surface uses. */}
-      {/* Real LiveScoreBar, mounted directly (not through the iframe),
-          untouched component — repositioned/enlarged into the
-          bottom-left corner purely via <BigScoreBarPositionOverride />
-          above. `hideTrigger` keeps its own show/hide toggle button
-          out of the way since visibility here is meant to just track
-          `channels.liveScoreBar`, same source of truth the broadcast
-          surface uses.
-
-          `show` also factors in `view === "control"` — this component
-          portals straight to document.body (see LiveScoreBar.jsx's own
-          header comment), so simply hiding its CONTROL-VIEW ancestor
-          with `display: none` above would NOT hide it; it'd keep
-          floating on top of the Live view's own copy of this same bar
-          (rendered inside BroadcastSurface). Passing `show=false` while
-          `view === "live"` instead lets it close itself with its normal
-          exit animation, and it reopens with its entrance animation the
-          moment you flip back to Controls. */}
-      <LiveScoreBar
-        show={channels.liveScoreBar && view === "control"}
-        hideTrigger
-        liveState={liveState}
-        matchSetup={matchSetup}
-      />
+      {/* FIX: BigScoreBarPositionOverride + the control-view's
+          LiveScoreBar are now fully unmounted (not just toggled via
+          `show`) whenever we're not on the control view. Both are pure,
+          derived-only-from-props/state — nothing here needs to survive
+          a flip to Live — and mounting the override's global <style>
+          tag at the same time as the Live view's own LiveScoreBar (from
+          BroadcastSurface) let its unscoped `div[aria-live="polite"]`
+          selector squash THAT bar down to this corner's small size too,
+          since both bars share the same portaled-to-body attribute with
+          no DOM relationship distinguishing them. Conditionally
+          rendering removes the override CSS from the document entirely
+          while Live is showing, so BroadcastSurface's LiveScoreBar
+          renders at its real, full broadcast size. */}
+      {view === "control" && (
+        <>
+          <BigScoreBarPositionOverride />
+          <LiveScoreBar
+            show={channels.liveScoreBar}
+            hideTrigger
+            liveState={liveState}
+            matchSetup={matchSetup}
+          />
+        </>
+      )}
     </div>
 
     {/* ── LIVE VIEW ──────────────────────────────────────────────────
@@ -1298,9 +1349,29 @@ export default function OverlaySandboxPage() {
           channels/etc. props that live in this component regardless of
           which layer is on screen, so remounting it on every flip just
           re-plays its entrance animations, which is the correct,
-          expected behavior for a "go live" cut. ── */}
+          expected behavior for a "go live" cut.
+
+          FIX: this wrapper used to be `fixed inset-0 z-[9500]`. The
+          overlay components rendered by <BroadcastSurface> all portal
+          straight to document.body, so they are NOT descendants of
+          this div and don't inherit its stacking context — only the
+          <video> backdrop actually is. But `position: fixed` plus an
+          explicit z-index still creates a real stacking context for
+          this div, and z-[9500] put that context (video included)
+          above every one of those portaled overlays' own, much lower
+          z-indices — hiding all of them behind solid video, which is
+          exactly the "only the video is showing" symptom. There was
+          never a reason for this wrapper itself to out-rank anything:
+          the control view is already kept out of the way via
+          `display: none` above, regardless of z-index. Dropping the
+          z-index here lets the overlay components stack correctly
+          above the video again, same as they do on the real broadcast
+          page. Only the two controls that ARE real children of this
+          div — "Back to Controls" and the "Sandbox Feed" badge — keep
+          their own z-[9999] so they stay above the video and the
+          portaled overlays alike. ── */}
     {view === "live" && (
-      <div className="fixed inset-0 z-[9500]" style={{ background: "#000" }}>
+      <div className="fixed inset-0" style={{ background: "#000" }}>
         <BroadcastSurface
           channels={channels}
           liveState={liveState}

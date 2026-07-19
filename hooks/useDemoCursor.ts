@@ -60,6 +60,36 @@
 // its own, independent of whatever hover/active styles the component
 // already defines.
 //
+// BACKGROUND-PROGRESS FIX (Flip to Live): the control view (every
+// demo-* element the driver clicks) gets hidden with `display: none`
+// while the broadcast surface is showing (see page.tsx's "Flip to
+// Live" — the control view is hidden, not unmounted, specifically so
+// state/timers keep running underneath). A `display: none` element
+// generates NO box at all, so getBoundingClientRect() and
+// elementFromPoint() both report it as unclickable/off-viewport no
+// matter what — `ensureVisible` used to respond to that by scrolling
+// and polling for a "stable rect" repeatedly (up to
+// MAX_ENSURE_VISIBLE_ATTEMPTS retries × SETTLE_MAX_WAIT_MS each),
+// which could add several *extra* seconds to literally every single
+// ball for as long as the Live view was showing. The match wasn't
+// frozen, it was just crawling at a fraction of normal speed — which
+// reads as "stalled" (nothing about it is visible anyway while hidden)
+// and then looks like it's "catching up" once you flip back.
+//
+// Fixed with `isHiddenByLayout()`: an element hidden by `display: none`
+// (on itself or an ancestor) reports `getClientRects().length === 0` —
+// unlike an element that's merely scrolled off-screen, which still has
+// real (if off-view) client rects. When that's true, ensureVisible
+// bails immediately (no scrolling toward something that can never
+// become visible) and the click/selectOption/typeText/clickByText
+// actions skip the ghost-cursor animation and on-element flash (so you
+// don't get a stray cursor icon flashing at (0,0) over the live
+// broadcast layer) while still firing the REAL interaction
+// (el.click() etc. work perfectly fine on display:none elements), so
+// the match keeps advancing at its normal pace in the background and
+// picks back up naturally — no backlog, no jump — the moment you flip
+// back to Controls.
+//
 // All driver "steps" are serialized through a promise chain so two
 // scripted actions never race.
 
@@ -121,6 +151,18 @@ function flashElement(el: HTMLElement, color: string) {
   void el.offsetWidth; // force reflow so the class removal registers
   el.classList.add("demo-click-flash");
   setTimeout(() => el.classList.remove("demo-click-flash"), FLASH_MS + 40);
+}
+
+// True only when `el` (or an ancestor) has `display: none` — i.e. it
+// generates no box at all. getClientRects() stays populated (even with
+// a zero-area rect, even fully scrolled offscreen) for anything that's
+// merely off-view but still laid out; it only goes empty when the
+// element isn't rendered at all. This is exactly the "Flip to Live"
+// case: the whole control view (every demo-* button) sits under a
+// `display: none` ancestor while the broadcast surface is showing, and
+// no amount of scrollIntoView/centering will ever change that.
+function isHiddenByLayout(el: HTMLElement): boolean {
+  return el.getClientRects().length === 0;
 }
 
 function isInViewport(el: HTMLElement): boolean {
@@ -241,6 +283,18 @@ function centerElement(el: HTMLElement) {
 // real occlusion after each settle and retrying up to
 // MAX_ENSURE_VISIBLE_ATTEMPTS times.
 async function ensureVisible(el: HTMLElement): Promise<void> {
+  // Hidden by a `display: none` ancestor (e.g. the control view while
+  // "Flip to Live" is showing) — nothing to scroll into view, and no
+  // amount of retrying will change that. Bail immediately instead of
+  // burning MAX_ENSURE_VISIBLE_ATTEMPTS retries × SETTLE_MAX_WAIT_MS
+  // each on a target that can never become "visible" while it's
+  // un-rendered. The click still fires normally right after this
+  // returns — el.click() (and the native setters used by selectOption/
+  // typeText) work fine on display:none elements — which is what
+  // actually lets the demo keep pace in the background instead of
+  // crawling at a fraction of its normal speed.
+  if (isHiddenByLayout(el)) return;
+
   for (let attempt = 0; attempt < MAX_ENSURE_VISIBLE_ATTEMPTS; attempt++) {
     const alreadyGood = attempt === 0 && isInViewport(el) && isTrulyClickable(el);
     if (!alreadyGood) {
@@ -307,22 +361,40 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
 
             const proceed = () => {
               if (cancelledRef.current) return resolve(false);
-              const startPos = positionFor(el);
-              setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              // Snapshot visibility now — if the control view is
+              // currently hidden (Live view showing), don't animate the
+              // ghost cursor toward a target with a zero-size rect;
+              // that would just flash a stray cursor icon at (0,0)
+              // over the broadcast surface.
+              const hiddenAtStart = isHiddenByLayout(el);
+              if (!hiddenAtStart) {
+                const startPos = positionFor(el);
+                setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              }
               setTimeout(() => {
                 if (cancelledRef.current) return resolve(false);
-                // Recompute right before clicking — the target may
-                // have drifted during the travel delay (event feed
-                // growing, a carousel re-rendering, the sticky score
-                // readout updating). Without this the cursor renders
-                // frozen at its pre-travel position even though
-                // el.click() still fires correctly on the real element.
-                const finalPos = positionFor(el);
-                setCursor((c) => ({ ...c, x: finalPos.x, y: finalPos.y, clicking: true }));
-                flashElement(el, color);
+                // Re-check right before acting — the view may have
+                // flipped (live <-> control) during the travel delay,
+                // and if we were already hidden the target may also
+                // have reflowed once it's shown again.
+                const hiddenNow = isHiddenByLayout(el);
+                if (!hiddenNow) {
+                  const finalPos = positionFor(el);
+                  setCursor((c) => ({ ...c, visible: true, x: finalPos.x, y: finalPos.y, clicking: true }));
+                  flashElement(el, color);
+                } else if (!hiddenAtStart) {
+                  // Was visible, went hidden mid-travel (user flipped
+                  // to Live right as this click was in flight) — drop
+                  // the ghost cursor instead of leaving it stuck on
+                  // screen at its last position.
+                  setCursor((c) => ({ ...c, visible: false, clicking: false }));
+                }
+                // Fires regardless of visibility — el.click() works
+                // correctly on a display:none element, which is what
+                // keeps the match advancing while the Live view is up.
                 el.click();
                 setTimeout(() => {
-                  setCursor((c) => ({ ...c, clicking: false }));
+                  setCursor((c) => (isHiddenByLayout(el) ? c : { ...c, clicking: false }));
                   resolve(true);
                 }, HOLD_MS);
               }, TRAVEL_MS);
@@ -344,14 +416,22 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
 
             const proceed = () => {
               if (cancelledRef.current) return resolve(false);
-              const startPos = positionFor(el);
-              setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              const hiddenAtStart = isHiddenByLayout(el);
+              if (!hiddenAtStart) {
+                const startPos = positionFor(el);
+                setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              }
 
               setTimeout(() => {
                 if (cancelledRef.current) return resolve(false);
-                const finalPos = positionFor(el);
-                setCursor((c) => ({ ...c, x: finalPos.x, y: finalPos.y, clicking: true }));
-                flashElement(el, color);
+                const hiddenNow = isHiddenByLayout(el);
+                if (!hiddenNow) {
+                  const finalPos = positionFor(el);
+                  setCursor((c) => ({ ...c, visible: true, x: finalPos.x, y: finalPos.y, clicking: true }));
+                  flashElement(el, color);
+                } else if (!hiddenAtStart) {
+                  setCursor((c) => ({ ...c, visible: false, clicking: false }));
+                }
 
                 const proto = window.HTMLSelectElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
@@ -363,7 +443,7 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
                 el.dispatchEvent(new Event("change", { bubbles: true }));
 
                 setTimeout(() => {
-                  setCursor((c) => ({ ...c, clicking: false }));
+                  setCursor((c) => (isHiddenByLayout(el) ? c : { ...c, clicking: false }));
                   resolve(true);
                 }, HOLD_MS);
               }, TRAVEL_MS);
@@ -385,15 +465,28 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
 
             const proceed = () => {
               if (cancelledRef.current) return resolve(false);
-              const startPos = positionFor(el);
-              setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              const hiddenAtStart = isHiddenByLayout(el);
+              if (!hiddenAtStart) {
+                const startPos = positionFor(el);
+                setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              }
 
               setTimeout(() => {
                 if (cancelledRef.current) return resolve(false);
-                const finalPos = positionFor(el);
-                setCursor((c) => ({ ...c, x: finalPos.x, y: finalPos.y, clicking: true }));
-                flashElement(el, color);
+                const hiddenNow = isHiddenByLayout(el);
+                if (!hiddenNow) {
+                  const finalPos = positionFor(el);
+                  setCursor((c) => ({ ...c, visible: true, x: finalPos.x, y: finalPos.y, clicking: true }));
+                  flashElement(el, color);
+                } else if (!hiddenAtStart) {
+                  setCursor((c) => ({ ...c, visible: false, clicking: false }));
+                }
 
+                // el.focus() is a no-op (throws nothing, just does
+                // nothing useful) on a display:none element, which is
+                // fine — the value setter + dispatched events below are
+                // what actually matter for state, and those work
+                // regardless of visibility.
                 el.focus();
                 const proto = window.HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
@@ -406,7 +499,7 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
                 el.dispatchEvent(new Event("change", { bubbles: true }));
 
                 setTimeout(() => {
-                  setCursor((c) => ({ ...c, clicking: false }));
+                  setCursor((c) => (isHiddenByLayout(el) ? c : { ...c, clicking: false }));
                   resolve(true);
                 }, HOLD_MS);
               }, TRAVEL_MS);
@@ -431,17 +524,25 @@ export function useDemoCursor(_containerRef?: React.RefObject<HTMLElement | null
 
             const proceed = () => {
               if (cancelledRef.current) return resolve(false);
-              const startPos = positionFor(target);
-              setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              const hiddenAtStart = isHiddenByLayout(target);
+              if (!hiddenAtStart) {
+                const startPos = positionFor(target);
+                setCursor((c) => ({ ...c, visible: true, x: startPos.x, y: startPos.y, label, color, clicking: false }));
+              }
 
               setTimeout(() => {
                 if (cancelledRef.current) return resolve(false);
-                const finalPos = positionFor(target);
-                setCursor((c) => ({ ...c, x: finalPos.x, y: finalPos.y, clicking: true }));
-                flashElement(target, color);
+                const hiddenNow = isHiddenByLayout(target);
+                if (!hiddenNow) {
+                  const finalPos = positionFor(target);
+                  setCursor((c) => ({ ...c, visible: true, x: finalPos.x, y: finalPos.y, clicking: true }));
+                  flashElement(target, color);
+                } else if (!hiddenAtStart) {
+                  setCursor((c) => ({ ...c, visible: false, clicking: false }));
+                }
                 target.click();
                 setTimeout(() => {
-                  setCursor((c) => ({ ...c, clicking: false }));
+                  setCursor((c) => (isHiddenByLayout(target) ? c : { ...c, clicking: false }));
                   resolve(true);
                 }, HOLD_MS);
               }, TRAVEL_MS);
