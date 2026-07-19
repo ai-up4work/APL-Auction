@@ -3,6 +3,7 @@
 
 import { ListOrdered, Star } from "lucide-react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { useOverlayPanel } from "@/hooks/useOverlayPanel";
 import { useBallsLedger } from "@/hooks/useBallsLedger";
 import { buildInningsCard } from "@/lib/scorecardAggregator";
@@ -37,10 +38,11 @@ function TeamBadge({ team, variant, sizeClass = "w-14 h-14", glowInset = "-inset
         }}
       >
         {logoUrl ? (
-          <img 
+          <Image 
             src={logoUrl} 
             alt={team?.name || 'Team'} 
-            className="w-full h-full object-cover"
+            fill
+            className="object-cover"
           />
         ) : (
           <div 
@@ -277,12 +279,15 @@ export default function CricketScorecard({ show, hideTrigger = false, matchId, m
                         aria-hidden="true"
                         style={{ opacity: 0.16, mixBlendMode: "screen" }}
                       >
-                        <img
-                          src={tournamentLogoUrl}
-                          alt=""
-                          className="w-2/3 h-2/3 object-contain"
-                          style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
-                        />
+                        <div className="relative w-2/3 h-2/3">
+                          <Image
+                            src={tournamentLogoUrl}
+                            alt=""
+                            fill
+                            className="object-contain"
+                            style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
+                          />
+                        </div>
                       </div>
                     )}
 

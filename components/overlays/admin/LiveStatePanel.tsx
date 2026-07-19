@@ -18,6 +18,7 @@ import {
 } from "@/hooks/useLiveScoringEngine";
 import ManualCorrectionPanel from "./ManualCorrectionPanel";
 import { X, AlertTriangle, ArrowRight, UserX, Trophy, RotateCcw, Undo2 } from "lucide-react";
+import Image from "next/image";
 
 function initials(name: string) {
   return (
@@ -156,7 +157,7 @@ function PlayerCarousel({
             <span className="squad-avatar" style={{ width: 44, height: 44 }}>
               {p.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.imageUrl} alt="" />
+                <Image src={p.imageUrl} alt="" width={44} height={44}/>
               ) : (
                 <span className="squad-avatar-fallback" style={{ fontSize: 13 }}>
                   {initials(p.name)}
@@ -290,7 +291,7 @@ function CrewSlot({
         <span className="squad-avatar" style={{ width: 48, height: 48 }}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="" />
+            <Image src={imageUrl} alt="" width={48} height={48}/>
           ) : (
             <span className="squad-avatar-fallback" style={{ fontSize: 14 }}>
               {displayName ? initials(displayName) : "＋"}

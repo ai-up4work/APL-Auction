@@ -1,6 +1,7 @@
 'use client';
 
 import { Player } from '@/types/sankeytype';
+import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 interface ShuffleOverlayProps {
@@ -83,10 +84,11 @@ function ReelCard({
       }}
     >
       {player.img && imgOk ? (
-        <img
+        <Image
           src={player.img}
           alt={player.name}
-          className="w-full h-full object-cover object-top"
+          fill
+          className="object-cover object-top"
           onError={() => setImgOk(false)}
         />
       ) : (

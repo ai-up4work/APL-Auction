@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight } from "lucide-react";
+import Image from "next/image";
 
 /* ------------------------------------------------------------------ */
 /*  Public types — every piece of chart data flows through these      */
@@ -159,13 +160,13 @@ function TeamRow({
       {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
       <div className="flex items-center gap-2 lg:gap-3 pl-1.5 lg:pl-2 min-w-0">
         <span
-          className={`w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
+          className={`relative w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
             isTBD ? "border border-dashed border-outline/40" : ""
           }`}
         >
           {!isTBD ? (
             team.logo ? (
-              <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
+              <Image src={team.logo} alt="" fill className="object-cover p-0.5" />
             ) : (
               <span style={{ color: team.color }}>{team.code}</span>
             )
@@ -728,9 +729,11 @@ export default function TournamentBracket({
                     transform: "translate(-50%, -50%)",
                   }}
                 >
-                  <img
+                  <Image
                     src={logoSrc}
                     alt=""
+                    width={600}
+                    height={600}
                     className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-30"
                   />
                 </div>
@@ -829,9 +832,11 @@ export default function TournamentBracket({
                     transform: "translate(-50%, -50%)",
                   }}
                 >
-                  <img
+                  <Image
                     src={logoSrc}
                     alt=""
+                    width={600}
+                    height={600}
                     className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
                   />
                 </div>
@@ -954,9 +959,11 @@ export default function TournamentBracket({
                     <div key={match.id} className="w-full relative">
                       {round.id === finalRound.id && logoSrc && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none -z-10 w-full flex justify-center items-center">
-                          <img
+                          <Image
                             src={logoSrc}
                             alt=""
+                            width={350}
+                            height={350}
                             className="w-[250px] md:w-[350px] max-w-none h-auto object-contain opacity-10"
                           />
                         </div>

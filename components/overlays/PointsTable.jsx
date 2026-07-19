@@ -2,6 +2,7 @@
 
 import { Award, Star } from "lucide-react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { useOverlayPanel } from "@/hooks/useOverlayPanel";
 import { usePointsTableLedger } from "@/hooks/usePointsTableLedger";
 import { GOLD_BEZEL, plaqueClip } from "@/lib/overlayTokens";
@@ -52,7 +53,7 @@ function TeamCrest({ team }) {
           style={{ background: team.color }}
         >
           {team.image ? (
-            <img src={team.image} alt={team.name} className="w-full h-full object-contain" />
+            <Image src={team.image} alt={team.name} fill className="object-contain" />
           ) : (
             <span className="text-[10px] font-black text-white">{team.short}</span>
           )}
@@ -246,12 +247,15 @@ export default function PointsTable({
                       aria-hidden="true"
                       style={{ opacity: 0.12, mixBlendMode: "screen" }}
                     >
-                      <img
-                        src={tournament.logo}
-                        alt=""
-                        className="w-2/3 h-2/3 object-contain"
-                        style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
-                      />
+                      <div className="relative w-2/3 h-2/3">
+                        <Image
+                          src={tournament.logo}
+                          alt=""
+                          fill
+                          className="object-contain"
+                          style={{ filter: "grayscale(1) contrast(1.4) brightness(2)" }}
+                        />
+                      </div>
                     </div>
 
                     <div

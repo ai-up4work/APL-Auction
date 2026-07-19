@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 /**
  * TeamBadge — the circular team medallion: spinning shine-ring, optional
  * soft color glow behind it, a brushed-metal gradient frame, the team
@@ -44,7 +46,7 @@ export default function TeamBadge({
         }}
       >
         <div className="relative w-full h-full rounded-full overflow-hidden bg-black">
-          <img src={team.image} alt={team.name} className="w-full h-full object-cover" />
+          <Image src={team.image} alt={team.name} fill className="object-cover" />
           <div
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{

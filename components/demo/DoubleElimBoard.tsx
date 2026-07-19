@@ -2,6 +2,7 @@
 "use client";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { Trophy, RotateCcw, Award } from "lucide-react";
+import Image from "next/image";
 import type { MatchNode, Round } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 import MatchResultCard from "./MatchResultCard";
@@ -475,9 +476,11 @@ export default function DoubleElimBoard({
             </svg>
 
             {gfCenterY != null && logoSrc && (
-              <img
+              <Image
                 src={logoSrc}
                 alt=""
+                width={300}
+                height={300}
                 className="absolute pointer-events-none opacity-15 w-[300px] h-auto object-contain"
                 style={{ left: gfX + COL_W / 2, top: gfCenterY, transform: "translate(-50%, -50%)" }}
               />

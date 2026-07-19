@@ -3,6 +3,7 @@
 import { ChevronRight, ChevronDown, ChevronUp, Radio } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { GOLD_BEZEL, ambientGlow, teamBlockClip } from "@/lib/overlayTokens";
 import CricketBall from "@/components/overlays/shared/CricketBall";
 // NOTE: no `import type ... from "@/lib/overlayBus"` here — this file is
@@ -120,8 +121,7 @@ function TeamCrest({ team, variant }) {
       >
         <div className="relative w-full h-full rounded-full overflow-hidden bg-black">
           {team.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={team.logoUrl} alt={team.name} className="w-full h-full object-cover" />
+            <Image src={team.logoUrl} alt={team.name} fill className="object-cover" />
           ) : (
             <div
               className="w-full h-full flex items-center justify-center font-heading font-black text-white/80"
@@ -336,11 +336,11 @@ export default function LiveScoreBar({ show, hideTrigger = false, liveState, mat
                         : `lsbLogIn ${ENTRANCE_MS}ms cubic-bezier(0.22,1,0.36,1) both`,
                     }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={tournamentLogo}
                       alt={tournamentName}
-                      className="w-full h-full object-contain"
+                      fill
+                      className="object-contain"
                       style={{ filter: "grayscale(1) contrast(1.3) brightness(1.7)" }}
                     />
                   </div>
