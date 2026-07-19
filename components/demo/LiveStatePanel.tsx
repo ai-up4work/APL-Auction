@@ -1690,12 +1690,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
             )}
           </>
         )}
-
-        {/* <div className="flex justify-end">
-          <PrimaryButton id="demo-push-live-state" onClick={onPush} minWidth={180}>
-            {pushLabel}
-          </PrimaryButton>
-        </div> */}
       </div>
     </DrawerSection>
   );

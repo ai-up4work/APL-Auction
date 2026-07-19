@@ -956,61 +956,35 @@ export default function OverlaySandboxPage() {
     }
   }
 
-  // ── LIVE VIEW ──────────────────────────────────────────────────────
-  if (view === "live") {
-    return (
-      <div className="fixed inset-0" style={{ background: "#000" }}>
-        <ScrollbarTheme />
-
-        <BroadcastSurface
-          channels={channels}
-          liveState={liveState}
-          weatherData={weatherData}
-          matchSetup={matchSetup}
-          inningsCards={inningsCards}
-        />
-
-        <button
-          type="button"
-          onClick={backToControls}
-          className="fixed top-1/2 left-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all opacity-70 hover:opacity-100 hover:brightness-110"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            background: "rgba(13,17,23,0.9)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            color: "var(--color-on-surface)",
-            backdropFilter: "blur(6px)",
-            boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
-          }}
-        >
-          <LayoutPanelLeft className="w-3 h-3" />
-          Back to Controls
-        </button>
-
-        <div
-          className="fixed top-1/2 right-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] opacity-70 hover:opacity-100 transition-opacity"
-          style={{
-            background: "color-mix(in srgb, #e5484d 16%, transparent)",
-            border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
-            backdropFilter: "blur(6px)",
-          }}
-        >
-          <span
-            className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
-            style={{ animation: "sandboxFeedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
-          />
-          <span
-            className="text-[9px] font-bold uppercase"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
-          >
-            Sandbox Feed
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   // ── CONTROL VIEW ─────────────────────────────────────────────────────
+  //
+  // CHANGED: the Live view used to be an entirely separate early
+  // `return`, which meant flipping to Live UNMOUNTED this whole tree —
+  // including <LiveStatePanelAuto> and, with it, the ScriptedDriver
+  // instance living inside it (see the driverRef useEffect cleanup in
+  // LiveStatePanelAuto.tsx, which calls driver.stop() on unmount). Every
+  // "Flip to Live" silently paused the auto-demo, and every "Back to
+  // Controls" remounted a brand new driver, which is NOT the same thing
+  // as "the match kept playing in the background."
+  //
+  // Now there's a single `return` below that always renders BOTH the
+  // control layout and the live broadcast layer — whichever one isn't
+  // current is hidden with `display: none` rather than unmounted, so
+  // React state updates (and the driver's own setTimeout-based loop)
+  // keep running underneath exactly as before, regardless of which one
+  // is currently visible on screen. The live broadcast layer is still
+  // conditionally rendered (`{view === "live" && (...)}`) since
+  // BroadcastSurface holds no state that needs to survive being hidden —
+  // it's fully driven by props (liveState/channels/etc.) that live up
+  // here in this component either way.
+  //
+  // One caveat: WicketDetailDialog / EndInningsDialog / RestartMatchDialog
+  // inside LiveStatePanel portal straight to document.body (same reason
+  // LiveScoreBar does), so `display: none` on their control-view ancestor
+  // doesn't hide them. In the rare case one of those is open at the exact
+  // moment "Flip to Live" is clicked, it'll still show up floating over
+  // the broadcast surface until it's dismissed. Not worth solving for
+  // here — it resolves itself the moment that dialog is closed.
   const scoreReadout = `${liveState.score.runs}/${liveState.score.wickets} (${liveState.score.overs}.${liveState.score.balls})`;
   const inningsLabel = liveState.matchComplete
     ? "Match Complete"
@@ -1019,7 +993,17 @@ export default function OverlaySandboxPage() {
     : `Innings ${liveState.inningsNumber ?? 1}`;
 
   return (
-    <div className="h-screen w-screen overflow-hidden relative flex flex-col" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
+    <>
+    <div
+      className="h-screen w-screen overflow-hidden relative flex flex-col"
+      style={{
+        background: "var(--color-background)",
+        color: "var(--color-on-background)",
+        // Hidden (not unmounted) while the Live view is showing — see
+        // the big comment above for why this matters.
+        display: view === "live" ? "none" : "flex",
+      }}
+    >
       <ScrollbarTheme />
       <BigScoreBarPositionOverride />
       <style jsx global>{`
@@ -1282,12 +1266,87 @@ export default function OverlaySandboxPage() {
           out of the way since visibility here is meant to just track
           `channels.liveScoreBar`, same source of truth the broadcast
           surface uses. */}
+      {/* Real LiveScoreBar, mounted directly (not through the iframe),
+          untouched component — repositioned/enlarged into the
+          bottom-left corner purely via <BigScoreBarPositionOverride />
+          above. `hideTrigger` keeps its own show/hide toggle button
+          out of the way since visibility here is meant to just track
+          `channels.liveScoreBar`, same source of truth the broadcast
+          surface uses.
+
+          `show` also factors in `view === "control"` — this component
+          portals straight to document.body (see LiveScoreBar.jsx's own
+          header comment), so simply hiding its CONTROL-VIEW ancestor
+          with `display: none` above would NOT hide it; it'd keep
+          floating on top of the Live view's own copy of this same bar
+          (rendered inside BroadcastSurface). Passing `show=false` while
+          `view === "live"` instead lets it close itself with its normal
+          exit animation, and it reopens with its entrance animation the
+          moment you flip back to Controls. */}
       <LiveScoreBar
-        show={channels.liveScoreBar}
+        show={channels.liveScoreBar && view === "control"}
         hideTrigger
         liveState={liveState}
         matchSetup={matchSetup}
       />
     </div>
+
+    {/* ── LIVE VIEW ──────────────────────────────────────────────────
+          Conditionally rendered (not just hidden) — unlike the control
+          view above, nothing here needs to survive being unmounted:
+          BroadcastSurface is fully driven by the same liveState/
+          channels/etc. props that live in this component regardless of
+          which layer is on screen, so remounting it on every flip just
+          re-plays its entrance animations, which is the correct,
+          expected behavior for a "go live" cut. ── */}
+    {view === "live" && (
+      <div className="fixed inset-0 z-[9500]" style={{ background: "#000" }}>
+        <BroadcastSurface
+          channels={channels}
+          liveState={liveState}
+          weatherData={weatherData}
+          matchSetup={matchSetup}
+          inningsCards={inningsCards}
+        />
+
+        <button
+          type="button"
+          onClick={backToControls}
+          className="fixed top-1/2 left-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all opacity-70 hover:opacity-100 hover:brightness-110"
+          style={{
+            fontFamily: "var(--font-label-mono)",
+            background: "rgba(13,17,23,0.9)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "var(--color-on-surface)",
+            backdropFilter: "blur(6px)",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
+          }}
+        >
+          <LayoutPanelLeft className="w-3 h-3" />
+          Back to Controls
+        </button>
+
+        <div
+          className="fixed top-1/2 right-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] opacity-70 hover:opacity-100 transition-opacity"
+          style={{
+            background: "color-mix(in srgb, #e5484d 16%, transparent)",
+            border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <span
+            className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
+            style={{ animation: "sandboxFeedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
+          />
+          <span
+            className="text-[9px] font-bold uppercase"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
+          >
+            Sandbox Feed
+          </span>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

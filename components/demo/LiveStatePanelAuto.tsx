@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { MonitorPlay, Pause, Play, LayoutPanelLeft } from "lucide-react";
+import { createPortal } from "react-dom";
+import { MonitorPlay, Pause, Play, LayoutPanelLeft, AlertTriangle } from "lucide-react";
 import LiveStatePanel, { type LiveStatePanelHandle, type LiveStatePanelProps } from "./LiveStatePanel";
 import DemoCursor from "@/components/demo/DemoCursor";
 import { useDemoCursor } from "@/hooks/useDemoCursor";
@@ -1261,6 +1262,18 @@ export interface LiveStatePanelAutoProps extends Omit<LiveStatePanelProps, "read
   defaultMode?: "demo" | "interactive";
 }
 
+// Small helper so the confirm dialog below (and any future one-off
+// dialog this file needs) doesn't have to reach into LiveStatePanel.tsx
+// for a portal utility. Same "wait for mount, then portal to body"
+// pattern LiveStatePanel.tsx's own ViewportPortal uses, kept local here
+// since it's not exported from that file.
+function ViewportPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
+
 export default function LiveStatePanelAuto({
   onRestartMatch,
   onModeChange,
@@ -1273,6 +1286,18 @@ export default function LiveStatePanelAuto({
   const driverRef = useRef<ScriptedDriver | null>(null);
   const [mode, setMode] = useState<"demo" | "interactive">(defaultMode);
   const [paused, setPaused] = useState(false);
+
+  // NEW — confirmation gate before switching FROM "Try It Yourself"
+  // BACK INTO "Watch Demo". Entering demo mode always calls
+  // onRestartMatch() first (see the mode effect below) — the driver has
+  // no way to pick up mid-match, it only knows how to run its script
+  // from ball one. Without this, a scorer who'd taken over manually
+  // could lose everything they'd just scored with a single accidental
+  // tap. Going the OTHER way (demo -> interactive) needs no
+  // confirmation — nothing is lost there; see the big comment on the
+  // mode-switch effect below for the full story of what does and
+  // doesn't survive each direction.
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
   const [viewport, setViewport] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
@@ -1314,8 +1339,28 @@ export default function LiveStatePanelAuto({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  // CHANGED: toggleMode no longer flips modes unconditionally. Going
+  // interactive -> demo now opens a confirmation first (see
+  // showRestartConfirm above) instead of silently wiping whatever was
+  // just scored manually — the actual mode switch only happens once the
+  // person taps "Restart & Watch Demo" in that dialog (confirmSwitchToDemo
+  // below). Going demo -> interactive is unaffected — that direction
+  // doesn't touch the match at all, so it stays a single tap.
   function toggleMode() {
-    setMode((m) => (m === "demo" ? "interactive" : "demo"));
+    if (mode === "interactive") {
+      setShowRestartConfirm(true);
+      return;
+    }
+    setMode("interactive");
+  }
+
+  function confirmSwitchToDemo() {
+    setShowRestartConfirm(false);
+    setMode("demo");
+  }
+
+  function cancelSwitchToDemo() {
+    setShowRestartConfirm(false);
   }
 
   function togglePause() {
@@ -1334,6 +1379,60 @@ export default function LiveStatePanelAuto({
   return (
     <div ref={wrapRef} className="relative">
       <DemoCursor cursor={cursorCtl.cursor} frameWidth={viewport.width} frameHeight={viewport.height} />
+
+      {/* NEW — "switching to demo restarts the match" confirmation.
+          Reuses LiveStatePanel.tsx's existing .scorer-dialog-backdrop /
+          .scorer-dialog styling (that <style> tag is always present
+          since <LiveStatePanel> is rendered unconditionally below) so
+          this reads as the same family of dialog as Restart Match / End
+          Innings, rather than a bespoke one-off. */}
+      {showRestartConfirm && (
+        <ViewportPortal>
+          <div className="scorer-dialog-backdrop" onClick={cancelSwitchToDemo}>
+            <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle size={16} strokeWidth={2.4} style={{ color: "var(--color-theme-orange)" }} />
+                <span
+                  className="text-[11px] font-black uppercase tracking-widest"
+                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+                >
+                  Switch to Watch Demo?
+                </span>
+              </div>
+              <p className="text-[12px] mb-4" style={{ color: "var(--color-on-surface)" }}>
+                The auto-demo always plays its script from ball one — it can&apos;t pick up mid-match.
+                Switching back will <strong>restart the match and discard everything scored since you
+                took over</strong>. Tournament totals and the points table aren&apos;t affected, since
+                those carry across the whole tournament rather than just this match. This can&apos;t be
+                undone.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={cancelSwitchToDemo}
+                  className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+                  style={{
+                    fontFamily: "var(--font-label-mono)",
+                    background: "var(--color-surface-container-low)",
+                    border: "1px solid var(--color-border-overlay)",
+                    color: "var(--color-on-surface)",
+                  }}
+                >
+                  Cancel — Keep Scoring
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmSwitchToDemo}
+                  className="flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
+                  style={{ fontFamily: "var(--font-label-mono)", background: "var(--color-theme-orange)", color: "var(--color-on-primary)" }}
+                >
+                  Restart &amp; Watch Demo
+                </button>
+              </div>
+            </div>
+          </div>
+        </ViewportPortal>
+      )}
 
       <div className="flex items-center justify-end gap-2 mb-2">
         {mode === "demo" && (
