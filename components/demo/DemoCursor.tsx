@@ -26,7 +26,11 @@ const CURSOR_Z_INDEX = 999999;
 export default function DemoCursor({
   cursor,
 }: {
-  cursor: CursorState;
+  // Marked optional here because some call sites may not have
+  // initialized their cursor state yet on first render — see the
+  // `!cursor` guard below. Treat this as "cursor may be undefined
+  // until the demo driver's state settles."
+  cursor?: CursorState;
   // Accepted for backward compatibility with existing call sites.
   // No longer used for positioning now that the cursor is
   // viewport-fixed rather than scaled relative to a frame.
@@ -35,7 +39,13 @@ export default function DemoCursor({
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted || typeof document === "undefined" || !cursor.visible) return null;
+
+  // Guard against `cursor` itself being undefined/null (not just its
+  // `.visible` field) — without the `!cursor ||` check, `cursor.visible`
+  // throws when cursor hasn't been initialized yet by the caller.
+  if (!mounted || typeof document === "undefined" || !cursor || !cursor.visible) {
+    return null;
+  }
 
   return createPortal(
     <div
