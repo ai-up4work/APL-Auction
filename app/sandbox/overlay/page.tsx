@@ -32,6 +32,26 @@
 // BroadcastChannel) is what re-syncs this page's live state into that
 // iframe's document without a server round trip.
 //
+// Big Score Bar (CHANGED): previously this corner used a bespoke
+// <ScoreCornerBar> readout — a plain fixed <div> re-deriving its own
+// numbers from liveState. That's now replaced with the REAL
+// <LiveScoreBar> overlay component (components/overlays/LiveScoreBar),
+// mounted directly in this document — completely unmodified. It doesn't
+// need the iframe trick LivePreviewMonitor needs, because LiveScoreBar
+// itself only portals to document.body and takes liveState/matchSetup
+// as plain props; it doesn't reach for any other window-scoped globals
+// the way MatchMomentOverlay does. Since we're not allowed to touch
+// LiveScoreBar.jsx itself, and its own layout hardcodes a full-width,
+// centered "broadcast" position (`fixed inset-x-0 bottom-0`, `width:
+// 90vw`, `items-center`), it's repositioned to the bottom-left corner
+// and enlarged purely via a scoped global CSS override (see
+// <ScrollbarTheme>-style global <style jsx global> block below) that
+// targets its portaled wrapper by its `aria-live="polite"` attribute —
+// the one identifying hook LiveScoreBar's markup already exposes on
+// that wrapper, and one that's unique on this page (nothing else here
+// renders an aria-live="polite" region). No component code was edited
+// to make this work.
+//
 // Scoring console: now rendered via <LiveStatePanelAuto>, which wraps
 // the real <LiveStatePanel> (unchanged engine/graphics) with a scripted
 // "watch it run" driver plus its own Pause Demo / Try It Yourself
@@ -83,6 +103,7 @@ import type { MomentPayload } from "@/lib/overlayBus";
 
 import LiveStatePanelAuto from "@/components/demo/LiveStatePanelAuto";
 import BroadcastSurface from "@/components/demo/BroadcastSurface";
+import LiveScoreBar from "@/components/overlays/LiveScoreBar";
 import { connectSandboxBus, type SandboxChannels } from "./lib/sandBoxBus";
 
 import { HARDCODED_MATCH_SETUP, emptyLiveState, defaultWeather, emptyBatter, emptyBowler } from "./lib/sandboxData";
@@ -182,6 +203,32 @@ const MONITOR_WIDTH = 300;
 const MONITOR_HEIGHT = Math.round((MONITOR_WIDTH / STAGE_WIDTH) * STAGE_HEIGHT);
 const MONITOR_SCALE = MONITOR_WIDTH / STAGE_WIDTH;
 
+// On-screen footprint for the real <LiveScoreBar> we now mount directly
+// in this document, bottom-left. LiveScoreBar's own internal "broadcast"
+// layout renders its bar at `width: 90vw`; the override CSS below
+// forces its width instead, so it reads as a large, legible bar next to
+// the (much smaller, scaled-down) preview monitor, without editing
+// LiveScoreBar.jsx itself.
+//
+// Instead of a fixed pixel width, this now stretches responsively:
+// from the 16px left-edge margin all the way up to just short of the
+// Live Preview Monitor's left edge (monitor width + its own 16px right
+// margin + a small gap so the two never touch). Expressed as a CSS
+// calc() so it stays correct if the viewport is resized.
+const SCORE_BAR_LEFT_MARGIN = 16;
+const SCORE_BAR_GAP_TO_MONITOR = 24;
+const BIG_SCORE_BAR_WIDTH_CSS = `calc(100vw - ${MONITOR_WIDTH + 16 /* monitor's own right margin */ + SCORE_BAR_GAP_TO_MONITOR + SCORE_BAR_LEFT_MARGIN}px)`;
+
+// How much bottom padding the scrollable scoring console needs so its
+// last row of content never sits underneath the fixed, bottom-anchored
+// LiveScoreBar once the console is scrolled all the way down. Sized
+// generously above the bar's own on-screen height (it's not a fixed
+// height we control — see the note by <BigScoreBarPositionOverride> —
+// so this errs on the taller side plus its own 16px bottom offset,
+// rather than trying to measure it exactly) with a little extra
+// breathing room on top of that.
+const SCORE_BAR_BOTTOM_CLEARANCE = 200;
+
 // Themed scrollbars — applied globally (not scoped to one container) so
 // every scrollable region on the page picks it up: the scoring console's
 // own overflow-auto area, and anything with internal scroll inside
@@ -216,6 +263,39 @@ function ScrollbarTheme() {
       }
       *::-webkit-scrollbar-corner {
         background: transparent;
+      }
+    `}</style>
+  );
+}
+
+// ── Big Score Bar positioning override ──────────────────────────────
+// LiveScoreBar.jsx is intentionally left untouched. Its "broadcast"
+// layout hardcodes:
+//   - a portaled wrapper: `fixed inset-x-0 bottom-0 ... flex-col
+//     items-center ...` with `aria-live="polite"` on it
+//   - an inner `.lsb-wrap` sized to `width: 90vw`, centered via
+//     `origin-center`
+// aria-live="polite" is the one identifying hook that wrapper exposes,
+// and nothing else on this page renders an aria-live="polite" region —
+// so it's a safe, unique CSS target for repositioning it into the
+// bottom-left corner at a larger fixed width, purely from this page's
+// own stylesheet. This only affects the Control view, since that's the
+// only place this component gets mounted directly (the Live view's copy
+// comes from BroadcastSurface and is meant to stay centered/full-width
+// as designed).
+function BigScoreBarPositionOverride() {
+  return (
+    <style jsx global>{`
+      div[aria-live="polite"] {
+        left: 16px !important;
+        right: auto !important;
+        bottom: 16px !important;
+        align-items: flex-start !important;
+        padding: 0 !important;
+      }
+      div[aria-live="polite"] .lsb-wrap {
+        width: ${BIG_SCORE_BAR_WIDTH_CSS} !important;
+        transform-origin: bottom left !important;
       }
     `}</style>
   );
@@ -421,84 +501,6 @@ function LivePreviewMonitor({ featuredMoment }: { featuredMoment: MomentPayload[
             }}
           />
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Score Corner Bar — small, always-on fixed readout mirroring the
-// Live Preview Monitor's placement/visual language, but anchored to the
-// OPPOSITE corner (bottom-left vs the monitor's bottom-right) so the two
-// never overlap or crowd each other regardless of viewport width. Unlike
-// the monitor (an iframe replica of the real broadcast surface), this is
-// just a plain fixed div reading straight off local state — no iframe,
-// no bus round trip needed, since it's rendered in the same document.
-const SCORE_CORNER_MAX_WIDTH = 340;
-
-function ScoreCornerBar({
-  scoreReadout,
-  runRate,
-  battingLabel,
-  inningsLabel,
-  target,
-  runsNeeded,
-  ballsRemaining,
-}: {
-  scoreReadout: string;
-  runRate: string;
-  battingLabel: string;
-  inningsLabel: string;
-  target?: number;
-  runsNeeded?: number;
-  ballsRemaining?: number;
-}) {
-  return (
-    <div
-      className="fixed bottom-4 left-4 z-30 flex flex-col gap-1.5 rounded-md px-4 py-3 pointer-events-none"
-      style={{
-        maxWidth: SCORE_CORNER_MAX_WIDTH,
-        background: "rgba(8,8,8,0.88)",
-        backdropFilter: "blur(10px)",
-        border: "1px solid var(--color-border-overlay)",
-        boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
-      }}
-    >
-      <div className="flex items-center gap-2.5">
-        <span
-          className="text-[15px] tabular-nums font-bold px-2 py-0.5 rounded-[2px] shrink-0"
-          style={{
-            fontFamily: "var(--font-headline-lg)",
-            fontStyle: "italic",
-            color: "var(--color-theme-orange)",
-            background: "rgba(0,0,0,0.35)",
-            border: "1px solid var(--color-border-overlay)",
-          }}
-        >
-          {scoreReadout}
-        </span>
-        <span
-          className="text-[9px] font-semibold uppercase truncate"
-          style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.08em", color: "var(--color-outline)" }}
-        >
-          {inningsLabel}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-        <span
-          className="text-[10px] truncate"
-          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
-        >
-          {battingLabel} batting · RR {runRate}
-        </span>
-        {target !== undefined && (
-          <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
-            Target {target}
-            {runsNeeded !== undefined && ballsRemaining !== undefined && (
-              <> · Need {runsNeeded} off {ballsRemaining}</>
-            )}
-          </span>
-        )}
       </div>
     </div>
   );
@@ -1016,30 +1018,10 @@ export default function OverlaySandboxPage() {
     ? `Innings ${liveState.inningsNumber ?? 2} · Chasing ${liveState.target}`
     : `Innings ${liveState.inningsNumber ?? 1}`;
 
-  // Corner bar derived figures. Run rate is recomputed here rather than
-  // shared with LiveStatePanel's own internal scoreboard strip — this
-  // page has no access to that component's local runRate calculation,
-  // but has everything it needs in liveState to compute the same value
-  // independently. battingLabel falls back to the fixture matchup string
-  // since the actual toss-derived "who's currently batting" logic lives
-  // inside LiveStatePanel's battingTeamKey memo and isn't exposed
-  // outward — swap this for a real team name if that's ever lifted up.
-  const cornerRunRate =
-    liveState.score.overs + liveState.score.balls / 6 > 0
-      ? (liveState.score.runs / (liveState.score.overs + liveState.score.balls / 6)).toFixed(2)
-      : "0.00";
-  const cornerBattingLabel = `${matchSetup.teamA.shortCode} vs ${matchSetup.teamB.shortCode}`;
-  const cornerRunsNeeded =
-    liveState.target !== undefined ? Math.max(0, liveState.target - liveState.score.runs) : undefined;
-  const maxOversByFormatLocal: Record<string, number | undefined> = { T20: 20, ODI: 50, Test: undefined };
-  const cornerMaxOvers = matchSetup.format ? maxOversByFormatLocal[matchSetup.format] : undefined;
-  const cornerTotalBalls = cornerMaxOvers !== undefined ? cornerMaxOvers * 6 : undefined;
-  const cornerBallsBowled = liveState.score.overs * 6 + liveState.score.balls;
-  const cornerBallsRemaining = cornerTotalBalls !== undefined ? Math.max(0, cornerTotalBalls - cornerBallsBowled) : undefined;
-
   return (
     <div className="h-screen w-screen overflow-hidden relative flex flex-col" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
       <ScrollbarTheme />
+      <BigScoreBarPositionOverride />
       <style jsx global>{`
         @keyframes sandboxFeedPulse {
           0%, 100% { opacity: 1; }
@@ -1247,7 +1229,17 @@ export default function OverlaySandboxPage() {
             owns the demo/interactive toggle and pause/resume itself and
             renders LiveStatePanel underneath with the same props this
             page always passed it. ── */}
-      <div className="flex-1 min-h-0 overflow-auto relative z-10 px-5 py-5">
+      {/* pb is intentionally larger than the top/side padding — the real
+          LiveScoreBar is fixed-positioned at the bottom of the viewport
+          (see <LiveScoreBar> render below), so without this the console's
+          last row (Partnership / Match 4s-6s / Tourn. 4s-6s / Bowler
+          Figures tiles) sits directly underneath it once scrolled all
+          the way down. SCORE_BAR_BOTTOM_CLEARANCE keeps that last row
+          fully visible above the bar instead of tucking behind it. */}
+      <div
+        className="flex-1 min-h-0 overflow-auto relative z-10 px-5 pt-5"
+        style={{ paddingBottom: SCORE_BAR_BOTTOM_CLEARANCE }}
+      >
         <div
           className="rounded-xl p-5"
           style={{
@@ -1283,14 +1275,18 @@ export default function OverlaySandboxPage() {
 
       <LivePreviewMonitor featuredMoment={featuredMoment} />
 
-      <ScoreCornerBar
-        scoreReadout={scoreReadout}
-        runRate={cornerRunRate}
-        battingLabel={cornerBattingLabel}
-        inningsLabel={inningsLabel}
-        target={liveState.target}
-        runsNeeded={cornerRunsNeeded}
-        ballsRemaining={cornerBallsRemaining}
+      {/* Real LiveScoreBar, mounted directly (not through the iframe),
+          untouched component — repositioned/enlarged into the
+          bottom-left corner purely via <BigScoreBarPositionOverride />
+          above. `hideTrigger` keeps its own show/hide toggle button
+          out of the way since visibility here is meant to just track
+          `channels.liveScoreBar`, same source of truth the broadcast
+          surface uses. */}
+      <LiveScoreBar
+        show={channels.liveScoreBar}
+        hideTrigger
+        liveState={liveState}
+        matchSetup={matchSetup}
       />
     </div>
   );
