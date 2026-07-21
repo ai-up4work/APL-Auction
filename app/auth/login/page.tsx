@@ -3,7 +3,7 @@
 import type React from "react"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Eye, EyeOff, Lock, Mail, Facebook, Instagram, Linkedin, Twitter } from "lucide-react"
+import { Eye, EyeOff, Lock, Mail, Facebook, Instagram, Linkedin, Twitter, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function LoginPage() {
@@ -36,32 +36,42 @@ export default function LoginPage() {
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-gradient-to-br from-background via-card to-secondary">
-      <div className="absolute inset-0 z-0">
-        <iframe
-          src="https://my.spline.design/motiontrails-N1l4U8E0SAeloIlUTSuSUU9m/"
-          frameBorder="0"
-          width="100%"
-          height="100%"
-          className="h-full w-full"
-        />
-      </div>
-      <div className="absolute inset-0 z-0 bg-background/20" />
+      <div
+        className="absolute inset-0 z-0"
+        style={{
+          backgroundImage: "url('/images/bg-login.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center center",
+          backgroundRepeat: "no-repeat",
+        }}
+      />
+      {/* Same overlay treatment as the site's hero section, for consistency
+          across the app */}
+      <div className="absolute inset-0 z-0 hero-gradient" />
 
       <div className="relative z-10 flex h-full items-center justify-center overflow-hidden px-6">
         <div className="flex max-h-full w-full max-w-md flex-col justify-center">
-          <div className="mb-4 shrink-0 text-center animate-pulse-scale">
-            <Link href="/" className="text-xl font-bold uppercase tracking-wide text-foreground">
+          <div className="mb-6 shrink-0 text-center animate-pulse-scale">
+            <Link href="/" className="text-2xl font-bold uppercase tracking-[0.15em] text-foreground drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)]">
               Valiant League
             </Link>
           </div>
 
-          <div className="shrink-0 rounded-3xl border border-border bg-card/10 p-6 backdrop-blur-xl sm:p-7">
-            <p className="mb-1 text-center text-xs font-semibold uppercase tracking-wider text-accent-foreground/90">
+          <div
+            className="shrink-0 rounded-3xl border border-border bg-card/10 p-7 backdrop-blur-xl sm:p-8"
+            style={{
+              boxShadow:
+                "0 20px 60px -15px rgba(0,0,0,0.6), inset 0 1px 0 0 rgba(255,255,255,0.06), inset 0 0 40px 0 color-mix(in oklch, var(--primary) 4%, transparent)",
+            }}
+          >
+            <p className="mb-1.5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-primary/90">
               Welcome back
             </p>
-            <h1 className="mb-5 text-center text-xl font-bold leading-tight text-foreground sm:text-2xl">Sign in</h1>
+            <h1 className="mb-6 text-center text-2xl font-bold leading-tight text-foreground sm:text-[1.75rem]">
+              Sign in
+            </h1>
 
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground/70">
                   Email
@@ -75,7 +85,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="w-full rounded-full border border-input bg-input py-2.5 pl-11 pr-4 text-sm text-foreground placeholder:text-foreground/40 outline-none transition-all duration-300 focus:border-primary focus:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
+                    className="w-full rounded-full border border-input bg-input py-3 pl-11 pr-4 text-sm text-foreground placeholder:text-foreground/40 outline-none transition-all duration-300 focus:border-primary focus:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
                   />
                 </div>
               </div>
@@ -101,7 +111,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full rounded-full border border-input bg-input py-2.5 pl-11 pr-11 text-sm text-foreground placeholder:text-foreground/40 outline-none transition-all duration-300 focus:border-primary focus:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
+                    className="w-full rounded-full border border-input bg-input py-3 pl-11 pr-11 text-sm text-foreground placeholder:text-foreground/40 outline-none transition-all duration-300 focus:border-primary focus:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
                   />
                   <button
                     type="button"
@@ -118,13 +128,16 @@ export default function LoginPage() {
                 type="submit"
                 size="lg"
                 disabled={loading}
-                className="mt-1 w-full rounded-full bg-primary text-sm font-semibold uppercase tracking-wide text-primary-foreground transition-all duration-300 hover:bg-primary/90 hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_80%,transparent),0_0_40px_color-mix(in_oklch,var(--primary)_50%,transparent)] disabled:opacity-60"
+                className="group mt-2 w-full rounded-full bg-primary text-sm font-semibold uppercase tracking-wide text-primary-foreground transition-all duration-300 hover:bg-primary/90 hover:shadow-[0_0_25px_color-mix(in_oklch,var(--primary)_85%,transparent),0_0_50px_color-mix(in_oklch,var(--primary)_45%,transparent)] disabled:opacity-60"
               >
                 {loading ? "Signing in…" : "Sign in"}
+                {!loading && (
+                  <ArrowRight className="ml-1.5 h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
+                )}
               </Button>
             </form>
 
-            <div className="my-4 flex items-center gap-3">
+            <div className="my-5 flex items-center gap-3">
               <div className="h-px flex-1 bg-border" />
               <span className="text-[10px] font-semibold uppercase tracking-widest text-foreground/50">or</span>
               <div className="h-px flex-1 bg-border" />
@@ -138,15 +151,19 @@ export default function LoginPage() {
               Create account
             </Button>
 
-            <div className="mt-5 flex justify-center gap-6">
-              <Twitter className="h-4 w-4 cursor-pointer text-foreground/70 transition-all duration-300 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
-              <Linkedin className="h-4 w-4 cursor-pointer text-foreground/70 transition-all duration-300 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
-              <Facebook className="h-4 w-4 cursor-pointer text-foreground/70 transition-all duration-300 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
-              <Instagram className="h-4 w-4 cursor-pointer text-foreground/70 transition-all duration-300 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <div className="h-px flex-1 bg-border/60" />
+              <div className="flex justify-center gap-5">
+                <Twitter className="h-4 w-4 cursor-pointer text-foreground/60 transition-all duration-300 hover:scale-110 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
+                <Linkedin className="h-4 w-4 cursor-pointer text-foreground/60 transition-all duration-300 hover:scale-110 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
+                <Facebook className="h-4 w-4 cursor-pointer text-foreground/60 transition-all duration-300 hover:scale-110 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
+                <Instagram className="h-4 w-4 cursor-pointer text-foreground/60 transition-all duration-300 hover:scale-110 hover:text-primary hover:drop-shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_90%,transparent)]" />
+              </div>
+              <div className="h-px flex-1 bg-border/60" />
             </div>
           </div>
 
-          <p className="mt-3 shrink-0 text-center text-sm text-foreground/70">
+          <p className="mt-4 shrink-0 text-center text-sm text-foreground/70 drop-shadow-[0_1px_8px_rgba(0,0,0,0.5)]">
             New here?{" "}
             <Link href="/signup" className="font-semibold text-foreground transition-colors duration-300 hover:text-primary">
               Create an account

@@ -18,10 +18,9 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className={`${aurora.className} font-sans antialiased`}>
+    // <html lang="en">
+      <div className={`${aurora.className} font-sans antialiased`}>
         {children}
-      </body>
-    </html>
+      </div>
   )
 }
