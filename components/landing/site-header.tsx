@@ -28,7 +28,7 @@ export function SiteHeader({
   }
 
   return (
-    <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500 bg-black/90 backdrop-blur-sm border-b border-gold/20 py-2">
+    <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500 bg-black/90 backdrop-blur-sm border-b border-gold/20 py-0">
       <div className="w-full max-w-[1600px] mx-auto px-4">
         {/* Desktop Layout — grid for control */}
         <div className="grid grid-cols-[auto_1fr_auto] items-center justify-items-center">
@@ -37,7 +37,7 @@ export function SiteHeader({
             onClick={() => scrollToSection("home")}
             className="flex items-center space-x-2 z-20 justify-self-start cursor-pointer"
           >
-            <div className="relative w-14 h-16 md:w-16 md:h-20">
+            <div className="relative w-14 h-16 md:w-16 md:h-20 py-0 my-0">
               <Image
                 src="/valiant-league-logo.png"
                 alt="Valiant League Logo"
