@@ -920,7 +920,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           <div className="text-center mt-12 fade-in-up stagger-4">
             <Button
               className="pulse inline-flex items-center bg-gold hover:bg-gold/90 text-black font-bold py-6 px-8 rounded-md text-lg"
-              onClick={() => handleNavigation("/admin")}
+              onClick={() => handleNavigation("/auth/login")}
             >
               Start Your League
               <ArrowRight className="ml-2 h-5 w-5" />
