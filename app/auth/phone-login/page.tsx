@@ -72,7 +72,7 @@ export default function PhoneLoginPage() {
       return
     }
 
-    router.push("/dashboard")
+    router.push("/profile/")
     router.refresh()
   }
 

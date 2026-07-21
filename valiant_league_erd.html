@@ -1,0 +1,193 @@
+<style>
+#erd svg.erDiagram .divider path { stroke-opacity: 0.5; }
+#erd svg.erDiagram .row-rect-odd path,
+#erd svg.erDiagram .row-rect-odd rect,
+#erd svg.erDiagram .row-rect-even path,
+#erd svg.erDiagram .row-rect-even rect { stroke: none !important; }
+#erd { overflow-x: auto; }
+</style>
+<div id="erd"></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '12px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+  },
+});
+
+const src = `erDiagram
+  ORGANIZATIONS ||--o{ ORG_MEMBERSHIPS : has
+  ORGANIZATIONS ||--o{ USER_PROFILES : "current org for"
+  AUCTIONS ||--o{ TEAMS : has
+  AUCTIONS ||--o{ PLAYERS : has
+  AUCTIONS ||--o{ AUCTION_LOTS : has
+  AUCTIONS ||--o{ BID_HISTORY : has
+  AUCTIONS ||--o{ STANDINGS : has
+  AUCTIONS ||--|| RULES : configures
+  AUCTIONS ||--|| SESSION_CONFIG : configures
+  TEAMS ||--o{ PLAYERS : "drafts (sold_to)"
+  TEAMS ||--o{ AUCTION_LOTS : wins
+  TEAMS ||--o{ BID_HISTORY : places
+  TEAMS ||--o{ STANDINGS : tracks
+  PLAYERS ||--o{ AUCTION_LOTS : "called as"
+  AUCTION_LOTS ||--o{ BID_HISTORY : receives
+  MATCHES ||--|| WEATHER_READINGS : has
+  MATCHES ||--|| ON_AIR_CHANNELS : has
+  MATCHES ||--|| MATCH_STATE : has
+  MATCHES ||--|| ENGINE_STATE : has
+  MATCHES ||--o{ BALLS : records
+
+  ORGANIZATIONS {
+    uuid id PK
+    text name
+    text slug
+    uuid created_by
+    text plan
+    text status
+  }
+  ORG_MEMBERSHIPS {
+    uuid id PK
+    uuid org_id FK
+    uuid user_id FK
+    text role
+    text status
+  }
+  USER_PROFILES {
+    uuid id PK "= auth.users.id"
+    text email
+    text full_name
+    uuid current_org_id FK
+  }
+  AUCTIONS {
+    uuid id PK
+    text name
+    text status
+    timestamptz launched_at
+    timestamptz completed_at
+  }
+  TEAMS {
+    uuid id PK
+    uuid auction_id FK
+    text code
+    text name
+    text owner
+    int remaining_purse
+    text pin
+  }
+  RULES {
+    uuid id PK
+    uuid auction_id FK
+    int total_points
+    int team_size
+    jsonb tiers
+    bool owner_participation
+    int unsold_reentry_rounds
+  }
+  SESSION_CONFIG {
+    uuid id PK
+    uuid auction_id FK
+    text access_mode
+    int timer_seconds
+    text spectator_link
+  }
+  PLAYERS {
+    uuid id PK
+    uuid auction_id FK
+    uuid sold_to_team_id FK
+    text name
+    text role
+    text status
+    int lot_order
+    bool is_unsold_final
+  }
+  AUCTION_LOTS {
+    uuid id PK
+    uuid auction_id FK
+    uuid player_id FK
+    uuid winning_team_id FK
+    text status
+    int current_bid
+  }
+  BID_HISTORY {
+    uuid id PK
+    uuid auction_id FK
+    uuid lot_id FK
+    uuid team_id FK
+    int amount
+    timestamptz placed_at
+  }
+  STANDINGS {
+    uuid id PK
+    uuid auction_id FK
+    uuid team_id FK
+    smallint played
+    smallint points
+  }
+  MATCHES {
+    uuid id PK
+    text auction_id "no FK - see note"
+    jsonb match_setup
+    bool match_setup_completed
+  }
+  WEATHER_READINGS {
+    uuid match_id PK,FK
+    jsonb data
+    jsonb coords
+  }
+  ON_AIR_CHANNELS {
+    uuid match_id PK,FK
+    jsonb channels
+  }
+  MATCH_STATE {
+    uuid match_id PK,FK
+    jsonb live_state
+  }
+  ENGINE_STATE {
+    uuid match_id PK,FK
+    jsonb state
+  }
+  BALLS {
+    bigserial id PK
+    uuid match_id FK
+    smallint innings_number
+    int sequence
+    smallint runs
+    bool is_wicket
+  }`;
+
+const { svg } = await mermaid.render('erd-svg', src);
+document.getElementById('erd').innerHTML = svg;
+
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
