@@ -1,9 +1,9 @@
-// app/auction/live/[auctionId]/page.tsx
+// app/components/demo/DemoOwnerBidPage.tsx
 "use client";
 
 import React, { useSyncExternalStore, useState, useEffect } from "react";
 import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
-import DemoCursor from "./DemoCursor";
+import DemoCursor from "@/components/demo/DemoCursorAuction";
 import Image from "next/image";
 
 const BID_COLOR = "#c9971f";
@@ -63,7 +63,7 @@ export default function DemoOwnerBidPage({ teamId, cursorKey }: { teamId: string
         .demo-shuffle-fade { animation: demo-shuffle-fade 1.4s ease-in-out infinite; }
       `}</style>
 
-      <DemoCursor cursor={snap.cursors[cursorKey] as any} />
+      <DemoCursor cursor={snap.cursors[cursorKey] as React.ComponentProps<typeof DemoCursor>["cursor"]} />
 
       <header className="shrink-0 h-16 flex items-center justify-between pl-4 pr-8 bg-black/40 border-b border-white/[0.07]">
         <div className="flex items-center gap-3">

@@ -3,7 +3,7 @@
 
 import React, { useSyncExternalStore, useState, useEffect } from "react";
 import { demoModel, getDemoSnapshot, getNextBidAmount, fmtPts } from "@/lib/demo/demoModel";
-import DemoCursor from "./DemoCursor";
+import DemoCursor from "./DemoCursorAuction";
 import Image from "next/image";
 
 type Particle = { id: number; tx: number; ty: number; color: string; duration: number };

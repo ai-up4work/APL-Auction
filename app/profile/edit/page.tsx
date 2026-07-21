@@ -24,11 +24,11 @@ const MOCK_USER_EMAIL = "user@example.com"
 const MOCK_PROFILE: Profile = {
   id: MOCK_USER_ID,
   userId: MOCK_USER_ID,
-  username: "User",
-  displayName: "User",
+  username: "Safnas-Kaldeen",
+  displayName: "Safnas-K",
   bio: "This is my bio.",
   profileImage: "/default-avatar.png",
-  profileBanner: null,
+  profileBanner: '/images/website-background.png',
   updatedAt: new Date().toISOString(),
 }
 
