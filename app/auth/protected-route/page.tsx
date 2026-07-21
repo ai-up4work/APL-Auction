@@ -11,7 +11,7 @@ import Link from "next/link"
 import { LogOut, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ProtectedRoute } from "@/components/protected-route"
-import { useAuth } from "@/context/AuthCOntext"
+import { useAuth } from "@/context/AuthContext"
 
 function ProtectedContent() {
   const { user, signOut } = useAuth()
