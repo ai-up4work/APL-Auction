@@ -1,0 +1,315 @@
+Table organizations {
+  id uuid [pk]
+  name text
+  slug text [unique]
+  description text
+  logo_url text
+  created_by uuid
+  plan text
+  status text
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table user_profiles {
+  id uuid [pk] // = auth.users.id
+  email text
+  full_name text
+  avatar_url text
+  current_org_id uuid
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table org_memberships {
+  id uuid [pk]
+  org_id uuid
+  user_id uuid
+  role text
+  status text
+  invited_at timestamptz
+  joined_at timestamptz
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (org_id, user_id) [unique]
+  }
+}
+
+Table auctions {
+  id uuid [pk]
+  name text
+  status text // setup | live | paused | completed
+  org_id uuid
+  created_by uuid
+  tournament_id uuid // set when >2 teams drafted - routes to a tournament instead of a direct match
+  created_at timestamptz
+  updated_at timestamptz
+  launched_at timestamptz
+  completed_at timestamptz
+}
+
+Table tournaments {
+  id uuid [pk]
+  org_id uuid [not null]
+  name text
+  format text // single_elimination | double_elimination
+  status text
+  created_by uuid
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table bracket_matches {
+  id uuid [pk]
+  tournament_id uuid [not null]
+  bracket_type text // winners | losers | grand_final
+  round int
+  position int
+  team_a_id uuid
+  team_b_id uuid
+  winner_team_id uuid
+  score_a int
+  score_b int
+  feeder_match_a_id uuid
+  feeder_match_b_id uuid
+  overlay_match_id uuid
+  created_at timestamptz
+}
+
+Table teams {
+  id uuid [pk]
+  auction_id uuid [not null]
+  code text
+  name text
+  tier text // A | B | C | Pro | Elite | Legend
+  owner text
+  color text
+  logo text
+  roster int
+  remaining_purse int
+  pin text
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table rules {
+  id uuid [pk]
+  auction_id uuid [unique, not null]
+  total_points int
+  team_size int
+  base_price int
+  owner_participation bool
+  owner_self_purchase_cost int
+  max_overseas_players int
+  reserve_points_enforced bool
+  max_bid_time_seconds int
+  unsold_reentry_rounds int
+  tiers jsonb
+  target_player_count int
+  current_round int
+  updated_at timestamptz
+}
+
+Table session_config {
+  id uuid [pk]
+  auction_id uuid [unique, not null]
+  auction_name text
+  auctioneer text
+  auction_date text
+  auction_time text
+  venue text
+  timer_seconds int
+  access_mode text // private | spectator | broadcast
+  spectator_link text
+  owner_participation bool
+  unsold_reintroduce bool
+  auction_logo text
+  updated_at timestamptz
+}
+
+Table players {
+  id uuid [pk]
+  auction_id uuid [not null]
+  name text
+  role text
+  origin text
+  price int
+  capped bool
+  img text
+  country text
+  sold_to_team_id uuid
+  sold_price int
+  status text
+  lot_order int
+  owner_team_code text
+  reentry_count int
+  is_unsold_final bool
+  is_unsold bool
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table auction_lots {
+  id uuid [pk]
+  auction_id uuid
+  player_id uuid
+  lot_number int
+  status text // shuffling | pending | sold | unsold
+  current_bid int
+  base_price int
+  winning_team_id uuid
+  winning_team_code text
+  player_country text
+  player_img text
+  player_name text
+  player_role text
+  started_at timestamptz
+  closed_at timestamptz
+}
+
+Table bid_history {
+  id uuid [pk]
+  lot_id uuid
+  auction_id uuid
+  team_id uuid
+  team_code text
+  team_name text
+  team_color text
+  amount int [not null]
+  placed_at timestamptz
+}
+
+Table feedback {
+  id uuid [pk]
+  auction_id uuid [not null]
+  team_id uuid
+  role text // owner | auctioneer | spectator
+  trigger text // paused | completed
+  rating int
+  what_went_well text
+  what_to_improve text
+  submitted_at timestamptz
+}
+
+Table standings {
+  id uuid [pk]
+  auction_id uuid [not null]
+  team_id uuid [not null]
+  played int
+  won int
+  lost int
+  tied int
+  no_result int
+  points int
+  runs_scored int
+  balls_faced int
+  runs_conceded int
+  balls_bowled int
+  updated_at timestamptz
+}
+
+Table matches {
+  id uuid [pk]
+  auction_id text [unique, not null] // NOTE: still text, no FK yet - see pending fixes
+  match_setup jsonb
+  match_setup_completed bool
+  org_id uuid
+  created_at timestamptz
+  updated_at timestamptz
+}
+
+Table balls {
+  id bigint [pk]
+  match_id uuid
+  innings_number int
+  sequence int
+  over_number int
+  ball_number int
+  striker_name text
+  non_striker_name text
+  bowler_name text
+  runs int
+  extra_type text
+  is_wicket bool
+  dismissal_type text
+  batsman_out text
+  fielder text
+  is_free_hit bool
+  created_at timestamptz
+}
+
+Table match_state {
+  match_id uuid [pk]
+  live_state jsonb
+  updated_at timestamptz
+}
+
+Table engine_state {
+  match_id uuid [pk]
+  state jsonb
+  updated_at timestamptz
+}
+
+Table weather_readings {
+  match_id uuid [pk]
+  data jsonb
+  coords jsonb
+  updated_at timestamptz
+}
+
+Table on_air_channels {
+  match_id uuid [pk]
+  channels jsonb
+  updated_at timestamptz
+}
+
+Table auth.users {
+  id uuid [pk]
+}
+
+// Relationships
+
+Ref: user_profiles.id - auth.users.id [delete: cascade]
+Ref: user_profiles.current_org_id > organizations.id
+Ref: org_memberships.org_id > organizations.id
+Ref: org_memberships.user_id > auth.users.id
+Ref: organizations.created_by > auth.users.id // note: no FK constraint yet in live DB - pending fix
+
+Ref: auctions.org_id > organizations.id
+Ref: auctions.created_by > auth.users.id
+Ref: auctions.tournament_id > tournaments.id
+
+Ref: tournaments.org_id > organizations.id
+Ref: tournaments.created_by > auth.users.id
+
+Ref: bracket_matches.tournament_id > tournaments.id
+Ref: bracket_matches.team_a_id > teams.id
+Ref: bracket_matches.team_b_id > teams.id
+Ref: bracket_matches.winner_team_id > teams.id
+Ref: bracket_matches.feeder_match_a_id > bracket_matches.id
+Ref: bracket_matches.feeder_match_b_id > bracket_matches.id
+Ref: bracket_matches.overlay_match_id > matches.id
+
+Ref: teams.auction_id > auctions.id
+Ref: rules.auction_id > auctions.id
+Ref: session_config.auction_id > auctions.id
+Ref: players.auction_id > auctions.id
+Ref: players.sold_to_team_id > teams.id
+Ref: auction_lots.auction_id > auctions.id
+Ref: auction_lots.player_id > players.id
+Ref: auction_lots.winning_team_id > teams.id
+Ref: bid_history.lot_id > auction_lots.id
+Ref: bid_history.auction_id > auctions.id
+Ref: bid_history.team_id > teams.id
+Ref: feedback.auction_id > auctions.id
+Ref: feedback.team_id > teams.id
+Ref: standings.team_id > teams.id
+
+Ref: matches.org_id > organizations.id
+Ref: balls.match_id > matches.id
+Ref: match_state.match_id - matches.id
+Ref: engine_state.match_id - matches.id
+Ref: weather_readings.match_id - matches.id
+Ref: on_air_channels.match_id - matches.id
