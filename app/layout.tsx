@@ -2,7 +2,7 @@
 // @ts-ignore
 import "./globals.css";
 import { AuctionProvider } from "@/context/AuctionContext";
-import { AuthProvider } from "@/context/AuthCOntext";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata = {
   title: "Valiant League — Live Auction, Tournament & Broadcast Platform",
