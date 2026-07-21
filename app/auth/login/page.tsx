@@ -3,10 +3,12 @@
 import type React from "react"
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Lock, Mail, Facebook, Instagram, Linkedin, Twitter, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function LoginPage() {
+  const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -144,6 +146,7 @@ export default function LoginPage() {
             </div>
 
             <Button
+              onClick={() => router.push("/auth/register")}
               size="lg"
               variant="outline"
               className="w-full rounded-full border-2 border-foreground bg-transparent text-sm font-semibold uppercase tracking-wide text-foreground transition-all duration-300 hover:border-primary hover:bg-primary/10 hover:text-primary hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_80%,transparent),0_0_40px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
