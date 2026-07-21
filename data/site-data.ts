@@ -53,7 +53,9 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 }
 
 /* ── hero overlay — sits directly on the hero's own bg image ── */
-.hero-gradient { background: linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.55), rgba(0,0,0,0.85)); }
+.hero-gradient {
+  background: linear-gradient(to bottom, rgba(0,0,0,0.45), rgba(0,0,0,0.75), rgba(0,0,0,0.92));
+}
 .section-gradient { background: linear-gradient(to bottom, rgba(0,0,0,0.95), rgba(0,0,0,0.85), rgba(0,0,0,0.95)); }
 
 /* ── subtle dot texture ── */
