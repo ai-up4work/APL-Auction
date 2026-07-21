@@ -109,8 +109,6 @@ export default function EditProfileClientPage() {
           </div>
         </div>
       </section>
-
-      <SectionDivider />
     </main>
   )
 }

@@ -12,9 +12,8 @@ Complete SaaS transformation of the Valiant League application with multi-tenant
 - `org_memberships` - User-organization relationships with roles
 - `auctions` - Auction events (org-scoped)
 - `players` - Player data (org-scoped)
-- `auction_teams` - Teams in auctions (org-scoped)
 - `tournaments` - Tournament containers (org-scoped)
-- `tournament_teams` - Teams in tournaments
+- `teams` - Teams in auctions and tournaments
 - `matches` - Match fixtures
 - `match_scorecards` - Match scoring data
 

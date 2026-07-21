@@ -59,7 +59,7 @@ export default function ProfileClientPage() {
         handleNavigation={handleNavigation}
       />
 
-      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-20 sm:pt-40 pb-12 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
 
         <div className="container mx-auto px-4 relative z-10">
@@ -71,8 +71,6 @@ export default function ProfileClientPage() {
           </div>
         </div>
       </section>
-
-      <SectionDivider />
     </main>
   )
 }

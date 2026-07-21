@@ -170,8 +170,6 @@ export default function ResetPasswordPage() {
           </div>
         </div>
       </section>
-
-      <SectionDivider />
     </main>
   )
 }
