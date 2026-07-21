@@ -10,7 +10,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 
 export type AuctionStatus = "setup" | "live" | "paused" | "completed";
 

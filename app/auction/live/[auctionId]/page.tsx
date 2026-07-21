@@ -23,7 +23,7 @@ import {
   type BidEntry,
 } from "@/lib/auctionLiveDb";
 import { ensureTeamPurses, fmtPts, type TeamPurse } from "@/lib/auctionLiveUtils";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 import type { Player } from "@/types/auction";
 import { FeedbackModal } from "@/components/FeedbackModal";
 

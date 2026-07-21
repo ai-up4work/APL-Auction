@@ -4,7 +4,7 @@ import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import BottomNavBar from "@/components/BottomNavBar";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 
 // Matches --color-theme-orange in globals.css.
 const ORANGE       = "#c9971f";

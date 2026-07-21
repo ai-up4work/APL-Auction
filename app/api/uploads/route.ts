@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-const { supabase } = await import("@/lib/supabse");
+const { supabase } = await import("@/lib/supabase");
 
 const BUCKET = "Auction-Images";
 

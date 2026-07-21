@@ -160,7 +160,7 @@ async function fetchPlayersWithRetry(
   maxAttempts = 8,   // was 5
   delayMs = 600      // was 400
 ): Promise<Player[] | null> {
-  const { supabase } = await import("@/lib/supabse");
+  const { supabase } = await import("@/lib/supabase");
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) {

@@ -7,18 +7,7 @@ import Link from "next/link"
 import { CheckCircle2, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-
-interface ResetResult {
-  success: boolean
-  error?: string
-}
-
-// Mocked reset-password request — swap this out for the real server action
-// (e.g. requestPasswordReset) once auth is wired back up.
-async function mockRequestPasswordReset(_email: string): Promise<ResetResult> {
-  await new Promise((resolve) => setTimeout(resolve, 900))
-  return { success: true }
-}
+import { supabase } from "@/lib/supabase"
 
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState("")
@@ -26,8 +15,6 @@ export default function ResetPasswordPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
-  // Lock page scroll while this screen is mounted, regardless of any
-  // surrounding layout, so the viewport can never be scrolled.
   useEffect(() => {
     const html = document.documentElement
     const body = document.body
@@ -46,18 +33,20 @@ export default function ResetPasswordPage() {
     setIsLoading(true)
     setError(null)
 
-    try {
-      const result = await mockRequestPasswordReset(email)
-      if (!result.success) {
-        throw new Error(result.error || "Failed to send reset link")
-      }
-      setSubmitted(true)
-    } catch (err: any) {
-      console.error("Password reset request error:", err)
-      setError(err.message || "Failed to send reset link")
-    } finally {
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/update-password`,
+    })
+
+    // Supabase doesn't reveal whether the email exists, so this branch only
+    // fires for real failures (rate limiting, malformed email, etc.).
+    if (resetError) {
+      setError(resetError.message)
       setIsLoading(false)
+      return
     }
+
+    setSubmitted(true)
+    setIsLoading(false)
   }
 
   return (
@@ -71,8 +60,6 @@ export default function ResetPasswordPage() {
           backgroundRepeat: "no-repeat",
         }}
       />
-      {/* Same overlay treatment as the login screen, for consistency
-          across the app */}
       <div className="absolute inset-0 z-0 hero-gradient" />
 
       <div className="relative z-10 flex h-full items-center justify-center overflow-hidden px-6">

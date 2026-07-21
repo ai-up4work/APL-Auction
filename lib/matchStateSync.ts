@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { LiveState } from "@/lib/overlayBus";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";

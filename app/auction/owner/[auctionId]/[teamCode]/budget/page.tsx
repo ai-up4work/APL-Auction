@@ -6,7 +6,7 @@ import Image from "next/image";
 import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import InlineBottomNav from "@/components/InlineBottomNav";
 import BudgetRing from "@/components/BudgetRing";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 
 // NOTE: BID_COLOR constant removed — it was a hardcoded "#e45d35" that
 // bypassed globals.css entirely. Every place that used it now uses the

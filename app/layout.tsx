@@ -2,6 +2,7 @@
 // @ts-ignore
 import "./globals.css";
 import { AuctionProvider } from "@/context/AuctionContext";
+import { AuthProvider } from "@/context/AuthCOntext";
 
 export const metadata = {
   title: "Valiant League — Live Auction, Tournament & Broadcast Platform",
@@ -63,7 +64,9 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <AuctionProvider>{children}</AuctionProvider>
+        <AuthProvider>
+          <AuctionProvider>{children}</AuctionProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -1,11 +1,14 @@
+// app/auth/login/page.tsx
 "use client"
 
 import type React from "react"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye, EyeOff, Lock, Mail, Facebook, Instagram, Linkedin, Twitter, ArrowRight } from "lucide-react"
+import { AlertCircle, ArrowRight, Eye, EyeOff, Facebook, Instagram, Linkedin, Lock, Mail, Twitter } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { supabase } from "@/lib/supabase"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -13,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Lock page scroll while this screen is mounted, regardless of any
   // surrounding layout, so the viewport can never be scrolled.
@@ -29,11 +33,22 @@ export default function LoginPage() {
     }
   }, [])
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    // Replace with real auth call
-    setTimeout(() => setLoading(false), 900)
+    setError(null)
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (signInError) {
+      // Supabase's message here is already user-safe ("Invalid login credentials", etc.)
+      setError(signInError.message)
+      setLoading(false)
+      return
+    }
+
+    router.push("/dashboard")
+    router.refresh()
   }
 
   return (
@@ -73,6 +88,13 @@ export default function LoginPage() {
               Sign in
             </h1>
 
+            {error && (
+              <Alert variant="destructive" className="mb-4 border-destructive/40 bg-destructive/10 py-2 text-destructive">
+                <AlertCircle className="h-4 w-4 mr-2" />
+                <AlertDescription className="text-xs">{error}</AlertDescription>
+              </Alert>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground/70">
@@ -98,7 +120,7 @@ export default function LoginPage() {
                     Password
                   </label>
                   <Link
-                    href="#"
+                    href="/auth/reset-password"
                     className="text-xs text-foreground/60 transition-colors duration-300 hover:text-primary"
                   >
                     Forgot?
@@ -168,7 +190,7 @@ export default function LoginPage() {
 
           <p className="mt-4 shrink-0 text-center text-sm text-foreground/70 drop-shadow-[0_1px_8px_rgba(0,0,0,0.5)]">
             New here?{" "}
-            <Link href="/signup" className="font-semibold text-foreground transition-colors duration-300 hover:text-primary">
+            <Link href="/auth/register" className="font-semibold text-foreground transition-colors duration-300 hover:text-primary">
               Create an account
             </Link>
           </p>

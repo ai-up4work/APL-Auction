@@ -3,7 +3,7 @@
 // All Supabase reads / writes for the auction.  Nothing in this file knows
 // about React — it's pure async functions called from AuctionContext.
 // ─────────────────────────────────────────────────────────────────────────────
-import { supabase } from "./supabse";
+import { supabase } from "./supabase";
 import type {
   AuctionState,
   AuctionStatus,

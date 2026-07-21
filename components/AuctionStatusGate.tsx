@@ -21,7 +21,7 @@ export function AuctionStatusGate({
 
   // Subscribe to auction status changes in real time
   useEffect(() => {
-    const { supabase } = require("@/lib/supabse");
+    const { supabase } = require("@/lib/supabase");
 
     const channel = supabase
       .channel(`auction-status-gate-${auctionId}`)

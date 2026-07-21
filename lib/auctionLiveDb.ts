@@ -27,7 +27,7 @@
 //      reentry_count, and returns { started: true, round, requeued }
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { supabase } from "./supabse";
+import { supabase } from "./supabase";
 import type { AuctionRules } from "@/types/auction";
 
 // How long the watch page shuffle animation takes (ms).

@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import BottomNavBar from "@/components/BottomNavBar";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 import { useOwner } from "@/context/OwnerContext";
 
 // Matches --color-theme-orange in globals.css — fallback accent when a team

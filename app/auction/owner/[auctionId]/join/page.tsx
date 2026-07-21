@@ -4,7 +4,7 @@
 import React, { use, useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 
 interface TeamOption {
   id:    string;

@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 import {
   subscribeToTeamPurses,
 } from "@/lib/auctionLiveDb";

@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabse";
+import { supabase } from "@/lib/supabase";
 import type {
   MatchSetup,
   LiveState,
