@@ -12,8 +12,9 @@
 //
 // This uses the AuthProvider's session state, so it renders a brief loading
 // state on first paint while the session is restored from localStorage, then
-// redirects to /auth/login if there's no user. Because this check happens in
-// the browser, it's a UX guard, not a security boundary — real authorization
+// redirects to /unauthorized if there's no user (which in turn links to
+// /auth/login and /auth/register). Because this check happens in the
+// browser, it's a UX guard, not a security boundary — real authorization
 // (e.g. RLS policies in Supabase) still has to enforce access on the data
 // itself.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/auth/login")
+      router.replace("/unauthorized")
     }
   }, [loading, user, router])
 
