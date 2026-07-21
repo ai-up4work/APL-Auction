@@ -154,7 +154,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             <div className="flex flex-col sm:flex-row gap-3 md:gap-4 justify-center">
               <Button
                 className="bg-gold hover:bg-gold/90 text-black font-bold py-4 md:py-6 px-6 md:px-8 rounded-md text-base md:text-lg animate-slow-pulse hover:scale-105 transition-all duration-500"
-                onClick={() => scrollToSection("modules")}
+                onClick={() => scrollToSection("")}
               >
                 Explore the Platform
                 <ArrowRight className="ml-2 h-5 w-5" />
@@ -162,7 +162,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               <Button
                 variant="outline"
                 className="border-gold text-gold hover:bg-gold/10 py-4 md:py-6 px-6 md:px-8 rounded-md text-base md:text-lg animate-slow-pulse hover:scale-105 transition-all duration-500 bg-transparent"
-                onClick={() => handleNavigation("/admin")}
+                onClick={() => handleNavigation("/auth/login")}
               >
                 <Shield className="mr-2 h-5 w-5" />
                 Open the Console

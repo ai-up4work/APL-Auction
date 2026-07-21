@@ -83,7 +83,7 @@ export function SiteHeader({
 
               <Button
                 className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel"
-                onClick={() => handleNavigation("/admin")}
+                onClick={() => handleNavigation("/auth/login")}
               >
                 Open the Console
               </Button>
@@ -131,7 +131,7 @@ export function SiteHeader({
             <Button
               className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start mt-2"
               onClick={() => {
-                handleNavigation("/admin")
+                handleNavigation("/auth/login")
                 setIsNavOpen(false)
               }}
             >

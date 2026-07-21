@@ -67,7 +67,7 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
               </li>
               <li>
                 <div
-                  onClick={() => handleNavigation("/admin")}
+                  onClick={() => handleNavigation("/auth/login")}
                   className="text-gray-300 hover:text-gold transition-colors flex items-center cursor-pointer"
                 >
                   <Shield className="h-4 w-4 mr-2 text-gold" />

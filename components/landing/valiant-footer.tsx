@@ -14,7 +14,7 @@ const ValiantFooter = ({ onNavigate }: ValiantFooterProps) => {
   const router = useRouter()
 
   const handleConsole = () => {
-    router.push("/admin")
+    router.push("/auth/login")
     window.scrollTo(0, 0)
   }
 
