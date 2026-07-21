@@ -22,8 +22,8 @@ const MOCK_PROFILE: Profile = {
   username: "User",
   displayName: "User",
   bio: "This is my bio.",
-  profileImage: "/images/default-avatar.png",
-  profileBanner: null,
+  profileImage: "/default-avatar.png",
+  profileBanner: '/images/website-background.png',
   updatedAt: new Date().toISOString(),
 }
 
@@ -73,7 +73,6 @@ export default function ProfileClientPage() {
       </section>
 
       <SectionDivider />
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }

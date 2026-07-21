@@ -172,7 +172,6 @@ export default function ResetPasswordPage() {
       </section>
 
       <SectionDivider />
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }
