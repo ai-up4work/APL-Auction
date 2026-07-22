@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation"
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Lock, Mail, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
+import { registerUser } from "@/lib/profile"
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -46,16 +46,13 @@ export default function RegisterPage() {
       return
     }
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: name },
-        emailRedirectTo: `${window.location.origin}/auth/login`,
-      },
-    })
+    const { data, error: signUpError } = await registerUser(email, password, name)
 
     if (signUpError) {
+      // Log the full error object (status, code, name, etc.) - the message
+      // shown to the user is often generic ("Database error saving new
+      // user") and hides what actually went wrong server-side.
+      console.error("[register] signUp failed:", signUpError)
       // Supabase returns "User already registered" for duplicate emails.
       setError(signUpError.message)
       setIsLoading(false)

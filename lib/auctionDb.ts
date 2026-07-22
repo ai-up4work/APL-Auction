@@ -30,13 +30,44 @@ function sbErr(error: any, context?: string): Error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPER — current auth user + their current_org_id, in one call. Used by
+// createAuction so every auction row is stamped with who owns it and (if
+// they belong to an org) which org it belongs to. Throws if there's no
+// authenticated user — an auction MUST have an owner; there is no
+// legitimate anonymous-create path.
+// ─────────────────────────────────────────────────────────────────────────────
+async function getCurrentUserAndOrg(): Promise<{ userId: string; orgId: string | null }> {
+  const { data: { user }, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw sbErr(userErr, "getCurrentUserAndOrg(auth)");
+  if (!user) throw new Error("Not signed in — cannot create or own an auction.");
+
+  const { data: profile, error: profileErr } = await supabase
+    .from("user_profiles")
+    .select("current_org_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  // A missing/failed profile lookup shouldn't block auction creation — the
+  // auction just falls back to a personal (org_id: null) auction, scoped
+  // by created_by alone.
+  if (profileErr) {
+    console.warn("[getCurrentUserAndOrg] profile lookup failed, defaulting org_id to null:", profileErr);
+    return { userId: user.id, orgId: null };
+  }
+
+  return { userId: user.id, orgId: profile?.current_org_id ?? null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AUCTION ROW
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function createAuction(name: string): Promise<string> {
+  const { userId, orgId } = await getCurrentUserAndOrg();
+
   const { data, error } = await supabase
     .from("auctions")
-    .insert({ name, status: "setup" })
+    .insert({ name, status: "setup", created_by: userId, org_id: orgId })
     .select("id")
     .single();
 
@@ -64,6 +95,11 @@ export async function loadAuction(auctionId: string): Promise<AuctionState | nul
     .eq("id", auctionId)
     .single();
 
+  // NOTE: with RLS enabled on `auctions` (see rls_auction_scoping.sql),
+  // this also silently returns null for auctions that exist but belong to
+  // someone else — Postgres just won't return the row. That's the desired
+  // behavior: a stale/guessed auction id in localStorage or the URL can no
+  // longer leak another user's auction into the UI.
   if (aErr || !auction) return null;
 
   const [
@@ -530,6 +566,15 @@ export const DEFAULT_SESSION: SessionConfig = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST ALL AUCTIONS
+//
+// No explicit .eq("created_by", ...) filter here on purpose: RLS on the
+// `auctions` table (see rls_auction_scoping.sql) is the source of truth for
+// "which auctions can this user see" — it already restricts every select to
+// rows the caller owns or shares an org with. Filtering here too would be
+// redundant, and worse, would silently diverge from the RLS policy if one
+// is ever changed without updating the other. If RLS is NOT yet applied to
+// your database, this function will currently return every auction in the
+// table — run the migration first.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AuctionSummary {
@@ -653,4 +698,3 @@ export async function loadAuctionFromUrl(): Promise<string | null> {
   const params = new URLSearchParams(window.location.search);
   return params.get("auction");
 }
-

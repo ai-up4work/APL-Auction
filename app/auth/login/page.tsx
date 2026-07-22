@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { AlertCircle, ArrowRight, Eye, EyeOff, Facebook, Instagram, Linkedin, Lock, Mail, Twitter } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
+import { loginUser } from "@/lib/profile"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -38,9 +38,16 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    const { error: signInError } = await loginUser(email, password)
 
     if (signInError) {
+      console.error("[login] signIn failed:", {
+        name: signInError.name,
+        message: signInError.message,
+        status: (signInError as any).status,
+        code: (signInError as any).code,
+        raw: signInError,
+      })
       // Supabase's message here is already user-safe ("Invalid login credentials", etc.)
       setError(signInError.message)
       setLoading(false)
