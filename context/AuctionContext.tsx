@@ -74,13 +74,14 @@ interface AuctionContextValue {
   handleReauction: () => Promise<void>;
   handleShuffle:   () => Promise<void>;
 
-  // FIX: createNew now actually persists the auction row to Supabase
-  // immediately (rather than only building local state and waiting for
-  // the first team/player/save to lazily create it via ensureAuctionId).
-  // That way an auction the user names but never adds anything else to
-  // still exists and shows up in "Choose an Auction" next time. Returns
-  // a Promise so callers (AdminPage) can wait for it to finish — and
-  // surface an error — before leaving the picker. Name is now required.
+  // FIX: createNew now persists BOTH the auctions row (name, status, owner)
+  // AND a matching session_config row immediately, instead of only calling
+  // createAuction() and relying on in-memory state to carry the name until
+  // the first debounced Session-tab save. Without the session_config row,
+  // a page reload (or returning to /admin later) would rehydrate straight
+  // from loadAuction() -> sessionRaw === null -> DEFAULT_SESSION, silently
+  // reverting the display name back to "APL Season 1 Auction" even though
+  // auctions.name was correctly set to what the user typed.
   createNew:          (name: string) => Promise<void>;
   switchAuction:      (id: string) => Promise<void>;
   cloneFromPrevious:  (sourceId: string, newName: string) => Promise<void>;
@@ -248,12 +249,15 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
           localStorage.removeItem("apl_auction_id");
           return;
         }
-        const hasData = state.teams.length > 0 || state.players.length > 0;
-        if (hasData) {
-          applyLoadedState(state);
-        } else {
-          setAuction((prev) => ({ ...prev, auctionId: state.auctionId }));
-        }
+        // FIX: previously only applied the loaded state when the auction
+        // already had teams or players (`hasData`), and otherwise kept
+        // just `auctionId` and silently discarded the real rules/session
+        // that were already saved in the DB — falling back to hardcoded
+        // frontend defaults instead (this is what caused a freshly-created
+        // auction's name to revert to "APL Season 1 Auction" on reload).
+        // Rules and session exist independently of team/player count, so
+        // always apply whatever loadAuction() actually returned.
+        applyLoadedState(state);
       })
       .catch(console.error)
       .finally(() => setIsHydrated(true));
@@ -279,14 +283,18 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // FIX: createNew now persists the auction row to Supabase immediately
+  // FIX: createNew now persists the auctions row AND a matching
+  // session_config row to Supabase immediately (see note on the
+  // `createNew` type above for why session_config is required here too),
   // instead of only building local state and waiting for the first
   // team/player/save to lazily create it via ensureAuctionId. This means:
   //   - a name is required (also enforced in AuctionPicker before this
   //     is ever called, but re-checked here defensively)
-  //   - the row (with created_by/org_id stamped, empty teams/players)
-  //     exists in the DB as soon as this resolves, so it shows up in
-  //     "Choose an Auction" even if the user adds nothing else
+  //   - the auctions row (with created_by/org_id stamped, empty teams/
+  //     players) exists in the DB as soon as this resolves, so it shows
+  //     up in "Choose an Auction" even if the user adds nothing else
+  //   - the session_config row exists too, so a reload pulls the real
+  //     auction name back instead of DEFAULT_SESSION's hardcoded one
   //   - callers should await this and only leave the picker on success;
   //     on failure, saveError is set and nothing local changes
   const createNew = useCallback(async (name: string) => {
@@ -299,6 +307,12 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
 
     await withSave(async () => {
       const id = await createAuction(trimmedName);
+      const newSession: SessionConfig = { ...DEFAULT_SESSION, auctionName: trimmedName };
+
+      // Persist session_config right away — without this the row simply
+      // doesn't exist until the first debounced save from the Session tab,
+      // and any reload before that point falls back to DEFAULT_SESSION.
+      await saveSession(id, newSession);
 
       localStorage.setItem("apl_auction_id", id);
       setShuffleReady(false);
@@ -308,7 +322,7 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
         teams:     [],
         players:   [],
         rules:     DEFAULT_RULES,
-        session:   { ...DEFAULT_SESSION, auctionName: trimmedName },
+        session:   newSession,
       });
     });
 

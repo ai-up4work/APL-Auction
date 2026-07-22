@@ -464,26 +464,37 @@ export async function saveRules(auctionId: string, rules: AuctionRules): Promise
 // SESSION CONFIG
 // ─────────────────────────────────────────────────────────────────────────────
 
+// FIX: previously this only wrote to session_config, so auctions.name
+// (which createAuction() set once at creation and which listAuctions() /
+// AuctionCard / AuctionSwitcher all read from) never got updated when a
+// user renamed their auction from the Session tab — every other surface
+// kept showing the original name forever. Now both rows are updated
+// together so there's a single source of truth for "what is this auction
+// called right now".
 export async function saveSession(auctionId: string, session: SessionConfig): Promise<void> {
-  const { error } = await supabase.from("session_config").upsert(
-    {
-      auction_id:          auctionId,
-      auction_name:        session.auctionName,
-      auctioneer:          session.auctioneer,
-      auction_date:        session.auctionDate,
-      auction_time:        session.auctionTime,
-      venue:               session.venue,
-      auction_logo:        session.auctionLogo,   // ← NEW
-      timer_seconds:       session.timerSeconds,
-      access_mode:         session.accessMode,
-      spectator_link:      session.spectatorLink,
-      owner_participation: session.ownerParticipation,
-      unsold_reintroduce:  session.unsoldReintroduce,
-    },
-    { onConflict: "auction_id" }
-  );
+  const [sessionResult, auctionResult] = await Promise.all([
+    supabase.from("session_config").upsert(
+      {
+        auction_id:          auctionId,
+        auction_name:        session.auctionName,
+        auctioneer:          session.auctioneer,
+        auction_date:        session.auctionDate,
+        auction_time:        session.auctionTime,
+        venue:               session.venue,
+        auction_logo:        session.auctionLogo,   // ← NEW
+        timer_seconds:       session.timerSeconds,
+        access_mode:         session.accessMode,
+        spectator_link:      session.spectatorLink,
+        owner_participation: session.ownerParticipation,
+        unsold_reintroduce:  session.unsoldReintroduce,
+      },
+      { onConflict: "auction_id" }
+    ),
+    supabase.from("auctions").update({ name: session.auctionName }).eq("id", auctionId),
+  ]);
 
-  if (error) throw sbErr(error, "saveSession");
+  if (sessionResult.error) throw sbErr(sessionResult.error, "saveSession(session_config)");
+  if (auctionResult.error) throw sbErr(auctionResult.error, "saveSession(auctions.name)");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
