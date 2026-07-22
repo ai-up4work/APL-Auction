@@ -203,9 +203,6 @@ export default function TermsOfServicePage() {
           </div>
         </div>
       </section>
-
-      <SectionDivider />
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }
