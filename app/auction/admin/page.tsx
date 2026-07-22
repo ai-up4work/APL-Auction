@@ -51,7 +51,7 @@ export default function AdminPage() {
   const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
 
   function handleCreateNew(name?: string) {
-    createNew(name);
+    createNew(name || "");
     setEntered(true);
   }
 
