@@ -1,9 +1,12 @@
 // app/profile/page.tsx
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useScrollTop } from "@/hooks/use-scroll-top"
+import { useAuth } from "@/context/AuthContext"
+import { getOrCreateProfile } from "@/lib/profile"
+import { Loading } from "@/components/ui/loading"
 import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
@@ -12,26 +15,35 @@ import ProfileBio from "@/components/profile/profile-bio"
 import { pageStyles } from "@/data/site-data"
 import type { Profile } from "@/types/user"
 
-// Hardcoded profile data — swap this out for the real server action
-// (getOrCreateProfile) and useSession() once they're wired back up.
-const MOCK_USER_ID = "mock-user-id"
-
-const MOCK_PROFILE: Profile = {
-  id: MOCK_USER_ID,
-  userId: MOCK_USER_ID,
-  username: "Safnas-Kaldeen",
-  displayName: "Safnas-K",
-  bio: "This is my bio.",
-  profileImage: "/default-avatar.png",
-  profileBanner: '/images/website-background.png',
-  updatedAt: new Date().toISOString(),
-}
-
 export default function ProfileClientPage() {
   useScrollTop()
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
   const [isNavOpen, setIsNavOpen] = useState(false)
-  const profile = MOCK_PROFILE
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+
+  useEffect(() => {
+    if (authLoading) return
+
+    if (!user) {
+      router.push("/auth/login")
+      return
+    }
+
+    let cancelled = false
+    setProfileLoading(true)
+    getOrCreateProfile(user.id, user.email ?? "").then((p) => {
+      if (!cancelled) {
+        setProfile(p)
+        setProfileLoading(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading, user, router])
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -44,7 +56,29 @@ export default function ProfileClientPage() {
   }
 
   const refreshProfile = async () => {
-    // No-op: profile data is hardcoded, nothing to refresh.
+    if (!user) return
+    const updated = await getOrCreateProfile(user.id, user.email ?? "")
+    setProfile(updated)
+  }
+
+  if (authLoading || profileLoading) {
+    return <Loading label="Loading your profile…" variant="full" />
+  }
+
+  if (!profile) {
+    return (
+      <main className="flex min-h-screen w-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-foreground/70">
+          We couldn't load your profile. Check the browser console for details, or try again.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-full border border-foreground/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/80 hover:border-primary hover:text-primary"
+        >
+          Retry
+        </button>
+      </main>
+    )
   }
 
   return (
