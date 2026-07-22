@@ -9,6 +9,12 @@ interface ValiantFooterProps {
   onNavigate: (id: string) => void
 }
 
+const handleNavigation = (path: string) => {
+  const router = useRouter()
+  router.push(path)
+  window.scrollTo(0, 0)
+}
+
 const ValiantFooter = ({ onNavigate }: ValiantFooterProps) => {
   const currentYear = new Date().getFullYear()
   const router = useRouter()
@@ -93,10 +99,16 @@ const ValiantFooter = ({ onNavigate }: ValiantFooterProps) => {
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm">{currentYear} Valiant League. All rights reserved.</p>
             <div className="flex space-x-6 mt-4 md:mt-0">
-              <div className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer">
+              <div
+                onClick={() => handleNavigation("/privacy-policy")}
+                className="text-gray-300 text-sm hover:text-gold transition-colors cursor-pointer"
+              >
                 Privacy Policy
               </div>
-              <div className="text-gray-400 text-sm hover:text-gold transition-colors cursor-pointer">
+              <div
+                onClick={() => handleNavigation("/terms-of-service")}
+                className="text-gray-300 text-sm hover:text-gold transition-colors cursor-pointer"
+              >
                 Terms of Service
               </div>
             </div>
