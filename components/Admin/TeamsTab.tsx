@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import type { Team } from "@/types/auction";
 import ImageUploadField from "@/components/Admin/ImageUploadField";
+import ColorPicker from "@/components/Admin/ColorPicker";
 import Image from "next/image";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -243,14 +244,13 @@ function FranchiseModal({ initial, existingCodes, auctionId, onClose, onSave }: 
               className="w-full rounded-lg px-3 py-2 text-sm outline-none"
               style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
           </div>
+
+          {/* ── IDENTITY COLOR — now the aesthetic ColorPicker component
+               (preset swatches + hex input + native color wheel) instead
+               of a raw <input type="color">. Same form.color value/setter,
+               so nothing downstream changes. ── */}
           <div>
-            <FieldLabel>Identity Color</FieldLabel>
-            <div className="flex items-center gap-2">
-              <input type="color" value={form.color} onChange={(e) => set("color", e.target.value)}
-                className="w-10 h-9 rounded-lg cursor-pointer"
-                style={{ background: "transparent", border: "1px solid var(--color-border-overlay)", padding: "2px" }} />
-              <span className="text-xs font-mono" style={{ color: "var(--color-on-surface-variant)" }}>{form.color.toUpperCase()}</span>
-            </div>
+            <ColorPicker value={form.color} onChange={(v) => set("color", v)} label="Identity Color" />
           </div>
 
           {/* ── TEAM LOGO — now an upload field instead of a raw URL input.

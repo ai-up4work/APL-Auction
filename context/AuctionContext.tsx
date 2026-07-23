@@ -16,6 +16,7 @@ import type {
   Player,
   AuctionRules,
   SessionConfig,
+  Tournament,
 } from "@/types/auction";
 import {
   createAuction,
@@ -33,6 +34,10 @@ import {
   resetAuctionInDb,
   generateLinks,
   shufflePlayerOrder,
+  listTournaments,
+  createTournament,
+  linkAuctionTournament,
+  setTournamentOptOut,
   DEFAULT_RULES,
   DEFAULT_SESSION,
   type AuctionSummary,
@@ -53,6 +58,21 @@ interface AuctionContextValue {
   auctionList:   AuctionSummary[];
   isLoadingList: boolean;
   links:         AuctionLinks | null;
+
+  // ── Tournament linking ──────────────────────────────────────────────────
+  tournaments:             Tournament[];
+  isLoadingTournaments:    boolean;
+  /**
+   * True when the auction has crossed 2 teams and hasn't yet been linked
+   * to a tournament or explicitly opted out — drives the modal in
+   * app/admin/page.tsx. Recomputed reactively (not set imperatively), so
+   * it also re-appears if a stale/half-configured auction is reopened.
+   */
+  tournamentPromptOpen:    boolean;
+  loadTournaments:         () => Promise<void>;
+  linkTournament:          (tournamentId: string) => Promise<void>;
+  createAndLinkTournament: (name: string, format: "single_elimination" | "double_elimination") => Promise<void>;
+  skipTournamentLink:      () => Promise<void>;
 
   ensureAuctionId: () => Promise<string>;
 
@@ -99,6 +119,8 @@ function buildInitialState(): AuctionState {
   return {
     auctionId: null,
     status:    "setup",
+    tournamentId:     null,
+    tournamentOptOut: false,
     teams:     DEFAULT_TEAMS.map((t) => ({ ...t, id: tid++, supabaseId: undefined, roster: 0 })),
     players:   DEFAULT_PLAYERS.map((p) => ({ ...p, id: pid++, supabaseId: undefined })),
     rules:     DEFAULT_RULES,
@@ -146,12 +168,27 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
   const [shuffleReady,  setShuffleReady]  = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
 
+  // ── Tournament linking state ──────────────────────────────────────────────
+  const [tournaments,          setTournaments]          = useState<Tournament[]>([]);
+  const [isLoadingTournaments, setIsLoadingTournaments] = useState(false);
+  const [tournamentPromptOpen, setTournamentPromptOpen] = useState(false);
+
   const auctionRef   = useRef<AuctionState>(INITIAL_STATE);
   const rulesTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ensureAuctionIdPromiseRef = useRef<Promise<string> | null>(null);
 
   useEffect(() => { auctionRef.current = auction; }, [auction]);
+
+  // Reactively show/hide the tournament prompt based on current state —
+  // covers both "just added a 3rd team this session" and "reopened an
+  // auction that already has 3+ teams and was never linked or opted out".
+  useEffect(() => {
+    if (!isHydrated) return;
+    setTournamentPromptOpen(
+      auction.teams.length > 2 && !auction.tournamentId && !auction.tournamentOptOut
+    );
+  }, [isHydrated, auction.teams.length, auction.tournamentId, auction.tournamentOptOut]);
 
   async function ensureAuctionId(): Promise<string> {
     const current = auctionRef.current;
@@ -283,6 +320,51 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // ── Tournament linking actions ────────────────────────────────────────────
+
+  const loadTournaments = useCallback(async () => {
+    setIsLoadingTournaments(true);
+    try {
+      setTournaments(await listTournaments());
+    } catch (err) {
+      console.error("[AuctionContext] failed to load tournaments:", err);
+      setTournaments([]);
+    } finally {
+      setIsLoadingTournaments(false);
+    }
+  }, []);
+
+  const linkTournament = useCallback(async (tournamentId: string) => {
+    await withSave(async () => {
+      const id = await ensureAuctionId();
+      await linkAuctionTournament(id, tournamentId);
+      setAuction((prev) => ({ ...prev, tournamentId, tournamentOptOut: false }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const createAndLinkTournament = useCallback(
+    async (name: string, format: "single_elimination" | "double_elimination") => {
+      await withSave(async () => {
+        const id = await ensureAuctionId();
+        const tournamentId = await createTournament(name, format);
+        await linkAuctionTournament(id, tournamentId);
+        setAuction((prev) => ({ ...prev, tournamentId, tournamentOptOut: false }));
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const skipTournamentLink = useCallback(async () => {
+    await withSave(async () => {
+      const id = await ensureAuctionId();
+      await setTournamentOptOut(id, true);
+      setAuction((prev) => ({ ...prev, tournamentOptOut: true }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // FIX: createNew now persists the auctions row AND a matching
   // session_config row to Supabase immediately (see note on the
   // `createNew` type above for why session_config is required here too),
@@ -319,6 +401,8 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
       setAuction({
         auctionId: id,
         status:    "setup",
+        tournamentId:     null,
+        tournamentOptOut: false,
         teams:     [],
         players:   [],
         rules:     DEFAULT_RULES,
@@ -573,6 +657,13 @@ export function AuctionProvider({ children }: { children: React.ReactNode }) {
     auctionList,
     isLoadingList,
     links,
+    tournaments,
+    isLoadingTournaments,
+    tournamentPromptOpen,
+    loadTournaments,
+    linkTournament,
+    createAndLinkTournament,
+    skipTournamentLink,
     ensureAuctionId,
     addTeam,
     editTeam,

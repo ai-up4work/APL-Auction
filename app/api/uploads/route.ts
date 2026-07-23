@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     if (typeof auctionId !== "string" || !auctionId.trim()) {
       return NextResponse.json({ error: "Missing auctionId" }, { status: 400 });
     }
-    if (kind !== "team" && kind !== "player") {
+    if (kind !== "team" && kind !== "player" && kind !== "logo") {
       return NextResponse.json({ error: "kind must be 'team' or 'player'" }, { status: 400 });
     }
     if (!ALLOWED_TYPES.includes(file.type)) {

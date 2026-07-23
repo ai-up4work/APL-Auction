@@ -11,6 +11,7 @@ import type {
   Player,
   AuctionRules,
   SessionConfig,
+  Tournament,
 } from "@/types/auction";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,12 +32,15 @@ function sbErr(error: any, context?: string): Error {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER — current auth user + their current_org_id, in one call. Used by
-// createAuction so every auction row is stamped with who owns it and (if
-// they belong to an org) which org it belongs to. Throws if there's no
-// authenticated user — an auction MUST have an owner; there is no
-// legitimate anonymous-create path.
+// createAuction (and now createTournament/listTournaments) so every row is
+// stamped with who owns it and (if they belong to an org) which org it
+// belongs to. Throws if there's no authenticated user — an auction MUST
+// have an owner; there is no legitimate anonymous-create path.
+//
+// NOTE: exported (not just module-local) because the Tournaments section
+// below also needs org context to scope createTournament/listTournaments.
 // ─────────────────────────────────────────────────────────────────────────────
-async function getCurrentUserAndOrg(): Promise<{ userId: string; orgId: string | null }> {
+export async function getCurrentUserAndOrg(): Promise<{ userId: string; orgId: string | null }> {
   const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr) throw sbErr(userErr, "getCurrentUserAndOrg(auth)");
   if (!user) throw new Error("Not signed in — cannot create or own an auction.");
@@ -187,6 +191,13 @@ export async function loadAuction(auctionId: string): Promise<AuctionState | nul
   return {
     auctionId,
     status: auction.status as AuctionStatus,
+    // ← NEW: surfaces the tournament link (if any) and whether the user has
+    // explicitly opted this auction out of ever prompting for one again.
+    // Both columns already exist on `auctions` (tournament_id was there
+    // from the old team-count trigger; tournament_opt_out was added in the
+    // migration that neutralized that trigger).
+    tournamentId:     auction.tournament_id ?? null,
+    tournamentOptOut: auction.tournament_opt_out ?? false,
     teams,
     players,
     rules,
@@ -495,6 +506,66 @@ export async function saveSession(auctionId: string, session: SessionConfig): Pr
 
   if (sessionResult.error) throw sbErr(sessionResult.error, "saveSession(session_config)");
   if (auctionResult.error) throw sbErr(auctionResult.error, "saveSession(auctions.name)");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOURNAMENTS
+//
+// Backed by public.tournaments (org-scoped). Used by the TeamsTab
+// tournament-link prompt: once an auction crosses 2 teams, the user can
+// link it to an existing tournament, create a new one, or opt out (see
+// setTournamentOptOut below and the tournament_opt_out column on auctions,
+// added in the migration that neutralized the old check_auction_destination
+// trigger).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function listTournaments(): Promise<Tournament[]> {
+  const { orgId } = await getCurrentUserAndOrg();
+  if (!orgId) return []; // no org context — nothing shared to show
+
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select("id, name, format, status")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw sbErr(error, "listTournaments");
+  return (data ?? []) as Tournament[];
+}
+
+export async function createTournament(
+  name: string,
+  format: "single_elimination" | "double_elimination"
+): Promise<string> {
+  const { userId, orgId } = await getCurrentUserAndOrg();
+  if (!orgId) throw new Error("You must belong to an organization to create a tournament.");
+
+  const { data, error } = await supabase
+    .from("tournaments")
+    .insert({ name, format, created_by: userId, org_id: orgId })
+    .select("id")
+    .single();
+
+  if (error) throw sbErr(error, "createTournament");
+  return data.id as string;
+}
+
+export async function linkAuctionTournament(auctionId: string, tournamentId: string): Promise<void> {
+  const { error } = await supabase
+    .from("auctions")
+    .update({ tournament_id: tournamentId, tournament_opt_out: false })
+    .eq("id", auctionId);
+
+  if (error) throw sbErr(error, "linkAuctionTournament");
+}
+
+export async function setTournamentOptOut(auctionId: string, optOut: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("auctions")
+    .update({ tournament_opt_out: optOut })
+    .eq("id", auctionId);
+
+  if (error) throw sbErr(error, "setTournamentOptOut");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

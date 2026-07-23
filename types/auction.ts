@@ -110,7 +110,7 @@ export interface SessionConfig {
   auctioneer:         string;
   auctionDate:        string;
   auctionTime:        string;
-  auctionLogo:        string;        
+  auctionLogo:        string;
   venue:              string;
   timerSeconds:       number;
   accessMode:         "private" | "spectator" | "broadcast";
@@ -119,11 +119,29 @@ export interface SessionConfig {
   unsoldReintroduce:  boolean;
 }
 
+// ── Tournament ─────────────────────────────────────────────────────────────────
+export interface Tournament {
+  id:     string;
+  name:   string;
+  format: "single_elimination" | "double_elimination";
+  status: string;
+}
+
 // ── Full Auction State ────────────────────────────────────────────────────────
 export interface AuctionState {
   /** Supabase row UUID — null until first save */
   auctionId: string | null;
   status:    AuctionStatus;
+
+  /** FK to public.tournaments.id — null until linked */
+  tournamentId: string | null;
+  /**
+   * True once the user explicitly declines to link this auction to a
+   * tournament (via the TournamentPromptModal "Keep Standalone" button).
+   * Prevents the prompt from reappearing on reload.
+   */
+  tournamentOptOut: boolean;
+
   teams:     Team[];
   players:   Player[];
   rules:     AuctionRules;

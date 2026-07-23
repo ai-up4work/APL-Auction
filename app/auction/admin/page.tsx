@@ -9,6 +9,7 @@ import PlayersTab    from "@/components/Admin/PlayersTab";
 import RulesTab      from "@/components/Admin/RulesTab";
 import SessionTab    from "@/components/Admin/SessionTab";
 import LaunchTab     from "@/components/Admin/LaunchTab";
+import TournamentPromptModal from "@/components/Admin/TournamentPromptModal";
 import { useAuction } from "@/context/AuctionContext";
 
 const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
@@ -30,6 +31,13 @@ export default function AdminPage() {
     shuffleReady,
     isHydrated,
     links,
+    tournaments,
+    isLoadingTournaments,
+    tournamentPromptOpen,
+    loadTournaments,
+    linkTournament,
+    createAndLinkTournament,
+    skipTournamentLink,
     createNew,
     addTeam,
     editTeam,
@@ -118,6 +126,20 @@ export default function AdminPage() {
       }}
     >
 
+      {/* Tournament link prompt — appears automatically once teams.length > 2
+          and the auction hasn't been linked or explicitly opted out. Purely
+          advisory; nothing blocks team creation while it's open. */}
+      {tournamentPromptOpen && (
+        <TournamentPromptModal
+          teamCount={teams.length}
+          tournaments={tournaments}
+          isLoadingTournaments={isLoadingTournaments}
+          onLoadTournaments={loadTournaments}
+          onLink={linkTournament}
+          onCreateAndLink={createAndLinkTournament}
+          onSkip={skipTournamentLink}
+        />
+      )}
 
       {/* Saving indicator */}
       {isSaving && (
@@ -161,7 +183,7 @@ export default function AdminPage() {
         onResume={handleResume}
         onStop={onStop}
         onReauction={onReauction}
-        onAllAuctions={() => setEntered(false)}  // ← Add this line
+        onAllAuctions={() => setEntered(false)}
       />
 
       <main
