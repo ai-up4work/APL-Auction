@@ -143,7 +143,7 @@ export default function TournamentClient() {
                     <div className="relative h-40 md:h-48 border-b border-gold/20">
                       <Image
                         src={t.image || "/placeholder.svg"}
-                        alt={`Tournament: ${t.title}`}
+                        alt={t.title}
                         fill
                         className="object-cover"
                       />

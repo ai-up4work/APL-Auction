@@ -63,6 +63,7 @@ export async function getTournamentsForOrg(
       name,
       format,
       status,
+      image_url,
       created_at,
       organizations ( name, logo_url )
     `
@@ -87,7 +88,9 @@ export async function getTournamentsForOrg(
       title: t.name,
       by: org?.name ?? "Unknown Org",
       tag: t.format === "single_elimination" ? "Knockout" : "Double Elim",
-      image: org?.logo_url || "/placeholder.svg",
+      // Prefer the tournament's own image, fall back to the org logo,
+      // then the placeholder — same priority order as getTournamentById.
+      image: t.image_url || org?.logo_url || "/placeholder.svg",
       status: t.status,
     };
   });
