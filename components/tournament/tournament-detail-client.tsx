@@ -434,7 +434,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
           </div>
 
           <div className="mt-12 text-center">
-            <Link href="/tournament">
+            <Link href="/tournaments">
               <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back to Tournaments</Button>
             </Link>
           </div>
