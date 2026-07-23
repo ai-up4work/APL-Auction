@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import type { SessionConfig } from "@/types/auction";
+import ImageUploadField from "@/components/Admin/ImageUploadField";
 
 interface SessionTabProps {
   locked: boolean;
   session: SessionConfig;
   onSessionChange: (session: SessionConfig) => void;
+  auctionId: string;
 }
 
 function LockBanner() {
@@ -132,7 +134,7 @@ const ACCESS_MODES: { value: SessionConfig["accessMode"]; label: string; desc: s
   { value: "broadcast", label: "Broadcast Display",  desc: "Fullscreen big-screen mode" },
 ];
 
-export default function SessionTab({ locked, session, onSessionChange }: SessionTabProps) {
+export default function SessionTab({ locked, session, onSessionChange, auctionId }: SessionTabProps) {
   const [saved, setSaved] = useState(false);
 
   function update<K extends keyof SessionConfig>(key: K, value: SessionConfig[K]) {
@@ -211,30 +213,29 @@ export default function SessionTab({ locked, session, onSessionChange }: Session
                 <TextInput value={session.venue} onChange={(v) => update("venue", v)} placeholder="e.g. Colombo Oval" disabled={locked} />
               </div>
 
-              {/* NEW: Auction Logo — identifies WHO is conducting this auction, not a team logo */}
+              {/* Auction Logo — identifies WHO is conducting this auction, not a team logo.
+                  Upload OR paste a URL — both write to the same session.auctionLogo value. */}
               <div className="col-span-2">
-                <FieldLabel>Auction Logo (URL)</FieldLabel>
-                <div className="flex items-center gap-3">
-                  {session.auctionLogo && (
-                    <img
-                      src={session.auctionLogo}
-                      alt="Auction logo preview"
-                      className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
-                      style={{ border: "1px solid var(--color-border-overlay)" }}
-                    />
-                  )}
-                  <div className="flex-1">
-                    <TextInput
-                      value={session.auctionLogo}
-                      onChange={(v) => update("auctionLogo", v)}
-                      placeholder="https://… logo image URL"
-                      disabled={locked}
-                      mono
-                    />
-                  </div>
+                <ImageUploadField
+                  auctionId={auctionId}
+                  kind="logo"
+                  value={session.auctionLogo}
+                  onChange={(v: string) => update("auctionLogo", v)}
+                  label="Auction Logo"
+                  disabled={locked}
+                />
+                <div className="mt-2">
+                  <TextInput
+                    value={session.auctionLogo}
+                    onChange={(v) => update("auctionLogo", v)}
+                    placeholder="…or paste an image URL directly"
+                    disabled={locked}
+                    mono
+                  />
                 </div>
                 <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>
                   Shown on the broadcast display and spectator link header — represents the organizer, not any single team.
+                  Upload a file or paste a URL; both set the same logo.
                 </p>
               </div>
             </div>

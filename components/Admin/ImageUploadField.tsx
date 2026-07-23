@@ -6,10 +6,11 @@ import { uploadAuctionImage, type UploadKind } from "@/lib/uploadImage";
 
 interface ImageUploadFieldProps {
   auctionId: string;
-  kind:      UploadKind; // "team" | "player"
+  kind:      UploadKind; // "team" | "player" | "logo"
   value:     string;     // current image URL (empty string if none)
   onChange:  (url: string) => void;
   label?:    string;
+  disabled?: boolean;    // optional — existing callers that don't pass it keep working unchanged
   // Accent color for the upload affordance — pass the team color, or
   // omit to use the theme orange default.
   accentColor?: string;
@@ -21,6 +22,7 @@ export default function ImageUploadField({
   value,
   onChange,
   label = "Image",
+  disabled = false,
   accentColor = "var(--color-theme-orange)",
 }: ImageUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,7 +31,7 @@ export default function ImageUploadField({
   const [dragOver,  setDragOver]  = useState(false);
 
   async function handleFile(file: File | undefined | null) {
-    if (!file) return;
+    if (disabled || !file) return;
     setError(null);
 
     if (!auctionId) {
@@ -58,18 +60,20 @@ export default function ImageUploadField({
       </label>
 
       <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => { if (!disabled) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          handleFile(e.dataTransfer.files?.[0]);
+          if (!disabled) handleFile(e.dataTransfer.files?.[0]);
         }}
-        onClick={() => !uploading && inputRef.current?.click()}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
+        onClick={() => !uploading && !disabled && inputRef.current?.click()}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
         style={{
           background: dragOver ? `${accentColor}11` : "var(--color-surface-container-low)",
           border: `1px dashed ${dragOver ? accentColor : "var(--color-border-overlay)"}`,
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.5 : 1,
         }}
       >
         <input
@@ -77,6 +81,7 @@ export default function ImageUploadField({
           type="file"
           accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
           className="hidden"
+          disabled={disabled}
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
 
@@ -94,7 +99,17 @@ export default function ImageUploadField({
             <img src={value} alt="" className="w-12 h-12 object-cover" />
           ) : (
             <span className="material-symbols-outlined text-base" style={{ color: "var(--color-surface-variant)" }}>
-              {kind === "team" ? "shield" : "person"}
+              {(() => {
+                // map upload kind to icon name
+                switch (kind) {
+                  case "team":
+                    return "shield";
+                  case "logo":
+                    return "workspace_premium";
+                  default:
+                    return "person";
+                }
+              })()}
             </span>
           )}
         </div>
@@ -108,7 +123,7 @@ export default function ImageUploadField({
           </p>
         </div>
 
-        {value && !uploading && (
+        {value && !uploading && !disabled && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onChange(""); }}

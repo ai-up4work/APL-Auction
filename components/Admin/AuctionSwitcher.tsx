@@ -173,7 +173,7 @@ export default function AuctionSwitcher() {
                     onChange={(e) => setNewName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
-                        createNew(newName.trim() || undefined);
+                        createNew(newName.trim() || "");
                         setNewName(""); setOpen(false);
                       }
                     }}
@@ -188,7 +188,7 @@ export default function AuctionSwitcher() {
                     }}
                   />
                   <button
-                    onClick={() => { createNew(newName.trim() || undefined); setNewName(""); setOpen(false); }}
+                    onClick={() => { createNew(newName.trim() || ""); setNewName(""); setOpen(false); }}
                     style={{
                       flexShrink: 0, padding: "8px 18px", borderRadius: 7, border: "none",
                       background: "var(--color-theme-orange)", color: "var(--color-on-primary)",

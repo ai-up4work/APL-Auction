@@ -117,7 +117,7 @@ export default function AdminPage() {
         maxWidth: "100%",
       }}
     >
-      
+
 
       {/* Saving indicator */}
       {isSaving && (
@@ -201,6 +201,7 @@ export default function AdminPage() {
             locked={auctionLocked}
             session={session}
             onSessionChange={updateSession}
+            auctionId={auctionId!}
           />
         )}
         {activeStep === "launch" && (

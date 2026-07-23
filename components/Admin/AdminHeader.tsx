@@ -236,10 +236,10 @@ function AllAuctionsButton({ onClick }: { onClick: () => void }) {
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 const STEPS = [
+  { key: "session", label: "Session", icon: "event"         },
   { key: "teams",   label: "Teams",   icon: "group"         },
   { key: "players", label: "Players", icon: "person"        },
   { key: "rules",   label: "Rules",   icon: "gavel"         },
-  { key: "session", label: "Session", icon: "event"         },
   { key: "launch",  label: "Launch",  icon: "rocket_launch" },
 ] as const;
 
