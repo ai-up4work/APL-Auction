@@ -391,7 +391,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             {showcaseSlides.filter((slide) => slide.featured).slice(0, 3).map((t, i) => (
               <Link
                 key={t.title}
-                href={`/tournament/${slugify(t.title)}`}
+                href={`/all-tournaments/${slugify(t.title)}`}
                 className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1} hover:border-gold/80 transition-all duration-300`}
               >
                 <div className="relative h-40 md:h-48 border-b border-gold/20">
@@ -412,7 +412,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             <Button
               variant="outline"
               className="border-gold text-gold hover:bg-gold/10"
-              onClick={() => handleNavigation("/tournament")}
+              onClick={() => handleNavigation("/all-tournaments")}
             >
               View All Tournaments
               <ArrowRight className="ml-2 h-4 w-4" />

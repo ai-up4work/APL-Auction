@@ -433,9 +433,17 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
             </div>
           </div>
 
-          <div className="mt-12 text-center">
+          <div className="mt-12 flex items-center justify-center gap-4">
             <Link href="/tournaments">
               <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back to Tournaments</Button>
+            </Link>
+            <Link href={`/tournaments/${slug}/edit`}>
+              <Button
+                variant="outline"
+                className="border-gold/40 text-gold hover:bg-gold/10 hover:text-gold py-2 font-bold bg-transparent"
+              >
+                Edit Tournament
+              </Button>
             </Link>
           </div>
         </div>
