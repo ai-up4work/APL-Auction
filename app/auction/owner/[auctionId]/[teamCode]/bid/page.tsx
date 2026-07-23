@@ -303,6 +303,15 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
       setTimeout(() => setBidError(""), 3000);
       return;
     }
+
+    // ── NEW: squad-full check ──
+    const teamSizeLimit = rulesRef.current?.teamSize ?? 16;
+    if ((t.roster ?? 0) >= teamSizeLimit) {
+      setBidError("Your squad is already full — you can't bid on more players.");
+      setTimeout(() => setBidError(""), 3000);
+      return;
+    }
+
     const amount = getNextBidAmount(currentLotRef.current.currentBid, rulesRef.current?.tiers ?? []);
     if (amount > purseRef.current) {
       setBidError("Insufficient purse for this bid.");
@@ -337,6 +346,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     !!currentLot && currentLot.status === "pending" &&
     auctionStatus === "live" &&
     !isPlacing && !isLocked && nextBid <= purse &&
+    roster < teamSize &&                          // ← new
     currentLot.winningTeamId !== team?.id;
 
   const fmt = (n: number) => n.toLocaleString();
@@ -352,6 +362,7 @@ function BidRoom({ auctionId, teamCode }: { auctionId: string; teamCode: string 
     : isUnsold        ? "LOT UNSOLD"
     : isLocked        ? "TIME'S UP"
     : isLeading       ? "YOU'RE LEADING"
+    : roster >= teamSize ? "SQUAD FULL"           // ← new
     : nextBid > purse ? "INSUFFICIENT PURSE"
     : `PLACE BID — ${fmt(nextBid)}`;
 

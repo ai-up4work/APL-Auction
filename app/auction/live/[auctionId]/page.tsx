@@ -59,6 +59,7 @@ async function fetchPlayerQueue(auctionId: string): Promise<Player[]> {
     .select("*")
     .eq("auction_id", auctionId)
     .eq("is_unsold_final", false)
+    .eq("is_manual_entry", false)   // ← excludes roster-fills / manual captains
     .not("lot_order", "is", null)
     .order("lot_order", { ascending: true });
 

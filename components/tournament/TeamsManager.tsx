@@ -276,9 +276,9 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     setPlayerErrors((prev) => ({ ...prev, [team.id]: "" }))
 
     const player = await addManualPlayer(team.auctionId, team.id, team.code, {
-      name: form.name.trim(),
-      role: form.role,
-      isCaptain: form.isCaptain,
+        name: form.name.trim(),
+        role: form.role,
+        isCaptain: form.isCaptain,          // ← should be true if you checked the box
     })
     setAddingPlayerFor(null)
 
@@ -336,14 +336,14 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     }
   }
 
-  const handleDeletePlayer = async (teamId: string, playerId: string) => {
-    const ok = await deleteManualPlayer(playerId)
+    const handleDeletePlayer = async (teamId: string, playerId: string) => {
+    const ok = await deleteManualPlayer(playerId, teamId)
     if (ok) {
-      setTeams((prev) =>
+        setTeams((prev) =>
         prev.map((t) => (t.id !== teamId ? t : { ...t, players: t.players.filter((p) => p.id !== playerId) }))
-      )
+        )
     }
-  }
+    }
 
   // ── LOADING ──────────────────────────────────────────────────────────
   if (phase === "loading") {

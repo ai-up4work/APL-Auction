@@ -1,5 +1,6 @@
 // app/lib/tournament/manualTeams.ts
 import { supabase } from "@/lib/supabase";
+import { is } from "date-fns/locale";
 
 export interface ManualTeamInput {
   code: string;
@@ -19,6 +20,7 @@ export interface ManualPlayer {
   name: string;
   role: string;
   isCaptain: boolean;
+  isManualEntry: boolean;
 }
 
 export interface ManualTeam {
@@ -115,7 +117,7 @@ export async function getTeamsWithPlayers(tournamentId: string): Promise<ManualT
   const teamIds = teams.map((t) => t.id);
   const { data: players, error: playersErr } = await supabase
     .from("players")
-    .select("id, name, role, sold_to_team_id, owner_team_code")
+    .select("id, name, role, sold_to_team_id, owner_team_code, is_manual_entry")
     .in("sold_to_team_id", teamIds);
 
   if (playersErr) {
@@ -136,6 +138,7 @@ export async function getTeamsWithPlayers(tournamentId: string): Promise<ManualT
         name: p.name,
         role: p.role,
         isCaptain: p.owner_team_code === t.code,
+        isManualEntry: !!p.is_manual_entry,
       })),
   }));
 }
@@ -203,6 +206,13 @@ export async function deleteManualTeam(teamId: string): Promise<boolean> {
  * — sold_to_team_id is set immediately, sold_price stays null (nothing
  * was actually bid). owner_team_code is how getSquadsForTournament
  * determines the captain, so it's only set when isCaptain is true.
+ *
+ * is_manual_entry marks this row as never eligible for the live-auction
+ * pool — startRandomLot / fetchPlayerQueue both filter on it explicitly,
+ * so a manually-added player can never be drawn into a lot. is_unsold_final
+ * is also set defensively (the DB trigger sync_player_sold_state does this
+ * too, since sold_to_team_id is non-null here, but setting it directly
+ * keeps this function correct even if the trigger is ever removed).
  */
 export async function addManualPlayer(
   auctionId: string,
@@ -219,8 +229,10 @@ export async function addManualPlayer(
       sold_to_team_id: teamId,
       owner_team_code: input.isCaptain ? teamCode : null,
       status: "sold",
+      is_manual_entry: true,
+      is_unsold_final: true,
     })
-    .select("id, name, role, owner_team_code")
+    .select("id, name, role, owner_team_code, is_manual_entry")
     .single();
 
   if (error || !data) {
@@ -228,7 +240,36 @@ export async function addManualPlayer(
     return null;
   }
 
-  return { id: data.id, name: data.name, role: data.role, isCaptain: !!data.owner_team_code };
+  // Keep teams.roster in sync with the same counter live-auction wins use.
+  const { data: teamRow, error: teamFetchErr } = await supabase
+    .from("teams")
+    .select("roster")
+    .eq("id", teamId)
+    .single();
+
+  if (teamFetchErr) {
+    console.error("addManualPlayer(roster fetch) failed:", teamFetchErr.message);
+    // Player row was already created — don't fail the whole operation over
+    // a roster-count desync, but do surface it in the console since the cap
+    // enforcement in placeBid will now be silently wrong for this team
+    // until it's corrected.
+  } else {
+    const { error: rosterErr } = await supabase
+      .from("teams")
+      .update({ roster: (teamRow?.roster ?? 0) + 1 })
+      .eq("id", teamId);
+    if (rosterErr) {
+      console.error("addManualPlayer(roster update) failed:", rosterErr.message);
+    }
+  }
+
+  return {
+    id: data.id,
+    name: data.name,
+    role: data.role,
+    isCaptain: !!data.owner_team_code,
+    isManualEntry: !!data.is_manual_entry,
+  };
 }
 
 /**
@@ -274,12 +315,32 @@ export async function updateManualPlayerName(playerId: string, name: string): Pr
   return true;
 }
 
-export async function deleteManualPlayer(playerId: string): Promise<boolean> {
+export async function deleteManualPlayer(playerId: string, teamId: string): Promise<boolean> {
   const { error } = await supabase.from("players").delete().eq("id", playerId);
   if (error) {
     console.error("deleteManualPlayer failed:", error.message);
     return false;
   }
+
+  const { data: teamRow, error: teamFetchErr } = await supabase
+    .from("teams")
+    .select("roster")
+    .eq("id", teamId)
+    .single();
+
+  if (teamFetchErr) {
+    console.error("deleteManualPlayer(roster fetch) failed:", teamFetchErr.message);
+    return true; // player delete itself succeeded — don't report failure
+  }
+
+  const { error: rosterErr } = await supabase
+    .from("teams")
+    .update({ roster: Math.max(0, (teamRow?.roster ?? 1) - 1) })
+    .eq("id", teamId);
+  if (rosterErr) {
+    console.error("deleteManualPlayer(roster update) failed:", rosterErr.message);
+  }
+
   return true;
 }
 
@@ -357,8 +418,13 @@ export interface SwitchResult {
 /**
  * Copies every manual team + player into a real auction's tables — as new
  * rows, `status: 'sold'`, captain flag preserved — exactly what a live
- * auction win would have written. Then re-links the tournament to the real
- * auction and removes the now-empty manual container.
+ * auction win would have written, EXCEPT is_manual_entry is preserved as
+ * true on the copy too. These players still never went through bidding,
+ * even after landing in a real auction's tables, so they must stay
+ * excluded from that auction's live draw pool (startRandomLot) — dropping
+ * the flag on copy would silently make them eligible to be re-auctioned.
+ * Then re-links the tournament to the real auction and removes the now-
+ * empty manual container.
  *
  * Copies first, deletes only after every copy succeeds, so a failure
  * partway through never destroys the manual data before it's safely
@@ -383,7 +449,7 @@ export async function switchManualToRealAuction(
   const { data: manualPlayers, error: playersErr } = teamIds.length
     ? await supabase
         .from("players")
-        .select("id, name, role, sold_to_team_id, owner_team_code")
+        .select("id, name, role, sold_to_team_id, owner_team_code, is_manual_entry")
         .in("sold_to_team_id", teamIds)
     : { data: [] as any[], error: null };
 
@@ -416,7 +482,8 @@ export async function switchManualToRealAuction(
     teamMap[t.id] = { newId: newTeam.id, code: t.code };
   }
 
-  // Copy players, pointed at the copied teams, marked sold.
+  // Copy players, pointed at the copied teams, marked sold, still flagged
+  // as manual entries so the target auction's live draw never picks them up.
   for (const p of manualPlayers ?? []) {
     const mapped = teamMap[p.sold_to_team_id as string];
     if (!mapped) continue;
@@ -429,11 +496,41 @@ export async function switchManualToRealAuction(
       sold_to_team_id: mapped.newId,
       status: "sold",
       owner_team_code: isCaptain ? mapped.code : null,
+      is_manual_entry: true,
+      is_unsold_final: true,
     });
 
     if (insertPlayerErr) {
       console.error("switchManualToRealAuction(insert player) failed:", insertPlayerErr.message);
       return { ok: false, error: `Couldn't copy player "${p.name}" — nothing was deleted, safe to retry.` };
+    }
+  }
+
+  // Sync each copied team's roster count to how many players actually
+  // landed on it — the insert above never set roster, so without this
+  // every copied team would look empty (roster: 0) to isFull / placeBid's
+  // squad-full check, even though it may already be at or near teamSize.
+  const rosterCounts = new Map<string, number>();
+  for (const p of manualPlayers ?? []) {
+    const mapped = teamMap[p.sold_to_team_id as string];
+    if (!mapped) continue;
+    rosterCounts.set(mapped.newId, (rosterCounts.get(mapped.newId) ?? 0) + 1);
+  }
+
+  if (rosterCounts.size > 0) {
+    const rosterResults = await Promise.all(
+      Array.from(rosterCounts.entries()).map(([newTeamId, count]) =>
+        supabase.from("teams").update({ roster: count }).eq("id", newTeamId)
+      )
+    );
+    for (const r of rosterResults) {
+      if (r.error) {
+        console.error("switchManualToRealAuction(roster sync) failed:", r.error.message);
+        // Not fatal — teams and players are already correctly copied and
+        // linked; a roster-count desync here is a display/enforcement bug,
+        // not data loss. Surfaced in console rather than failing the whole
+        // switch, since the copy itself succeeded.
+      }
     }
   }
 

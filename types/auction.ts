@@ -48,6 +48,7 @@ export interface Player {
 
   /** Position in the shuffled draw order — null until shuffled */
   lotOrder?: number;
+  isManualEntry?: boolean;
 
   /**
    * The team code this player is a captain/owner of.

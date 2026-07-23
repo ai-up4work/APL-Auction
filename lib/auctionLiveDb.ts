@@ -252,18 +252,19 @@ export async function startRandomLot(auctionId: string): Promise<AuctionLot> {
   );
   const nextNumber = ((allLots ?? [])[0]?.lot_number ?? 0) + 1;
 
-  // Pick the next player by lot_order. Captains (owner_team_code set) are
-  // never given a lot_order, so they're naturally excluded here. Players
-  // already finalized as unsold (is_unsold_final) are excluded too, as
-  // are players currently flagged is_unsold (unsold this round, awaiting
-  // a re-entry round to requeue them — they shouldn't be callable until
-  // that happens).
+  // Pick the next player by lot_order. Players already finalized as unsold
+  // (is_unsold_final) or currently flagged is_unsold (awaiting a re-entry
+  // round) are excluded, as are players added directly to a roster outside
+  // the live auction (is_manual_entry) — those never had a real lot_order
+  // and must never be drawn into a live lot regardless of what lot_order
+  // they end up with.
   const { data: players } = await supabase
     .from("players")
     .select("*")
     .eq("auction_id", auctionId)
     .eq("is_unsold_final", false)
     .eq("is_unsold", false)
+    .eq("is_manual_entry", false)
     .order("lot_order", { ascending: true });
 
   const remaining = (players ?? []).filter((p: any) => !usedIds.has(p.id));
@@ -554,11 +555,15 @@ export async function placeBid(
   teamColor: string,
   amount:    number
 ): Promise<BidEntry> {
-  const { data: lot } = await supabase
-    .from("auction_lots")
-    .select("status, current_bid")
-    .eq("id", lotId)
-    .single();
+  const [{ data: lot }, { data: team }, { data: rulesRow }] = await Promise.all([
+    supabase.from("auction_lots").select("status, current_bid").eq("id", lotId).single(),
+    // roster here is the SAME column addManualPlayer must increment —
+    // manual players and live-auction wins share one counter, so this
+    // check naturally accounts for both without needing to know which
+    // kind of player any given roster slot came from.
+    supabase.from("teams").select("roster").eq("id", teamId).single(),
+    supabase.from("rules").select("team_size").eq("auction_id", auctionId).single(),
+  ]);
 
   // Bids only accepted on "pending" lots — not "shuffling"
   if (!lot || lot.status !== "pending") {
@@ -566,6 +571,13 @@ export async function placeBid(
   }
   if (amount <= (lot.current_bid ?? 0)) {
     throw new Error("Bid must exceed current high bid");
+  }
+
+  // Squad-full check — counts manual entries + live wins together, since
+  // both increment the same teams.roster column.
+  const teamSize = rulesRow?.team_size ?? Infinity;
+  if ((team?.roster ?? 0) >= teamSize) {
+    throw new Error("This team's squad is already full");
   }
 
   const placedAt = new Date().toISOString();
