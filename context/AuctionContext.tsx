@@ -135,8 +135,21 @@ let _playerId = 10 + DEFAULT_PLAYERS.length;
 function nextTeamId()   { return _teamId++;   }
 function nextPlayerId() { return _playerId++; }
 
+// FIX: captains (ownerTeamCode set) are deliberately excluded from the
+// shuffle and never given a lotOrder — see shufflePlayerOrder in
+// auctionDb.ts (`.is("owner_team_code", null)`) and the assignCaptains
+// comment ("never given a lot_order ... shufflePlayerOrder already
+// excludes them"). The previous version of this function used
+// `players.every(...)` over ALL players with no such exclusion, which
+// meant any auction with at least one captain could never satisfy
+// shuffleReady — that player's lotOrder would never become non-null no
+// matter how many times "Shuffle" was clicked, permanently blocking the
+// live draw from starting. Excluding captains here mirrors exactly what
+// shufflePlayerOrder itself excludes, so "ready" means "every player who
+// was ever going to get a lot_order actually has one."
 function computeShuffleReady(players: Player[]): boolean {
-  return players.length > 0 && players.every((p) => p.lotOrder != null);
+  const shufflablePlayers = players.filter((p) => !p.ownerTeamCode);
+  return shufflablePlayers.length > 0 && shufflablePlayers.every((p) => p.lotOrder != null);
 }
 
 function resetIdCounters() {
