@@ -96,7 +96,7 @@ export default function TournamentClient() {
             {filteredTournaments.map((t, i) => (
               <Link
                 key={t.title}
-                href={`/tournament/${slugify(t.title)}`}
+                href={`/all-tournaments/${slugify(t.title)}`}
                 className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
                   (i % 6) + 1
                 } hover:border-gold/80 transition-all duration-300 cursor-pointer`}
