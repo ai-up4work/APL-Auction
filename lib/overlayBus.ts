@@ -16,6 +16,8 @@ export interface SquadPlayer {
   id: string;
   name: string;
   imageUrl?: string;
+  color?: string;  // NEW
+  tier?: string;   // NEW
 }
 
 export interface TeamInfo {

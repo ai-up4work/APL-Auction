@@ -767,35 +767,69 @@ function BracketTeamRow({ team, isWinner }: { team: BracketTeam; isWinner: boole
 // ─────────────────────────────────────────────────────────────
 // SQUADS PANEL
 // ─────────────────────────────────────────────────────────────
+// Teams may exist with no sold players yet (auction created but not run,
+// or still in progress) — getSquadsForTournament now returns those teams
+// with an empty `players` array instead of hiding them. Render that case
+// as "Squad to be announced" rather than an empty card or omitting it.
 function SquadsPanel({ squads }: { squads: Squad[] }) {
   return (
     <div className="space-y-4 mb-8">
-      {squads.map((s) => (
-        <div key={s.team} className="bg-black/50 border border-gold/20 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-gold" />
-              <h3 className="text-white font-bold font-cinzel">{s.team}</h3>
-            </div>
-            <p className="text-gray-400 text-xs flex items-center gap-1.5">
-              <Users className="h-3 w-3" /> {s.players.length} players · Capt. {s.captain}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {s.players.map((p, i) => (
-              <div key={i} className="flex items-center gap-2 bg-white/[0.03] border border-gold/10 rounded-full pl-1 pr-3 py-1">
-                <span className="h-6 w-6 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
-                  {initials(p.name)}
-                </span>
-                <span className="text-gray-300 text-xs">
-                  {p.name}
-                  {p.isCaptain && <span className="text-gold ml-1">(C)</span>}
-                </span>
+      {squads.map((s) => {
+        const hasRoster = s.players.length > 0
+        return (
+          <div key={s.team} className="bg-black/50 border border-gold/20 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                {s.logo ? (
+                  <div className="relative h-9 w-9 rounded-full overflow-hidden border border-gold/20 shrink-0">
+                    <Image src={s.logo} alt={`${s.team} logo`} fill className="object-cover" />
+                  </div>
+                ) : (
+                  <span className="h-9 w-9 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center shrink-0">
+                    <Shield className="h-4 w-4 text-gold" />
+                  </span>
+                )}
+                <div>
+                  <h3 className="text-white font-bold font-cinzel leading-tight">{s.team}</h3>
+                  {s.owner && <p className="text-gray-400 text-xs">Owner: {s.owner}</p>}
+                </div>
               </div>
-            ))}
+              <div className="text-right">
+                <p className="text-gray-400 text-xs flex items-center gap-1.5 justify-end">
+                  <Users className="h-3 w-3" />
+                  {hasRoster ? `${s.players.length} players · Capt. ${s.captain}` : "Squad to be announced"}
+                </p>
+                {s.purseSpent != null && s.purseRemaining != null && (
+                  <p className="text-gold text-xs mt-1">
+                    {s.purseSpent.toLocaleString()} spent
+                    <span className="text-gray-500"> · {s.purseRemaining.toLocaleString()} left</span>
+                  </p>
+                )}
+              </div>
+            </div>
+            {hasRoster ? (
+              <div className="flex flex-wrap gap-2">
+                {s.players.map((p, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 bg-white/[0.03] border border-gold/10 rounded-full pl-1 pr-3 py-1"
+                  >
+                    <span className="h-6 w-6 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
+                      {initials(p.name)}
+                    </span>
+                    <span className="text-gray-300 text-xs">
+                      {p.name}
+                      {p.isCaptain && <span className="text-gold ml-1">(C)</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm italic">Roster not finalized yet.</p>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

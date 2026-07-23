@@ -75,6 +75,11 @@ export interface BracketMatch {
 
 export interface SquadMember {
   name: string
+  /** Playing role (Batter/Bowler/All-rounder/etc) — populated for
+   *  DB-driven squads (getSquadsForTournament reads it from
+   *  players.role). Optional because the static demo squads below don't
+   *  set it. */
+  role?: string
   isCaptain?: boolean
 }
 
@@ -82,6 +87,18 @@ export interface Squad {
   team: string
   captain: string
   players: SquadMember[]
+  /** Everything below is optional because the static demo squads in
+   *  `tournamentExtras` below only set team/captain/players — these
+   *  fields are populated when squads come from getSquadsForTournament
+   *  (lib/tournament/tournament.ts), which reads them off the real
+   *  `teams` row (color, tier, owner, logo, remaining_purse) plus
+   *  `rules.total_points` for the auction (to derive purseSpent). */
+  color?: string
+  tier?: string
+  owner?: string
+  logo?: string
+  purseSpent?: number
+  purseRemaining?: number
 }
 
 export interface LeaderboardRow {

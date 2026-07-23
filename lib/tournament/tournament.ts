@@ -396,7 +396,18 @@ async function getFixturesForTournament(tournamentId: string) {
  * parameter if you need to pick a specific one instead.
  *
  * Players with no sold_to_team_id (unsold, or the auction hasn't run yet)
- * are excluded rather than shown as free agents.
+ * are excluded from rosters. Teams with no sold players are still
+ * included, with an empty `players` array — every team created for the
+ * auction should be visible on the tournament page (e.g. "Squad to be
+ * announced") rather than disappearing until the auction actually
+ * resolves. See SquadsPanel in the tournament detail client for how the
+ * empty-roster case is rendered.
+ *
+ * Also surfaces owner, logo, and purse spent/remaining per team (from
+ * `teams.owner`/`teams.logo`/`teams.remaining_purse`, with the starting
+ * budget read from `rules.total_points` for the same auction). `teams.pin`
+ * is deliberately never selected here — it's the private auction access
+ * code, not public-page data.
  */
 export async function getSquadsForTournament(tournamentId: string): Promise<Squad[]> {
   const { data: auction, error: auctionErr } = await supabase
@@ -411,36 +422,67 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
     console.error("getSquadsForTournament(auction lookup) failed:", auctionErr.message);
     return [];
   }
-  if (!auction) return []; // no auction linked yet
+  if (!auction) return [];
 
-  const [{ data: teams, error: teamsErr }, { data: players, error: playersErr }] =
-    await Promise.all([
-      supabase.from("teams").select("id, code, name").eq("auction_id", auction.id),
-      supabase
-        .from("players")
-        .select("name, sold_to_team_id, owner_team_code")
-        .eq("auction_id", auction.id)
-        .not("sold_to_team_id", "is", null),
-    ]);
+  const [
+    { data: teams, error: teamsErr },
+    { data: players, error: playersErr },
+    { data: rules, error: rulesErr },
+  ] = await Promise.all([
+    // owner, logo, remaining_purse added for the squads page (owner name,
+    // team badge, purse spent) — pin is intentionally NOT selected here,
+    // it's a private auction access code and should never reach a public
+    // page's response payload.
+    supabase
+      .from("teams")
+      .select("id, code, name, color, tier, owner, logo, remaining_purse")
+      .eq("auction_id", auction.id),
+    supabase
+      .from("players")
+      // + role
+      .select("name, role, sold_to_team_id, owner_team_code")
+      .eq("auction_id", auction.id)
+      .not("sold_to_team_id", "is", null),
+    // rules.total_points is the per-team starting budget for this auction —
+    // teams.remaining_purse alone doesn't tell us how much was spent
+    // without knowing what they started with.
+    supabase.from("rules").select("total_points").eq("auction_id", auction.id).maybeSingle(),
+  ]);
 
   if (teamsErr) console.error("getSquadsForTournament(teams) failed:", teamsErr.message);
   if (playersErr) console.error("getSquadsForTournament(players) failed:", playersErr.message);
+  if (rulesErr) console.error("getSquadsForTournament(rules) failed:", rulesErr.message);
   if (!teams || !players) return [];
 
-  return teams
-    .map((t) => {
-      const roster = players.filter((p) => p.sold_to_team_id === t.id);
-      const captain = roster.find((p) => p.owner_team_code === t.code);
-      return {
-        team: t.name,
-        captain: captain?.name ?? "TBD",
-        players: roster.map((p) => ({
-          name: p.name,
-          isCaptain: p.owner_team_code === t.code,
-        })),
-      };
-    })
-    .filter((s) => s.players.length > 0); // hide teams with no completed purchases
+  // Falls back to 50000 (the teams.remaining_purse column default) if
+  // rules is missing entirely, so purseSpent still computes to something
+  // sane rather than NaN.
+  const totalPurse = rules?.total_points ?? 50000;
+
+  // NOTE: previously this filtered out `.filter((s) => s.players.length > 0)`
+  // at the end, which hid every team until the auction had actually sold
+  // players to it. That's removed — teams should show up as soon as they
+  // exist, with an empty roster until players are sold.
+  return teams.map((t) => {
+    const roster = players.filter((p) => p.sold_to_team_id === t.id);
+    const captain = roster.find((p) => p.owner_team_code === t.code);
+    const remaining = t.remaining_purse ?? totalPurse;
+    return {
+      team: t.name,
+      captain: captain?.name ?? "TBD",
+      color: t.color,
+      tier: t.tier,
+      owner: t.owner,
+      logo: t.logo || "",
+      purseSpent: Math.max(totalPurse - remaining, 0),
+      purseRemaining: remaining,
+      players: roster.map((p) => ({
+        name: p.name,
+        role: p.role,
+        isCaptain: p.owner_team_code === t.code,
+      })),
+    };
+  });
 }
 
 /**
@@ -468,7 +510,8 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
  *     no join through auctions needed; nrr/form are precomputed columns)
  *   - squads: mapped ✅ — derived from the linked auction's results
  *     (players.sold_to_team_id / owner_team_code), see
- *     getSquadsForTournament above. NOT a hand-edited table.
+ *     getSquadsForTournament above. NOT a hand-edited table. Teams show
+ *     even before any players are sold (see note in that function).
  *   - liveMatch, runsLeaderboard, wicketsLeaderboard: NOT mapped. These
  *     come from matches/balls/match_team_stats (live scoring + per-player
  *     aggregation) — real but more involved queries, left as a later pass.
