@@ -1,4 +1,4 @@
-// context/auth-context.tsx
+// context/AuthContext.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 // App-wide auth state. Wrap the root layout in <AuthProvider> and read the
 // current user anywhere with useAuth().

@@ -24,6 +24,8 @@ import {
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
+import { SiteFooter } from "@/components/landing/site-footer"
+import SectionDivider from "@/components/section-divider"
 import RelatedTournaments from "@/components/tournament/related-tournaments"
 import BracketPreviewPanel from "@/components/tournament/BracketPreviewPanel"
 import { pageStyles } from "@/data/site-data"
@@ -288,13 +290,15 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 <TabsContent value="overview" className="mt-0">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">ABOUT THE TOURNAMENT</h2>
-                    {tournament.description ? (
-                      <p className="text-gray-300">{tournament.description}</p>
-                    ) : (
-                      <p className="text-gray-500 italic text-sm">
-                        No description has been added for this tournament yet.
-                      </p>
-                    )}
+                    <p className="text-gray-300 mb-6">
+                      {tournament.description ||
+                        `${tournament.title} is run on Valiant League — ${tournament.by.toLowerCase()}. Live scoring, automatic points tables, and stream-ready broadcast overlays, all from one console.`}
+                    </p>
+                    <ul className="text-gray-300 space-y-2">
+                      <li>• Ball-by-ball live scoring synced straight to this page</li>
+                      <li>• Points table and NRR calculated automatically after every match</li>
+                      <li>• Broadcast overlay layer ready for OBS or any streaming setup</li>
+                    </ul>
                   </div>
                   {hasAwards && <AwardsPanel awards={tournament.awards!} />}
                 </TabsContent>
@@ -429,7 +433,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </Button>
               </div>
 
-              {/* <RelatedTournaments currentSlug={slug} currentTag={tournament.tag} /> */}
+              <RelatedTournaments currentSlug={slug} currentTag={tournament.tag} />
             </div>
           </div>
 
@@ -440,6 +444,8 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
           </div>
         </div>
       </section>
+
+      <SectionDivider />
     </main>
   )
 }

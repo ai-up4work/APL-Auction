@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -8,18 +8,59 @@ import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SiteHeader } from "@/components/landing/site-header"
-import { SiteFooter } from "@/components/landing/site-footer"
 import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import SectionDivider from "@/components/section-divider"
-import { pageStyles, showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
+import { pageStyles } from "@/data/site-data"
+import { useAuth } from "@/context/AuthContext"
+import { getTournamentsForUser, type TournamentCardData } from "@/lib/tournament/tournament"
 
 export default function TournamentClient() {
   useScrollTop()
 
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
+
   const [searchQuery, setSearchQuery] = useState("")
   const [isNavOpen, setIsNavOpen] = useState(false)
+  const [tournaments, setTournaments] = useState<TournamentCardData[]>([])
+  const [hasOrg, setHasOrg] = useState(true)
+  const [dataLoading, setDataLoading] = useState(true)
+
+  // Supabase re-checks the session on tab focus and fires onAuthStateChange
+  // with a freshly-created session/user object even when it's the same
+  // user — that's a new object reference, not a new user. Track the id
+  // we last fetched for so we don't re-run the fetch (and flash the
+  // loading state) every time the tab regains focus.
+  const fetchedForUserId = useRef<string | null>(null)
+
+  useEffect(() => {
+    // Wait for the auth session to resolve before deciding anything.
+    if (authLoading) return
+
+    if (!user) {
+      fetchedForUserId.current = null
+      router.push("/login")
+      return
+    }
+
+    if (fetchedForUserId.current === user.id) return
+
+    let cancelled = false
+
+    setDataLoading(true)
+    getTournamentsForUser(user.id).then(({ orgId, tournaments }) => {
+      if (cancelled) return
+      fetchedForUserId.current = user.id
+      setHasOrg(!!orgId)
+      setTournaments(tournaments)
+      setDataLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading, user, router])
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -33,12 +74,14 @@ export default function TournamentClient() {
 
   const q = searchQuery.toLowerCase()
 
-  const filteredTournaments: ShowcaseSlide[] = showcaseSlides.filter(
+  const filteredTournaments = tournaments.filter(
     (t) =>
       t.title.toLowerCase().includes(q) ||
       t.by.toLowerCase().includes(q) ||
       t.tag.toLowerCase().includes(q)
   )
+
+  const isLoading = authLoading || dataLoading
 
   return (
     <main className="overflow-hidden">
@@ -52,10 +95,6 @@ export default function TournamentClient() {
         handleNavigation={handleNavigation}
       />
 
-      {/* ═══════════════════════════════════════════════════════════
-          HEADER — same section-pattern + section-gradient treatment
-          as every section in HomeContent, typewriter title
-      ═══════════════════════════════════════════════════════════ */}
       <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
@@ -85,58 +124,62 @@ export default function TournamentClient() {
         </div>
       </section>
 
-      {/* ═══════════════════════════════════════════════════════════
-          GRID — same card anatomy as the Showcase section on Home,
-          but with the real image instead of the placeholder block
-      ═══════════════════════════════════════════════════════════ */}
       <section className="pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
-            {filteredTournaments.map((t, i) => (
-              <Link
-                key={t.title}
-                href={`/tournament/${slugify(t.title)}`}
-                className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
-                  (i % 6) + 1
-                } hover:border-gold/80 transition-all duration-300 cursor-pointer`}
-              >
-                <div className="relative h-40 md:h-48 border-b border-gold/20">
-                  <Image
-                    src={t.image || "/placeholder.svg"}
-                    alt={`Tournament: ${t.title}`}
-                    fill
-                    className="object-cover"
-                  />
-                </div>
-                <div className="p-5 md:p-6">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
-                      {t.tag}
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-bold text-white font-cinzel mb-1">{t.title}</h3>
-                  <p className="text-gray-300 text-xs">{t.by}</p>
-                </div>
-              </Link>
-            ))}
-          </div>
+          {isLoading ? (
+            <p className="text-center text-gray-400 fade-in">Loading tournaments…</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
+                {filteredTournaments.map((t, i) => (
+                  <Link
+                    key={t.id}
+                    href={`/tournament/${t.id}`}
+                    className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
+                      (i % 6) + 1
+                    } hover:border-gold/80 transition-all duration-300 cursor-pointer`}
+                  >
+                    <div className="relative h-40 md:h-48 border-b border-gold/20">
+                      <Image
+                        src={t.image || "/placeholder.svg"}
+                        alt={`Tournament: ${t.title}`}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                    <div className="p-5 md:p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
+                          {t.tag}
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-bold text-white font-cinzel mb-1">{t.title}</h3>
+                      <p className="text-gray-300 text-xs">{t.by}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
 
-          {filteredTournaments.length === 0 && (
-            <p className="text-center text-gray-400 mt-12 fade-in">
-              No tournaments match your search.
-            </p>
+              {filteredTournaments.length === 0 && (
+                <p className="text-center text-gray-400 mt-12 fade-in">
+                  {!hasOrg
+                    ? "You're not part of an organization yet."
+                    : tournaments.length === 0
+                    ? "Your organization hasn't created any tournaments yet."
+                    : "No tournaments match your search."}
+                </p>
+              )}
+
+              <div className="text-center mt-12 fade-in-up stagger-5">
+                <span className="font-mono text-xs text-gray-400 tracking-widest">
+                  SHOWING {filteredTournaments.length} OF {tournaments.length} LEAGUES
+                </span>
+              </div>
+            </>
           )}
-
-          <div className="text-center mt-12 fade-in-up stagger-5">
-            <span className="font-mono text-xs text-gray-400 tracking-widest">
-              SHOWING {filteredTournaments.length} OF {showcaseSlides.length} LEAGUES
-            </span>
-          </div>
         </div>
       </section>
-
-      <SectionDivider />
     </main>
   )
 }
