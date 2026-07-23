@@ -1,3 +1,4 @@
+// app/tournaments/[id]/bracket/page.tsx
 import { supabase } from "@/lib/supabase";
 import TournamentBracket from "@/components/tournament/TournamentBracket";
 import DoubleElimBracketClient from "@/components/tournament/DoubleElimBracketClient";
@@ -7,11 +8,17 @@ import {
   buildDoubleEliminationData,
 } from "@/lib/tournament/bracketData";
 
-export default async function TournamentBracketPage({ params }: { params: { id: string } }) {
+export default async function TournamentBracketPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+
   const { data: tournament, error } = await supabase
     .from("tournaments")
     .select("id, name, format")
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
 
   if (error || !tournament) {

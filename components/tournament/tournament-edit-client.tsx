@@ -18,6 +18,13 @@ import {
   savePrizesForTournament,
   type TournamentEditData,
 } from "@/lib/tournament/tournament"
+import {
+  hasBracketGenerated,
+  generateBracketForTournament,
+  deleteBracketForTournament,
+  type SeedingMethod,
+} from "@/lib/tournament/generateBracket"
+import TeamsManager from "@/components/tournament/TeamsManager"
 
 interface TournamentEditClientProps {
   tournament: TournamentEditData
@@ -57,6 +64,13 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   const [prizesSaveError, setPrizesSaveError] = useState<string | null>(null)
   const [prizesSavedAt, setPrizesSavedAt] = useState<number | null>(null)
 
+  // ── Bracket — generated from the linked auction's teams, its own flow ─
+  const [bracketExists, setBracketExists] = useState<boolean | null>(null)
+  const [seedingMethod, setSeedingMethod] = useState<SeedingMethod>("random")
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState<string | null>(null)
+  const [generateSuccess, setGenerateSuccess] = useState(false)
+
   const handleNavigation = (path: string) => {
     router.push(path)
     window.scrollTo(0, 0)
@@ -89,6 +103,10 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
           setPrizes(p)
           setSavedPrizes(p)
           setPrizesLoaded(true)
+        })
+        hasBracketGenerated(tournament.id).then((exists) => {
+          if (cancelled) return
+          setBracketExists(exists)
         })
       }
     })
@@ -160,6 +178,39 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     }
   }
 
+  const handleGenerateBracket = async () => {
+    setIsGenerating(true)
+    setGenerateError(null)
+    setGenerateSuccess(false)
+    const result = await generateBracketForTournament(tournament.id, seedingMethod)
+    setIsGenerating(false)
+    if (result.ok) {
+      setBracketExists(true)
+      setGenerateSuccess(true)
+    } else {
+      setGenerateError(result.error ?? "Couldn't generate the bracket.")
+    }
+  }
+
+  const handleRegenerateBracket = async () => {
+    setIsGenerating(true)
+    setGenerateError(null)
+    setGenerateSuccess(false)
+    const del = await deleteBracketForTournament(tournament.id)
+    if (!del.ok) {
+      setIsGenerating(false)
+      setGenerateError(del.error ?? "Couldn't clear the existing bracket.")
+      return
+    }
+    const result = await generateBracketForTournament(tournament.id, seedingMethod)
+    setIsGenerating(false)
+    if (result.ok) {
+      setGenerateSuccess(true)
+    } else {
+      setGenerateError(result.error ?? "Couldn't generate the bracket.")
+    }
+  }
+
   return (
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
@@ -200,8 +251,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
             <>
               <h1 className="text-3xl font-bold text-white font-cinzel mb-2">Edit Tournament</h1>
               <p className="text-gray-400 text-sm mb-8">
-                Details and Prizes save immediately. Schedule and Awards are read-only here for
-                now — see notes below.
+                Details, Prizes, and Bracket save immediately. Schedule and Awards are read-only
+                here for now — see notes below.
               </p>
 
               {/* DETAILS — the only section backed by real columns today */}
@@ -424,6 +475,89 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 )}
               </div>
 
+              {/* BRACKET — generates bracket_matches from the linked auction's teams */}
+              <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
+                <h2 className="text-lg font-bold text-white font-cinzel mb-4">Bracket</h2>
+
+                {format === "round_robin" ? (
+                  <p className="text-gray-400 text-sm">
+                    Round-robin tournaments don't use a bracket — check the Points Table on the
+                    tournament page instead.
+                  </p>
+                ) : bracketExists === null ? (
+                  <p className="text-gray-500 text-sm">Checking…</p>
+                ) : bracketExists ? (
+                  <>
+                    <p className="text-gray-300 text-sm mb-4">
+                      A bracket has already been generated for this tournament.
+                    </p>
+                    <div className="mb-4">
+                      <label className="text-gray-400 text-sm block mb-1">Reseed using</label>
+                      <select
+                        value={seedingMethod}
+                        onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
+                        className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      >
+                        <option value="random">Random draw</option>
+                        <option value="creation_order">Team creation order</option>
+                      </select>
+                    </div>
+                    <Button
+                      onClick={handleRegenerateBracket}
+                      disabled={isGenerating}
+                      className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
+                    >
+                      {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
+                    </Button>
+                    <p className="text-gray-500 text-xs mt-2">
+                      This deletes all existing matches and results for this tournament and
+                      builds a fresh bracket.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-gray-300 text-sm mb-4">
+                      No bracket yet — this needs a completed auction with at least 2 teams
+                      linked to this tournament.
+                    </p>
+                    <div className="mb-4">
+                      <label className="text-gray-400 text-sm block mb-1">Seed teams using</label>
+                      <select
+                        value={seedingMethod}
+                        onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
+                        className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      >
+                        <option value="random">Random draw</option>
+                        <option value="creation_order">Team creation order</option>
+                      </select>
+                    </div>
+                    <Button
+                      onClick={handleGenerateBracket}
+                      disabled={isGenerating}
+                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                    >
+                      {isGenerating ? "Generating…" : "Generate Bracket"}
+                    </Button>
+                  </>
+                )}
+
+                {generateSuccess && (
+                  <span className="flex items-center gap-1.5 text-green-500 text-sm mt-3">
+                    <CheckCircle2 className="h-4 w-4" /> Bracket generated
+                  </span>
+                )}
+                {generateError && (
+                  <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+                    <AlertCircle className="h-4 w-4" /> {generateError}
+                  </span>
+                )}
+              </div>
+              <TeamsManager
+                tournamentId={tournament.id}
+                orgId={tournament.orgId!}
+                tournamentName={tournament.name}
+              />
+
               {/* PLACEHOLDER SECTIONS — still need write support */}
               <PlaceholderSection
                 title="Schedule (Fixtures)"
@@ -436,10 +570,9 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
               <div className="bg-black/30 border border-gold/10 rounded-lg p-4 mb-8">
                 <p className="text-gray-400 text-xs">
-                  <span className="text-gold font-semibold">Squads</span> and{" "}
-                  <span className="text-gold font-semibold">Bracket</span> aren't edited here —
-                  squads come from your linked auction's results, and the bracket is generated
-                  from match data. Update the auction or bracket_matches to change those.
+                  <span className="text-gold font-semibold">Squads</span> aren't edited here —
+                  they come from your linked auction's results. Update the auction to change
+                  those.
                 </p>
               </div>
 
