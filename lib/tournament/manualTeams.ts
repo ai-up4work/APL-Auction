@@ -348,3 +348,140 @@ export async function unlinkAuctionFromTournament(auctionId: string): Promise<bo
   }
   return true;
 }
+
+export interface SwitchResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Copies every manual team + player into a real auction's tables — as new
+ * rows, `status: 'sold'`, captain flag preserved — exactly what a live
+ * auction win would have written. Then re-links the tournament to the real
+ * auction and removes the now-empty manual container.
+ *
+ * Copies first, deletes only after every copy succeeds, so a failure
+ * partway through never destroys the manual data before it's safely
+ * duplicated.
+ */
+export async function switchManualToRealAuction(
+  tournamentId: string,
+  manualAuctionId: string,
+  targetAuctionId: string
+): Promise<SwitchResult> {
+  const { data: manualTeams, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, code, name, color, logo, tier, owner")
+    .eq("auction_id", manualAuctionId);
+
+  if (teamsErr) {
+    console.error("switchManualToRealAuction(load teams) failed:", teamsErr.message);
+    return { ok: false, error: "Couldn't read the manual teams." };
+  }
+
+  const teamIds = (manualTeams ?? []).map((t) => t.id);
+  const { data: manualPlayers, error: playersErr } = teamIds.length
+    ? await supabase
+        .from("players")
+        .select("id, name, role, sold_to_team_id, owner_team_code")
+        .in("sold_to_team_id", teamIds)
+    : { data: [] as any[], error: null };
+
+  if (playersErr) {
+    console.error("switchManualToRealAuction(load players) failed:", playersErr.message);
+    return { ok: false, error: "Couldn't read the manual players." };
+  }
+
+  // Copy teams, remembering old-id -> {newId, code} so players can be re-pointed.
+  const teamMap: Record<string, { newId: string; code: string }> = {};
+  for (const t of manualTeams ?? []) {
+    const { data: newTeam, error: insertErr } = await supabase
+      .from("teams")
+      .insert({
+        auction_id: targetAuctionId,
+        code: t.code,
+        name: t.name,
+        color: t.color,
+        logo: t.logo,
+        tier: t.tier || "Pro",
+        owner: t.owner || "Manual Entry",
+      })
+      .select("id")
+      .single();
+
+    if (insertErr || !newTeam) {
+      console.error("switchManualToRealAuction(insert team) failed:", insertErr?.message);
+      return { ok: false, error: `Couldn't copy team "${t.name}" — nothing was deleted, safe to retry.` };
+    }
+    teamMap[t.id] = { newId: newTeam.id, code: t.code };
+  }
+
+  // Copy players, pointed at the copied teams, marked sold.
+  for (const p of manualPlayers ?? []) {
+    const mapped = teamMap[p.sold_to_team_id as string];
+    if (!mapped) continue;
+    const isCaptain = p.owner_team_code === mapped.code;
+
+    const { error: insertPlayerErr } = await supabase.from("players").insert({
+      auction_id: targetAuctionId,
+      name: p.name,
+      role: p.role,
+      sold_to_team_id: mapped.newId,
+      status: "sold",
+      owner_team_code: isCaptain ? mapped.code : null,
+    });
+
+    if (insertPlayerErr) {
+      console.error("switchManualToRealAuction(insert player) failed:", insertPlayerErr.message);
+      return { ok: false, error: `Couldn't copy player "${p.name}" — nothing was deleted, safe to retry.` };
+    }
+  }
+
+  // Everything copied successfully — now link the real auction and clear out the manual one.
+  const { error: linkErr } = await supabase
+    .from("auctions")
+    .update({ tournament_id: tournamentId })
+    .eq("id", targetAuctionId);
+  if (linkErr) {
+    console.error("switchManualToRealAuction(link) failed:", linkErr.message);
+    return { ok: false, error: "Copied everything, but couldn't link the new auction — please try linking it manually." };
+  }
+
+  if (teamIds.length) {
+    const { error: delPlayersErr } = await supabase.from("players").delete().in("sold_to_team_id", teamIds);
+    if (delPlayersErr) console.error("switchManualToRealAuction(cleanup players) failed:", delPlayersErr.message);
+    const { error: delTeamsErr } = await supabase.from("teams").delete().in("id", teamIds);
+    if (delTeamsErr) console.error("switchManualToRealAuction(cleanup teams) failed:", delTeamsErr.message);
+  }
+
+  const { error: delAuctionErr } = await supabase.from("auctions").delete().eq("id", manualAuctionId);
+  if (delAuctionErr) console.error("switchManualToRealAuction(cleanup auction) failed:", delAuctionErr.message);
+
+  return { ok: true };
+}
+
+/**
+ * Every auction currently linked to this tournament — normally exactly one
+ * or zero, but nothing in the schema actually enforces that (tournament_id
+ * on `auctions` isn't unique), so more than one is a real possibility if
+ * two people link separately. Callers should treat length > 1 as "ask the
+ * user which one to keep" rather than silently picking one.
+ */
+export async function getAllLinkedAuctions(tournamentId: string): Promise<LinkedAuctionInfo[]> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .select("id, name, status, tournament_opt_out")
+    .eq("tournament_id", tournamentId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getAllLinkedAuctions failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    status: a.status,
+    isManual: !!a.tournament_opt_out,
+  }));
+}

@@ -27,14 +27,17 @@ import {
   updateManualPlayerName,
   deleteManualPlayer,
   getLinkedAuctionInfo,
+  getAllLinkedAuctions,
   getLinkableAuctionsForOrg,
   linkAuctionToTournament,
   unlinkAuctionFromTournament,
+  switchManualToRealAuction,
   type ManualTeam,
   type ManualPlayerInput,
   type LinkedAuctionInfo,
   type LinkableAuction,
-} from "@/lib/tournament/manualTeams";
+} from "@/lib/tournament/manualTeams"
+
 
 interface TeamsManagerProps {
   tournamentId: string
@@ -42,7 +45,7 @@ interface TeamsManagerProps {
   tournamentName: string
 }
 
-type Phase = "loading" | "choose" | "linking" | "manage"
+type Phase = "loading" | "choose" | "linking" | "selectLinked" | "manage"
 
 const ROLE_OPTIONS: ManualPlayerInput["role"][] = [
   "Batter",
@@ -87,17 +90,60 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
 
   const [isUnlinking, setIsUnlinking] = useState(false)
 
+  // "Switch to a real auction" (manual mode only)
+  const [showSwitchPicker, setShowSwitchPicker] = useState(false)
+  const [switchableAuctions, setSwitchableAuctions] = useState<LinkableAuction[]>([])
+  const [selectedSwitchAuctionId, setSelectedSwitchAuctionId] = useState("")
+  const [isSwitching, setIsSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+
+  // Multiple auctions already linked to this tournament — needs a pick
+  const [linkedCandidates, setLinkedCandidates] = useState<LinkedAuctionInfo[]>([])
+  const [selectedCandidateId, setSelectedCandidateId] = useState("")
+  const [isSelectingLinked, setIsSelectingLinked] = useState(false)
+  const [selectLinkedError, setSelectLinkedError] = useState<string | null>(null)
+
   const loadEverything = async () => {
     setLoadError(null)
-    const info = await getLinkedAuctionInfo(tournamentId)
-    setLinkedAuction(info)
-    if (!info) {
+    const candidates = await getAllLinkedAuctions(tournamentId)
+
+    if (candidates.length === 0) {
+      setLinkedAuction(null)
       setPhase("choose")
       return
     }
+
+    if (candidates.length > 1) {
+      // More than one auction is linked to this tournament — the schema
+      // doesn't prevent that, but only one should actually be "active."
+      // Stop and make the user choose rather than silently picking one.
+      setLinkedCandidates(candidates)
+      setSelectedCandidateId("")
+      setSelectLinkedError(null)
+      setPhase("selectLinked")
+      return
+    }
+
+    setLinkedAuction(candidates[0])
     const t = await getTeamsWithPlayers(tournamentId)
     setTeams(t)
     setPhase("manage")
+  }
+
+  const confirmSelectLinked = async () => {
+    if (!selectedCandidateId) return
+    setIsSelectingLinked(true)
+    setSelectLinkedError(null)
+
+    const others = linkedCandidates.filter((c) => c.id !== selectedCandidateId)
+    const results = await Promise.all(others.map((c) => unlinkAuctionFromTournament(c.id)))
+    setIsSelectingLinked(false)
+
+    if (results.some((ok) => !ok)) {
+      setSelectLinkedError("Couldn't unlink one of the other auctions — please try again.")
+      return
+    }
+    await loadEverything()
   }
 
   useEffect(() => {
@@ -137,7 +183,10 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
 
   const handleUnlink = async () => {
     if (!linkedAuction?.id) return
-    if (!confirm("Unlink this auction? Its teams and players won't show on the tournament page anymore, but nothing gets deleted.")) return
+    const message = linkedAuction.isManual
+      ? "Unlink these manually-entered teams? They stay saved and untouched — just detached from this tournament's public page until you link something again."
+      : "Unlink this auction? Its teams and players won't show on the tournament page anymore, but nothing gets deleted."
+    if (!confirm(message)) return
     setIsUnlinking(true)
     const ok = await unlinkAuctionFromTournament(linkedAuction.id)
     setIsUnlinking(false)
@@ -146,6 +195,28 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
       setTeams([])
       setPhase("choose")
     }
+  }
+
+  const openSwitchPicker = async () => {
+    setSwitchError(null)
+    setShowSwitchPicker(true)
+    const options = await getLinkableAuctionsForOrg(orgId)
+    setSwitchableAuctions(options)
+  }
+
+  const confirmSwitchToRealAuction = async () => {
+    if (!selectedSwitchAuctionId || !linkedAuction?.id) return
+    setIsSwitching(true)
+    setSwitchError(null)
+    const result = await switchManualToRealAuction(tournamentId, linkedAuction.id, selectedSwitchAuctionId)
+    setIsSwitching(false)
+    if (!result.ok) {
+      setSwitchError(result.error ?? "Couldn't switch to that auction — please try again.")
+      return
+    }
+    setShowSwitchPicker(false)
+    setSelectedSwitchAuctionId("")
+    await loadEverything()
   }
 
   const handleAddTeam = async () => {
@@ -375,6 +446,50 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     )
   }
 
+  // ── SELECT LINKED: more than one auction is linked to this tournament ─
+  if (phase === "selectLinked") {
+    return (
+      <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-bold text-white font-cinzel mb-2">Multiple Auctions Found</h2>
+        <p className="text-gray-400 text-sm mb-4">
+          This tournament is currently linked to {linkedCandidates.length} auctions at once — only
+          one can be active at a time. Pick which one this tournament should use below; the others
+          will be unlinked, not deleted, so their data is safe and they're free to be linked to a
+          different tournament later.
+        </p>
+        <div className="space-y-2 mb-4">
+          {linkedCandidates.map((c) => (
+            <label
+              key={c.id}
+              className="flex items-center gap-3 border border-gold/10 rounded-md p-3 bg-white/[0.02] cursor-pointer hover:border-gold/40 transition-colors"
+            >
+              <input
+                type="radio"
+                name="linkedCandidate"
+                checked={selectedCandidateId === c.id}
+                onChange={() => setSelectedCandidateId(c.id)}
+              />
+              <span className="text-white text-sm font-semibold">{c.name}</span>
+              <span className="text-gray-500 text-xs">({c.isManual ? "Manual entry" : c.status})</span>
+            </label>
+          ))}
+        </div>
+        {selectLinkedError && (
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
+            <AlertCircle className="h-4 w-4" /> {selectLinkedError}
+          </p>
+        )}
+        <Button
+          onClick={confirmSelectLinked}
+          disabled={!selectedCandidateId || isSelectingLinked}
+          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+        >
+          {isSelectingLinked ? "Applying…" : "Use This One"}
+        </Button>
+      </div>
+    )
+  }
+
   // ── MANAGE: an auction (real or manual) is linked ───────────────────
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
@@ -385,7 +500,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
             <span className="text-[10px] uppercase tracking-widest font-cinzel px-2 py-1 rounded bg-gold/10 text-gold border border-gold/20">
               {linkedAuction.isManual ? "Manual" : "Linked Auction"}
             </span>
-            {!linkedAuction.isManual && (
+            {linkedAuction.id && (
               <button
                 onClick={handleUnlink}
                 disabled={isUnlinking}
@@ -403,6 +518,71 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
           ? "Teams and players added here show up directly on the tournament page's Squads tab."
           : `Reading from "${linkedAuction?.name}". Teams and their sold players are shown below exactly as the auction settled — add more manually if you need to.`}
       </p>
+
+      {/* Switch manual -> real auction */}
+      {linkedAuction?.isManual && linkedAuction.id && !showSwitchPicker && (
+        <button
+          onClick={openSwitchPicker}
+          className="w-full text-left bg-white/[0.02] border border-gold/20 hover:border-gold/60 rounded-lg p-4 mb-6 transition-colors flex items-center gap-3"
+        >
+          <Link2 className="h-4 w-4 text-gold shrink-0" />
+          <span className="text-sm text-gray-300">
+            <span className="text-white font-semibold">Ran a real auction after all?</span>{" "}
+            Switch to it — every team and player below gets copied in as sold, just like a real
+            auction result, and this manual list is retired.
+          </span>
+        </button>
+      )}
+
+      {linkedAuction?.isManual && showSwitchPicker && (
+        <div className="border border-gold/20 rounded-lg p-4 mb-6 bg-white/[0.02]">
+          <p className="text-white font-semibold text-sm mb-1">Switch to a real auction</p>
+          <p className="text-gray-400 text-xs mb-3">
+            All {teams.length} team{teams.length === 1 ? "" : "s"} and their players will be copied
+            into the auction you pick below, marked sold exactly as-is. This manual list is then
+            deleted — nothing is left duplicated.
+          </p>
+          {switchableAuctions.length === 0 ? (
+            <p className="text-gray-400 text-sm mb-3">
+              No unlinked auctions found in your organization yet.
+            </p>
+          ) : (
+            <select
+              value={selectedSwitchAuctionId}
+              onChange={(e) => setSelectedSwitchAuctionId(e.target.value)}
+              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2 mb-3"
+            >
+              <option value="">Select an auction…</option>
+              {switchableAuctions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} — {a.status}
+                </option>
+              ))}
+            </select>
+          )}
+          {switchError && (
+            <p className="flex items-center gap-1.5 text-red-500 text-xs mb-3">
+              <AlertCircle className="h-3.5 w-3.5" /> {switchError}
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={confirmSwitchToRealAuction}
+              disabled={!selectedSwitchAuctionId || isSwitching}
+              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+            >
+              {isSwitching ? "Switching…" : "Copy & Switch"}
+            </Button>
+            <Button
+              onClick={() => setShowSwitchPicker(false)}
+              disabled={isSwitching}
+              className="bg-transparent hover:bg-white/5 text-gray-300 border border-gold/20"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Team list */}
       <div className="space-y-4 mb-6">
