@@ -1,3 +1,4 @@
+// app/lib/tournament/manualTeams.ts
 import { supabase } from "@/lib/supabase";
 
 export interface ManualTeamInput {
@@ -277,6 +278,72 @@ export async function deleteManualPlayer(playerId: string): Promise<boolean> {
   const { error } = await supabase.from("players").delete().eq("id", playerId);
   if (error) {
     console.error("deleteManualPlayer failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export interface LinkedAuctionInfo {
+  id: string;
+  name: string;
+  status: string;
+  isManual: boolean; // true if this was the auto-created manual container
+}
+
+/** Which auction (if any) is currently linked to this tournament, and whether it's a manual container or a real one. */
+export async function getLinkedAuctionInfo(tournamentId: string): Promise<LinkedAuctionInfo | null> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .select("id, name, status, tournament_opt_out")
+    .eq("tournament_id", tournamentId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getLinkedAuctionInfo failed:", error.message);
+    return null;
+  }
+  if (!data) return null;
+  return { id: data.id, name: data.name, status: data.status, isManual: !!data.tournament_opt_out };
+}
+
+export interface LinkableAuction {
+  id: string;
+  name: string;
+  status: string;
+}
+
+/** Real auctions in this org not yet linked to any tournament — candidates to attach here. */
+export async function getLinkableAuctionsForOrg(orgId: string): Promise<LinkableAuction[]> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .select("id, name, status")
+    .eq("org_id", orgId)
+    .is("tournament_id", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getLinkableAuctionsForOrg failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function linkAuctionToTournament(auctionId: string, tournamentId: string): Promise<boolean> {
+  const { error } = await supabase.from("auctions").update({ tournament_id: tournamentId }).eq("id", auctionId);
+  if (error) {
+    console.error("linkAuctionToTournament failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+/** Detaches whichever auction is linked, without deleting any of its data — safe to re-link later. */
+export async function unlinkAuctionFromTournament(auctionId: string): Promise<boolean> {
+  const { error } = await supabase.from("auctions").update({ tournament_id: null }).eq("id", auctionId);
+  if (error) {
+    console.error("unlinkAuctionFromTournament failed:", error.message);
     return false;
   }
   return true;
