@@ -1,7 +1,7 @@
 // components/Admin/LaunchTab.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { AuctionLinks } from "@/lib/auctionDb";
 
 type AuctionStatus = "setup" | "live" | "paused" | "completed";
@@ -63,7 +63,7 @@ function buildChecklist(props: LaunchTabProps, shuffled: boolean) {
     {
       id:     "photos",
       label:  "Player Photos Uploaded",
-      status: "warning" as const,
+      status: playerCount >= targetPlayerCount ? "complete" : "warning",
       meta:   "OPTIONAL",
     },
     {
@@ -276,13 +276,37 @@ export default function LaunchTab(props: LaunchTabProps) {
   const [shuffling,  setShuffling]  = useState(false);
   const [shuffleErr, setShuffleErr] = useState<string | null>(null);
 
+  // ── Local optimistic shuffle completion ──────────────────────────────────
+  // `shuffleReady` is fully controlled by the parent. If the parent doesn't
+  // (or can't, e.g. waiting on a realtime/DB round-trip) flip that prop the
+  // instant onShuffle() resolves, this component would get stuck showing
+  // "REQUIRES ACTION" on the shuffle checklist item forever — even though
+  // the shuffle actually succeeded — which permanently blocks Launch.
+  //
+  // We track completion locally as soon as onShuffle() resolves without
+  // throwing, and treat shuffle as done if EITHER the parent prop says so
+  // OR our local optimistic flag says so. The parent prop can still "win"
+  // later (e.g. on a fresh page load) — it just isn't the only source of
+  // truth for unlocking the button in this session.
+  const [localShuffleDone, setLocalShuffleDone] = useState(false);
+  const isShuffled = shuffleReady || localShuffleDone;
+
+  // If auction moves back to "setup" from a prior session (e.g. after a
+  // re-auction reset the schedule) and the incoming shuffleReady prop is
+  // false, drop our stale local flag too so a fresh shuffle is required.
+  useEffect(() => {
+    if (auctionStatus === "setup" && !shuffleReady) {
+      setLocalShuffleDone(false);
+    }
+  }, [auctionStatus, shuffleReady]);
+
   const isLive      = auctionStatus === "live";
   const isPaused    = auctionStatus === "paused";
   const isCompleted = auctionStatus === "completed";
 
   const checklist = buildChecklist(
     { ...props, teamCount, allPinsSet, playerCount, auctionName, targetPlayerCount },
-    shuffleReady,
+    isShuffled,
   );
 
   const passCount = checklist.filter((c) => c.status !== "action").length;
@@ -294,11 +318,14 @@ export default function LaunchTab(props: LaunchTabProps) {
   );
 
   async function handleShuffle() {
-    if (shuffleReady || shuffling) return;
+    if (isShuffled || shuffling) return;
     setShuffling(true);
     setShuffleErr(null);
     try {
       await onShuffle();
+      // Mark done immediately — don't wait on the parent to re-render with
+      // an updated shuffleReady prop before unlocking Launch.
+      setLocalShuffleDone(true);
     } catch (err: any) {
       setShuffleErr(err?.message ?? "Shuffle failed");
     } finally {
@@ -455,7 +482,7 @@ export default function LaunchTab(props: LaunchTabProps) {
           <div className="rounded-2xl p-5 relative overflow-hidden"
             style={{ background: "var(--color-surface-glass)", border: "1px solid var(--color-border-overlay)", backdropFilter: "blur(24px)" }}>
             <div className="absolute pointer-events-none -right-2 -top-2 transition-opacity duration-500"
-              style={{ opacity: shuffleReady ? 0.18 : 0.08 }}>
+              style={{ opacity: isShuffled ? 0.18 : 0.08 }}>
               <span className="material-symbols-outlined rotate-12 mt-5 mr-4" style={{ fontSize: "90px", color: "var(--color-theme-orange)" }}>
                 casino
               </span>
@@ -479,37 +506,37 @@ export default function LaunchTab(props: LaunchTabProps) {
 
             <button
               onClick={handleShuffle}
-              disabled={shuffleReady || shuffling}
+              disabled={isShuffled || shuffling}
               className="relative z-10 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-[0.18em] transition-all duration-300"
               style={{
                 fontFamily: "var(--font-label-mono)",
-                background: shuffleReady
+                background: isShuffled
                   ? "rgba(201,151,31,0.1)"
                   : shuffling
                   ? "var(--color-surface-container-low)"
                   : "var(--color-on-surface)",
-                border: shuffleReady
+                border: isShuffled
                   ? "1px solid rgba(201,151,31,0.35)"
                   : "1px solid var(--color-border-overlay)",
-                color: shuffleReady
+                color: isShuffled
                   ? "var(--color-theme-orange)"
                   : shuffling
                   ? "var(--color-outline)"
                   : "var(--color-surface)",
-                cursor: shuffleReady || shuffling ? "default" : "pointer",
+                cursor: isShuffled || shuffling ? "default" : "pointer",
               }}
             >
               <span className={`material-symbols-outlined text-[15px] ${shuffling ? "animate-spin" : ""}`}>
-                {shuffleReady ? "verified" : shuffling ? "refresh" : "shuffle"}
+                {isShuffled ? "verified" : shuffling ? "refresh" : "shuffle"}
               </span>
-              {shuffleReady
+              {isShuffled
                 ? "Sequence Locked"
                 : shuffling
                 ? "Shuffling Players…"
                 : "Generate Sequence"}
             </button>
 
-            {shuffleReady && (
+            {isShuffled && (
               <p className="text-[9px] mt-2 text-center relative z-10"
                 style={{ fontFamily: "var(--font-label-mono)", color: "rgba(201,151,31,0.5)" }}>
                 Order saved to database

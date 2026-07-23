@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Player, Team } from "@/types/auction";
 import ImageUploadField from "@/components/Admin/ImageUploadField";
@@ -39,6 +39,85 @@ const EMPTY_FORM: Omit<Player, "id" | "supabaseId"> = {
   ownerTeamCode: undefined,
 };
 
+// ── CSV helpers ───────────────────────────────────────────────────────────────
+// Columns exported/imported, in order. `img` is intentionally excluded from
+// import (photos must go through the upload flow) but included on export so
+// the file is a faithful snapshot of the pool.
+const CSV_COLUMNS = ["name", "role", "origin", "price", "capped", "country", "ownerTeamCode", "img"] as const;
+
+function csvEscape(value: unknown): string {
+  const str = value === undefined || value === null ? "" : String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function playersToCSV(players: Player[]): string {
+  const header = CSV_COLUMNS.join(",");
+  const rows = players.map((p) =>
+    CSV_COLUMNS.map((col) => csvEscape((p as unknown as Record<string, unknown>)[col])).join(",")
+  );
+  return [header, ...rows].join("\n");
+}
+
+// Minimal RFC4180-ish CSV parser: handles quoted fields, escaped quotes ("")
+// and commas/newlines inside quotes. Good enough for a small admin import
+// tool without pulling in a dependency.
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') { inQuotes = true; continue; }
+    if (char === ",") { row.push(field); field = ""; continue; }
+    if (char === "\r") { continue; }
+    if (char === "\n") { row.push(field); rows.push(row); row = []; field = ""; continue; }
+    field += char;
+  }
+  // flush trailing field/row (file may not end with a newline)
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+
+  return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
+}
+
+interface ImportRowResult {
+  line: number;
+  name: string;
+  status: "added" | "error";
+  message?: string;
+}
+
+function downloadTextFile(filename: string, contents: string, mime = "text/csv;charset=utf-8;") {
+  const blob = new Blob([contents], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function todayStamp(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // ── Lock Banner ───────────────────────────────────────────────────────────────
 function LockBanner() {
   return (
@@ -48,6 +127,46 @@ function LockBanner() {
       <p style={{ fontSize: "12px", color: "var(--color-warning)", fontFamily: "var(--font-body-md)" }}>
         Player pool is <strong>locked</strong> while the auction is live. Stop or re-auction to make changes.
       </p>
+    </div>
+  );
+}
+
+// ── Import Results Banner ────────────────────────────────────────────────────
+function ImportResultsBanner({ results, onDismiss }: { results: ImportRowResult[]; onDismiss: () => void }) {
+  const added = results.filter((r) => r.status === "added").length;
+  const errors = results.filter((r) => r.status === "error");
+  const hasErrors = errors.length > 0;
+
+  return (
+    <div className="flex flex-col gap-2 px-5 py-3 rounded-xl mb-6"
+      style={{
+        background: hasErrors ? "var(--color-warning-container)" : "var(--color-success-container)",
+        border: `1px solid ${hasErrors ? "var(--color-warning-outline)" : "var(--color-success)"}`,
+      }}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="material-symbols-outlined" style={{ fontSize: "18px", color: hasErrors ? "var(--color-warning)" : "var(--color-success)", flexShrink: 0, marginTop: "1px" }}>
+            {hasErrors ? "warning" : "check_circle"}
+          </span>
+          <div>
+            <p className="text-sm font-bold" style={{ color: hasErrors ? "var(--color-warning)" : "var(--color-success)", fontFamily: "var(--font-body-md)" }}>
+              {added} player{added === 1 ? "" : "s"} imported{hasErrors ? `, ${errors.length} row${errors.length === 1 ? "" : "s"} skipped` : ""}
+            </p>
+            {hasErrors && (
+              <ul className="mt-1.5 space-y-0.5">
+                {errors.map((e) => (
+                  <li key={e.line} className="text-[11px]" style={{ color: "var(--color-warning)", opacity: 0.85, fontFamily: "var(--font-label-mono)" }}>
+                    Row {e.line}{e.name ? ` (${e.name})` : ""}: {e.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        <button onClick={onDismiss} className="shrink-0">
+          <span className="material-symbols-outlined" style={{ fontSize: "16px", color: hasErrors ? "var(--color-warning)" : "var(--color-success)" }}>close</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -392,6 +511,11 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
   const [modal, setModal] = useState<null | { mode: "add" } | { mode: "edit"; player: Player }>(null);
   const [poolLocked, setPoolLocked] = useState(false);
 
+  // ── Bulk import/export state ──
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(null);
+
   const isEditingBlocked = locked || poolLocked;
   const filtered = filter === "All" ? players : players.filter((p) => p.role === filter);
 
@@ -417,6 +541,113 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
     await onEditPlayer(modal.player.id, data);
   }, [modal, onEditPlayer]);
 
+  // ── Export: snapshot current pool as a CSV file ──
+  const handleExportCSV = useCallback(() => {
+    if (players.length === 0) return;
+    const csv = playersToCSV(players);
+    downloadTextFile(`player-registry-${todayStamp()}.csv`, csv);
+  }, [players]);
+
+  // ── Import: open the hidden file picker ──
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  // ── Import: parse the chosen CSV and register each valid row ──
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // reset the input so choosing the same file twice still fires onChange
+    e.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    setImportResults(null);
+
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) {
+        setImportResults([{ line: 0, name: "", status: "error", message: "File is empty." }]);
+        return;
+      }
+
+      const header = rows[0].map((h) => h.trim().toLowerCase());
+      const dataRows = rows.slice(1);
+      const validRoles = new Set<string>(ROLES);
+      const validTeamCodes = new Set(teams.map((t) => t.code));
+
+      const results: ImportRowResult[] = [];
+
+      for (let i = 0; i < dataRows.length; i++) {
+        const line = i + 2; // +1 for header, +1 for 1-indexing
+        const raw = dataRows[i];
+        if (raw.every((cell) => cell.trim() === "")) continue; // skip blank lines
+
+        const record: Record<string, string> = {};
+        header.forEach((col, idx) => { record[col] = (raw[idx] ?? "").trim(); });
+
+        const name = record.name ?? "";
+        if (!name) {
+          results.push({ line, name: "", status: "error", message: "Missing name." });
+          continue;
+        }
+
+        const role = (record.role || "Batsman") as Role;
+        if (!validRoles.has(role)) {
+          results.push({ line, name, status: "error", message: `Unknown role "${record.role}". Must be one of ${ROLES.join(", ")}.` });
+          continue;
+        }
+
+        const origin = (record.origin || "Local") as Player["origin"];
+        if (origin !== "Local" && origin !== "Overseas") {
+          results.push({ line, name, status: "error", message: `Origin must be "Local" or "Overseas".` });
+          continue;
+        }
+
+        const priceRaw = record.price?.trim();
+        const price = priceRaw ? Number(priceRaw) : DEFAULT_BASE_PRICE;
+        if (Number.isNaN(price) || price < 1) {
+          results.push({ line, name, status: "error", message: "Base price must be a number ≥ 1." });
+          continue;
+        }
+
+        const cappedRaw = (record.capped || "").toLowerCase();
+        const capped = cappedRaw === "true" || cappedRaw === "1" || cappedRaw === "yes";
+
+        let ownerTeamCode: Player["ownerTeamCode"] = undefined;
+        if (record.ownerteamcode) {
+          if (!validTeamCodes.has(record.ownerteamcode)) {
+            results.push({ line, name, status: "error", message: `Unknown team code "${record.ownerteamcode}".` });
+            continue;
+          }
+          ownerTeamCode = record.ownerteamcode as Player["ownerTeamCode"];
+        }
+
+        try {
+          await onAddPlayer({
+            name,
+            role,
+            origin,
+            price,
+            capped,
+            img: record.img || "",
+            country: record.country || "",
+            ownerTeamCode,
+          });
+          results.push({ line, name, status: "added" });
+        } catch {
+          results.push({ line, name, status: "error", message: "Failed to save — try again." });
+        }
+      }
+
+      setImportResults(results);
+    } catch {
+      setImportResults([{ line: 0, name: "", status: "error", message: "Could not read that file. Make sure it's a valid CSV." }]);
+    } finally {
+      setImporting(false);
+    }
+  }, [teams, onAddPlayer]);
+
   return (
     <>
       {modal?.mode === "add" && !isEditingBlocked && (
@@ -425,6 +656,15 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
       {modal?.mode === "edit" && !isEditingBlocked && (
         <PlayerModal teams={teams} auctionId={auctionId} initial={modal.player} onClose={() => setModal(null)} onSave={handleEdit} />
       )}
+
+      {/* Hidden file input driving CSV import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="flex-1 min-w-0">
@@ -438,6 +678,11 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
                 <button className="underline" onClick={() => setPoolLocked(false)}>Unlock</button> to make changes.
               </p>
             </div>
+          )}
+
+          {/* ── Import results — success/error summary, dismissible ── */}
+          {importResults && (
+            <ImportResultsBanner results={importResults} onDismiss={() => setImportResults(null)} />
           )}
 
           {/* ── Missing photos warning — amber, non-blocking ── */}
@@ -600,44 +845,27 @@ export default function PlayersTab({ locked, players, teams, auctionId, onAddPla
               Bulk Actions
             </h4>
             <div className="flex flex-col gap-2">
-              {[
-                { icon: "upload_file", label: "Import via CSV",  onClick: () => alert("CSV import — wire up your handler") },
-                { icon: "download",    label: "Export Registry", onClick: () => alert("Export — wire up your handler") },
-              ].map((action) => (
-                <SidebarActionButton key={action.label} icon={action.icon} label={action.label} onClick={action.onClick} />
-              ))}
+              <SidebarActionButton
+                icon="upload_file"
+                label={importing ? "Importing…" : "Import via CSV"}
+                onClick={handleImportClick}
+                disabled={importing}
+              />
+              <SidebarActionButton
+                icon="download"
+                label="Export Registry"
+                onClick={handleExportCSV}
+                disabled={players.length === 0}
+              />
             </div>
+            <p className="mt-2 text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}>
+              CSV columns: {CSV_COLUMNS.join(", ")}
+            </p>
             <button onClick={() => setPoolLocked(true)}
               className="w-full mt-4 py-3 font-black text-[10px] uppercase rounded-xl transition-all hover:opacity-90 hover:-translate-y-0.5"
               style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", letterSpacing: "0.18em", fontFamily: "var(--font-label-mono)", boxShadow: "0 0 18px rgba(201,151,31,0.25)" }}>
               Lock Player Pool
             </button>
-          </div>
-
-          {/* Overseas quota */}
-          <div className="p-3 rounded-lg border" style={{ background: "var(--color-surface-container)", borderColor: "var(--color-outline-variant)" }}>
-            <p className="text-[9px] font-black uppercase tracking-widest mb-3" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
-              Overseas Quota
-            </p>
-            <div className="space-y-3">
-              {([
-                { label: "Overseas Players", count: players.filter((p) => p.origin === "Overseas").length, color: "var(--color-theme-orange)" },
-                { label: "Local Players",    count: players.filter((p) => p.origin === "Local").length,    color: "var(--color-on-surface-variant)" },
-              ] as const).map((item) => {
-                const pct = players.length ? Math.round((item.count / players.length) * 100) : 0;
-                return (
-                  <div key={item.label}>
-                    <div className="flex justify-between text-[10px] mb-1">
-                      <span style={{ color: "var(--color-on-surface-variant)" }}>{item.label}</span>
-                      <span className="font-bold" style={{ color: item.color }}>{item.count} / {players.length}</span>
-                    </div>
-                    <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "var(--color-surface-variant)" }}>
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--color-theme-orange)", }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </aside>
       </div>
@@ -694,18 +922,19 @@ function IconButton({ icon, danger = false, onClick }: { icon: string; danger?: 
   );
 }
 
-function SidebarActionButton({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+function SidebarActionButton({ icon, label, onClick, disabled = false }: { icon: string; label: string; onClick: () => void; disabled?: boolean }) {
   const [hovered, setHovered] = useState(false);
   return (
-    <button onClick={onClick}
+    <button onClick={onClick} disabled={disabled}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left disabled:cursor-not-allowed"
       style={{
-        background: hovered ? "rgba(201,151,31,0.08)" : "var(--color-surface-container)",
-        borderColor: hovered ? "rgba(201,151,31,0.5)" : "var(--color-outline-variant)",
-        color: hovered ? "var(--color-theme-orange)" : "var(--color-on-surface-variant)",
+        background: hovered && !disabled ? "rgba(201,151,31,0.08)" : "var(--color-surface-container)",
+        borderColor: hovered && !disabled ? "rgba(201,151,31,0.5)" : "var(--color-outline-variant)",
+        color: hovered && !disabled ? "var(--color-theme-orange)" : "var(--color-on-surface-variant)",
         fontFamily: "var(--font-label-mono)", fontSize: "11px",
+        opacity: disabled ? 0.5 : 1,
       }}>
       <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-theme-orange)" }}>{icon}</span>
       {label}

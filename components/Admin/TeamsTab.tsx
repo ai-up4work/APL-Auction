@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Team } from "@/types/auction";
 import ImageUploadField from "@/components/Admin/ImageUploadField";
 import ColorPicker from "@/components/Admin/ColorPicker";
+import BulkImportTeamsModal from "@/components/Admin/BulkImportTeamsModal";
 import Image from "next/image";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -500,7 +501,7 @@ function TeamCard({
 // ── Main Tab ──────────────────────────────────────────────────────────────────
 export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTeam, onDeleteTeam }: TeamsTabProps) {
   const [activeTeamId, setActiveTeamId] = useState<number | null>(teams[0]?.id ?? null);
-  const [modal, setModal] = useState<null | { mode: "add" } | { mode: "edit"; team: Team }>(null);
+  const [modal, setModal] = useState<null | { mode: "add" } | { mode: "edit"; team: Team } | { mode: "bulk" }>(null);
   const [deleteTarget, setDeleteTarget] = useState<Team | null>(null);
   const { toast, show: showToast } = useToast();
 
@@ -547,6 +548,22 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
     return teams.filter((t) => t.id !== excludeId).map((t) => t.code.toUpperCase());
   }
 
+  // Called once per row by BulkImportTeamsModal — routed through the same
+  // onAddTeam prop as the single-franchise form, so every imported team
+  // still gets a real Supabase write via AuctionContext.addTeam, still
+  // triggers local state updates, and still participates in the
+  // tournament-link prompt reactivity (teams.length > 2 check) exactly
+  // like a manually created franchise would.
+  async function handleBulkImportRow(rows: Omit<Team, "id" | "roster" | "supabaseId">[]) {
+    for (const row of rows) {
+      await onAddTeam(row);
+    }
+  }
+
+  async function handleBulkImportComplete(importedCount: number) {
+    showToast(`${importedCount} franchise${importedCount === 1 ? "" : "s"} imported successfully.`);
+  }
+
   return (
     <>
       {modal?.mode === "add" && (
@@ -554,6 +571,14 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
       )}
       {modal?.mode === "edit" && (
         <FranchiseModal initial={modal.team} existingCodes={existingCodes(modal.team.id)} auctionId={auctionId} onClose={() => setModal(null)} onSave={handleEdit} />
+      )}
+      {modal?.mode === "bulk" && (
+        <BulkImportTeamsModal
+          existingCodes={existingCodes()}
+          remainingSlots={MAX_TEAMS - teams.length}
+          onClose={() => setModal(null)}
+          onImport={handleBulkImportRow}
+        />
       )}
       {deleteTarget && (
         <DeleteConfirm team={deleteTarget} onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />
@@ -594,22 +619,40 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
             </div>
 
             {!locked && (
-              <button
-                onClick={() => {
-                  if (atCapacity) { showToast(`Maximum of ${MAX_TEAMS} franchises reached.`, "error"); return; }
-                  setModal({ mode: "add" });
-                }}
-                className="px-5 py-2.5 font-bold flex items-center gap-1.5 rounded-xl transition-all hover:-translate-y-0.5 whitespace-nowrap ml-6"
-                style={{
-                  background: atCapacity ? "var(--color-surface-container-high)" : "var(--color-theme-orange)",
-                  color: atCapacity ? "var(--color-surface-variant)" : "var(--color-on-primary)",
-                  boxShadow: atCapacity ? "none" : "0 0 20px rgba(201,151,31,0.25)",
-                  fontFamily: "var(--font-label-mono)", fontSize: "12px",
-                  cursor: atCapacity ? "not-allowed" : "pointer",
-                }}>
-                <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span>
-                Create New Franchise
-              </button>
+              <div className="flex items-center gap-3 ml-6">
+                <button
+                  onClick={() => {
+                    if (atCapacity) { showToast(`Maximum of ${MAX_TEAMS} franchises reached.`, "error"); return; }
+                    setModal({ mode: "bulk" });
+                  }}
+                  className="px-4 py-2.5 font-bold flex items-center gap-1.5 rounded-xl transition-all hover:-translate-y-0.5 whitespace-nowrap"
+                  style={{
+                    background: atCapacity ? "var(--color-surface-container-high)" : "var(--color-surface-container-low)",
+                    border: "1px solid var(--color-border-overlay)",
+                    color: atCapacity ? "var(--color-surface-variant)" : "var(--color-on-surface-variant)",
+                    fontFamily: "var(--font-label-mono)", fontSize: "12px",
+                    cursor: atCapacity ? "not-allowed" : "pointer",
+                  }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>upload_file</span>
+                  Bulk Import
+                </button>
+                <button
+                  onClick={() => {
+                    if (atCapacity) { showToast(`Maximum of ${MAX_TEAMS} franchises reached.`, "error"); return; }
+                    setModal({ mode: "add" });
+                  }}
+                  className="px-5 py-2.5 font-bold flex items-center gap-1.5 rounded-xl transition-all hover:-translate-y-0.5 whitespace-nowrap"
+                  style={{
+                    background: atCapacity ? "var(--color-surface-container-high)" : "var(--color-theme-orange)",
+                    color: atCapacity ? "var(--color-surface-variant)" : "var(--color-on-primary)",
+                    boxShadow: atCapacity ? "none" : "0 0 20px rgba(201,151,31,0.25)",
+                    fontFamily: "var(--font-label-mono)", fontSize: "12px",
+                    cursor: atCapacity ? "not-allowed" : "pointer",
+                  }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span>
+                  Create New Franchise
+                </button>
+              </div>
             )}
           </div>
 
@@ -629,11 +672,18 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
               <span className="material-symbols-outlined text-4xl mb-3" style={{ color: "var(--color-surface-variant)" }}>group</span>
               <p className="text-sm mb-4" style={{ fontFamily: "var(--font-label-mono)" }}>No franchises yet</p>
               {!locked && (
-                <button onClick={() => setModal({ mode: "add" })}
-                  className="px-4 py-2 rounded-lg text-xs font-bold"
-                  style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", fontFamily: "var(--font-label-mono)" }}>
-                  Create First Franchise
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setModal({ mode: "add" })}
+                    className="px-4 py-2 rounded-lg text-xs font-bold"
+                    style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)", fontFamily: "var(--font-label-mono)" }}>
+                    Create First Franchise
+                  </button>
+                  <button onClick={() => setModal({ mode: "bulk" })}
+                    className="px-4 py-2 rounded-lg text-xs font-bold"
+                    style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface-variant)", fontFamily: "var(--font-label-mono)" }}>
+                    Bulk Import CSV
+                  </button>
+                </div>
               )}
             </div>
           ) : (
@@ -664,7 +714,14 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
               Management Tools
             </h4>
             <div className="grid grid-cols-2 gap-3">
-              {TOOLS.map((tool) => <SidebarTool key={tool.label} icon={tool.icon} label={tool.label} />)}
+              {TOOLS.map((tool) => (
+                <SidebarTool
+                  key={tool.label}
+                  icon={tool.icon}
+                  label={tool.label}
+                  onClick={tool.label === "Import CSV" ? () => setModal({ mode: "bulk" }) : undefined}
+                />
+              ))}
             </div>
             <button
               className="w-full mt-4 py-3 font-black text-[10px] uppercase rounded-xl transition-all hover:opacity-90 hover:-translate-y-0.5"
@@ -747,16 +804,18 @@ export default function TeamsTab({ locked, teams, auctionId, onAddTeam, onEditTe
   );
 }
 
-function SidebarTool({ icon, label }: { icon: string; label: string }) {
+function SidebarTool({ icon, label, onClick }: { icon: string; label: string; onClick?: () => void }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
+      onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all"
       style={{
         background: hovered ? "rgba(201,151,31,0.08)" : "var(--color-surface-container)",
         borderColor: hovered ? "rgba(201,151,31,0.5)" : "var(--color-outline-variant)",
+        cursor: onClick ? "pointer" : "default",
       }}>
       <span className="material-symbols-outlined text-xl" style={{ color: "var(--color-theme-orange)" }}>{icon}</span>
       <span className="text-[9px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>

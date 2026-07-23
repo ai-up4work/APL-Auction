@@ -1,0 +1,101 @@
+name,role,origin,price,capped,country,ownerTeamCode,img
+Ronan Ashworth,Batsman,Overseas,500,false,Silverhold,,/images/knights/knight-1.png
+Soren Direwood,Bowler,Overseas,1000,true,Highgarde,,/images/knights/knight-2.png
+Edmund Ashworth,All-rounder,Local,500,false,Camelotia,,/images/knights/knight-3.png
+Rufus Wraith,Wicket Keeper,Overseas,2000,false,Ashvale,,/images/knights/knight-4.png
+Dane Duskmoor,Batsman,Local,300,false,Northhold,,/images/knights/knight-5.png
+Aric Voss,Bowler,Local,500,false,Duskmoor,,/images/knights/knight-6.png
+Soren Ashford,All-rounder,Local,600,false,Ironfell,,/images/knights/knight-7.png
+Elian Dawnbringer,Wicket Keeper,Local,800,false,Highgarde,,/images/knights/knight-8.png
+Corwin Bramblewood,Batsman,Local,1500,false,Duskmoor,,/images/knights/knight-9.png
+Talon Wraith,Bowler,Overseas,300,false,Stormreach,,/images/knights/knight-10.png
+Corwin Blackfen,All-rounder,Local,400,false,Wintermere,,/images/knights/knight-11.png
+Rhydian Drake,Wicket Keeper,Local,500,false,Silverhold,,/images/knights/knight-12.png
+Merrick Shadowvale,Batsman,Local,1000,false,Northhold,,/images/knights/knight-13.png
+Falkor Wolfsbane,Bowler,Local,1500,false,Ashvale,,/images/knights/knight-14.png
+Maddox Thistlewood,All-rounder,Overseas,300,false,Camelotia,,/images/knights/knight-15.png
+Leofric Greymantle,Wicket Keeper,Local,500,false,Ironfell,,/images/knights/knight-16.png
+Leofric Blackmoor,Batsman,Overseas,750,false,Greymoor,,/images/knights/knight-17.png
+Edric Hollowell,Bowler,Local,500,false,Sunspire,,/images/knights/knight-18.png
+Elian Ironside,All-rounder,Local,1200,false,Ashvale,,/images/knights/knight-19.png
+Faelan Nightfall,Wicket Keeper,Local,300,false,Northhold,,/images/knights/knight-20.png
+Marek Falconer,Batsman,Overseas,1200,true,Highgarde,,/images/knights/knight-21.png
+Wynn Emberhart,Bowler,Local,1000,false,Camelotia,,/images/knights/knight-22.png
+Ronan Direwood,All-rounder,Overseas,500,false,Duskmoor,,/images/knights/knight-23.png
+Ronan Hollowmere,Wicket Keeper,Local,800,true,Silverhold,,/images/knights/knight-24.png
+Elian Nightfall,Batsman,Overseas,1000,false,Greymoor,,/images/knights/knight-25.png
+Jareth Thistlewood,Bowler,Local,1200,true,Duskmoor,,/images/knights/knight-26.png
+Marek Frostwick,All-rounder,Overseas,1000,false,Ironfell,,/images/knights/knight-27.png
+Maddox Graystone,Wicket Keeper,Local,600,false,Stormreach,,/images/knights/knight-28.png
+Bastian Stormridge,Batsman,Local,1200,false,Ravensmark,,/images/knights/knight-29.png
+Ives Grimwald,Bowler,Local,1000,false,Northhold,,/images/knights/knight-30.png
+Griff Bramblewood,All-rounder,Local,1000,false,Highgarde,,/images/knights/knight-31.png
+Wystan Wyldwood,Wicket Keeper,Local,2000,false,Silverhold,,/images/knights/knight-32.png
+Kendric Greymantle,Batsman,Overseas,1500,false,Sunspire,,/images/knights/knight-33.png
+Dane Fenwick,Bowler,Local,400,false,Ironfell,,/images/knights/knight-34.png
+Quill Duskwood,All-rounder,Local,300,true,Greymoor,,/images/knights/knight-35.png
+Osric Duskwood,Wicket Keeper,Local,300,false,Ravensmark,,/images/knights/knight-36.png
+Lorcan Thistledown,Batsman,Local,800,true,Northhold,,/images/knights/knight-37.png
+Talon Wintermere,Bowler,Local,800,false,Ashvale,,/images/knights/knight-38.png
+Dorian Kane,All-rounder,Overseas,600,false,Wintermere,,/images/knights/knight-39.png
+Baldric Direwood,Wicket Keeper,Overseas,1500,true,Highgarde,,/images/knights/knight-40.png
+Oswin Dawnbringer,Batsman,Overseas,500,true,Sunspire,,/images/knights/knight-41.png
+Dane Ravenscroft,Bowler,Local,500,false,Ravensmark,,/images/knights/knight-42.png
+Corin Dawnbringer,All-rounder,Overseas,1000,true,Greymoor,,/images/knights/knight-43.png
+Pryce Thistlewood,Wicket Keeper,Local,400,false,Ashvale,,/images/knights/knight-44.png
+Emeric Hawthorne,Batsman,Local,500,false,Camelotia,,/images/knights/knight-45.png
+Emeric Wolfsbane,Bowler,Local,750,false,Wintermere,,/images/knights/knight-46.png
+Harwin Blackthorn,All-rounder,Overseas,2000,false,Sunspire,,/images/knights/knight-47.png
+Ives Hollowell,Wicket Keeper,Local,500,false,Ironfell,,/images/knights/knight-48.png
+Pryce Stormridge,Batsman,Overseas,300,true,Wintermere,,/images/knights/knight-49.png
+Kester Ashcombe,Bowler,Overseas,500,true,Sunspire,,/images/knights/knight-50.png
+Roland Vale,All-rounder,Local,1500,false,Highgarde,,/images/knights/knight-51.png
+Ivar Stormcrest,Wicket Keeper,Local,1200,false,Ironfell,,/images/knights/knight-52.png
+Corwin Hawthorne,Batsman,Overseas,1200,false,Stormreach,,/images/knights/knight-53.png
+Aldric Ashenvale,Bowler,Overseas,500,false,Northhold,,/images/knights/knight-54.png
+Jareth Emberhart,All-rounder,Local,400,true,Ironfell,,/images/knights/knight-55.png
+Stellan Kane,Wicket Keeper,Local,500,false,Northhold,,/images/knights/knight-56.png
+Piers Stormcrest,Batsman,Local,500,false,Northhold,,/images/knights/knight-57.png
+Corin Thistlewood,Bowler,Local,500,false,Greymoor,,/images/knights/knight-58.png
+Nash Thorne,All-rounder,Overseas,1000,false,Greymoor,,/images/knights/knight-59.png
+Soren Stormcrest,Wicket Keeper,Local,400,false,Silverhold,,/images/knights/knight-60.png
+Quill Hollowell,Batsman,Local,1200,true,Duskmoor,,/images/knights/knight-61.png
+Aldric Direwood,Bowler,Local,500,false,Stormreach,,/images/knights/knight-62.png
+Baldric Ashford,All-rounder,Local,500,true,Duskmoor,,/images/knights/knight-63.png
+Bram Larkspur,Wicket Keeper,Overseas,500,false,Sunspire,,/images/knights/knight-64.png
+Aric Bramblewood,Batsman,Local,400,false,Silverhold,,/images/knights/knight-65.png
+Alden Frostwick,Bowler,Local,600,false,Northhold,,/images/knights/knight-66.png
+Bran Ravenscroft,All-rounder,Local,600,false,Camelotia,,/images/knights/knight-67.png
+Quinlan Blackmoor,Wicket Keeper,Overseas,1500,true,Sunspire,,/images/knights/knight-68.png
+Yorick Brightwater,Batsman,Overseas,500,false,Northhold,,/images/knights/knight-69.png
+Yorick Ashworth,Bowler,Local,600,false,Highgarde,,/images/knights/knight-70.png
+Caspian Grimshaw,All-rounder,Local,2000,true,Camelotia,,/images/knights/knight-71.png
+Griff Duskwood,Wicket Keeper,Local,800,false,Ashvale,,/images/knights/knight-72.png
+Hadrian Ashworth,Batsman,Overseas,750,false,Ravensmark,,/images/knights/knight-73.png
+Gideon Ironwood,Bowler,Local,750,false,Sunspire,,/images/knights/knight-74.png
+Nolan Ashworth,All-rounder,Local,500,true,Stormreach,,/images/knights/knight-75.png
+Edmund Kane,Wicket Keeper,Local,600,false,Duskmoor,,/images/knights/knight-76.png
+Bran Shadowvale,Batsman,Overseas,400,false,Ironfell,,/images/knights/knight-77.png
+Godfrey Ashgrave,Bowler,Local,750,true,Sunspire,,/images/knights/knight-78.png
+Lucan Cinderfall,All-rounder,Local,1500,false,Ironfell,,/images/knights/knight-79.png
+Leofric Ashenvale,Wicket Keeper,Overseas,2000,false,Sunspire,,/images/knights/knight-80.png
+Kendric Ashenvale,Batsman,Local,750,false,Sunspire,,/images/knights/knight-81.png
+Bram Wraith,Bowler,Local,750,false,Northhold,,/images/knights/knight-82.png
+Ambrose Wintermere,All-rounder,Local,1000,false,Stormreach,,/images/knights/knight-83.png
+Harwin Blackmoor,Wicket Keeper,Local,1200,false,Duskmoor,,/images/knights/knight-84.png
+Falkor Silverleaf,Batsman,Local,500,false,Silverhold,,/images/knights/knight-85.png
+Emeric Ashenvale,Bowler,Local,1000,false,Ironfell,,/images/knights/knight-86.png
+Nolan Ashford,All-rounder,Overseas,500,false,Ashvale,,/images/knights/knight-87.png
+Lucan Hollowell,Wicket Keeper,Local,500,false,Ironfell,,/images/knights/knight-88.png
+Merrick Emberhart,Batsman,Local,1500,false,Silverhold,,/images/knights/knight-89.png
+Ulric Graystone,Bowler,Local,500,false,Camelotia,,/images/knights/knight-90.png
+Soren Highmoor,All-rounder,Local,500,false,Silverhold,,/images/knights/knight-91.png
+Mervyn Emberhart,Wicket Keeper,Local,500,false,Ravensmark,,/images/knights/knight-92.png
+Edric Ravenscroft,Batsman,Overseas,1500,false,Sunspire,,/images/knights/knight-93.png
+Wynn Stonewell,Bowler,Overseas,800,false,Silverhold,,/images/knights/knight-94.png
+Kester Blackthorn,All-rounder,Overseas,1000,false,Northhold,,/images/knights/knight-95.png
+Griff Silverleaf,Wicket Keeper,Local,500,false,Stormreach,,/images/knights/knight-96.png
+Mervyn Graystone,Batsman,Local,500,false,Silverhold,,/images/knights/knight-97.png
+Harwin Thistledown,Bowler,Local,600,false,Ravensmark,,/images/knights/knight-98.png
+Faelan Hollowell,All-rounder,Local,2000,true,Ashvale,,/images/knights/knight-99.png
+Aldous Hawthorne,Wicket Keeper,Local,1000,false,Camelotia,,/images/knights/knight-100.png
