@@ -613,7 +613,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
           )}
 
           <div className="text-center mb-16">
-            <Link href={`/tournament/${tournamentSlug}`}>
+            <Link href={`/tournaments/${tournamentSlug}`}>
               <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back to Tournament</Button>
             </Link>
           </div>

@@ -132,12 +132,12 @@ export async function getTournamentsForUser(userId: string): Promise<{
 }
 
 /**
- * Updates the subset of tournament fields that currently have real columns
- * (`name`, `format`, `status`). Everything else on the `Tournament` type
- * (description, startDate, prizePool, prizes, website/twitter/discord,
- * fixtures, awards) has no backing column/table yet — see the schema note
- * on getTournamentById below. Add those columns first, then extend this
- * function's `patch` type and the insert/update payload to match.
+ * Updates tournament fields that have real columns — which, per the real
+ * schema, is now most of them: name, format, status, category,
+ * description, startDate, imageUrl, prizePool, website, twitter, discord.
+ * Still NOT covered here (no column/table, or intentionally derived —
+ * see getTournamentById's schema note below): fixtures results/status,
+ * prizes list, awards, pointsTable, squads, liveMatch, leaderboards.
  *
  * RLS (via is_org_member) is what actually stops a user editing a
  * tournament outside their org — this function doesn't re-check org_id
@@ -147,13 +147,28 @@ export async function updateTournament(
   id: string,
   patch: Partial<{
     name: string;
-    format: "single_elimination" | "double_elimination";
+    format: "single_elimination" | "double_elimination" | "round_robin";
     status: string;
+    category: "Auction" | "Bracket" | "Overlay" | "League";
+    description: string;
+    startDate: string; // ISO date, e.g. "2026-08-01"
+    imageUrl: string;
+    prizePool: string;
+    website: string;
+    twitter: string;
+    discord: string;
   }>
 ): Promise<boolean> {
   if (Object.keys(patch).length === 0) return true;
 
-  const { error } = await supabase.from("tournaments").update(patch).eq("id", id);
+  // Map camelCase -> snake_case column names; everything else passes through.
+  const { startDate, imageUrl, prizePool, ...rest } = patch;
+  const payload: Record<string, unknown> = { ...rest };
+  if (startDate !== undefined) payload.start_date = startDate;
+  if (imageUrl !== undefined) payload.image_url = imageUrl;
+  if (prizePool !== undefined) payload.prize_pool = prizePool;
+
+  const { error } = await supabase.from("tournaments").update(payload).eq("id", id);
 
   if (error) {
     console.error("updateTournament failed:", error.message);
@@ -165,8 +180,16 @@ export async function updateTournament(
 export type TournamentEditData = {
   id: string;
   name: string;
-  format: "single_elimination" | "double_elimination";
+  format: "single_elimination" | "double_elimination" | "round_robin";
   status: string;
+  category: "Auction" | "Bracket" | "Overlay" | "League" | null;
+  description: string;
+  startDate: string; // "" if unset, else "YYYY-MM-DD"
+  imageUrl: string;
+  prizePool: string;
+  website: string;
+  twitter: string;
+  discord: string;
   orgId: string | null;
 };
 
@@ -182,7 +205,9 @@ export type TournamentEditData = {
 export async function getTournamentForEdit(id: string): Promise<TournamentEditData | null> {
   const { data, error } = await supabase
     .from("tournaments")
-    .select("id, name, format, status, org_id")
+    .select(
+      "id, name, format, status, category, description, start_date, image_url, prize_pool, website, twitter, discord, org_id"
+    )
     .eq("id", id)
     .single();
 
@@ -196,8 +221,163 @@ export async function getTournamentForEdit(id: string): Promise<TournamentEditDa
     name: data.name,
     format: data.format,
     status: data.status,
+    category: data.category ?? null,
+    description: data.description ?? "",
+    startDate: data.start_date ?? "",
+    imageUrl: data.image_url ?? "",
+    prizePool: data.prize_pool ?? "",
+    website: data.website ?? "",
+    twitter: data.twitter ?? "",
+    discord: data.discord ?? "",
     orgId: data.org_id ?? null,
   };
+}
+
+/**
+ * Replaces every prize row for a tournament with the given list — simplest
+ * correct approach for a short, fully-editable, reorderable list (delete +
+ * reinsert instead of diffing individual rows). Called with an empty array
+ * to clear all prizes.
+ */
+export async function savePrizesForTournament(
+  tournamentId: string,
+  prizes: { place: string; reward: string }[]
+): Promise<boolean> {
+  const { error: deleteError } = await supabase
+    .from("tournament_prizes")
+    .delete()
+    .eq("tournament_id", tournamentId);
+
+  if (deleteError) {
+    console.error("savePrizesForTournament(delete) failed:", deleteError.message);
+    return false;
+  }
+
+  if (prizes.length === 0) return true;
+
+  const { error: insertError } = await supabase.from("tournament_prizes").insert(
+    prizes.map((p, i) => ({
+      tournament_id: tournamentId,
+      place: p.place,
+      reward: p.reward,
+      sort_order: i,
+    }))
+  );
+
+  if (insertError) {
+    console.error("savePrizesForTournament(insert) failed:", insertError.message);
+    return false;
+  }
+  return true;
+}
+
+export async function getPrizesForTournament(
+  tournamentId: string
+): Promise<{ place: string; reward: string }[]> {
+  const { data, error } = await supabase
+    .from("tournament_prizes")
+    .select("place, reward")
+    .eq("tournament_id", tournamentId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    console.error("getPrizesForTournament failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+async function getAwardsForTournament(tournamentId: string) {
+  const { data, error } = await supabase
+    .from("tournament_awards")
+    .select("label, player_name, note")
+    .eq("tournament_id", tournamentId);
+
+  if (error) {
+    console.error("getAwardsForTournament failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map((a) => ({ label: a.label, name: a.player_name, note: a.note ?? "" }));
+}
+
+/**
+ * Points table, read directly from `standings` — it already carries a
+ * direct tournament_id FK plus computed nrr/form, no join through auctions
+ * needed. This is match-result-derived data, not something the edit page
+ * writes to; it updates as matches are scored.
+ */
+async function getPointsTableForTournament(tournamentId: string) {
+  const { data, error } = await supabase
+    .from("standings")
+    .select("played, won, lost, points, nrr, form, teams:team_id ( name, code )")
+    .eq("tournament_id", tournamentId);
+
+  if (error) {
+    console.error("getPointsTableForTournament failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row: any) => {
+    const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
+    return {
+      team: team?.name ?? "Unknown",
+      short: team?.code ?? "???",
+      played: row.played,
+      won: row.won,
+      lost: row.lost,
+      nrr: String(row.nrr),
+      points: row.points,
+      form: (row.form ?? []) as ("W" | "L" | "NR")[],
+    };
+  });
+}
+
+/**
+ * Schedule, derived from `bracket_matches` — there's no separate fixtures
+ * table; bracket_matches already carries venue/scheduled_at/status per
+ * match (and supports bracket_type = 'round_robin'), so it doubles as the
+ * source for both the Bracket tab and the Schedule tab. Not hand-edited
+ * here; match scheduling/results update these rows directly.
+ */
+async function getFixturesForTournament(tournamentId: string) {
+  const { data, error } = await supabase
+    .from("bracket_matches")
+    .select(
+      `
+      id, scheduled_at, venue, status, score_a, score_b,
+      team_a:team_a_id ( name ),
+      team_b:team_b_id ( name ),
+      winner:winner_team_id ( name )
+      `
+    )
+    .eq("tournament_id", tournamentId)
+    .order("scheduled_at", { ascending: true, nullsFirst: false });
+
+  if (error) {
+    console.error("getFixturesForTournament failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((m: any) => {
+    const teamA = Array.isArray(m.team_a) ? m.team_a[0] : m.team_a;
+    const teamB = Array.isArray(m.team_b) ? m.team_b[0] : m.team_b;
+    const winner = Array.isArray(m.winner) ? m.winner[0] : m.winner;
+    const scheduled = m.scheduled_at ? new Date(m.scheduled_at) : null;
+
+    return {
+      id: m.id,
+      team1: teamA?.name ?? "TBD",
+      team2: teamB?.name ?? "TBD",
+      date: scheduled ? scheduled.toLocaleDateString() : "TBD",
+      time: scheduled ? scheduled.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      venue: m.venue ?? "",
+      status: m.status as "upcoming" | "live" | "completed",
+      result:
+        winner && m.score_a != null && m.score_b != null
+          ? `${winner.name} won (${m.score_a} - ${m.score_b})`
+          : undefined,
+    };
+  });
 }
 
 /**
@@ -261,34 +441,36 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
 }
 
 /**
- * Fetches a single tournament (by tournaments.id) with its bracket and
- * squads, for the public tournament detail page.
+ * Fetches a single tournament (by tournaments.id) with its bracket, squads,
+ * prizes, awards, points table, and fixtures, for the public tournament
+ * detail page.
  *
- * SCOPE NOTE — the `tournaments` table + related schema only supports a
- * subset of the `Tournament` (ShowcaseSlide & TournamentExtras) type that
- * TournamentDetailClient renders:
- *   - slug, title (name), by/image (via organizations), status: mapped ✅
- *     (slug is DERIVED via slugify(name) — tournaments has no slug column,
- *     so this breaks if two tournaments share a name; see note below)
- *   - tag: mapped from `format`, but onto a DIFFERENT vocabulary than the
- *     rest of the showcase uses ("Knockout"/"Double Elim" vs "Auction"/
- *     "Bracket"/"Overlay"/"League") — there's no column indicating which
- *     of those four categories a tournament belongs to.
- *   - bracket: mapped ✅ via bracket_matches.tournament_id (direct FK)
+ * SCHEMA NOTE (corrected against the real DB schema — tournaments already
+ * has more columns than earlier drafts of this file assumed):
+ *   - slug, title (name), by/image (via organizations), status,
+ *     description, startDate, prizePool, website, twitter, discord: all
+ *     mapped ✅ directly from real columns on `tournaments`.
+ *   - tag: mapped from `format` onto "Knockout"/"Double Elim" — note
+ *     `tournaments.category` (Auction/Bracket/Overlay/League) is the
+ *     *actual* column matching the rest of the showcase's tag vocabulary
+ *     and isn't used here yet; consider switching `tag` to read
+ *     `category` directly once every tournament has one set.
+ *   - bracket: mapped ✅ via bracket_matches.tournament_id
+ *   - fixtures: mapped ✅ — derived from the same bracket_matches rows
+ *     (venue/scheduled_at/status/scores). There's no separate fixtures
+ *     table; bracket_matches already supports bracket_type='round_robin'.
+ *   - prizes: mapped ✅ via tournament_prizes.tournament_id
+ *   - awards: mapped ✅ via tournament_awards.tournament_id
+ *   - pointsTable: mapped ✅ via standings.tournament_id (direct FK —
+ *     no join through auctions needed; nrr/form are precomputed columns)
  *   - squads: mapped ✅ — derived from the linked auction's results
  *     (players.sold_to_team_id / owner_team_code), see
  *     getSquadsForTournament above. NOT a hand-edited table.
- *   - pointsTable: NOT mapped. `standings` links to `auctions.id`
- *     (auction_id), and `auctions` links to `tournaments.id` — there's no
- *     direct tournaments -> standings path. Populating this needs a join
- *     through `auctions` (tournaments.id -> auctions.tournament_id ->
- *     standings.auction_id), and only works if a tournament has exactly
- *     one associated auction.
- *   - liveMatch, fixtures, runsLeaderboard, wicketsLeaderboard, awards,
- *     prizePool, prizes, description, startDate, website, twitter,
- *     discord: NOT mapped — no columns anywhere in the schema for these.
- *     All optional on the type, so simply omitted here; TournamentDetailClient's
- *     existing hasX checks hide those tabs rather than render broken data.
+ *   - liveMatch, runsLeaderboard, wicketsLeaderboard: NOT mapped. These
+ *     come from matches/balls/match_team_stats (live scoring + per-player
+ *     aggregation) — real but more involved queries, left as a later pass.
+ *     Optional on the type, so simply omitted; existing hasX checks hide
+ *     those tabs rather than render broken data.
  */
 export async function getTournamentById(id: string): Promise<Tournament | null> {
   const { data: tournament, error } = await supabase
@@ -299,6 +481,14 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
       name,
       format,
       status,
+      category,
+      description,
+      start_date,
+      image_url,
+      prize_pool,
+      website,
+      twitter,
+      discord,
       organizations ( name, logo_url )
     `
     )
@@ -314,7 +504,14 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
     ? tournament.organizations[0]
     : tournament.organizations;
 
-  const [{ data: bracketRows, error: bracketError }, squads] = await Promise.all([
+  const [
+    { data: bracketRows, error: bracketError },
+    squads,
+    prizes,
+    awards,
+    pointsTable,
+    fixtures,
+  ] = await Promise.all([
     supabase
       .from("bracket_matches")
       .select(
@@ -331,6 +528,10 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
       .eq("tournament_id", tournament.id)
       .order("round", { ascending: true }),
     getSquadsForTournament(tournament.id),
+    getPrizesForTournament(tournament.id),
+    getAwardsForTournament(tournament.id),
+    getPointsTableForTournament(tournament.id),
+    getFixturesForTournament(tournament.id),
   ]);
 
   if (bracketError) {
@@ -365,10 +566,20 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
     slug: slugify(tournament.name),
     title: tournament.name,
     by: org?.name ?? "Unknown Org",
-    image: org?.logo_url || "/placeholder.svg",
+    image: tournament.image_url || org?.logo_url || "/placeholder.svg",
     // ShowcaseSlide optional fields we do have data for
     status: mapTournamentStatus(tournament.status),
     // TournamentExtras
+    description: tournament.description || undefined,
+    startDate: tournament.start_date || undefined,
+    prizePool: tournament.prize_pool || undefined,
+    website: tournament.website || undefined,
+    twitter: tournament.twitter || undefined,
+    discord: tournament.discord || undefined,
+    prizes: prizes.length ? prizes : undefined,
+    awards: awards.length ? awards : undefined,
+    pointsTable: pointsTable.length ? pointsTable : undefined,
+    fixtures: fixtures.length ? fixtures : undefined,
     bracket,
     squads: squads.length ? squads : undefined,
   };

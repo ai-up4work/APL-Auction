@@ -1,3 +1,4 @@
+// app/tournaments/page.tsx
 import type { Metadata } from "next"
 import TournamentClient from "@/components/tournament/TournamentClient"
 

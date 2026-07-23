@@ -742,7 +742,7 @@ function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string
           )
 
           return playable ? (
-            <Link key={m.id} href={`/tournament/${slug}/match/${m.id}`}>
+            <Link key={m.id} href={`/tournaments/${slug}/match/${m.id}`}>
               {card}
             </Link>
           ) : (
