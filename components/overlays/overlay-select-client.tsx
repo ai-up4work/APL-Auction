@@ -2,8 +2,11 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { AlertCircle, Radio, PlayCircle, Trophy, Swords } from "lucide-react"
+import { AlertCircle, Radio, PlayCircle, Trophy, Swords, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { SiteHeader } from "@/components/landing/site-header"
+import { useScrollTop } from "@/hooks/use-scroll-top"
+import { pageStyles } from "@/data/site-data"
 import {
   startOverlayForFixture,
   getFixturesForTournamentOverlay,
@@ -19,8 +22,18 @@ interface OverlaySelectClientProps {
 
 type Mode = "tournament" | "manual"
 
+function formatName(format: TournamentOption["format"]) {
+  return format === "single_elimination"
+    ? "Single Elimination"
+    : format === "double_elimination"
+      ? "Double Elimination"
+      : "Round Robin"
+}
+
 export default function OverlaySelectClient({ tournaments, auctions }: OverlaySelectClientProps) {
+  useScrollTop()
   const router = useRouter()
+  const [isNavOpen, setIsNavOpen] = useState(false)
   const [mode, setMode] = useState<Mode>("tournament")
 
   // tournament path
@@ -30,6 +43,15 @@ export default function OverlaySelectClient({ tournaments, auctions }: OverlaySe
 
   const [startingId, setStartingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const handleNavigation = (path: string) => {
+    router.push(path)
+    window.scrollTo(0, 0)
+  }
+  const scrollToSection = (sectionId: string) => {
+    router.push(`/#${sectionId}`)
+    setIsNavOpen(false)
+  }
 
   const handleSelectTournament = async (t: TournamentOption) => {
     setSelectedTournamentId(t.id)
@@ -46,178 +68,206 @@ export default function OverlaySelectClient({ tournaments, auctions }: OverlaySe
     const result = await startOverlayForFixture(fixture.id)
     setStartingId(null)
     if (result.ok) {
-      router.push(`/overlay/${result.auctionId}`)
+      router.push(`/overlay/${result.auctionId}/admin`)
     } else {
       setError(result.error)
     }
   }
 
   const handleSelectAuction = (auction: AuctionOption) => {
-    router.push(`/overlay/${auction.id}`)
+    router.push(`/overlay/${auction.id}/admin`)
   }
 
   return (
-    <main className="container mx-auto px-4 pt-32 sm:pt-40 pb-16 max-w-3xl">
-      <h1 className="text-3xl font-bold text-white font-cinzel mb-2">Select Match</h1>
-      <p className="text-gray-400 text-sm mb-6">
-        Start or resume a live overlay — from a tournament fixture, or directly by auction.
-      </p>
+    <main className="overflow-hidden">
+      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
 
-      <div className="flex gap-2 mb-6 border-b border-gold/10 pb-3">
-        <button
-          onClick={() => setMode("tournament")}
-          className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors ${
-            mode === "tournament"
-              ? "border-gold/40 text-gold bg-gold/10"
-              : "border-transparent text-gray-400 hover:text-gold"
-          }`}
-        >
-          <Trophy className="h-3.5 w-3.5" /> By Tournament
-        </button>
-        <button
-          onClick={() => setMode("manual")}
-          className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors ${
-            mode === "manual"
-              ? "border-gold/40 text-gold bg-gold/10"
-              : "border-transparent text-gray-400 hover:text-gold"
-          }`}
-        >
-          <Swords className="h-3.5 w-3.5" /> Manual (by Auction)
-        </button>
-      </div>
+      <SiteHeader
+        activeSection="overlay"
+        isNavOpen={isNavOpen}
+        setIsNavOpen={setIsNavOpen}
+        scrollToSection={scrollToSection}
+        handleNavigation={handleNavigation}
+      />
 
-      {error && (
-        <div className="flex items-center gap-2 text-red-500 text-sm mb-4 bg-red-500/10 border border-red-500/20 rounded-md p-3">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
-        </div>
-      )}
+      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10 max-w-3xl">
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+            <Radio className="w-3.5 h-3.5" />
+            Live Overlay
+          </span>
+          <h1 className="text-3xl font-bold text-white font-cinzel mb-2">Select Match</h1>
+          <p className="text-gray-400 text-sm mb-8 max-w-xl">
+            Start or resume a live overlay — from a tournament fixture, or directly by auction.
+          </p>
 
-      {/* ── TOURNAMENT MODE ─────────────────────────────────────────── */}
-      {mode === "tournament" && (
-        <>
-          {!selectedTournamentId ? (
-            tournaments.length === 0 ? (
-              <p className="text-gray-500 text-sm italic">
-                No tournaments with fixtures yet — generate a bracket first.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {tournaments.map((t) => (
+          {/* MODE TABS — same pill-tab pattern as the tournament detail page */}
+          <div className="flex flex-wrap gap-1 mb-8 pb-4 border-b border-gold/10">
+            <button
+              onClick={() => setMode("tournament")}
+              className={`flex items-center gap-1.5 text-[11px] font-cinzel uppercase tracking-widest px-4 py-2 rounded-full border transition-colors ${
+                mode === "tournament"
+                  ? "bg-gold text-black border-gold font-bold"
+                  : "border-transparent text-gray-400 hover:text-gold hover:border-gold/20"
+              }`}
+            >
+              <Trophy className="h-3.5 w-3.5" /> By Tournament
+            </button>
+            <button
+              onClick={() => setMode("manual")}
+              className={`flex items-center gap-1.5 text-[11px] font-cinzel uppercase tracking-widest px-4 py-2 rounded-full border transition-colors ${
+                mode === "manual"
+                  ? "bg-gold text-black border-gold font-bold"
+                  : "border-transparent text-gray-400 hover:text-gold hover:border-gold/20"
+              }`}
+            >
+              <Swords className="h-3.5 w-3.5" /> Manual (by Auction)
+            </button>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-red-500 text-sm mb-6 bg-red-500/10 border border-red-500/20 rounded-md p-3">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {/* ── TOURNAMENT MODE ─────────────────────────────────────── */}
+          {mode === "tournament" && (
+            <>
+              {!selectedTournamentId ? (
+                tournaments.length === 0 ? (
+                  <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center">
+                    <Trophy className="h-6 w-6 text-gold mx-auto mb-3" />
+                    <p className="text-gray-400 text-sm">
+                      No tournaments with fixtures yet — generate a bracket first.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {tournaments.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => handleSelectTournament(t)}
+                        className="w-full text-left bg-black/50 border border-gold/20 rounded-lg p-5 hover:border-gold/50 hover:bg-white/[0.02] transition-all flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="text-white font-bold font-cinzel">{t.name}</p>
+                          <p className="text-gray-500 text-xs mt-1">
+                            {formatName(t.format)} · {t.fixtureCount} fixture
+                            {t.fixtureCount === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <Trophy className="h-4 w-4 text-gold/60 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <>
                   <button
-                    key={t.id}
-                    onClick={() => handleSelectTournament(t)}
-                    className="w-full text-left bg-black/50 border border-gold/20 rounded-lg p-4 hover:border-gold/40 transition-colors flex items-center justify-between"
+                    onClick={() => {
+                      setSelectedTournamentId(null)
+                      setFixtures([])
+                      setError(null)
+                    }}
+                    className="text-gold text-[11px] uppercase tracking-widest font-cinzel mb-5 hover:underline"
                   >
-                    <div>
-                      <p className="text-white font-semibold">{t.name}</p>
-                      <p className="text-gray-500 text-xs mt-0.5">
-                        {t.format === "single_elimination"
-                          ? "Single Elimination"
-                          : t.format === "double_elimination"
-                            ? "Double Elimination"
-                            : "Round Robin"}{" "}
-                        · {t.fixtureCount} fixture{t.fixtureCount === 1 ? "" : "s"}
+                    ← Back to tournaments
+                  </button>
+
+                  {loadingFixtures ? (
+                    <p className="text-gray-500 text-sm">Loading fixtures…</p>
+                  ) : fixtures.length === 0 ? (
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center">
+                      <p className="text-gray-400 text-sm italic">
+                        No fixtures with both teams resolved yet.
                       </p>
                     </div>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  setSelectedTournamentId(null)
-                  setFixtures([])
-                }}
-                className="text-gold text-xs uppercase tracking-widest font-cinzel mb-4 hover:underline"
-              >
-                ← Back to tournaments
-              </button>
+                  ) : (
+                    <div className="space-y-3">
+                      {fixtures.map((fixture) => (
+                        <div
+                          key={fixture.id}
+                          className="bg-black/50 border border-gold/20 rounded-lg p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                        >
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-gold font-cinzel mb-1.5">
+                              Round {fixture.round} · {fixture.status}
+                            </p>
+                            <p className="text-white font-bold font-cinzel">
+                              {fixture.teamA.name}{" "}
+                              <span className="text-gray-500 font-normal">vs</span>{" "}
+                              {fixture.teamB.name}
+                            </p>
+                            {fixture.venue && (
+                              <p className="text-gray-500 text-xs mt-1.5">{fixture.venue}</p>
+                            )}
+                          </div>
 
-              {loadingFixtures ? (
-                <p className="text-gray-500 text-sm">Loading fixtures…</p>
-              ) : fixtures.length === 0 ? (
-                <p className="text-gray-500 text-sm italic">
-                  No fixtures with both teams resolved yet.
-                </p>
+                          <Button
+                            onClick={() => handleSelectFixture(fixture)}
+                            disabled={startingId === fixture.id}
+                            className={
+                              fixture.overlayMatchId
+                                ? "bg-gold hover:bg-gold/90 text-black font-bold shrink-0 disabled:opacity-50"
+                                : "bg-transparent hover:bg-gold/10 text-gold border border-gold/30 shrink-0 disabled:opacity-50"
+                            }
+                          >
+                            {startingId === fixture.id ? (
+                              "Loading…"
+                            ) : fixture.overlayMatchId ? (
+                              <>
+                                <Radio className="mr-2 h-4 w-4" /> Resume
+                              </>
+                            ) : (
+                              <>
+                                <PlayCircle className="mr-2 h-4 w-4" /> Start Overlay
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── MANUAL MODE ─────────────────────────────────────────── */}
+          {mode === "manual" && (
+            <>
+              {auctions.length === 0 ? (
+                <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center">
+                  <Swords className="h-6 w-6 text-gold mx-auto mb-3" />
+                  <p className="text-gray-400 text-sm">No auctions found.</p>
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {fixtures.map((fixture) => (
-                    <div
-                      key={fixture.id}
-                      className="bg-black/50 border border-gold/20 rounded-lg p-4 flex items-center justify-between gap-4"
+                  {auctions.map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => handleSelectAuction(a)}
+                      className="w-full text-left bg-black/50 border border-gold/20 rounded-lg p-5 hover:border-gold/50 hover:bg-white/[0.02] transition-all flex items-center justify-between"
                     >
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest text-gold font-cinzel mb-1">
-                          Round {fixture.round} · {fixture.status}
+                        <p className="text-white font-bold font-cinzel">{a.name}</p>
+                        <p className="text-gray-500 text-xs mt-1 flex items-center gap-1.5">
+                          <Users className="h-3 w-3" />
+                          {a.status} · {a.teamCount} team{a.teamCount === 1 ? "" : "s"}
                         </p>
-                        <p className="text-white font-semibold">
-                          {fixture.teamA.name} <span className="text-gray-500">vs</span>{" "}
-                          {fixture.teamB.name}
-                        </p>
-                        {fixture.venue && (
-                          <p className="text-gray-500 text-xs mt-1">{fixture.venue}</p>
-                        )}
                       </div>
-
-                      <Button
-                        onClick={() => handleSelectFixture(fixture)}
-                        disabled={startingId === fixture.id}
-                        className={
-                          fixture.overlayMatchId
-                            ? "bg-gold hover:bg-gold/90 text-black font-bold"
-                            : "bg-transparent hover:bg-gold/10 text-gold border border-gold/30"
-                        }
-                      >
-                        {startingId === fixture.id ? (
-                          "Loading…"
-                        ) : fixture.overlayMatchId ? (
-                          <>
-                            <Radio className="mr-2 h-4 w-4" /> Resume
-                          </>
-                        ) : (
-                          <>
-                            <PlayCircle className="mr-2 h-4 w-4" /> Start Overlay
-                          </>
-                        )}
-                      </Button>
-                    </div>
+                      <Radio className="h-4 w-4 text-gold/60 shrink-0" />
+                    </button>
                   ))}
                 </div>
               )}
             </>
           )}
-        </>
-      )}
-
-      {/* ── MANUAL MODE ─────────────────────────────────────────────── */}
-      {mode === "manual" && (
-        <>
-          {auctions.length === 0 ? (
-            <p className="text-gray-500 text-sm italic">No auctions found.</p>
-          ) : (
-            <div className="space-y-2">
-              {auctions.map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => handleSelectAuction(a)}
-                  className="w-full text-left bg-black/50 border border-gold/20 rounded-lg p-4 hover:border-gold/40 transition-colors flex items-center justify-between"
-                >
-                  <div>
-                    <p className="text-white font-semibold">{a.name}</p>
-                    <p className="text-gray-500 text-xs mt-0.5">
-                      {a.status} · {a.teamCount} team{a.teamCount === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                  <Radio className="h-4 w-4 text-gold shrink-0" />
-                </button>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        </div>
+      </section>
     </main>
   )
 }
