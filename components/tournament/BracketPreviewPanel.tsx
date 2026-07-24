@@ -12,21 +12,33 @@ import {
   recordDoubleElimResult,
   type DoubleElimData,
 } from "@/lib/tournament/doubleElim"
+import { hasMatchDetail } from "@/data/tournament-data"
 
 /* ------------------------------------------------------------------ */
-/*  This panel generates its own full 32-team demo bracket — the same  */
-/*  shape the full-page chart (TournamentBracket / DoubleElimBoard)    */
-/*  renders — and previews a slice of it. It intentionally does NOT    */
-/*  read per-tournament data from tournament-data: that data is much   */
-/*  smaller/differently-shaped than a real bracket, which made the     */
-/*  preview look like a thin, half-empty stub. The `format` prop only  */
-/*  says which chart TYPE to preview; `slug` is only used to build the */
-/*  "Full bracket" link.                                                */
+/*  This panel can render TWO kinds of data:                            */
+/*                                                                       */
+/*  1. REAL per-tournament bracket data, passed in via `bracketRounds`  */
+/*     (single-elim) or `doubleElimData` (double-elim) — same shape the */
+/*     full-page chart (TournamentBracket / DoubleElimBoard) consumes.  */
+/*     Presence of the prop (even as an empty structure) means "this IS */
+/*     the real tournament's bracket" — if it's empty, we show an empty */
+/*     state rather than silently substituting demo data.               */
+/*                                                                       */
+/*  2. DEMO data (generated internally, 32-team bracket) — used ONLY    */
+/*     when the real-data prop is omitted entirely (undefined). This is */
+/*     what keeps older/showcase tournaments (that haven't been wired   */
+/*     up with real bracket data yet) looking populated instead of      */
+/*     empty.                                                            */
+/*                                                                       */
+/*  `format` says which chart TYPE to render; `slug` builds the "Full   */
+/*  bracket" link AND the per-match "View match" links (only real,      */
+/*  demo matches never link anywhere since hasMatchDetail() won't match */
+/*  their synthetic ids).                                               */
 /* ------------------------------------------------------------------ */
 
 type BracketPreviewProps =
-  | { format: "single"; slug: string }
-  | { format: "double"; slug: string }
+  | { format: "single"; slug: string; bracketRounds?: Round[] }
+  | { format: "double"; slug: string; doubleElimData?: DoubleElimData }
 
 function isDone(m: MatchNode) {
   return m.status === "completed"
@@ -63,6 +75,7 @@ function getPreviewRounds(rounds: Round[]): Round[] {
 /*  slice of the same bracket shape (32 teams), not a separate one.    */
 /*  Cached at module scope so re-renders of this panel (or multiple    */
 /*  tabs on the same tournament page) don't regenerate/re-randomize.   */
+/*  Only ever called when the caller passed NO real data at all.       */
 /* ------------------------------------------------------------------ */
 
 function setResult(match: MatchNode, winner: "A" | "B", scoreA: number, scoreB: number) {
@@ -309,15 +322,31 @@ function MiniTeamRow({ team, isWinner }: { team: MatchNode["teamA"]; isWinner: b
   )
 }
 
+/**
+ * `slug` is optional and purely additive: when present AND the match
+ * has a real MatchDetail entry (hasMatchDetail), the card becomes a
+ * clickable link to the full match page — same behavior the legacy
+ * flat BracketPanel had. Demo matches never match a real id, so they
+ * naturally stay non-interactive without any extra checks.
+ */
 function MiniMatchCard({
   match,
   cardRef,
+  slug,
 }: {
   match: MatchNode
   cardRef?: (el: HTMLDivElement | null) => void
+  slug?: string
 }) {
-  return (
-    <div ref={cardRef} className="border border-gold/10 rounded-md p-3 bg-white/[0.02]">
+  const linkable = !!slug && hasMatchDetail(match.id)
+
+  const card = (
+    <div
+      ref={cardRef}
+      className={`border border-gold/10 rounded-md p-3 bg-white/[0.02] transition-all ${
+        linkable ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
+      }`}
+    >
       <div className="flex items-center justify-between mb-2">
         <span className="text-gold text-[10px] font-bold font-cinzel uppercase tracking-wide">{match.label}</span>
         {match.status === "live" ? (
@@ -330,7 +359,20 @@ function MiniMatchCard({
       </div>
       <MiniTeamRow team={match.teamA} isWinner={!!match.teamA?.isWinner} />
       <MiniTeamRow team={match.teamB} isWinner={!!match.teamB?.isWinner} />
+      {linkable && (
+        <p className="text-gold text-[9px] uppercase tracking-widest font-cinzel mt-2 text-right">
+          View match →
+        </p>
+      )}
     </div>
+  )
+
+  return linkable ? (
+    <Link href={`/tournaments/${slug}/match/${match.id}`} className="block">
+      {card}
+    </Link>
+  ) : (
+    card
   )
 }
 
@@ -338,13 +380,13 @@ function MiniMatchCard({
  * Renders one round on its own (used when there's only a single round
  * to preview — no feeder pairing/connectors needed).
  */
-function SingleColumn({ round }: { round: Round }) {
+function SingleColumn({ round, slug }: { round: Round; slug?: string }) {
   return (
     <div>
       <p className="text-gray-400 text-[10px] uppercase tracking-widest font-cinzel mb-2">{round.name}</p>
       <div className="space-y-2">
         {round.matches.map((m) => (
-          <MiniMatchCard key={m.id} match={m} />
+          <MiniMatchCard key={m.id} match={m} slug={slug} />
         ))}
       </div>
     </div>
@@ -357,7 +399,7 @@ function SingleColumn({ round }: { round: Round }) {
  * real measured lines — the mini version of what DoubleElimBoard and
  * TournamentBracket do for a full bracket.
  */
-function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
+function ConnectedRoundPair({ rounds, slug }: { rounds: Round[]; slug?: string }) {
   const leftRound = rounds[0]
   const rightRound = rounds[1]
   const { containerRef, leftColRef, getCardRef, centerY, colHeight, paths, svgSize } = useRoundPairLayout(
@@ -366,7 +408,7 @@ function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
   )
 
   if (!leftRound) return null
-  if (!rightRound) return <SingleColumn round={leftRound} />
+  if (!rightRound) return <SingleColumn round={leftRound} slug={slug} />
 
   return (
     <div
@@ -379,7 +421,7 @@ function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
         <div ref={leftColRef} className="flex flex-col gap-6">
           {leftRound.matches.map((m) => (
             <div key={m.id}>
-              <MiniMatchCard match={m} cardRef={getCardRef(m.id)} />
+              <MiniMatchCard match={m} cardRef={getCardRef(m.id)} slug={slug} />
             </div>
           ))}
         </div>
@@ -402,7 +444,7 @@ function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
               className="absolute left-0 right-0"
               style={{ top: centerY[m.id] ?? 0, transform: "translateY(-50%)" }}
             >
-              <MiniMatchCard match={m} />
+              <MiniMatchCard match={m} slug={slug} />
             </div>
           ))}
         </div>
@@ -433,6 +475,26 @@ function ConnectedRoundPair({ rounds }: { rounds: Round[] }) {
           ))}
         </svg>
       )}
+    </div>
+  )
+}
+
+/**
+ * Shown in place of the bracket preview when real per-tournament data
+ * was explicitly provided (the prop wasn't omitted) but is currently
+ * empty — e.g. a tournament with bracketFormat set but no matches
+ * scheduled yet. Distinct from the demo fallback: an empty real
+ * bracket should look empty, not get backfilled with fake teams.
+ */
+function EmptyBracketState() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-10 gap-3">
+      <div className="h-10 w-10 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center">
+        <Network className="h-4 w-4 text-gold/50" />
+      </div>
+      <p className="text-gray-400 text-sm max-w-xs">
+        The bracket hasn't been set up yet. Once matches are scheduled, they'll appear here.
+      </p>
     </div>
   )
 }
@@ -473,14 +535,20 @@ function PanelShell({
 
 export default function BracketPreviewPanel(props: BracketPreviewProps) {
   if (props.format === "single") {
-    const { slug } = props
-    const rounds = getSingleElimDemoRounds()
+    const { slug, bracketRounds } = props
+    // Presence of the prop (not its length) decides real-vs-demo: an
+    // explicitly-passed empty array means "this tournament really has
+    // no bracket yet," which should render an empty state, NOT fall
+    // back to random demo teams. Omitting the prop entirely is what
+    // opts a tournament into the demo bracket.
+    const isRealData = bracketRounds !== undefined
+    const rounds = isRealData ? bracketRounds! : getSingleElimDemoRounds()
     const visible = getPreviewRounds(rounds)
     const fullBracketHref = `/tournament/${slug}/bracket/singleElimination`
 
     return (
       <PanelShell fullBracketHref={fullBracketHref}>
-        <ConnectedRoundPair rounds={visible} />
+        {visible.length > 0 ? <ConnectedRoundPair rounds={visible} slug={slug} /> : <EmptyBracketState />}
       </PanelShell>
     )
   }
@@ -495,40 +563,46 @@ export default function BracketPreviewPanel(props: BracketPreviewProps) {
   // shown without a connector into it, since its real feeders (the
   // WB/LB finals) aren't necessarily the same matches currently visible
   // above.
-  const { slug } = props
-  const data = getDoubleElimDemoData()
+  const { slug, doubleElimData } = props
+  const isRealData = doubleElimData !== undefined
+  const data = isRealData ? doubleElimData! : getDoubleElimDemoData()
   const wbVisible = getPreviewRounds(data.winners)
   const lbVisible = data.losers.length ? getPreviewRounds(data.losers) : []
   const gfReached = !!data.grandFinal.teamA && !!data.grandFinal.teamB
+  const isEmpty = wbVisible.length === 0 && lbVisible.length === 0 && !gfReached
 
   return (
     <PanelShell fullBracketHref={`/tournament/${slug}/bracket/doubleElimination`}>
-      <div className="space-y-6 min-w-[280px]">
-        {wbVisible.length > 0 && (
-          <div>
-            <p className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
-              <Trophy className="h-3 w-3" /> Winners bracket
-            </p>
-            <ConnectedRoundPair rounds={wbVisible} />
-          </div>
-        )}
-        {lbVisible.length > 0 && (
-          <div>
-            <p className="flex items-center gap-1.5 text-orange-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
-              <RotateCcw className="h-3 w-3" /> Losers bracket
-            </p>
-            <ConnectedRoundPair rounds={lbVisible} />
-          </div>
-        )}
-        {gfReached && (
-          <div>
-            <p className="flex items-center gap-1.5 text-gold text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
-              <Award className="h-3 w-3" /> Grand final
-            </p>
-            <MiniMatchCard match={data.grandFinal} />
-          </div>
-        )}
-      </div>
+      {isEmpty ? (
+        <EmptyBracketState />
+      ) : (
+        <div className="space-y-6 min-w-[280px]">
+          {wbVisible.length > 0 && (
+            <div>
+              <p className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
+                <Trophy className="h-3 w-3" /> Winners bracket
+              </p>
+              <ConnectedRoundPair rounds={wbVisible} slug={slug} />
+            </div>
+          )}
+          {lbVisible.length > 0 && (
+            <div>
+              <p className="flex items-center gap-1.5 text-orange-400 text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
+                <RotateCcw className="h-3 w-3" /> Losers bracket
+              </p>
+              <ConnectedRoundPair rounds={lbVisible} slug={slug} />
+            </div>
+          )}
+          {gfReached && (
+            <div>
+              <p className="flex items-center gap-1.5 text-gold text-[10px] font-bold uppercase tracking-widest font-cinzel mb-2">
+                <Award className="h-3 w-3" /> Grand final
+              </p>
+              <MiniMatchCard match={data.grandFinal} slug={slug} />
+            </div>
+          )}
+        </div>
+      )}
     </PanelShell>
   )
 }

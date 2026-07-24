@@ -21,6 +21,7 @@ import {
   MapPin,
   Award,
   Shield,
+  Lock,
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
@@ -49,6 +50,16 @@ import {
 /*      slice of it (does NOT read tournament.bracket).                 */
 /*    - left unset -> falls back to the legacy flat `bracket` array     */
 /*      via BracketPanel below, if present.                             */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON TABS:                                                       */
+/*  Every tab (Live, Points, Schedule, Bracket, Squads, Stats) is now    */
+/*  always rendered so visitors can see the full shape of what a        */
+/*  fully-run tournament looks like. If the underlying data for a tab   */
+/*  isn't there yet, the tab trigger is disabled + shows a lock icon,   */
+/*  and its content renders a "coming soon" placeholder instead of      */
+/*  being hidden outright.                                              */
 /* ------------------------------------------------------------------ */
 
 interface TournamentDetailClientProps {
@@ -215,60 +226,18 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
             <div className="w-full lg:w-2/3 fade-in">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full justify-start mb-6 flex-wrap h-auto gap-1">
-                  {hasLive && (
-                    <TabsTrigger
-                      value="live"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Live
-                    </TabsTrigger>
-                  )}
+                  <LockableTabTrigger value="live" label="Live" locked={!hasLive} />
                   <TabsTrigger
                     value="overview"
                     className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
                   >
                     Overview
                   </TabsTrigger>
-                  {hasPoints && (
-                    <TabsTrigger
-                      value="points"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Points Table
-                    </TabsTrigger>
-                  )}
-                  {hasFixtures && (
-                    <TabsTrigger
-                      value="schedule"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Schedule
-                    </TabsTrigger>
-                  )}
-                  {hasBracket && (
-                    <TabsTrigger
-                      value="bracket"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Bracket
-                    </TabsTrigger>
-                  )}
-                  {hasSquads && (
-                    <TabsTrigger
-                      value="squads"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Squads
-                    </TabsTrigger>
-                  )}
-                  {hasLeaderboard && (
-                    <TabsTrigger
-                      value="stats"
-                      className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                    >
-                      Stats
-                    </TabsTrigger>
-                  )}
+                  <LockableTabTrigger value="points" label="Points Table" locked={!hasPoints} />
+                  <LockableTabTrigger value="schedule" label="Schedule" locked={!hasFixtures} />
+                  <LockableTabTrigger value="bracket" label="Bracket" locked={!hasBracket} />
+                  <LockableTabTrigger value="squads" label="Squads" locked={!hasSquads} />
+                  <LockableTabTrigger value="stats" label="Stats" locked={!hasLeaderboard} />
                   <TabsTrigger
                     value="prizes"
                     className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
@@ -278,11 +247,17 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsList>
 
                 {/* LIVE */}
-                {hasLive && (
-                  <TabsContent value="live" className="mt-0">
+                <TabsContent value="live" className="mt-0">
+                  {hasLive ? (
                     <LiveScorePanel match={tournament.liveMatch!} />
-                  </TabsContent>
-                )}
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={Radio}
+                      title="No Live Match Right Now"
+                      description="Once a match kicks off, ball-by-ball scoring, run rates, and the current batting/bowling breakdown will show up here."
+                    />
+                  )}
+                </TabsContent>
 
                 {/* OVERVIEW */}
                 <TabsContent value="overview" className="mt-0">
@@ -300,33 +275,51 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* POINTS TABLE */}
-                {hasPoints && (
-                  <TabsContent value="points" className="mt-0">
+                <TabsContent value="points" className="mt-0">
+                  {hasPoints ? (
                     <PointsTablePanel rows={tournament.pointsTable!} />
-                  </TabsContent>
-                )}
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={ListOrdered}
+                      title="Points Table Coming Soon"
+                      description="Once matches are played, standings, net run rate, and each team's recent form will be tracked here automatically."
+                    />
+                  )}
+                </TabsContent>
 
                 {/* SCHEDULE */}
-                {hasFixtures && (
-                  <TabsContent value="schedule" className="mt-0">
+                <TabsContent value="schedule" className="mt-0">
+                  {hasFixtures ? (
                     <SchedulePanel fixtures={tournament.fixtures!} />
-                  </TabsContent>
-                )}
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={CalendarClock}
+                      title="Schedule Not Announced Yet"
+                      description="Match dates, times, and venues will appear here once the fixture list is published."
+                    />
+                  )}
+                </TabsContent>
 
                 {/* BRACKET */}
-                {hasBracket && (
-                  <TabsContent value="bracket" className="mt-0">
-                    {tournament.bracketFormat === "double" ? (
-                      <BracketPreviewPanel format="double" slug={slug} />
+                <TabsContent value="bracket" className="mt-0">
+                  {hasBracket ? (
+                    tournament.bracketFormat === "double" ? (
+                      <BracketPreviewPanel format="double" slug={slug} doubleElimData={tournament.doubleElimData} />
                     ) : tournament.bracketFormat === "single" ? (
-                      <BracketPreviewPanel format="single" slug={slug} />
+                      <BracketPreviewPanel format="single" slug={slug} bracketRounds={tournament.bracketRounds} />
                     ) : (
-                      // Legacy fallback for tournaments with only the old
-                      // flat `bracket` array and no bracketFormat set.
+                      // Legacy fallback for tournaments with only the old flat `bracket`
+                      // array and no bracketFormat set (e.g. round-robin tournaments).
                       <BracketPanel matches={tournament.bracket!} slug={slug} />
-                    )}
-                  </TabsContent>
-                )}
+                    )
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={Network}
+                      title="Playoff Bracket Not Set Up"
+                      description="Once the playoff stage is configured, the full knockout bracket will be previewed here."
+                    />
+                  )}
+                </TabsContent>
 
                 {/* SQUADS */}
                 {hasSquads && (
@@ -335,15 +328,34 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   </TabsContent>
                 )}
 
+                {/* SQUADS */}
+                <TabsContent value="squads" className="mt-0">
+                  {hasSquads ? (
+                    <SquadsPanel squads={tournament.squads!} />
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={Shield}
+                      title="Squads Not Added Yet"
+                      description="Team rosters and captains will show up here once squads are registered for this tournament."
+                    />
+                  )}
+                </TabsContent>
+
                 {/* STATS / LEADERBOARD */}
-                {hasLeaderboard && (
-                  <TabsContent value="stats" className="mt-0">
+                <TabsContent value="stats" className="mt-0">
+                  {hasLeaderboard ? (
                     <LeaderboardPanel
                       runs={tournament.runsLeaderboard || []}
                       wickets={tournament.wicketsLeaderboard || []}
                     />
-                  </TabsContent>
-                )}
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={Award}
+                      title="Leaderboard Not Available Yet"
+                      description="Top run-scorers and wicket-takers will populate here once matches start being recorded."
+                    />
+                  )}
+                </TabsContent>
 
                 <TabsContent value="prizes" className="mt-0">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
@@ -449,6 +461,52 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
         </div>
       </section>
     </main>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// TAB TRIGGER — disabled + lock icon when its data isn't there yet
+// ─────────────────────────────────────────────────────────────
+function LockableTabTrigger({ value, label, locked }: { value: string; label: string; locked: boolean }) {
+  return (
+    <TabsTrigger
+      value={value}
+      disabled={locked}
+      className={`data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300 flex items-center gap-1.5 ${
+        locked ? "opacity-40 cursor-not-allowed data-[state=active]:bg-transparent data-[state=active]:text-inherit" : ""
+      }`}
+    >
+      {locked && <Lock className="h-3 w-3" />}
+      {label}
+    </TabsTrigger>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// LOCKED TAB PLACEHOLDER — shown in place of a tab's content when
+// that part of the tournament hasn't been set up yet, so visitors
+// can see what a fully-run tournament will eventually show here.
+// ─────────────────────────────────────────────────────────────
+function LockedTabPlaceholder({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  description: string
+}) {
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-10 mb-8 flex flex-col items-center text-center gap-3">
+      <div className="h-12 w-12 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center relative">
+        <Icon className="h-5 w-5 text-gold/50" />
+        <span className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-black border border-gold/30 flex items-center justify-center">
+          <Lock className="h-2.5 w-2.5 text-gold" />
+        </span>
+      </div>
+      <h3 className="text-white font-bold font-cinzel">{title}</h3>
+      <p className="text-gray-400 text-sm max-w-sm">{description}</p>
+    </div>
   )
 }
 
@@ -773,12 +831,10 @@ function BracketTeamRow({ team, isWinner }: { team: BracketTeam; isWinner: boole
 }
 
 // ─────────────────────────────────────────────────────────────
-// SQUADS PANEL
+// SQUADS PANEL — kept identical to the original/demo design
+// (name + captain + player chips). No logos, owner, or purse
+// fields here; that enhanced variant was intentionally reverted.
 // ─────────────────────────────────────────────────────────────
-// Teams may exist with no sold players yet (auction created but not run,
-// or still in progress) — getSquadsForTournament now returns those teams
-// with an empty `players` array instead of hiding them. Render that case
-// as "Squad to be announced" rather than an empty card or omitting it.
 function SquadsPanel({ squads }: { squads: Squad[] }) {
   return (
     <div className="space-y-4 mb-8">
@@ -920,3 +976,4 @@ function AwardsPanel({ awards }: { awards: AwardEntry[] }) {
     </div>
   )
 }
+

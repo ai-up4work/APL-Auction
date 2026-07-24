@@ -7,6 +7,7 @@
 
 import { showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket"
+import type { DoubleElimData } from "@/lib/tournament/doubleElim"
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -135,6 +136,9 @@ export interface TournamentExtras {
    *  than a random unrelated 32-team demo. Only meaningful when
    *  `bracketFormat === "single"`. */
   bracketRounds?: Round[]
+  /** Real double-elimination bracket data. Only meaningful when
+   *  `bracketFormat === "double"`. */
+  doubleElimData?: DoubleElimData
   squads?: Squad[]
   runsLeaderboard?: LeaderboardRow[]
   wicketsLeaderboard?: LeaderboardRow[]

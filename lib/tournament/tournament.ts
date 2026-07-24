@@ -20,6 +20,8 @@
 import { supabase } from "@/lib/supabase";
 import type { Tournament, BracketMatch, Squad } from "@/data/tournament-data";
 import { slugify } from "@/data/tournament-data";
+import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
+import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 // Tournament = ShowcaseSlide & TournamentExtras. ShowcaseSlide only requires
 // tag, slug, title, by, image — everything else on it (and all of
 // TournamentExtras) is optional, so a partial DB mapping is a valid
@@ -47,6 +49,19 @@ function mapTournamentStatus(dbStatus: string): "Upcoming" | "Live" | "Completed
   if (normalized === "live") return "Live";
   if (normalized === "completed") return "Completed";
   return "Upcoming";
+}
+
+/**
+ * `tournaments.format` (DB enum: single_elimination | double_elimination |
+ * round_robin) -> the `bracketFormat` field TournamentExtras and
+ * BracketPreviewPanel actually key off of ("single" | "double"). There's no
+ * chart-style bracket for round_robin, so it returns undefined there and
+ * the caller falls back to the legacy flat `bracket` array / points table.
+ */
+function mapBracketFormat(dbFormat: string): "single" | "double" | undefined {
+  if (dbFormat === "single_elimination") return "single";
+  if (dbFormat === "double_elimination") return "double";
+  return undefined;
 }
 
 /**
@@ -394,6 +409,153 @@ async function getFixturesForTournament(tournamentId: string) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// BRACKET CHART DATA — Round[] / DoubleElimData for BracketPreviewPanel
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Converts a raw joined team row + score/winner code into the TeamNode
+ * shape TournamentBracket/DoubleElimBoard/BracketPreviewPanel consume.
+ * Returns null for an unfilled slot (team not yet decided/TBD).
+ */
+function toTeamNode(
+  team: { name: string; code: string; color?: string | null } | null | undefined,
+  score: number | null | undefined,
+  winnerCode?: string | null
+): TeamNode | null {
+  if (!team) return null;
+  return {
+    id: team.code,
+    code: team.code,
+    name: team.name,
+    color: team.color ?? "#4a5168",
+    score: score ?? undefined,
+    isWinner: winnerCode ? winnerCode === team.code : undefined,
+  };
+}
+
+/**
+ * Converts one raw bracket_matches row (with team_a/team_b/winner already
+ * joined) into a MatchNode.
+ */
+function toMatchNode(m: any): MatchNode {
+  const teamA = Array.isArray(m.team_a) ? m.team_a[0] : m.team_a;
+  const teamB = Array.isArray(m.team_b) ? m.team_b[0] : m.team_b;
+  const winner = Array.isArray(m.winner) ? m.winner[0] : m.winner;
+
+  return {
+    id: m.id,
+    label: `Round ${m.round}`,
+    status: m.status === "completed" ? "completed" : m.status === "live" ? "live" : "scheduled",
+    teamA: toTeamNode(teamA, m.score_a, winner?.code),
+    teamB: toTeamNode(teamB, m.score_b, winner?.code),
+    aFrom: m.feeder_match_a_id ?? null,
+    bFrom: m.feeder_match_b_id ?? null,
+    venue: m.venue ?? undefined,
+    date: m.scheduled_at ? new Date(m.scheduled_at).toLocaleDateString() : undefined,
+  };
+}
+
+/**
+ * Groups already-built MatchNodes (parallel array to `rows`, same order)
+ * into Round[] keyed by bracket_matches.round, sorted ascending. Rows are
+ * expected to already be ordered by `position` within each round (the
+ * caller's query does this), so match order within a Round is preserved.
+ */
+function groupIntoRounds(rows: { round: number }[], matches: MatchNode[], namePrefix: string): Round[] {
+  const byRound = new Map<number, MatchNode[]>();
+  rows.forEach((row, i) => {
+    const arr = byRound.get(row.round) ?? [];
+    arr.push(matches[i]);
+    byRound.set(row.round, arr);
+  });
+  return [...byRound.keys()]
+    .sort((a, b) => a - b)
+    .map((rn, idx) => ({
+      id: idx,
+      name: `${namePrefix} ${rn}`,
+      shortName: `R${rn}`,
+      matches: byRound.get(rn) ?? [],
+    }));
+}
+
+/**
+ * Builds real bracket-chart data for a tournament from `bracket_matches`,
+ * shaped for BracketPreviewPanel: Round[] for single elimination,
+ * DoubleElimData for double elimination. Returns {} for round_robin (or
+ * on query error) — the caller then falls back to the legacy flat
+ * `bracket` array / points table instead of a chart.
+ *
+ * ASSUMPTION: for double elimination, `bracket_type = 'grand_final'` rows
+ * are ordered by `position` — position 0 is the grand final itself, and a
+ * second row (position 1), if present, is the bracket-reset decider match
+ * (only played if the loser's-bracket team wins the first grand final).
+ * Adjust the gfRows indexing below if your data encodes this differently.
+ */
+async function getBracketChartDataForTournament(
+  tournamentId: string,
+  dbFormat: string
+): Promise<{
+  bracketFormat?: "single" | "double";
+  bracketRounds?: Round[];
+  doubleElimData?: DoubleElimData;
+}> {
+  const bracketFormat = mapBracketFormat(dbFormat);
+  if (!bracketFormat) return {};
+
+  const { data: rows, error } = await supabase
+    .from("bracket_matches")
+    .select(
+      `
+      id, round, position, bracket_type, score_a, score_b, status,
+      venue, scheduled_at, feeder_match_a_id, feeder_match_b_id,
+      team_a:team_a_id ( name, code, color ),
+      team_b:team_b_id ( name, code, color ),
+      winner:winner_team_id ( code )
+      `
+    )
+    .eq("tournament_id", tournamentId)
+    .order("round", { ascending: true })
+    .order("position", { ascending: true });
+
+  if (error || !rows) {
+    console.error("getBracketChartDataForTournament failed:", error?.message);
+    return { bracketFormat };
+  }
+
+  if (bracketFormat === "single") {
+    const winnerRows = rows.filter((r) => r.bracket_type === "winners");
+    return {
+      bracketFormat,
+      bracketRounds: groupIntoRounds(winnerRows, winnerRows.map(toMatchNode), "Round"),
+    };
+  }
+
+  // double elimination
+  const winnersRows = rows.filter((r) => r.bracket_type === "winners");
+  const losersRows = rows.filter((r) => r.bracket_type === "losers");
+  const gfRows = rows
+    .filter((r) => r.bracket_type === "grand_final")
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
+  const winners = groupIntoRounds(winnersRows, winnersRows.map(toMatchNode), "WB Round");
+  const losers = groupIntoRounds(losersRows, losersRows.map(toMatchNode), "LB Round");
+  const grandFinal: MatchNode = gfRows[0]
+    ? toMatchNode(gfRows[0])
+    : {
+        id: "gf-empty",
+        label: "Grand Final",
+        status: "scheduled",
+        teamA: null,
+        teamB: null,
+        aFrom: null,
+        bFrom: null,
+      };
+  const bracketReset: MatchNode | undefined = gfRows[1] ? toMatchNode(gfRows[1]) : undefined;
+
+  return { bracketFormat, doubleElimData: { winners, losers, grandFinal, bracketReset } };
+}
+
 /**
  * Derives squads for a tournament from its linked auction's results —
  * NOT a hand-edited table. `players.sold_to_team_id` tells us which team
@@ -511,7 +673,13 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
  *     *actual* column matching the rest of the showcase's tag vocabulary
  *     and isn't used here yet; consider switching `tag` to read
  *     `category` directly once every tournament has one set.
- *   - bracket: mapped ✅ via bracket_matches.tournament_id
+ *   - bracket: mapped ✅ via bracket_matches.tournament_id (legacy flat
+ *     array, kept for round_robin tournaments / as a raw data source).
+ *   - bracketFormat / bracketRounds / doubleElimData: mapped ✅ via
+ *     getBracketChartDataForTournament, derived from tournaments.format +
+ *     bracket_matches. This is what the Bracket tab's chart-style
+ *     BracketPreviewPanel actually renders; the flat `bracket` array above
+ *     is only used as a fallback for round_robin tournaments.
  *   - fixtures: mapped ✅ — derived from the same bracket_matches rows
  *     (venue/scheduled_at/status/scores). There's no separate fixtures
  *     table; bracket_matches already supports bracket_type='round_robin'.
@@ -569,6 +737,7 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
     awards,
     pointsTable,
     fixtures,
+    chartBracket,
   ] = await Promise.all([
     supabase
       .from("bracket_matches")
@@ -590,6 +759,7 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
     getAwardsForTournament(tournament.id),
     getPointsTableForTournament(tournament.id),
     getFixturesForTournament(tournament.id),
+    getBracketChartDataForTournament(tournament.id, tournament.format),
   ]);
 
   if (bracketError) {
@@ -639,6 +809,9 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
     pointsTable: pointsTable.length ? pointsTable : undefined,
     fixtures: fixtures.length ? fixtures : undefined,
     bracket,
+    bracketFormat: chartBracket.bracketFormat,
+    bracketRounds: chartBracket.bracketRounds,
+    doubleElimData: chartBracket.doubleElimData,
     squads: squads.length ? squads : undefined,
   };
 

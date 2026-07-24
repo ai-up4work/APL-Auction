@@ -1,3 +1,4 @@
+// components/tournament/tournament-detail-clientDemo.tsx
 "use client"
 
 import { useState } from "react"
