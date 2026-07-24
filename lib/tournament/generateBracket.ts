@@ -29,11 +29,34 @@ export async function hasBracketGenerated(tournamentId: string): Promise<boolean
   return !!count && count > 0;
 }
 
-/** Deletes every bracket_matches row for a tournament — call before
- *  generateBracketForTournament if you want to regenerate from scratch. */
+/**
+ * Deletes every bracket_matches row for a tournament — call before
+ * generateBracketForTournament if you want to regenerate from scratch.
+ *
+ * IMPORTANT: Supabase/PostgREST does not throw an error when a RLS DELETE
+ * policy silently filters out every row a delete would otherwise match —
+ * it just reports success with zero rows affected. `.select("id")` forces
+ * the response to include the rows that were actually deleted, so we can
+ * tell the difference between "deleted everything" and "deleted nothing
+ * because RLS blocked it" instead of reporting a false success.
+ */
 export async function deleteBracketForTournament(tournamentId: string): Promise<GenerateBracketResult> {
-  const { error } = await supabase.from("bracket_matches").delete().eq("tournament_id", tournamentId);
+  const { data, error } = await supabase
+    .from("bracket_matches")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .select("id");
+
   if (error) return { ok: false, error: error.message };
+
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        "No bracket rows were deleted — this usually means the DELETE row-level-security policy on bracket_matches is missing or doesn't match your org.",
+    };
+  }
+
   return { ok: true };
 }
 
@@ -104,6 +127,11 @@ export async function generateBracketForTournament(
       await insertSingleElim(tournamentId, rounds);
     }
   } catch (e: any) {
+    // Most common cause of a failure here: no INSERT row-level-security
+    // policy on bracket_matches (or one that doesn't match the caller's
+    // org), which surfaces from Supabase as a permission-denied /
+    // "new row violates row-level security policy" error on the very
+    // first insert. Surface it plainly rather than a generic message.
     return { ok: false, error: e?.message ?? "Failed to generate bracket." };
   }
 

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight } from "lucide-react";
+import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Public types — every piece of chart data flows through these      */
@@ -63,15 +63,20 @@ export interface TournamentBracketProps {
    *  teams are both known (not TBD). When true, clicking a team row
    *  selects it as the winner for that card's editor instead of pinning
    *  the hover-trace highlight, and a score + Save row replaces the
-   *  venue/date footer on editable cards. */
+   *  venue/date footer on editable cards. A match that already has a
+   *  recorded result stays fully editable — the Save button just
+   *  relabels to "Update result" so admins can correct a mistake. */
   editable?: boolean;
-  /** Called when an admin saves a result from a card's inline editor. */
+  /** Called when an admin saves a result from a card's inline editor.
+   *  May return a Promise (optionally resolving to { ok, error }) — the
+   *  card awaits it to drive its saving/loading state and surface any
+   *  error inline. */
   onRecordResult?: (
     matchId: string,
     winner: "A" | "B",
     scoreA: number,
     scoreB: number
-  ) => void | Promise<void>;
+  ) => void | Promise<void | { ok: boolean; error?: string }>;
 }
 
 const GROW_WEIGHT = {
@@ -147,7 +152,9 @@ function TeamRow({
   /** When present, renders an editable score box on this row instead of
    *  (or alongside, pre-completion) the read-only score/checkmark — used
    *  by MatchCard's inline editor. `value`/`onChange` drive a plain
-   *  number input; `disabled` locks it once the match is completed. */
+   *  number input; `disabled` only reflects an in-flight save, never
+   *  whether the match has already been completed — completed matches
+   *  stay editable so a wrong score can be corrected. */
   scoreInput?: {
     value: string;
     onChange: (v: string) => void;
@@ -228,10 +235,17 @@ function TeamRow({
           {scoreInput ? (
             <input
               type="number"
+              min={0}
               value={scoreInput.value}
               disabled={scoreInput.disabled}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => scoreInput.onChange(e.target.value)}
+              onKeyDown={(e) => {
+                // Belt-and-suspenders alongside the clamp-on-change
+                // upstream: block typing a minus sign outright so the
+                // score can never even momentarily read negative.
+                if (e.key === "-") e.preventDefault();
+              }}
               className="w-12 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-1 disabled:opacity-60"
             />
           ) : (
@@ -272,19 +286,23 @@ function MatchCard({
    *  an editable score box directly in each team row — no separate
    *  winner-selection step. Winner is inferred from whichever score is
    *  higher; a tie shows explicit "X wins" buttons instead of a Save
-   *  button, mirroring MatchResultCard's flow. */
+   *  button, mirroring MatchResultCard's flow. Completed matches stay
+   *  editable so a wrong result can be corrected later. */
   editable?: boolean;
   onRecordResult?: (
     matchId: string,
     winner: "A" | "B",
     scoreA: number,
     scoreB: number
-  ) => void | Promise<void>;
+  ) => void | Promise<void | { ok: boolean; error?: string }>;
 }) {
   const isBye = match.teamA?.code === "BYE" || match.teamB?.code === "BYE";
   const bothAssigned = !!match.teamA && !!match.teamB;
   const playable = !!editable && bothAssigned && !isBye;
-  const locked = match.status === "completed";
+  // A completed match is no longer locked against edits — it just
+  // changes the button copy ("Update result" instead of "Save result")
+  // so admins know they're revising a saved score.
+  const alreadyRecorded = match.status === "completed";
 
   const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
   const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
@@ -298,6 +316,24 @@ function MatchCard({
     setScoreB(match.teamB?.score?.toString() ?? "");
   }, [match.id, match.status, match.teamA?.score, match.teamB?.score]);
 
+  // Scores can never go below 0 — clamp on every keystroke so the field
+  // itself never shows a negative number, rather than only checking at
+  // submit time.
+  function clampNonNegative(v: string): string {
+    if (v.trim() === "") return v;
+    const n = Number(v);
+    if (Number.isNaN(n)) return v;
+    return n < 0 ? "0" : v;
+  }
+
+  function handleScoreAChange(v: string) {
+    setScoreA(clampNonNegative(v));
+  }
+
+  function handleScoreBChange(v: string) {
+    setScoreB(clampNonNegative(v));
+  }
+
   const numA = Number(scoreA);
   const numB = Number(scoreB);
   const bothFilled = scoreA.trim() !== "" && scoreB.trim() !== "" && !Number.isNaN(numA) && !Number.isNaN(numB);
@@ -305,17 +341,37 @@ function MatchCard({
 
   async function submitDecisive() {
     if (!bothFilled || isTie) return;
+    if (numA < 0 || numB < 0) {
+      setEditError("Scores can't be negative.");
+      return;
+    }
     setEditError(null);
     setSaving(true);
-    await onRecordResult?.(match.id, numA > numB ? "A" : "B", numA, numB);
-    setSaving(false);
+    try {
+      const result = await onRecordResult?.(match.id, numA > numB ? "A" : "B", numA, numB);
+      if (result && typeof result === "object" && "ok" in result && !result.ok) {
+        setEditError(result.error ?? "Couldn't save the result.");
+      }
+    } catch {
+      setEditError("Couldn't save the result. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function submitTieBreak(winner: "A" | "B") {
     setEditError(null);
     setSaving(true);
-    await onRecordResult?.(match.id, winner, numA, numB);
-    setSaving(false);
+    try {
+      const result = await onRecordResult?.(match.id, winner, numA, numB);
+      if (result && typeof result === "object" && "ok" in result && !result.ok) {
+        setEditError(result.error ?? "Couldn't save the result.");
+      }
+    } catch {
+      setEditError("Couldn't save the result. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const showFooter = !compact && (match.teamA || match.teamB);
@@ -330,6 +386,11 @@ function MatchCard({
       {match.status === "live" && (
         <div className="absolute inset-0 bg-gradient-to-r from-status-live/5 to-theme-orange/5 pointer-events-none animate-pulse" />
       )}
+      {saving && (
+        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] flex items-center justify-center z-10 pointer-events-none">
+          <Loader2 className="w-4 h-4 text-theme-orange animate-spin" />
+        </div>
+      )}
       <div className="relative flex flex-col gap-1 lg:gap-1.5 p-1.5 lg:p-2">
         <TeamRow
           team={match.teamA}
@@ -342,7 +403,7 @@ function MatchCard({
           isPinned={!!match.teamA && pinnedTeamCode === match.teamA.code}
           rowRef={getRef ? getRef(`${match.id}:A`) : undefined}
           compact={compact}
-          scoreInput={playable ? { value: scoreA, onChange: setScoreA, disabled: locked } : undefined}
+          scoreInput={playable ? { value: scoreA, onChange: handleScoreAChange, disabled: saving } : undefined}
         />
         <TeamRow
           team={match.teamB}
@@ -355,10 +416,10 @@ function MatchCard({
           isPinned={!!match.teamB && pinnedTeamCode === match.teamB.code}
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
-          scoreInput={playable ? { value: scoreB, onChange: setScoreB, disabled: locked } : undefined}
+          scoreInput={playable ? { value: scoreB, onChange: handleScoreBChange, disabled: saving } : undefined}
         />
 
-        {playable && !locked && isTie && (
+        {playable && isTie && (
           <div className="flex flex-col gap-1">
             <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-status-live">
               Scores tied — who won?
@@ -384,14 +445,23 @@ function MatchCard({
           </div>
         )}
 
-        {playable && !locked && !isTie && (
+        {playable && !isTie && (
           <button
             type="button"
             onClick={submitDecisive}
             disabled={!bothFilled || saving}
-            className="w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-1.5 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {saving ? "Saving…" : "Save result"}
+            {saving ? (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Saving…
+              </>
+            ) : alreadyRecorded ? (
+              "Update result"
+            ) : (
+              "Save result"
+            )}
           </button>
         )}
 
@@ -471,7 +541,7 @@ function BracketColumn({
     winner: "A" | "B",
     scoreA: number,
     scoreB: number
-  ) => void | Promise<void>;
+  ) => void | Promise<void | { ok: boolean; error?: string }>;
 }) {
   return (
     <div

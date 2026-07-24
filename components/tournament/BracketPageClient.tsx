@@ -1,16 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/context/AuthContext"
-import { getOrgIdForUser } from "@/lib/tournament/tournament"
-import { updateBracketMatchResult } from "@/lib/tournament/bracketData"
-import TournamentBracketEditable from "@/components/demo/TournamentBracketEditable"
-import type { Round, MatchNode } from "@/components/tournament/TournamentBracket"
-import DoubleElimBracketClient from "@/components/tournament/DoubleElimBracketClient"
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabase"
+import TournamentBracket from "@/components/tournament/TournamentBracket"
+import type { Round } from "@/components/tournament/TournamentBracket"
+import DoubleElimBoard from "@/components/tournament/DoubleElimBoard"
 import type { DoubleElimData } from "@/lib/tournament/doubleElim"
+import {
+  getBracketMatchesForTournament,
+  buildSingleEliminationRounds,
+  buildDoubleEliminationData,
+} from "@/lib/tournament/bracketData"
 
 interface BracketPageClientProps {
+  /** Needed to scope the realtime subscription and to re-fetch rows
+   *  whenever a change comes in. */
+  tournamentId: string
   format: "single" | "double"
   title: string
   tournamentOrgId: string
@@ -18,105 +23,93 @@ interface BracketPageClientProps {
   doubleData?: DoubleElimData
 }
 
-/** Finds a match anywhere across all rounds by id, so a recorded
- *  "A"/"B" winner slot can be resolved into the actual team id the
- *  match already carries (teamA.id / teamB.id) before saving. */
-function findMatchInRounds(rounds: Round[], matchId: string): MatchNode | null {
-  for (const round of rounds) {
-    const m = round.matches.find((mm) => mm.id === matchId)
-    if (m) return m
-  }
-  return null
-}
-
+/**
+ * Public, read-only bracket view. This page never shows score inputs,
+ * Save buttons, or tie-break controls — that only happens on the
+ * /bracket/edit route (BracketEditClient). Here we deliberately omit
+ * `editable`/`onRecordResult` so TournamentBracket and DoubleElimBoard
+ * fall back to their fully static rendering.
+ *
+ * Server-rendered `singleRounds`/`doubleData` seed the initial paint;
+ * after that, a Supabase Realtime channel listens for any change to
+ * this tournament's `bracket_matches` rows (inserts/updates from the
+ * admin's edit page) and rebuilds local state from a fresh fetch, so
+ * anyone sitting on this page sees results land without reloading.
+ */
 export default function BracketPageClient({
+  tournamentId,
   format,
   title,
-  tournamentOrgId,
   singleRounds,
   doubleData,
 }: BracketPageClientProps) {
-  const router = useRouter()
-  const { user } = useAuth()
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [rounds, setRounds] = useState<Round[] | undefined>(singleRounds)
+  const [doubleElimData, setDoubleElimData] = useState<DoubleElimData | undefined>(doubleData)
+
+  // Re-seed local state if the server sends new props (e.g. a normal
+  // Next.js navigation/re-render) — kept separate from the realtime
+  // path below so the two update sources don't fight each other.
+  useEffect(() => {
+    setRounds(singleRounds)
+  }, [singleRounds])
 
   useEffect(() => {
-    if (!user) return
-    let cancelled = false
-    getOrgIdForUser(user.id).then((orgId) => {
-      if (!cancelled) setIsAdmin(!!orgId && orgId === tournamentOrgId)
-    })
+    setDoubleElimData(doubleData)
+  }, [doubleData])
+
+  useEffect(() => {
+    async function refetchAndRebuild() {
+      const rows = await getBracketMatchesForTournament(tournamentId)
+      if (format === "double") {
+        const next = buildDoubleEliminationData(rows)
+        if (next) setDoubleElimData(next)
+      } else {
+        setRounds(buildSingleEliminationRounds(rows))
+      }
+    }
+
+    const channel = supabase
+      .channel(`bracket-matches-${tournamentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bracket_matches",
+          filter: `tournament_id=eq.${tournamentId}`,
+        },
+        () => {
+          refetchAndRebuild()
+        }
+      )
+      .subscribe()
+
     return () => {
-      cancelled = true
+      supabase.removeChannel(channel)
     }
-  }, [user, tournamentOrgId])
+  }, [tournamentId, format])
 
-  const handleRecordResult = async (
-    matchId: string,
-    winner: "A" | "B",
-    scoreA: number,
-    scoreB: number
-  ) => {
-    if (!isAdmin || !singleRounds) return
-    setSaveError(null)
-
-    const match = findMatchInRounds(singleRounds, matchId)
-    const winnerTeamId = winner === "A" ? match?.teamA?.id : match?.teamB?.id
-    if (!winnerTeamId) {
-      setSaveError("Couldn't determine the winning team for this match.")
-      return
-    }
-
-    const res = await updateBracketMatchResult(matchId, {
-      scoreA,
-      scoreB,
-      winnerTeamId,
-      status: "completed",
-    })
-
-    if (!res.ok) {
-      setSaveError(res.error ?? "Couldn't save the result.")
-      return
-    }
-
-    // singleRounds is server-fetched props, not local state, so refresh
-    // to pull the updated bracket_matches rows and re-render.
-    router.refresh()
-  }
-
-  if (format === "double" && doubleData) {
+  if (format === "double" && doubleElimData) {
     return (
-      <DoubleElimBracketClient
-        data={doubleData}
+      <DoubleElimBoard
+        data={doubleElimData}
         title={title}
-        tournamentOrgId={tournamentOrgId}
+        eyebrowLabel="Knockout · Double Elimination"
+        helperText="Hover or click a team to trace their path."
       />
     )
   }
 
-  return (
-    <>
-      <TournamentBracketEditable
-        rounds={singleRounds!}
+  if (format === "single" && rounds) {
+    return (
+      <TournamentBracket
+        rounds={rounds}
         title={title}
         eyebrowLabel="Knockout Stage"
-        helperText={
-          isAdmin
-            ? "Enter a score and pick a winner to record a result."
-            : "Hover or click a team to trace their path."
-        }
-        onRecordResult={
-          isAdmin
-            ? handleRecordResult
-            : () => {
-                console.warn("Only tournament admins can record results.")
-              }
-        }
+        helperText="Hover or click a team to trace their path."
       />
-      {saveError && (
-        <p className="text-red-500 text-sm text-center mt-2">{saveError}</p>
-      )}
-    </>
-  )
+    )
+  }
+
+  return null
 }

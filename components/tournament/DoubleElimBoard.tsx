@@ -5,12 +5,19 @@ import { Trophy, RotateCcw, Award } from "lucide-react";
 import type { MatchNode, Round } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 import MatchResultCard from "./MatchResultCard";
+import MatchResultCardStatic from "./MatchResultCardStatic";
 
-type RecordFn = (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void;
+type RecordFn = (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void | Promise<{ ok: boolean; error?: string } | void>;
 
 export interface DoubleElimBoardProps {
   data: DoubleElimData;
-  onRecordResult: RecordFn;
+  /** Required when `editable` is true; ignored (and safe to omit) when
+   *  the board is read-only. */
+  onRecordResult?: RecordFn;
+  /** Turns on score entry on every match card. Defaults to false — the
+   *  public tournament page should never pass this, so every card
+   *  renders via MatchResultCardStatic with no inputs or buttons. */
+  editable?: boolean;
   title?: string;
   eyebrowLabel?: string;
   helperText?: string;
@@ -178,9 +185,40 @@ function SectionHeader({
   );
 }
 
+/** Renders whichever match card is appropriate for this board's mode:
+ *  the real editable card (score inputs, Save, tie-break buttons) when
+ *  `editable` is true, or the fully static read-only card otherwise.
+ *  Centralizing the switch here means every call site below just calls
+ *  <MatchCardFor .../> once instead of branching five separate times. */
+function MatchCardFor({
+  editable,
+  onRecordResult,
+  ...rest
+}: {
+  match: MatchNode;
+  editable?: boolean;
+  onRecordResult?: RecordFn;
+  cardRef?: (el: HTMLDivElement | null) => void;
+  hoveredTeamCode?: string | null;
+  onTeamHover?: (code: string | null) => void;
+  onTeamClick?: (code: string) => void;
+  pinnedTeamCode?: string | null;
+}) {
+  if (editable) {
+    // onRecordResult is guaranteed by the caller when editable is true
+    // (DoubleElimBoard only ever sets editable on the admin route, which
+    // always passes a real handler) — cast away the optionality here
+    // rather than threading a redundant non-null check through every
+    // render site below.
+    return <MatchResultCard {...rest} onRecordResult={onRecordResult as (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void} />;
+  }
+  return <MatchResultCardStatic {...rest} />;
+}
+
 export default function DoubleElimBoard({
   data,
   onRecordResult,
+  editable = false,
   title = "Double Elimination Bracket",
   eyebrowLabel = "Knockout · Double Elimination",
   helperText = "Hover or click a team to trace their path.",
@@ -385,8 +423,9 @@ export default function DoubleElimBoard({
         >
           {rounds[0]?.matches.map((m) => (
             <div key={m.id} className="w-full">
-              <MatchResultCard
+              <MatchCardFor
                 match={m}
+                editable={editable}
                 onRecordResult={onRecordResult}
                 cardRef={getRef(m.id)}
                 hoveredTeamCode={activeTeamCode}
@@ -407,8 +446,9 @@ export default function DoubleElimBoard({
             };
             return (
               <div key={m.id} className="absolute" style={style}>
-                <MatchResultCard
+                <MatchCardFor
                   match={m}
+                  editable={editable}
                   onRecordResult={onRecordResult}
                   cardRef={getRef(m.id)}
                   hoveredTeamCode={activeTeamCode}
@@ -524,8 +564,9 @@ export default function DoubleElimBoard({
                     <Award className="w-3 h-3" />
                     Grand final
                   </p>
-                  <MatchResultCard
+                  <MatchCardFor
                     match={data.grandFinal}
+                    editable={editable}
                     onRecordResult={onRecordResult}
                     cardRef={getRef("GF")}
                     hoveredTeamCode={activeTeamCode}
@@ -539,8 +580,9 @@ export default function DoubleElimBoard({
                     <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline mb-2 text-center">
                       Bracket reset · decider
                     </p>
-                    <MatchResultCard
+                    <MatchCardFor
                       match={data.bracketReset}
+                      editable={editable}
                       onRecordResult={onRecordResult}
                       cardRef={getRef(data.bracketReset.id)}
                       hoveredTeamCode={activeTeamCode}
@@ -558,20 +600,20 @@ export default function DoubleElimBoard({
 
       {/* Mobile: simple stacked sections, no absolute geometry */}
       <div className="md:hidden max-w-xl mx-auto flex flex-col gap-8 px-2">
-        <MobileSection title="Winners bracket" rounds={data.winners} onRecordResult={onRecordResult} />
-        <MobileSection title="Losers bracket" rounds={data.losers} onRecordResult={onRecordResult} />
+        <MobileSection title="Winners bracket" rounds={data.winners} editable={editable} onRecordResult={onRecordResult} />
+        <MobileSection title="Losers bracket" rounds={data.losers} editable={editable} onRecordResult={onRecordResult} />
         <div>
           <p className="text-[10px] font-black uppercase tracking-widest font-label-mono text-theme-orange mb-3">
             Grand final
           </p>
           <div className="flex flex-col gap-4">
-            <MatchResultCard match={data.grandFinal} onRecordResult={onRecordResult} />
+            <MatchCardFor match={data.grandFinal} editable={editable} onRecordResult={onRecordResult} />
             {data.bracketReset && (
               <>
                 <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline text-center -mt-1">
                   Bracket reset
                 </p>
-                <MatchResultCard match={data.bracketReset} onRecordResult={onRecordResult} />
+                <MatchCardFor match={data.bracketReset} editable={editable} onRecordResult={onRecordResult} />
               </>
             )}
           </div>
@@ -625,7 +667,17 @@ export default function DoubleElimBoard({
   );
 }
 
-function MobileSection({ title, rounds, onRecordResult }: { title: string; rounds: Round[]; onRecordResult: RecordFn }) {
+function MobileSection({
+  title,
+  rounds,
+  editable,
+  onRecordResult,
+}: {
+  title: string;
+  rounds: Round[];
+  editable?: boolean;
+  onRecordResult?: RecordFn;
+}) {
   if (!rounds.length) return null;
   return (
     <div>
@@ -638,7 +690,7 @@ function MobileSection({ title, rounds, onRecordResult }: { title: string; round
             </span>
             <div className="w-full flex flex-col gap-4">
               {round.matches.map((m) => (
-                <MatchResultCard key={m.id} match={m} onRecordResult={onRecordResult} />
+                <MatchCardFor key={m.id} match={m} editable={editable} onRecordResult={onRecordResult} />
               ))}
             </div>
           </div>

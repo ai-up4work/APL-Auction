@@ -7,6 +7,14 @@ import {
   buildDoubleEliminationData,
 } from "@/lib/tournament/bracketData";
 
+// This page reads bracket_matches straight from Supabase and relies on
+// router.refresh() (called right after delete/generate mutations) to show
+// the latest rows. Without this, Next.js's default fetch/route caching
+// can serve a stale render — e.g. matches that were just deleted, or
+// missing ones that were just created — instead of re-querying the DB.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function TournamentBracketEditPage({
   params,
 }: {
@@ -56,7 +64,7 @@ export default async function TournamentBracketEditPage({
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="min-h-[300px] w-full flex items-center justify-center text-outline font-label-mono text-sm text-center px-6">
+    <div className="min-h-[300px] w-full flex items-center justify-center text-outline font-label-mono text-sm text-center">
       {message}
     </div>
   );

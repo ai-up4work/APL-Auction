@@ -3,7 +3,21 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Lock, Save, CheckCircle2, AlertCircle, Plus, Trash2 } from "lucide-react"
+import {
+  Lock,
+  Save,
+  CheckCircle2,
+  AlertCircle,
+  Plus,
+  Trash2,
+  Settings2,
+  Trophy,
+  Swords,
+  Users,
+  CalendarClock,
+  Award,
+  ImageOff,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -32,6 +46,32 @@ interface TournamentEditClientProps {
 
 type GateState = "checking" | "denied" | "allowed"
 
+const JUMP_SECTIONS = [
+  { id: "details", label: "Details" },
+  { id: "prizes", label: "Prizes" },
+  { id: "bracket", label: "Bracket" },
+  { id: "teams", label: "Teams" },
+  { id: "schedule", label: "Schedule" },
+  { id: "awards", label: "Awards" },
+]
+
+function SectionHeading({
+  icon: Icon,
+  title,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+        <Icon className="h-3.5 w-3.5 text-gold" />
+      </div>
+      <h2 className="text-lg font-bold text-white font-cinzel">{title}</h2>
+    </div>
+  )
+}
+
 export default function TournamentEditClient({ tournament }: TournamentEditClientProps) {
   useScrollTop()
   const router = useRouter()
@@ -47,6 +87,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   const [description, setDescription] = useState(tournament.description)
   const [startDate, setStartDate] = useState(tournament.startDate)
   const [imageUrl, setImageUrl] = useState(tournament.imageUrl)
+  const [imageBroken, setImageBroken] = useState(false)
   const [prizePool, setPrizePool] = useState(tournament.prizePool)
   const [website, setWebsite] = useState(tournament.website)
   const [twitter, setTwitter] = useState(tournament.twitter)
@@ -81,9 +122,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   }
 
   // ── Auth + org-ownership gate ─────────────────────────────────────────
-  // Not signed in -> /login. Signed in but a different (or no) org than
-  // the tournament -> denied, with a link back to the public page rather
-  // than a silent redirect, so it's clear *why* nothing shows.
   useEffect(() => {
     if (authLoading) return
 
@@ -115,6 +153,10 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       cancelled = true
     }
   }, [authLoading, user, router, tournament.orgId, tournament.id])
+
+  useEffect(() => {
+    setImageBroken(false)
+  }, [imageUrl])
 
   const dirty =
     name !== tournament.name ||
@@ -165,7 +207,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     if (!prizesDirty) return
     setIsSavingPrizes(true)
     setPrizesSaveError(null)
-    // Drop fully-empty rows before saving rather than persisting blanks.
     const cleaned = prizes.filter((p) => p.place.trim() || p.reward.trim())
     const ok = await savePrizesForTournament(tournament.id, cleaned)
     setIsSavingPrizes(false)
@@ -202,9 +243,13 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       setGenerateError(del.error ?? "Couldn't clear the existing bracket.")
       return
     }
+
+    setBracketExists(false)
+
     const result = await generateBracketForTournament(tournament.id, seedingMethod)
     setIsGenerating(false)
     if (result.ok) {
+      setBracketExists(true)
       setGenerateSuccess(true)
     } else {
       setGenerateError(result.error ?? "Couldn't generate the bracket.")
@@ -249,15 +294,32 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
           {gate === "allowed" && (
             <>
-              <h1 className="text-3xl font-bold text-white font-cinzel mb-2">Edit Tournament</h1>
-              <p className="text-gray-400 text-sm mb-8">
+              <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+                <Settings2 className="w-3.5 h-3.5" />
+                Tournament Admin
+              </span>
+              <h1 className="text-3xl font-bold text-white font-cinzel mb-2">{tournament.name}</h1>
+              <p className="text-gray-400 text-sm mb-6 max-w-xl">
                 Details, Prizes, and Bracket save immediately. Schedule and Awards are read-only
                 here for now — see notes below.
               </p>
 
+              {/* JUMP NAV — turns the long stack of sections into something scannable */}
+              <nav className="flex flex-wrap gap-x-1 gap-y-2 mb-8 pb-4 border-b border-gold/10">
+                {JUMP_SECTIONS.map((s) => (
+                  <a
+                    key={s.id}
+                    href={`#${s.id}`}
+                    className="text-[11px] font-cinzel uppercase tracking-widest text-gray-400 hover:text-gold px-3 py-1.5 rounded-full border border-transparent hover:border-gold/20 transition-colors"
+                  >
+                    {s.label}
+                  </a>
+                ))}
+              </nav>
+
               {/* DETAILS — the only section backed by real columns today */}
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
-                <h2 className="text-lg font-bold text-white font-cinzel mb-4">Details</h2>
+              <div id="details" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
+                <SectionHeading icon={Settings2} title="Details" />
 
                 <div className="space-y-4">
                   <div>
@@ -269,56 +331,69 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                     />
                   </div>
 
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Format</label>
-                    <select
-                      value={format}
-                      onChange={(e) => setFormat(e.target.value as typeof format)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                    >
-                      <option value="single_elimination">Single Elimination</option>
-                      <option value="double_elimination">Double Elimination</option>
-                      <option value="round_robin">Round Robin</option>
-                    </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Format</label>
+                      <select
+                        value={format}
+                        onChange={(e) => setFormat(e.target.value as typeof format)}
+                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      >
+                        <option value="single_elimination">Single Elimination</option>
+                        <option value="double_elimination">Double Elimination</option>
+                        <option value="round_robin">Round Robin</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Category</label>
+                      <select
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      >
+                        <option value="">Not set</option>
+                        <option value="Auction">Auction</option>
+                        <option value="Bracket">Bracket</option>
+                        <option value="Overlay">Overlay</option>
+                        <option value="League">League</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Status</label>
+                      <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      >
+                        <option value="setup">Setup</option>
+                        <option value="upcoming">Upcoming</option>
+                        <option value="live">Live</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Category</label>
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                    >
-                      <option value="">Not set</option>
-                      <option value="Auction">Auction</option>
-                      <option value="Bracket">Bracket</option>
-                      <option value="Overlay">Overlay</option>
-                      <option value="League">League</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Status</label>
-                    <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                    >
-                      <option value="setup">Setup</option>
-                      <option value="upcoming">Upcoming</option>
-                      <option value="live">Live</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Start date</label>
-                    <Input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="bg-black/50 border-gold/30 text-white"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Start date</label>
+                      <Input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="bg-black/50 border-gold/30 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Prize pool (total)</label>
+                      <Input
+                        value={prizePool}
+                        onChange={(e) => setPrizePool(e.target.value)}
+                        placeholder="e.g. $5,000"
+                        className="bg-black/50 border-gold/30 text-white"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -334,22 +409,27 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
                   <div>
                     <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
-                    <Input
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://…"
-                      className="bg-black/50 border-gold/30 text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Prize pool (total)</label>
-                    <Input
-                      value={prizePool}
-                      onChange={(e) => setPrizePool(e.target.value)}
-                      placeholder="e.g. $5,000"
-                      className="bg-black/50 border-gold/30 text-white"
-                    />
+                    <div className="flex gap-3 items-start">
+                      <Input
+                        value={imageUrl}
+                        onChange={(e) => setImageUrl(e.target.value)}
+                        placeholder="https://…"
+                        className="bg-black/50 border-gold/30 text-white flex-1"
+                      />
+                      <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                        {imageUrl && !imageBroken ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={imageUrl}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={() => setImageBroken(true)}
+                          />
+                        ) : (
+                          <ImageOff className="h-4 w-4 text-gray-600" />
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -383,7 +463,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 mt-6">
+                <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
                   <Button
                     onClick={handleSave}
                     disabled={!dirty || isSaving}
@@ -406,8 +486,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
               </div>
 
               {/* PRIZES — its own table, saved separately from Details */}
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
-                <h2 className="text-lg font-bold text-white font-cinzel mb-4">Prizes</h2>
+              <div id="prizes" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
+                <SectionHeading icon={Trophy} title="Prizes" />
 
                 {!prizesLoaded ? (
                   <p className="text-gray-500 text-sm">Loading…</p>
@@ -476,8 +556,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
               </div>
 
               {/* BRACKET — generates bracket_matches from the linked auction's teams */}
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
-                <h2 className="text-lg font-bold text-white font-cinzel mb-4">Bracket</h2>
+              <div id="bracket" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
+                <SectionHeading icon={Swords} title="Bracket" />
 
                 {format === "round_robin" ? (
                   <p className="text-gray-400 text-sm">
@@ -552,27 +632,39 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                   </span>
                 )}
               </div>
-              <TeamsManager
-                tournamentId={tournament.id}
-                orgId={tournament.orgId!}
-                tournamentName={tournament.name}
-              />
+
+              <div id="teams" className="scroll-mt-28 mb-6">
+                <TeamsManager
+                  tournamentId={tournament.id}
+                  orgId={tournament.orgId!}
+                  tournamentName={tournament.name}
+                />
+              </div>
 
               {/* PLACEHOLDER SECTIONS — still need write support */}
-              <PlaceholderSection
-                title="Schedule (Fixtures)"
-                note="Fixtures come from bracket_matches (venue, scheduled_at, status) — reading works, but there's no create/edit UI yet for scheduling a match."
-              />
-              <PlaceholderSection
-                title="Awards"
-                note="Backed by tournament_awards — reading works, but there's no write function or UI yet. Usually filled in after the tournament ends."
-              />
+              <div id="schedule" className="scroll-mt-28">
+                <PlaceholderSection
+                  icon={CalendarClock}
+                  title="Schedule (Fixtures)"
+                  note="Fixtures come from bracket_matches (venue, scheduled_at, status) — reading works, but there's no create/edit UI yet for scheduling a match."
+                />
+              </div>
+              <div id="awards" className="scroll-mt-28">
+                <PlaceholderSection
+                  icon={Award}
+                  title="Awards"
+                  note="Backed by tournament_awards — reading works, but there's no write function or UI yet. Usually filled in after the tournament ends."
+                />
+              </div>
 
               <div className="bg-black/30 border border-gold/10 rounded-lg p-4 mb-8">
-                <p className="text-gray-400 text-xs">
-                  <span className="text-gold font-semibold">Squads</span> aren't edited here —
-                  they come from your linked auction's results. Update the auction to change
-                  those.
+                <p className="text-gray-400 text-xs flex items-start gap-2">
+                  <Users className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
+                  <span>
+                    <span className="text-gold font-semibold">Squads</span> aren't edited here —
+                    they come from your linked auction's results. Update the auction to change
+                    those.
+                  </span>
                 </p>
               </div>
 
@@ -591,11 +683,22 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   )
 }
 
-function PlaceholderSection({ title, note }: { title: string; note: string }) {
+function PlaceholderSection({
+  icon: Icon,
+  title,
+  note,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  note: string
+}) {
   return (
     <div className="bg-black/30 border border-gold/10 rounded-lg p-6 mb-6 opacity-60">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-bold text-white font-cinzel">{title}</h2>
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-gray-500" />
+          <h2 className="text-lg font-bold text-white font-cinzel">{title}</h2>
+        </div>
         <span className="text-[10px] uppercase tracking-widest text-gray-500 font-cinzel">
           Not available yet
         </span>

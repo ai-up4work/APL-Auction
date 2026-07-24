@@ -1,11 +1,19 @@
 "use client";
-import { useEffect, useState } from "react";
 import { CheckCircle2, Radio } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 
-export default function MatchResultCard({
+/**
+ * Read-only counterpart to MatchResultCard, for surfaces where nobody
+ * should be able to enter or change a result — the public tournament
+ * bracket page, spectator views, etc. Same visual structure and design
+ * tokens as MatchResultCard (and TournamentBracket's own MatchCard) so a
+ * public page doesn't look visually inconsistent with the admin one, but
+ * there is no score input, no Save button, and no tie-break UI anywhere
+ * in this component. If a match hasn't been played yet it just says so;
+ * if it's completed it shows the recorded score and a winner checkmark.
+ */
+export default function MatchResultCardStatic({
   match,
-  onRecordResult,
   cardRef,
   hoveredTeamCode = null,
   onTeamHover,
@@ -13,39 +21,15 @@ export default function MatchResultCard({
   pinnedTeamCode = null,
 }: {
   match: MatchNode;
-  onRecordResult: (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void;
   cardRef?: (el: HTMLDivElement | null) => void;
   hoveredTeamCode?: string | null;
   onTeamHover?: (code: string | null) => void;
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
 }) {
-  const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
-  const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
-
-  // MatchResultCard instances are keyed only by match.id, which stays the
-  // same across a demo restart/reshuffle/format-switch — so React reuses
-  // the component instance and its local state instead of remounting it.
-  // Without this sync, whatever was last typed (or previously recorded)
-  // into this card sticks around even after the model resets the match to
-  // a fresh "scheduled" state with no score — showing stale leftover
-  // scores, and occasionally a stale "Scores tied — who won?" prompt,
-  // right after a restart, before anything new has actually been typed.
-  // Re-sync whenever the match's identity, status, or recorded score
-  // actually changes; this does NOT fire while someone (or the bot) is
-  // mid-typing into a still-"scheduled" match, since none of those
-  // dependencies change until a result is submitted or the match resets.
-  useEffect(() => {
-    setScoreA(match.teamA?.score?.toString() ?? "");
-    setScoreB(match.teamB?.score?.toString() ?? "");
-  }, [match.id, match.status, match.teamA?.score, match.teamB?.score]);
-
   const isBye = match.teamB?.code === "BYE" || match.teamA?.code === "BYE";
-  const bothAssigned = !!match.teamA && !!match.teamB;
-  const playable = bothAssigned && !isBye;
-  const locked = match.status === "completed";
 
-  // Nothing assigned yet at all — genuinely empty slot, nothing to show.
+  // Nothing assigned yet — empty slot.
   if (!match.teamA && !match.teamB) {
     return (
       <div
@@ -59,8 +43,7 @@ export default function MatchResultCard({
     );
   }
 
-  // One real feeder was a bye — auto-completed by the generator, just
-  // show the bye result plainly, nothing to play or type in.
+  // One side was a bye — show plainly, nothing to score.
   if (isBye) {
     const realTeam = match.teamA?.code !== "BYE" ? match.teamA : match.teamB;
     return (
@@ -75,23 +58,7 @@ export default function MatchResultCard({
     );
   }
 
-  const numA = Number(scoreA);
-  const numB = Number(scoreB);
-  const bothFilled = scoreA.trim() !== "" && scoreB.trim() !== "" && !Number.isNaN(numA) && !Number.isNaN(numB);
-  const isTie = bothFilled && numA === numB;
-
-  function submitDecisive() {
-    if (!bothFilled || isTie) return;
-    onRecordResult(match.id, numA > numB ? "A" : "B", numA, numB);
-  }
-
-  /** Explicit manual override for a tied scoreline — the person (or the
-   *  bot, driving the same UI) picks who actually advances. Scores are
-   *  recorded as-entered; the winner flag is what matters for bracket
-   *  progression. */
-  function submitTieBreak(winner: "A" | "B") {
-    onRecordResult(match.id, winner, numA, numB);
-  }
+  const bothAssigned = !!match.teamA && !!match.teamB;
 
   return (
     <div
@@ -118,104 +85,43 @@ export default function MatchResultCard({
           )}
         </div>
 
-        <TeamResultRow
-          matchId={match.id}
-          slot="A"
+        <StaticTeamRow
           team={match.teamA}
-          score={scoreA}
-          onScoreChange={setScoreA}
-          locked={locked}
-          playable={playable}
+          status={match.status}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
         />
-        <TeamResultRow
-          matchId={match.id}
-          slot="B"
+        <StaticTeamRow
           team={match.teamB}
-          score={scoreB}
-          onScoreChange={setScoreB}
-          locked={locked}
-          playable={playable}
+          status={match.status}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
         />
 
-        {/* Only one side has shown up so far — nothing to score yet, but
-           we still show who's already through instead of hiding them
-           behind a generic "waiting" message. */}
-        {!playable && (
+        {!bothAssigned && (
           <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-outline mt-0.5">
             Waiting for opponent
           </p>
-        )}
-
-        {playable && !locked && isTie && (
-          <div className="mt-0.5 flex flex-col gap-1">
-            <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-status-live">
-              Scores tied — who won?
-            </p>
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                id={`tie-btn-${match.id}-A`}
-                onClick={() => submitTieBreak("A")}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate"
-              >
-                {match.teamA?.code} wins
-              </button>
-              <button
-                type="button"
-                id={`tie-btn-${match.id}-B`}
-                onClick={() => submitTieBreak("B")}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate"
-              >
-                {match.teamB?.code} wins
-              </button>
-            </div>
-          </div>
-        )}
-
-        {playable && !locked && !isTie && (
-          <button
-            type="button"
-            id={`save-btn-${match.id}`}
-            onClick={submitDecisive}
-            disabled={!bothFilled}
-            className="mt-0.5 w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Save result
-          </button>
         )}
       </div>
     </div>
   );
 }
 
-function TeamResultRow({
-  matchId,
-  slot,
+function StaticTeamRow({
   team,
-  score,
-  onScoreChange,
-  locked,
-  playable,
+  status,
   hoveredTeamCode,
   onTeamHover,
   onTeamClick,
   pinnedTeamCode,
 }: {
-  matchId: string;
-  slot: "A" | "B";
   team: TeamNode | null;
-  score: string;
-  onScoreChange: (v: string) => void;
-  locked: boolean;
-  playable: boolean;
+  status: MatchNode["status"];
   hoveredTeamCode?: string | null;
   onTeamHover?: (code: string | null) => void;
   onTeamClick?: (code: string) => void;
@@ -272,19 +178,10 @@ function TeamResultRow({
           </span>
         )}
       </div>
-      {/* Score box only makes sense once both sides are real teams —
-         showing an editable "0" box next to a TBD row implied you could
-         score a match that isn't playable yet. */}
-      {playable && (
-        <input
-          id={`score-input-${matchId}-${slot}`}
-          type="number"
-          value={score}
-          disabled={locked}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => onScoreChange(e.target.value)}
-          className="w-10 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-0.5 disabled:opacity-60"
-        />
+      {!isTBD && status !== "scheduled" && (
+        <span className={`shrink-0 text-xs font-label-mono font-black ${team.isWinner ? "text-theme-orange" : "text-outline"}`}>
+          {team.score}
+        </span>
       )}
     </div>
   );

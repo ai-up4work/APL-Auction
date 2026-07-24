@@ -1,3 +1,4 @@
+// app/(protected)/tournaments/[id]/bracket/page.tsx
 import { supabase } from "@/lib/supabase";
 import BracketPageClient from "@/components/tournament/BracketPageClient";
 import {
@@ -42,6 +43,7 @@ export default async function TournamentBracketPage({
     if (!data) return <EmptyState message="Bracket data looks incomplete — missing a grand final." />;
     return (
       <BracketPageClient
+        tournamentId={tournament.id}
         format="double"
         doubleData={data}
         title={tournament.name}
@@ -53,6 +55,7 @@ export default async function TournamentBracketPage({
   const rounds = buildSingleEliminationRounds(rows);
   return (
     <BracketPageClient
+      tournamentId={tournament.id}
       format="single"
       singleRounds={rounds}
       title={tournament.name}
