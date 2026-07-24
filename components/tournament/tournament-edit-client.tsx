@@ -39,6 +39,7 @@ import {
   type SeedingMethod,
 } from "@/lib/tournament/generateBracket"
 import TeamsManager from "@/components/tournament/TeamsManager"
+import MatchesManager from "@/components/tournament/MatchesManager"
 
 interface TournamentEditClientProps {
   tournament: TournamentEditData
@@ -377,8 +378,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
               </span>
               <h1 className="text-3xl font-bold text-white font-cinzel mb-2">{tournament.name}</h1>
               <p className="text-gray-400 text-sm mb-6 max-w-xl">
-                Details, Prizes, and Bracket save immediately. Schedule and Awards are read-only
-                here for now — see notes below.
+                Details, Prizes, Bracket, and Matches save immediately. Awards is read-only here
+                for now — see note below.
               </p>
 
               {/* JUMP NAV — turns the long stack of sections into something scannable */}
@@ -757,14 +758,22 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 />
               </div>
 
-              {/* PLACEHOLDER SECTIONS — still need write support */}
-              <div id="schedule" className="scroll-mt-28">
-                <PlaceholderSection
-                  icon={CalendarClock}
-                  title="Schedule (Fixtures)"
-                  note="Fixtures come from bracket_matches (venue, scheduled_at, status) — reading works, but there's no create/edit UI yet for scheduling a match."
-                />
+              {/* MATCHES / SCHEDULE — bracket_matches fixtures each get a
+                  "Create Match" action that inserts into `matches` and links
+                  via overlay_match_id, plus a section for standalone manual
+                  matches that aren't tied to any bracket fixture. */}
+              <div id="schedule" className="scroll-mt-28 mb-6">
+                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+                  <SectionHeading icon={CalendarClock} title="Matches" />
+                  <MatchesManager
+                    tournamentId={tournament.id}
+                    tournamentName={tournament.name}
+                    orgId={tournament.orgId!}
+                  />
+                </div>
               </div>
+
+              {/* PLACEHOLDER SECTION — still needs write support */}
               <div id="awards" className="scroll-mt-28">
                 <PlaceholderSection
                   icon={Award}
