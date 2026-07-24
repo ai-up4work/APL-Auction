@@ -551,7 +551,7 @@ async function getBracketChartDataForTournament(
         aFrom: null,
         bFrom: null,
       };
-  const bracketReset: MatchNode | undefined = gfRows[1] ? toMatchNode(gfRows[1]) : undefined;
+  const bracketReset: MatchNode | null = gfRows[1] ? toMatchNode(gfRows[1]) : null;
 
   return { bracketFormat, doubleElimData: { winners, losers, grandFinal, bracketReset } };
 }
