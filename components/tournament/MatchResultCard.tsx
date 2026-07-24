@@ -46,15 +46,58 @@ export default function MatchResultCard({
   const alreadyRecorded = match.status === "completed";
 
   if (!playable) {
+    // Match single elimination's visual weight exactly: same card shell,
+    // same team-row treatment for whichever side IS known, instead of a
+    // small dashed one-liner. Only difference from a playable card is
+    // the TBD side has no logo/name/input, and there's no Save button
+    // yet since the match can't be scored until both teams are set.
+    const byeOpponent = match.teamB?.code === "BYE";
+
     return (
       <div
         ref={cardRef}
-        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
+        className="w-full rounded-xl relative overflow-hidden bg-surface-container-low border border-border-overlay shadow-2xl"
       >
-        <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
-        <p className="mt-1 text-[11px] font-label-mono text-outline">
-          {match.teamB?.code === "BYE" ? `${match.teamA?.name} — Bye` : "Waiting for teams"}
-        </p>
+        <div className="relative flex flex-col gap-1.5 p-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+            {byeOpponent && (
+              <span className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">Bye</span>
+            )}
+          </div>
+
+          {match.teamA ? (
+            <TeamResultRow
+              team={match.teamA}
+              score=""
+              onScoreChange={() => {}}
+              disabled
+              readOnly
+              hoveredTeamCode={hoveredTeamCode}
+              onTeamHover={onTeamHover}
+              onTeamClick={onTeamClick}
+              pinnedTeamCode={pinnedTeamCode}
+            />
+          ) : (
+            <TBDResultRow />
+          )}
+
+          {byeOpponent ? null : match.teamB ? (
+            <TeamResultRow
+              team={match.teamB}
+              score=""
+              onScoreChange={() => {}}
+              disabled
+              readOnly
+              hoveredTeamCode={hoveredTeamCode}
+              onTeamHover={onTeamHover}
+              onTeamClick={onTeamClick}
+              pinnedTeamCode={pinnedTeamCode}
+            />
+          ) : (
+            <TBDResultRow />
+          )}
+        </div>
       </div>
     );
   }
@@ -195,6 +238,7 @@ function TeamResultRow({
   score,
   onScoreChange,
   disabled,
+  readOnly = false,
   hoveredTeamCode,
   onTeamHover,
   onTeamClick,
@@ -204,6 +248,10 @@ function TeamResultRow({
   score: string;
   onScoreChange: (v: string) => void;
   disabled: boolean;
+  /** When true, hides the score input entirely instead of showing a
+   *  disabled one — used for the "opponent still TBD" state, where
+   *  there's nothing to enter a score against yet. */
+  readOnly?: boolean;
   hoveredTeamCode?: string | null;
   onTeamHover?: (code: string | null) => void;
   onTeamClick?: (code: string) => void;
@@ -253,20 +301,38 @@ function TeamResultRow({
           </span>
         )}
       </div>
-      <input
-        type="number"
-        min={0}
-        value={score}
-        disabled={disabled}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onScoreChange(e.target.value)}
-        onKeyDown={(e) => {
-          // Belt-and-suspenders: block typing a minus sign at all,
-          // in addition to the clamp-on-change in the parent.
-          if (e.key === "-") e.preventDefault();
-        }}
-        className="w-10 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-0.5 disabled:opacity-60"
-      />
+      {!readOnly && (
+        <input
+          type="number"
+          min={0}
+          value={score}
+          disabled={disabled}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onScoreChange(e.target.value)}
+          onKeyDown={(e) => {
+            // Belt-and-suspenders: block typing a minus sign at all,
+            // in addition to the clamp-on-change in the parent.
+            if (e.key === "-") e.preventDefault();
+          }}
+          className="w-10 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-0.5 disabled:opacity-60"
+        />
+      )}
+    </div>
+  );
+}
+
+/** Placeholder row for a match slot whose team hasn't been decided yet —
+ *  same height/shape as a real TeamResultRow so the card doesn't jump
+ *  or look lopsided once the real team fills in. */
+function TBDResultRow() {
+  return (
+    <div className="flex items-center gap-2 p-1 lg:p-1.5 rounded-lg relative bg-surface-container/40 border border-dashed border-border-overlay">
+      <div className="flex items-center gap-2 pl-1.5 min-w-0">
+        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background/60 font-label-mono font-black text-[10px] text-outline">
+          ?
+        </span>
+        <span className="font-label-mono font-bold text-xs uppercase tracking-wide text-outline">TBD</span>
+      </div>
     </div>
   );
 }
