@@ -544,7 +544,7 @@ export default function BracketPreviewPanel(props: BracketPreviewProps) {
     const isRealData = bracketRounds !== undefined
     const rounds = isRealData ? bracketRounds! : getSingleElimDemoRounds()
     const visible = getPreviewRounds(rounds)
-    const fullBracketHref = `/tournament/${slug}/bracket/singleElimination`
+    const fullBracketHref = `/tournaments/${slug}/bracket`
 
     return (
       <PanelShell fullBracketHref={fullBracketHref}>
@@ -572,7 +572,7 @@ export default function BracketPreviewPanel(props: BracketPreviewProps) {
   const isEmpty = wbVisible.length === 0 && lbVisible.length === 0 && !gfReached
 
   return (
-    <PanelShell fullBracketHref={`/tournament/${slug}/bracket/doubleElimination`}>
+    <PanelShell fullBracketHref={`/tournaments/${slug}/bracket/`}>
       {isEmpty ? (
         <EmptyBracketState />
       ) : (

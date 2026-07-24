@@ -137,8 +137,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
       <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
 
-        <div className="container mx-auto px-4 relative z-10">
-          {/* Row 1: Banner + Tournament Information.
+            <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10">          {/* Row 1: Banner + Tournament Information.
               A grid row stretches every cell in it to match the
               tallest one, so the banner and the info card always
               line up in height — whichever needs more room wins,
