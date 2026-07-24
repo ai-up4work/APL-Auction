@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Trophy, Tv, MapPin, CheckCircle2, Radio, ChevronLeft, ChevronRight } from "lucide-react";
-import Image from "next/image";
 
 /* ------------------------------------------------------------------ */
 /*  Public types — every piece of chart data flows through these      */
@@ -60,6 +59,19 @@ export interface TournamentBracketProps {
   className?: string;
   /** Called whenever the highlighted/selected team changes. */
   onActiveTeamChange?: (teamCode: string | null) => void;
+  /** Turns on inline score/winner editing on every match card whose
+   *  teams are both known (not TBD). When true, clicking a team row
+   *  selects it as the winner for that card's editor instead of pinning
+   *  the hover-trace highlight, and a score + Save row replaces the
+   *  venue/date footer on editable cards. */
+  editable?: boolean;
+  /** Called when an admin saves a result from a card's inline editor. */
+  onRecordResult?: (
+    matchId: string,
+    winner: "A" | "B",
+    scoreA: number,
+    scoreB: number
+  ) => void | Promise<void>;
 }
 
 const GROW_WEIGHT = {
@@ -106,7 +118,7 @@ function computeCentersFromLeaves(leafCentersPx: number[], matchCountsPerRound: 
 type RefSetter = (el: HTMLDivElement | null) => void;
 
 /* ------------------------------------------------------------------ */
-/*  Presentational pieces (unchanged — pure functions of props)        */
+/*  Presentational pieces                                              */
 /* ------------------------------------------------------------------ */
 
 function TeamRow({
@@ -120,6 +132,7 @@ function TeamRow({
   isPinned,
   rowRef,
   compact,
+  scoreInput,
 }: {
   team: TeamNode | null;
   status: MatchNode["status"];
@@ -127,14 +140,19 @@ function TeamRow({
   hoveredTeamCode: string | null;
   setHoveredTeamCode: (c: string | null) => void;
   onFromClick?: () => void;
-  /** Click a team to pin the highlight on it, so it stays lit while you
-   *  move the mouse away or scroll — same mechanism as the double-elim
-   *  board's MatchResultCard. */
   onTeamClick?: (code: string) => void;
-  /** Whether this row's team is the currently pinned team. */
   isPinned?: boolean;
   rowRef?: RefSetter;
   compact?: boolean;
+  /** When present, renders an editable score box on this row instead of
+   *  (or alongside, pre-completion) the read-only score/checkmark — used
+   *  by MatchCard's inline editor. `value`/`onChange` drive a plain
+   *  number input; `disabled` locks it once the match is completed. */
+  scoreInput?: {
+    value: string;
+    onChange: (v: string) => void;
+    disabled: boolean;
+  };
 }) {
   const isTBD = !team;
   const isHovered = team && hoveredTeamCode === team.code;
@@ -145,7 +163,7 @@ function TeamRow({
       onMouseEnter={() => team && setHoveredTeamCode(team.code)}
       onMouseLeave={() => setHoveredTeamCode(null)}
       onClick={() => team && onTeamClick?.(team.code)}
-      className={`flex items-center justify-between p-1 lg:p-1.5 rounded-lg relative transition-all duration-200 border ${
+      className={`flex items-center justify-between gap-2 p-1 lg:p-1.5 rounded-lg relative transition-all duration-200 border ${
         isTBD ? "bg-background/40 border-dashed border-border-overlay text-outline" : "bg-surface-container border-border-overlay"
       } ${
         isHovered
@@ -160,13 +178,13 @@ function TeamRow({
       {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
       <div className="flex items-center gap-2 lg:gap-3 pl-1.5 lg:pl-2 min-w-0">
         <span
-          className={`relative w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
+          className={`w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
             isTBD ? "border border-dashed border-outline/40" : ""
           }`}
         >
           {!isTBD ? (
             team.logo ? (
-              <Image src={team.logo} alt="" fill className="object-cover p-0.5" />
+              <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
             ) : (
               <span style={{ color: team.color }}>{team.code}</span>
             )
@@ -207,11 +225,22 @@ function TeamRow({
               Pinned
             </span>
           )}
-          {status !== "scheduled" && (
-            <div className="flex items-center gap-2 font-label-mono font-black text-sm">
-              {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
-              <span className={team.isWinner ? "text-theme-orange" : "text-outline"}>{team.score}</span>
-            </div>
+          {scoreInput ? (
+            <input
+              type="number"
+              value={scoreInput.value}
+              disabled={scoreInput.disabled}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => scoreInput.onChange(e.target.value)}
+              className="w-12 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-1 disabled:opacity-60"
+            />
+          ) : (
+            status !== "scheduled" && (
+              <div className="flex items-center gap-2 font-label-mono font-black text-sm">
+                {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
+                <span className={team.isWinner ? "text-theme-orange" : "text-outline"}>{team.score}</span>
+              </div>
+            )
           )}
         </div>
       )}
@@ -228,6 +257,8 @@ function MatchCard({
   pinnedTeamCode,
   getRef,
   compact,
+  editable,
+  onRecordResult,
 }: {
   match: MatchNode;
   hoveredTeamCode: string | null;
@@ -237,8 +268,58 @@ function MatchCard({
   pinnedTeamCode?: string | null;
   getRef?: (key: string) => RefSetter;
   compact?: boolean;
+  /** When true, and both teams are known (not TBD, not a bye), renders
+   *  an editable score box directly in each team row — no separate
+   *  winner-selection step. Winner is inferred from whichever score is
+   *  higher; a tie shows explicit "X wins" buttons instead of a Save
+   *  button, mirroring MatchResultCard's flow. */
+  editable?: boolean;
+  onRecordResult?: (
+    matchId: string,
+    winner: "A" | "B",
+    scoreA: number,
+    scoreB: number
+  ) => void | Promise<void>;
 }) {
+  const isBye = match.teamA?.code === "BYE" || match.teamB?.code === "BYE";
+  const bothAssigned = !!match.teamA && !!match.teamB;
+  const playable = !!editable && bothAssigned && !isBye;
+  const locked = match.status === "completed";
+
+  const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
+  const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Re-sync local edit state whenever the underlying match result
+  // changes (e.g. after a save round-trips through router.refresh()).
+  useEffect(() => {
+    setScoreA(match.teamA?.score?.toString() ?? "");
+    setScoreB(match.teamB?.score?.toString() ?? "");
+  }, [match.id, match.status, match.teamA?.score, match.teamB?.score]);
+
+  const numA = Number(scoreA);
+  const numB = Number(scoreB);
+  const bothFilled = scoreA.trim() !== "" && scoreB.trim() !== "" && !Number.isNaN(numA) && !Number.isNaN(numB);
+  const isTie = bothFilled && numA === numB;
+
+  async function submitDecisive() {
+    if (!bothFilled || isTie) return;
+    setEditError(null);
+    setSaving(true);
+    await onRecordResult?.(match.id, numA > numB ? "A" : "B", numA, numB);
+    setSaving(false);
+  }
+
+  async function submitTieBreak(winner: "A" | "B") {
+    setEditError(null);
+    setSaving(true);
+    await onRecordResult?.(match.id, winner, numA, numB);
+    setSaving(false);
+  }
+
   const showFooter = !compact && (match.teamA || match.teamB);
+
   return (
     <div
       ref={getRef ? getRef(match.id) : undefined}
@@ -261,6 +342,7 @@ function MatchCard({
           isPinned={!!match.teamA && pinnedTeamCode === match.teamA.code}
           rowRef={getRef ? getRef(`${match.id}:A`) : undefined}
           compact={compact}
+          scoreInput={playable ? { value: scoreA, onChange: setScoreA, disabled: locked } : undefined}
         />
         <TeamRow
           team={match.teamB}
@@ -273,8 +355,51 @@ function MatchCard({
           isPinned={!!match.teamB && pinnedTeamCode === match.teamB.code}
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
+          scoreInput={playable ? { value: scoreB, onChange: setScoreB, disabled: locked } : undefined}
         />
-        {showFooter && (
+
+        {playable && !locked && isTie && (
+          <div className="flex flex-col gap-1">
+            <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-status-live">
+              Scores tied — who won?
+            </p>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => submitTieBreak("A")}
+                disabled={saving}
+                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50"
+              >
+                {match.teamA?.code} wins
+              </button>
+              <button
+                type="button"
+                onClick={() => submitTieBreak("B")}
+                disabled={saving}
+                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50"
+              >
+                {match.teamB?.code} wins
+              </button>
+            </div>
+          </div>
+        )}
+
+        {playable && !locked && !isTie && (
+          <button
+            type="button"
+            onClick={submitDecisive}
+            disabled={!bothFilled || saving}
+            className="w-full text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Save result"}
+          </button>
+        )}
+
+        {playable && editError && (
+          <p className="text-status-live text-[10px] font-label-mono px-0.5">{editError}</p>
+        )}
+
+        {showFooter && !playable && (
           <div className="flex items-center justify-between border-t border-border-overlay pt-1 lg:pt-1.5 mt-0 text-[9px] lg:text-[10px] font-label-mono font-bold uppercase tracking-wider text-outline">
             <span className="hidden lg:flex items-center gap-1.5 max-w-[65%] truncate">
               <MapPin className="w-3 h-3 shrink-0" />
@@ -320,6 +445,8 @@ function BracketColumn({
   bleedRight,
   innerBleedLeft,
   innerBleedRight,
+  editable,
+  onRecordResult,
 }: {
   roundName: string;
   matches: MatchNode[];
@@ -338,6 +465,13 @@ function BracketColumn({
   bleedRight?: string;
   innerBleedLeft?: string;
   innerBleedRight?: string;
+  editable?: boolean;
+  onRecordResult?: (
+    matchId: string,
+    winner: "A" | "B",
+    scoreA: number,
+    scoreB: number
+  ) => void | Promise<void>;
 }) {
   return (
     <div
@@ -363,6 +497,8 @@ function BracketColumn({
                 pinnedTeamCode={pinnedTeamCode}
                 getRef={getRef}
                 compact={compact}
+                editable={editable}
+                onRecordResult={onRecordResult}
               />
             </div>
           ))}
@@ -393,6 +529,8 @@ function BracketColumn({
                     pinnedTeamCode={pinnedTeamCode}
                     getRef={(key) => (key === match.id ? () => {} : getRef(key))}
                     compact={compact}
+                    editable={editable}
+                    onRecordResult={onRecordResult}
                   />
                 </div>
               </div>
@@ -424,6 +562,8 @@ export default function TournamentBracket({
   logoSrc,
   className = "",
   onActiveTeamChange,
+  editable,
+  onRecordResult,
 }: TournamentBracketProps) {
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
   const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
@@ -729,12 +869,10 @@ export default function TournamentBracket({
                     transform: "translate(-50%, -50%)",
                   }}
                 >
-                  <Image
+                  <img
                     src={logoSrc}
                     alt=""
-                    width={600}
-                    height={600}
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-30"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-15"
                   />
                 </div>
               )}
@@ -761,6 +899,8 @@ export default function TournamentBracket({
                     growWeight={growWeight}
                     bleedLeft={bleedLeft}
                     innerBleedLeft={innerBleedLeft}
+                    editable={editable}
+                    onRecordResult={onRecordResult}
                   />
                 );
               })}
@@ -774,6 +914,8 @@ export default function TournamentBracket({
                 onTeamClick={handleTeamClick}
                 pinnedTeamCode={selectedTeamCode}
                 growWeight={getRoundGrowWeight(nonFinalRounds.length, "final")}
+                editable={editable}
+                onRecordResult={onRecordResult}
               />
               {[...nonFinalRounds].reverse().map((round, revIdx) => {
                 const i = nonFinalRounds.length - 1 - revIdx;
@@ -798,6 +940,8 @@ export default function TournamentBracket({
                     growWeight={growWeight}
                     bleedRight={bleedRight}
                     innerBleedRight={innerBleedRight}
+                    editable={editable}
+                    onRecordResult={onRecordResult}
                   />
                 );
               })}
@@ -832,11 +976,9 @@ export default function TournamentBracket({
                     transform: "translate(-50%, -50%)",
                   }}
                 >
-                  <Image
+                  <img
                     src={logoSrc}
                     alt=""
-                    width={600}
-                    height={600}
                     className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
                   />
                 </div>
@@ -864,6 +1006,8 @@ export default function TournamentBracket({
                     compact={isCompact}
                     bleedLeft={bleedLeft}
                     innerBleedLeft={innerBleedLeft}
+                    editable={editable}
+                    onRecordResult={onRecordResult}
                   />
                 );
               })}
@@ -959,11 +1103,9 @@ export default function TournamentBracket({
                     <div key={match.id} className="w-full relative">
                       {round.id === finalRound.id && logoSrc && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none -z-10 w-full flex justify-center items-center">
-                          <Image
+                          <img
                             src={logoSrc}
                             alt=""
-                            width={350}
-                            height={350}
                             className="w-[250px] md:w-[350px] max-w-none h-auto object-contain opacity-10"
                           />
                         </div>
@@ -975,6 +1117,8 @@ export default function TournamentBracket({
                         onFromClick={goToLabel}
                         onTeamClick={handleTeamClick}
                         pinnedTeamCode={selectedTeamCode}
+                        editable={editable}
+                        onRecordResult={onRecordResult}
                       />
                     </div>
                   ))}

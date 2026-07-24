@@ -1,7 +1,5 @@
-// app/tournaments/[id]/bracket/page.tsx
 import { supabase } from "@/lib/supabase";
-import TournamentBracket from "@/components/tournament/TournamentBracket";
-import DoubleElimBracketClient from "@/components/tournament/DoubleElimBracketClient";
+import BracketPageClient from "@/components/tournament/BracketPageClient";
 import {
   getBracketMatchesForTournament,
   buildSingleEliminationRounds,
@@ -17,7 +15,7 @@ export default async function TournamentBracketPage({
 
   const { data: tournament, error } = await supabase
     .from("tournaments")
-    .select("id, name, format")
+    .select("id, name, format, org_id")
     .eq("id", id)
     .single();
 
@@ -36,20 +34,29 @@ export default async function TournamentBracketPage({
     return <EmptyState message="The bracket hasn't been generated for this tournament yet." />;
   }
 
+  // Auth/org-ownership check happens client-side in BracketPageClient
+  // (same pattern as TournamentEditClient) — this just passes the org_id
+  // needed for that gate. RLS on bracket_matches is the real boundary.
   if (tournament.format === "double_elimination") {
     const data = buildDoubleEliminationData(rows);
     if (!data) return <EmptyState message="Bracket data looks incomplete — missing a grand final." />;
-    return <DoubleElimBracketClient data={data} title={tournament.name} />;
+    return (
+      <BracketPageClient
+        format="double"
+        doubleData={data}
+        title={tournament.name}
+        tournamentOrgId={tournament.org_id}
+      />
+    );
   }
 
-  // single_elimination
   const rounds = buildSingleEliminationRounds(rows);
   return (
-    <TournamentBracket
-      rounds={rounds}
+    <BracketPageClient
+      format="single"
+      singleRounds={rounds}
       title={tournament.name}
-      eyebrowLabel="Knockout Stage"
-      helperText="Hover or click a team to trace their path."
+      tournamentOrgId={tournament.org_id}
     />
   );
 }

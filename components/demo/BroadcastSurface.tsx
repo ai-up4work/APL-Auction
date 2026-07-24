@@ -35,8 +35,8 @@ import MatchMomentOverlay from "@/components/overlays/MatchMomentOverlay";
 import TournamentLogoDisplay from "@/components/overlays/TournamentLogoDisplay";
 import CricketScorecard from "@/components/overlays/CricketScorecard";
 
-import { useOverlayVisibility } from "@/app/sandbox/overlay/lib/useOverlayVisibility";
-import type { SandboxChannels, SandboxInningsCards } from "@/app/sandbox/overlay/lib/sandBoxBus";
+import { useOverlayVisibility } from "@/app/(public)/sandbox/overlay/lib/useOverlayVisibility";
+import type { SandboxChannels, SandboxInningsCards } from "@/app/(public)/sandbox/overlay/lib/sandBoxBus";
 
 export interface BroadcastSurfaceProps {
   channels: SandboxChannels;

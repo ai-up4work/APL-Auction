@@ -232,7 +232,6 @@ export async function saveMatchSetup(
 }
 
 // ── match_state (LiveState) ──────────────────────────────────────────
-
 export async function loadLiveState(matchId: string): Promise<LiveState | null> {
   const { data, error } = await supabase
     .from("match_state")

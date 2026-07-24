@@ -227,6 +227,8 @@ function MatchCard({
   pinnedTeamCode,
   getRef,
   compact,
+  editable,
+  onRecordResult,
 }: {
   match: MatchNode;
   hoveredTeamCode: string | null;
@@ -236,8 +238,56 @@ function MatchCard({
   pinnedTeamCode?: string | null;
   getRef?: (key: string) => RefSetter;
   compact?: boolean;
+  /** When true, and both teams are known (not TBD), renders an inline
+   *  score + winner editor instead of (in addition to) the read-only
+   *  footer. Clicking a team row selects it as the winner rather than
+   *  pinning the hover-trace highlight. */
+  editable?: boolean;
+  onRecordResult?: (
+    matchId: string,
+    winner: "A" | "B",
+    scoreA: number,
+    scoreB: number
+  ) => void | Promise<void>;
 }) {
+  const canEdit = !!editable && !!match.teamA && !!match.teamB;
+
+  const [scoreA, setScoreA] = useState(match.teamA?.score?.toString() ?? "");
+  const [scoreB, setScoreB] = useState(match.teamB?.score?.toString() ?? "");
+  const [editWinner, setEditWinner] = useState<"A" | "B" | null>(
+    match.teamA?.isWinner ? "A" : match.teamB?.isWinner ? "B" : null
+  );
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Re-sync local edit state whenever the underlying match result changes
+  // (e.g. after a save round-trips through router.refresh()).
+  useEffect(() => {
+    setScoreA(match.teamA?.score?.toString() ?? "");
+    setScoreB(match.teamB?.score?.toString() ?? "");
+    setEditWinner(match.teamA?.isWinner ? "A" : match.teamB?.isWinner ? "B" : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.id, match.status, match.teamA?.score, match.teamB?.score]);
+
+  async function handleSave() {
+    if (!editWinner) {
+      setEditError("Pick a winner first.");
+      return;
+    }
+    const a = Number(scoreA);
+    const b = Number(scoreB);
+    if (scoreA === "" || scoreB === "" || Number.isNaN(a) || Number.isNaN(b)) {
+      setEditError("Enter both scores.");
+      return;
+    }
+    setEditError(null);
+    setSaving(true);
+    await onRecordResult?.(match.id, editWinner, a, b);
+    setSaving(false);
+  }
+
   const showFooter = !compact && (match.teamA || match.teamB);
+
   return (
     <div
       ref={getRef ? getRef(match.id) : undefined}
@@ -256,8 +306,8 @@ function MatchCard({
           hoveredTeamCode={hoveredTeamCode}
           setHoveredTeamCode={setHoveredTeamCode}
           onFromClick={onFromClick ? () => onFromClick(match.aFrom) : undefined}
-          onTeamClick={onTeamClick}
-          isPinned={!!match.teamA && pinnedTeamCode === match.teamA.code}
+          onTeamClick={canEdit ? () => setEditWinner("A") : onTeamClick}
+          isPinned={canEdit ? editWinner === "A" : !!match.teamA && pinnedTeamCode === match.teamA.code}
           rowRef={getRef ? getRef(`${match.id}:A`) : undefined}
           compact={compact}
         />
@@ -268,12 +318,44 @@ function MatchCard({
           hoveredTeamCode={hoveredTeamCode}
           setHoveredTeamCode={setHoveredTeamCode}
           onFromClick={onFromClick ? () => onFromClick(match.bFrom) : undefined}
-          onTeamClick={onTeamClick}
-          isPinned={!!match.teamB && pinnedTeamCode === match.teamB.code}
+          onTeamClick={canEdit ? () => setEditWinner("B") : onTeamClick}
+          isPinned={canEdit ? editWinner === "B" : !!match.teamB && pinnedTeamCode === match.teamB.code}
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
         />
-        {showFooter && (
+
+        {canEdit && (
+          <div className="flex items-center gap-2 border-t border-border-overlay pt-1.5 mt-0.5">
+            <input
+              type="number"
+              value={scoreA}
+              onChange={(e) => setScoreA(e.target.value)}
+              placeholder="Score"
+              className="w-14 bg-background border border-border-overlay rounded-md px-1.5 py-1 text-[11px] text-on-surface font-label-mono"
+            />
+            <span className="text-outline text-[10px] font-label-mono">vs</span>
+            <input
+              type="number"
+              value={scoreB}
+              onChange={(e) => setScoreB(e.target.value)}
+              placeholder="Score"
+              className="w-14 bg-background border border-border-overlay rounded-md px-1.5 py-1 text-[11px] text-on-surface font-label-mono"
+            />
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="ml-auto px-3 py-1.5 rounded-lg bg-theme-orange text-on-primary text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        )}
+        {canEdit && editError && (
+          <p className="text-status-live text-[10px] font-label-mono px-0.5">{editError}</p>
+        )}
+
+        {showFooter && !canEdit && (
           <div className="flex items-center justify-between border-t border-border-overlay pt-1 lg:pt-1.5 mt-0 text-[9px] lg:text-[10px] font-label-mono font-bold uppercase tracking-wider text-outline">
             <span className="hidden lg:flex items-center gap-1.5 max-w-[65%] truncate">
               <MapPin className="w-3 h-3 shrink-0" />
