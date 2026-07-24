@@ -6,13 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Calendar,
-  MapPin,
-  Radio,
-  Shield,
-  CloudSun,
-} from "lucide-react"
+import { Calendar, MapPin, Radio, Shield } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
@@ -24,14 +18,18 @@ import type {
   BowlingRow,
   FowEntry,
   MatchSquad,
-  LiveScriptStep,
-} from "@/data/tournament-data"
+  InningsComplete,
+} from "@/data/match-data"
 import MatchGraphs, { type OverRow } from "./match-graphs"
 
 interface MatchDetailClientProps {
   match: MatchDetail
-  tournamentSlug: string
+  /** Undefined for standalone/friendly matches with no tournament link. */
+  tournamentSlug?: string
 }
+
+// How often to re-poll the live match endpoint while a match is in progress.
+const LIVE_POLL_MS = 8000
 
 function initials(name: string) {
   return name
@@ -55,14 +53,7 @@ const images = {
 
 // Small helper so every logo slot (team A, team B, tournament) renders the
 // same way: a real <Image> when a path is supplied, and a graceful
-// "Image not available" placeholder otherwise. Keeping this in one place
-// means the three logo slots can never drift out of sync again.
-//
-// NOTE: rounded-2xl (a soft square) is used instead of a full circle.
-// Team crests are rarely perfectly square, so a circular mask + object-contain
-// leaves visible gaps of background in the corners where the logo doesn't
-// reach the edge of the circle. A rounded square is far more forgiving and
-// is what most real scorecards (Cricbuzz, ESPN, ICC) use for this reason.
+// "Image not available" placeholder otherwise.
 function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   return (
     <div className="relative h-20 w-20 bg-gradient-to-b from-white/10 to-black/40 backdrop-blur-md rounded-2xl border border-gold/30 mb-3 flex items-center justify-center overflow-hidden shrink-0 shadow-[0_0_20px_rgba(245,166,35,0.15)]">
@@ -79,7 +70,7 @@ function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   )
 }
 
-export default function MatchDetailClient({ match, tournamentSlug }: MatchDetailClientProps) {
+export default function MatchDetailClient({ match: initialMatch, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
@@ -95,112 +86,86 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
     setIsNavOpen(false)
   }
 
-  // ── live sim state ──
-  const [live, setLive] = useState(true)
-  const [runs, setRuns] = useState(match.innings2Partial.runsAtStart)
-  const [wkts, setWkts] = useState(match.innings2Partial.wktsAtStart)
-  const [overLabel, setOverLabel] = useState(match.innings2Partial.overAtStart)
-  const [stepIndex, setStepIndex] = useState(0)
-  const [winProb, setWinProb] = useState({ a: 42, b: 58 })
-  const [commentary, setCommentary] = useState<LiveScriptStep[]>([])
-  const [overRunsB, setOverRunsB] = useState<number[]>(
-    match.innings2Partial.overRunsAtStart.concat(match.innings2Partial.over19ExtraRuns)
-  )
-  const [partnership, setPartnership] = useState({ runs: 4, balls: 7 })
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // ── live state ──
+  // `match` is refreshed from the server on a poll while the game is live.
+  // There is no client-side simulation of deliveries — every number here
+  // is either the initial server-rendered snapshot or a refetch of the
+  // same real aggregation the server used.
+  const [match, setMatch] = useState<MatchDetail>(initialMatch)
+  const [live, setLive] = useState(initialMatch.isLive)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    timerRef.current = setTimeout(tick, 2600)
+    if (!live) return
+
+    async function poll() {
+      try {
+        const res = await fetch(`/api/match/${match.id}/live`, { cache: "no-store" })
+        if (!res.ok) return
+        const fresh: MatchDetail = await res.json()
+        setMatch(fresh)
+        setLive(fresh.isLive)
+      } catch {
+        // Transient network/poll failure — just try again next tick.
+      }
+    }
+
+    pollRef.current = setInterval(poll, LIVE_POLL_MS)
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      if (pollRef.current) clearInterval(pollRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepIndex])
+  }, [live, match.id])
 
-  function tick() {
-    if (stepIndex >= match.liveScript.length) return
-    const step = match.liveScript[stepIndex]
-
-    setRuns((r) => r + step.runs)
-    setWkts((w) => (step.wkt ? w + 1 : w))
-    setOverLabel(step.ball)
-    setWinProb({ a: step.wpA, b: step.wpB })
-    setCommentary((c) => [step, ...c])
-    setPartnership((p) => (step.wkt ? { runs: 0, balls: 0 } : { runs: p.runs + step.runs, balls: p.balls + 1 }))
-
-    if (step.ball === "19.6") {
-      const tail = match.liveScript.filter((s) => s.over === 19).reduce((a, s) => a + s.runs, 0)
-      setOverRunsB([...match.innings2Partial.overRunsAtStart, match.innings2Partial.over19ExtraRuns + tail])
-    }
-    if (step.ball === "20.6") {
-      const over20 = match.liveScript.filter((s) => s.over === 20).reduce((a, s) => a + s.runs, 0)
-      const tail = match.liveScript.filter((s) => s.over === 19).reduce((a, s) => a + s.runs, 0)
-      setOverRunsB([
-        ...match.innings2Partial.overRunsAtStart,
-        match.innings2Partial.over19ExtraRuns + tail,
-        over20,
-      ])
-      setLive(false)
-    }
-
-    setStepIndex((i) => i + 1)
-  }
+  const inn2 = live ? match.innings2Partial : match.innings2Final
+  const runs = live ? currentTotal(match.innings2Partial) : match.innings2Final.total
+  const wkts = live ? currentWkts(match.innings2Partial) : match.innings2Final.wkts
+  const overLabel = live ? currentOvers(match.innings2Partial) : match.innings2Final.overs
 
   const need = match.target - runs
   const ballsBowled = (() => {
     const [o, b] = overLabel.split(".").map(Number)
-    return o * 6 + b
+    return (o || 0) * 6 + (b || 0)
   })()
-  const ballsLeft = 120 - ballsBowled
-  const crr = (runs / (ballsBowled / 6)).toFixed(2)
-  const rrr = live && ballsLeft > 0 ? (need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : "0.00") : null
+  const oversLimitBalls = 120 // T20; adjust if match-data.ts starts carrying a per-match overs limit
+  const ballsLeft = oversLimitBalls - ballsBowled
+  const crr = ballsBowled > 0 ? (runs / (ballsBowled / 6)).toFixed(2) : "0.00"
+  const rrr = live && ballsLeft > 0 && need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : null
 
-  // Generate over-by-over list data for a given innings. Accepts an explicit
-  // innings arg (defaulting to the currently selected tab-innings) so callers
-  // like MatchGraphs can request both innings regardless of what's on screen.
+  const winProb = match.winProb // undefined unless match_state.live_state actually has it
+
+  // Over-by-over summary built from real aggregated data only: over number,
+  // runs scored in that over, and any wickets that fell during it (from
+  // `fow`, matched by over string). No per-ball sequence or bowler/batter
+  // matchup text is available from the current aggregation — that would
+  // require match-data.ts to group `balls` by over rather than just sum
+  // totals into `overRuns`. Flagging rather than fabricating it.
   const getOverByOverData = (inn: 1 | 2 = innings): OverRow[] => {
-    if (inn === 1) {
-      return [
-        { num: 20, score: `${match.innings1.total}-${match.innings1.wkts}`, matchUp: "D. Fernando to K. Perera & D. de Silva", balls: ["1", "4", "W", "1", "6", "1"], totalRuns: 13 },
-        { num: 19, score: "168-5", matchUp: "S. Jayasinghe to K. Perera & P. Nissanka", balls: ["•", "1", "4", "•", "1", "2"], totalRuns: 8 },
-        { num: 18, score: "160-5", matchUp: "D. Fernando to P. Nissanka", balls: ["1", "W", "1", "•", "6", "1"], totalRuns: 9 },
-        { num: 17, score: "151-4", matchUp: "M. Theekshana to K. Mendis & P. Nissanka", balls: ["1", "1", "1", "4", "1", "•"], totalRuns: 8 },
-        { num: 16, score: "143-4", matchUp: "C. Asalanka to K. Mendis", balls: ["6", "1", "W", "•", "1", "1"], totalRuns: 9 },
-      ]
-    }
+    const source: InningsComplete = inn === 1 ? match.innings1 : match.innings2Final
+    const liveOverRuns = inn === 2 && live ? partialOverRuns(match.innings2Partial) : null
+    const overRuns = liveOverRuns ?? source.overRuns
 
-    // Compiled live list array generated out of the active live simulation arrays
-    const list: OverRow[] = []
-    const tempRuns = match.innings2Partial.runsAtStart
-    const tempWkts = match.innings2Partial.wktsAtStart
+    const fow = inn === 1 ? match.innings1.fow : inn === 2 && live ? match.innings2Partial.fow : match.innings2Final.fow
 
-    // Over 19 mapping logic loop
-    const o19Steps = match.liveScript.filter((s) => s.over === 19)
-    if (o19Steps.length > 0 && stepIndex > 0) {
-      const o19F = o19Steps.filter((_, idx) => match.liveScript.indexOf(o19Steps[idx]) < stepIndex)
-      if (o19F.length > 0) {
-        const rScored = o19F.reduce((acc, s) => acc + s.runs, 0)
-        const wTaken = o19F.filter((s) => s.wkt).length
-        const currentTotalRuns = match.innings2Partial.runsAtStart + rScored
-        const currentTotalWkts = match.innings2Partial.wktsAtStart + wTaken
-        list.push({
-          num: 19,
-          score: `${currentTotalRuns}-${currentTotalWkts}`,
-          matchUp: "B. Kumar to J. Fonseka & M. Jayasuriya",
-          balls: o19F.map((s) => (s.wkt ? "W" : s.runs === 0 ? "•" : String(s.runs))),
-          totalRuns: rScored,
-        })
+    let runningTotal = 0
+    let runningWkts = 0
+    return overRuns.map((r, idx) => {
+      const overNum = idx + 1
+      runningTotal += r
+      const wicketsThisOver = fow.filter((f) => {
+        const [, , oversStr] = f
+        const overOfWicket = Math.floor(Number(oversStr))
+        return overOfWicket === overNum
+      })
+      runningWkts += wicketsThisOver.length
+      return {
+        num: overNum,
+        score: `${runningTotal}-${runningWkts}`,
+        matchUp: "",
+        balls: wicketsThisOver.length > 0 ? Array(wicketsThisOver.length).fill("W") : [],
+        totalRuns: r,
       }
-    }
-
-    // Preloaded complete historical overs sequence setup lists
-    list.push(
-      { num: 18, score: `${tempRuns}-${tempWkts}`, matchUp: "M. Siraj to J. Fonseka & R. Silva", balls: ["1", "•", "4", "1", "W", "1"], totalRuns: 7 },
-      { num: 17, score: `${tempRuns - 7}-${tempWkts - 1}`, matchUp: "B. Kumar to R. Silva & K. Mendis", balls: ["6", "1", "6", "•", "1", "2"], totalRuns: 16 },
-      { num: 16, score: `${tempRuns - 23}-${tempWkts - 1}`, matchUp: "A. Patel to K. Mendis", balls: ["1", "1", "•", "1", "W", "•"], totalRuns: 3 },
-      { num: 15, score: `${tempRuns - 26}-${tempWkts}`, matchUp: "J. Bumrah to J. Fonseka & K. Mendis", balls: ["1", "•", "4", "1", "1", "1"], totalRuns: 8 }
-    )
-    return list
+    })
   }
 
   return (
@@ -224,14 +189,14 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       />
 
       {/* ═══════════════════════════════════════════
-          HERO (FULL WIDTH ICC STYLE)
+          HERO
       ═══════════════════════════════════════════ */}
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
-            className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30"
-            style={{ backgroundImage: `url('${images.bg}')` }}
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30"
+          style={{ backgroundImage: `url('${images.bg}')` }}
         >
-            <span className="sr-only">Image not available</span>
+          <span className="sr-only">Image not available</span>
         </div>
 
         <div className="absolute inset-0 z-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
@@ -242,38 +207,42 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             {images.tournament ? (
               <Image
                 src={images.tournament}
-                alt={`${match.tournamentName} logo`}
+                alt={`${match.tournamentName ?? "Match"} logo`}
                 fill
                 className="object-contain p-2"
                 sizes="80px"
               />
             ) : (
               <span className="text-[10px] text-gray-500 font-cinzel text-center leading-tight uppercase">
-                Image<br />not<br />available
+                Image
+                <br />
+                not
+                <br />
+                available
               </span>
             )}
           </div>
 
           <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
-              <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-                <LogoSlot src={images["team-a"]} alt={`${match.teamA.name} logo`} />
-                <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
-                  {match.teamA.name}
-                </h1>
-              </div>
+            <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
+              <LogoSlot src={images["team-a"]} alt={`${match.teamA.name} logo`} />
+              <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                {match.teamA.name}
+              </h1>
+            </div>
 
-              <div className="flex flex-col items-center justify-center shrink-0">
-                  <span className="text-gold font-cinzel text-2xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
-                      VS
-                  </span>
-              </div>
+            <div className="flex flex-col items-center justify-center shrink-0">
+              <span className="text-gold font-cinzel text-2xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
+                VS
+              </span>
+            </div>
 
-              <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-                <LogoSlot src={images["team-b"]} alt={`${match.teamB.name} logo`} />
-                <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
-                  {match.teamB.name}
-                </h1>
-              </div>
+            <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
+              <LogoSlot src={images["team-b"]} alt={`${match.teamB.name} logo`} />
+              <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+                {match.teamB.name}
+              </h1>
+            </div>
           </div>
 
           <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-3 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg max-w-full">
@@ -283,14 +252,13 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             <span className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-gold shrink-0" /> {match.date} · {match.time}
             </span>
-            <span className="flex items-center gap-2 md:border-l border-gold/20 md:pl-6">
-              <CloudSun className="h-4 w-4 text-gold shrink-0" /> {(match as any).weather || "29°C · Clear Sky"}
-            </span>
           </div>
 
-          <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm max-w-full text-center break-words">
+          {match.toss && (
+            <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm max-w-full text-center break-words">
               {match.toss}
-          </p>
+            </p>
+          )}
         </div>
       </section>
 
@@ -309,9 +277,6 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
               ) : (
                 <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>
               )}
-              <span className="text-gray-400 text-xs font-cinzel uppercase tracking-wide">
-                {live ? "4,821 watching" : "5,940 watched"}
-              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -322,13 +287,15 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
                 </p>
               </div>
-              <div className={`rounded-lg p-4 border min-w-0 ${live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
+              <div
+                className={`rounded-lg p-4 border min-w-0 ${
+                  live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"
+                }`}
+              >
                 <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
                 <p className="text-2xl font-bold text-white font-cinzel mt-1">
                   {runs}/{wkts}
-                  <span className="text-sm text-gray-400 font-normal ml-2">
-                    ({live ? overLabel : match.innings2Final.overs} ov)
-                  </span>
+                  <span className="text-sm text-gray-400 font-normal ml-2">({overLabel} ov)</span>
                 </p>
               </div>
             </div>
@@ -392,7 +359,7 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                     innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
                   }`}
                 >
-                  {match.teamB.short} — 2nd Innings · {live ? `${runs}/${wkts}` : `${match.innings2Final.total}/${match.innings2Final.wkts}`}
+                  {match.teamB.short} — 2nd Innings · {runs}/{wkts}
                 </button>
               </div>
 
@@ -418,13 +385,13 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                   <BattingCard
                     title={`${match.teamB.short} Batting`}
                     rows={match.innings2Partial.batting}
-                    extras={1}
-                    extrasNote="lb 1"
+                    extras={0}
+                    extrasNote="—"
                     total={runs}
                     wkts={wkts}
                     overs={overLabel}
                     live
-                    creaseNote="J. Fonseka & M. Jayasuriya (not out)"
+                    creaseNote={notOutBatters(match.innings2Partial.batting)}
                   />
                   <FowList fow={match.innings2Partial.fow} />
                   <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Partial.bowling} live />
@@ -457,21 +424,22 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
                 <h2 className="text-xl font-bold text-white mb-4 font-cinzel">MATCH INFO</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
-                    ["Series", `${match.tournamentName} — ${match.round}`],
+                    ["Series", match.tournamentName ? `${match.tournamentName} — ${match.round}` : match.round],
                     ["Venue", match.venue],
                     ["Date & Time", `${match.date} · ${match.time}`],
-                    ["Weather", (match as any).weather || "29°C · Clear Sky"],
                     ["Toss", match.toss],
                     ["Umpires", match.officials.umpires],
                     ["Third Umpire", match.officials.thirdUmpire],
                     ["Match Referee", match.officials.referee],
                     ["Format", match.officials.format],
-                  ].map(([label, value]) => (
-                    <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3 min-w-0">
-                      <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">{label}</p>
-                      <p className="text-gray-200 text-sm mt-1 break-words">{value}</p>
-                    </div>
-                  ))}
+                  ]
+                    .filter(([, value]) => value)
+                    .map(([label, value]) => (
+                      <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3 min-w-0">
+                        <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">{label}</p>
+                        <p className="text-gray-200 text-sm mt-1 break-words">{value}</p>
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
@@ -480,116 +448,102 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
           {/* SQUADS TAB */}
           {tab === "squads" && (
             <div className="space-y-6 mb-8">
-              {match.squads.map((s) => (
-                <MatchSquadPanel key={s.team} squad={s} />
-              ))}
+              {match.squads.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-8">Squads have not been announced yet.</p>
+              ) : (
+                match.squads.map((s) => <MatchSquadPanel key={s.team} squad={s} />)
+              )}
             </div>
           )}
 
-          {/* OVERS TAB (CRICBUZZ LAYOUT) */}
-          {tab === "overs" && (() => {
-            const overOverData = getOverByOverData(innings)
-            return (
-              <div className="mb-8 space-y-4 fade-in">
-                {/* Inner Innings Selector System */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <button
-                    onClick={() => setInnings(1)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      innings === 1
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {match.teamA.short} (1st Inn)
-                  </button>
-                  <button
-                    onClick={() => setInnings(2)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      innings === 2
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {match.teamB.short} (2nd Inn)
-                  </button>
-                </div>
-
-                {/* Over by Over Container Table Element */}
-                <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
-                  {/* Table Header Row Component */}
-                  <div className="grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
-                    <div>Overs</div>
-                    <div>Balls</div>
-                    <div className="text-right">Runs</div>
-                  </div>
-
-                  {/* Over Record Map Loops */}
-                  {overOverData.map((ov, index) => (
-                    <div
-                      key={ov.num}
-                      className={`grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
-                        index < overOverData.length - 1 ? "border-b border-gold/10" : ""
+          {/* OVERS TAB */}
+          {tab === "overs" &&
+            (() => {
+              const overOverData = getOverByOverData(innings)
+              return (
+                <div className="mb-8 space-y-4 fade-in">
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <button
+                      onClick={() => setInnings(1)}
+                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                        innings === 1
+                          ? "bg-gold text-black shadow-md shadow-gold/20"
+                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
                       }`}
                     >
-                      {/* Left Column Stack Info */}
-                      <div className="min-w-0">
-                        <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
-                        <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
+                      {match.teamA.short} (1st Inn)
+                    </button>
+                    <button
+                      onClick={() => setInnings(2)}
+                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                        innings === 2
+                          ? "bg-gold text-black shadow-md shadow-gold/20"
+                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {match.teamB.short} (2nd Inn)
+                    </button>
+                  </div>
+
+                  {overOverData.length === 0 ? (
+                    <p className="text-gray-500 text-sm text-center py-8">No overs bowled yet.</p>
+                  ) : (
+                    <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
+                      <div className="grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
+                        <div>Over</div>
+                        <div>Wickets</div>
+                        <div className="text-right">Runs</div>
                       </div>
 
-                      {/* Middle Column Data Stack */}
-                      <div className="space-y-2 min-w-0">
-                        <p className="text-xs font-medium text-gray-300 break-words">{ov.matchUp}</p>
+                      {[...overOverData].reverse().map((ov, index) => (
+                        <div
+                          key={ov.num}
+                          className={`grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
+                            index < overOverData.length - 1 ? "border-b border-gold/10" : ""
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
+                            <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
+                          </div>
 
-                        {/* Ball pill block clusters */}
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                          {ov.balls.map((b: string, ballIdx: number) => {
-                            const isWicket = b.toUpperCase() === "W"
-                            const isSix = b === "6"
-                            const isFour = b === "4"
+                          <div className="flex flex-wrap gap-1.5 items-center min-w-0">
+                            {ov.balls.length > 0 ? (
+                              ov.balls.map((b, ballIdx) => (
+                                <span
+                                  key={ballIdx}
+                                  className="h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold bg-red-600 text-white shadow-sm shadow-red-900/50"
+                                >
+                                  {b}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-gray-600 text-xs">—</span>
+                            )}
+                          </div>
 
-                            return (
-                              <span
-                                key={ballIdx}
-                                className={`h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold transition-all shrink-0 ${
-                                  isWicket
-                                    ? "bg-red-600 text-white shadow-sm shadow-red-900/50 scale-105"
-                                    : isSix
-                                    ? "bg-purple-600/30 border border-purple-500 text-purple-400"
-                                    : isFour
-                                    ? "bg-cyan-600/30 border border-cyan-500 text-cyan-400"
-                                    : b === "•"
-                                    ? "bg-white/5 text-gray-500 border border-white/5"
-                                    : "bg-white/10 text-gray-300 border border-white/10"
-                                }`}
-                              >
-                                {b}
-                              </span>
-                            )
-                          })}
+                          <div className="text-right text-base font-bold text-white font-cinzel pr-1">
+                            {ov.totalRuns}
+                          </div>
                         </div>
-                      </div>
-
-                      {/* Right Column Total Value Stack */}
-                      <div className="text-right text-base font-bold text-white font-cinzel pr-1">
-                        {ov.totalRuns}
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <p className="text-[10px] text-gray-600 text-center pt-2">
+                    Ball-by-ball breakdown within each over isn't available yet — showing runs and wickets per over.
+                  </p>
                 </div>
-              </div>
-            )
-          })()}
+              )
+            })()}
 
           {/* GRAPHS TAB */}
           {tab === "graphs" && (
             <MatchGraphs
-              match={match}
+              match={match as any}
               live={live}
-              overRunsB={overRunsB}
-              winProb={winProb}
-              stepIndex={stepIndex}
+              overRunsB={live ? partialOverRuns(match.innings2Partial) : match.innings2Final.overRuns}
+              winProb={winProb ?? { a: 50, b: 50 }}
+              stepIndex={0}
               overs1={getOverByOverData(1)}
               overs2={getOverByOverData(2)}
             />
@@ -600,22 +554,38 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
             <div className="space-y-4 mb-8">
               <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
                 <h2 className="text-lg font-bold text-white mb-3 font-cinzel">WIN PROBABILITY</h2>
-                <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
-                  <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
-                  <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
-                </div>
-                <div className="flex justify-between mt-2 text-xs font-cinzel">
-                  <span className="text-gold">{match.teamA.short} {winProb.a}%</span>
-                  <span className="text-red-500">{match.teamB.short} {winProb.b}%</span>
-                </div>
+                {winProb ? (
+                  <>
+                    <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
+                      <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
+                      <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
+                    </div>
+                    <div className="flex justify-between mt-2 text-xs font-cinzel">
+                      <span className="text-gold">
+                        {match.teamA.short} {winProb.a}%
+                      </span>
+                      <span className="text-red-500">
+                        {match.teamB.short} {winProb.b}%
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-gray-500 text-sm">Win probability isn't available for this match.</p>
+                )}
               </div>
             </div>
           )}
 
           <div className="text-center mb-16">
-            <Link href={`/tournaments/${tournamentSlug}`}>
-              <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back to Tournament</Button>
-            </Link>
+            {tournamentSlug ? (
+              <Link href={`/tournaments/${tournamentSlug}`}>
+                <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back to Tournament</Button>
+              </Link>
+            ) : (
+              <Link href="/">
+                <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back Home</Button>
+              </Link>
+            )}
           </div>
         </div>
       </section>
@@ -623,6 +593,38 @@ export default function MatchDetailClient({ match, tournamentSlug }: MatchDetail
       <SectionDivider />
     </main>
   )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Live-partial helpers
+//
+// `innings2Partial` currently ships from match-data.ts as a snapshot of
+// batting/bowling/fow only (see innings2Partial construction there) — it
+// doesn't carry its own running total/wkts/overs the way `innings2Final`
+// does. These helpers derive them from what IS present. If you want the
+// partial state to carry its own total/wkts/overs directly, it's cleaner
+// to add those fields server-side in match-data.ts's innings2Partial
+// object (trivial: it already computes `innings2Agg` before slicing).
+// ─────────────────────────────────────────────────────────────
+function currentTotal(partial: MatchDetail["innings2Partial"]): number {
+  return partial.batting.reduce((sum, b) => sum + b.runs, 0)
+}
+function currentWkts(partial: MatchDetail["innings2Partial"]): number {
+  return partial.fow.length
+}
+function currentOvers(partial: MatchDetail["innings2Partial"]): string {
+  const legalBalls = partial.bowling.reduce((sum, b) => {
+    const [o, ball] = b.overs.split(".").map(Number)
+    return sum + o * 6 + ball
+  }, 0)
+  return `${Math.floor(legalBalls / 6)}.${legalBalls % 6}`
+}
+function partialOverRuns(partial: MatchDetail["innings2Partial"]): number[] {
+  return partial.overRunsAtStart
+}
+function notOutBatters(rows: BattingRow[]): string {
+  const names = rows.filter((b) => b.notOut).map((b) => b.name)
+  return names.length > 0 ? `${names.join(" & ")} (not out)` : ""
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -637,9 +639,6 @@ function DataGrid({
 }) {
   const template = columns.map((c) => (c.grow ? "minmax(6rem,1fr)" : "3.2rem")).join(" ")
   return (
-    // overflow-x-auto keeps a too-narrow viewport from ever forcing the
-    // whole page to scroll sideways — only this table scrolls internally,
-    // and only if it truly has to.
     <div className="border border-gold/10 rounded-md overflow-x-auto">
       <div className="min-w-[22rem]">
         <div className="grid border-b border-gold/10 bg-white/[0.02]" style={{ gridTemplateColumns: template }}>
@@ -654,19 +653,23 @@ function DataGrid({
             </div>
           ))}
         </div>
-        {rows.map((row, i) => (
-          <div
-            key={i}
-            className={`grid items-start text-xs md:text-sm ${i < rows.length - 1 ? "border-b border-gold/5" : ""}`}
-            style={{ gridTemplateColumns: template }}
-          >
-            {columns.map((c) => (
-              <div key={c.key} className={`p-2.5 ${c.align === "right" ? "text-right text-gray-200" : "text-left"}`}>
-                {row[c.key]}
-              </div>
-            ))}
-          </div>
-        ))}
+        {rows.length === 0 ? (
+          <p className="text-gray-600 text-xs text-center py-6">No data yet.</p>
+        ) : (
+          rows.map((row, i) => (
+            <div
+              key={i}
+              className={`grid items-start text-xs md:text-sm ${i < rows.length - 1 ? "border-b border-gold/5" : ""}`}
+              style={{ gridTemplateColumns: template }}
+            >
+              {columns.map((c) => (
+                <div key={c.key} className={`p-2.5 ${c.align === "right" ? "text-right text-gray-200" : "text-left"}`}>
+                  {row[c.key]}
+                </div>
+              ))}
+            </div>
+          ))
+        )}
       </div>
     </div>
   )
@@ -739,7 +742,7 @@ function BattingCard({
           Total {total}/{wkts} <span className="text-gray-500 font-normal">({overs} ov)</span>
         </span>
       </div>
-      {dnb && <p className="text-gray-500 text-[10px] mt-2 break-words">Did not bat: {dnb.join(", ")}</p>}
+      {dnb && dnb.length > 0 && <p className="text-gray-500 text-[10px] mt-2 break-words">Did not bat: {dnb.join(", ")}</p>}
     </div>
   )
 }
@@ -771,12 +774,13 @@ function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[];
 }
 
 function FowList({ fow }: { fow: FowEntry[] }) {
+  if (fow.length === 0) return null
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-4">
       <p className="text-gold text-xs uppercase tracking-widest font-cinzel mb-3">Fall of Wickets</p>
       <div className="flex flex-wrap gap-2">
-        {fow.map((f) => (
-          <span key={f[0]} className="text-[10.5px] text-gray-300 bg-white/[0.02] border border-gold/10 rounded-lg px-2.5 py-1.5">
+        {fow.map((f, i) => (
+          <span key={`${f[0]}-${i}`} className="text-[10.5px] text-gray-300 bg-white/[0.02] border border-gold/10 rounded-lg px-2.5 py-1.5">
             <b className="text-white">{f[0]}</b> {f[1]} ({f[2]} ov)
           </span>
         ))}
@@ -839,9 +843,7 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
       </div>
 
       <div className="space-y-3">
-        <p className="text-[11px] font-cinzel uppercase tracking-widest text-gold/70 font-semibold mb-2 px-1">
-          Playing XI
-        </p>
+        <p className="text-[11px] font-cinzel uppercase tracking-widest text-gold/70 font-semibold mb-2 px-1">Playing XI</p>
         {renderPlayerGrid(playingXI)}
       </div>
 
@@ -856,11 +858,7 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
         </div>
       )}
 
-      {bench.length > 0 && (
-        <div className="space-y-3">
-          {renderPlayerGrid(bench)}
-        </div>
-      )}
+      {bench.length > 0 && <div className="space-y-3">{renderPlayerGrid(bench)}</div>}
     </div>
   )
 }
