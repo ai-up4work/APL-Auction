@@ -21,6 +21,11 @@ interface BracketPageClientProps {
   tournamentOrgId: string
   singleRounds?: Round[]
   doubleData?: DoubleElimData
+  /** Watermark logo shown behind the Final match, forwarded straight
+   *  through to whichever bracket component renders. Optional —
+   *  both TournamentBracket and DoubleElimBoard skip the watermark
+   *  entirely when this is undefined. */
+  logoSrc?: string
 }
 
 /**
@@ -42,6 +47,7 @@ export default function BracketPageClient({
   title,
   singleRounds,
   doubleData,
+  logoSrc,
 }: BracketPageClientProps) {
   const [rounds, setRounds] = useState<Round[] | undefined>(singleRounds)
   const [doubleElimData, setDoubleElimData] = useState<DoubleElimData | undefined>(doubleData)
@@ -96,6 +102,7 @@ export default function BracketPageClient({
         title={title}
         eyebrowLabel="Knockout · Double Elimination"
         helperText="Hover or click a team to trace their path."
+        logoSrc={logoSrc}
       />
     )
   }
@@ -107,6 +114,7 @@ export default function BracketPageClient({
         title={title}
         eyebrowLabel="Knockout Stage"
         helperText="Hover or click a team to trace their path."
+        logoSrc={logoSrc}
       />
     )
   }

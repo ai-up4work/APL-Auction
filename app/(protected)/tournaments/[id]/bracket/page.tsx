@@ -14,15 +14,27 @@ export default async function TournamentBracketPage({
 }) {
   const { id } = await params;
 
+  // `tournaments.logo_url` is the tournament's own logo (separate from
+  // `image_url`, which is the banner image shown elsewhere). We also
+  // pull the parent org's logo as a fallback for tournaments that
+  // haven't set their own yet.
   const { data: tournament, error } = await supabase
     .from("tournaments")
-    .select("id, name, format, org_id")
+    .select("id, name, format, org_id, logo_url, organizations:org_id ( logo_url )")
     .eq("id", id)
     .single();
 
   if (error || !tournament) {
     return <EmptyState message="Tournament not found." />;
   }
+
+  // Supabase returns a to-one join as an object, but as an array in a
+  // couple of client-version/query-shape combinations — normalize
+  // either way rather than assuming.
+  const org = Array.isArray(tournament.organizations)
+    ? tournament.organizations[0]
+    : tournament.organizations;
+  const resolvedLogo = tournament.logo_url ?? org?.logo_url ?? undefined;
 
   if (tournament.format === "round_robin") {
     return (
@@ -48,6 +60,7 @@ export default async function TournamentBracketPage({
         doubleData={data}
         title={tournament.name}
         tournamentOrgId={tournament.org_id}
+        logoSrc={resolvedLogo}
       />
     );
   }
@@ -60,6 +73,7 @@ export default async function TournamentBracketPage({
       singleRounds={rounds}
       title={tournament.name}
       tournamentOrgId={tournament.org_id}
+      logoSrc={resolvedLogo}
     />
   );
 }

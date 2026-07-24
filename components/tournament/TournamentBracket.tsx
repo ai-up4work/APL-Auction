@@ -655,6 +655,15 @@ export default function TournamentBracket({
   const teamCount = rounds.length > 0 ? rounds[0].matches.length * 2 : 0;
   const useMirroredLayout = teamCount >= 16;
 
+  // Both mirrored (16+ team) and linear (smaller) brackets now share the
+  // same 1600px stage — a 4-team or 8-team bracket used to get squeezed
+  // into a narrow 760/1040px column, which crammed the columns close
+  // together. Instead we keep the full-width stage for every bracket
+  // size and let column gap (see the non-mirrored render branch below)
+  // do the work of spacing rounds out so it reads as spacious rather
+  // than stretched.
+  const desktopStageMaxWidth = 1600;
+
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
       refCache.current[key] = (el: HTMLDivElement | null) => {
@@ -926,7 +935,7 @@ export default function TournamentBracket({
         </div>
       </div>
 
-      <div className="hidden md:block max-w-[1600px] mx-auto relative">
+      <div className="hidden md:block mx-auto relative" style={{ maxWidth: desktopStageMaxWidth }}>
         <div className="w-full overflow-x-hidden">
           {useMirroredLayout ? (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
@@ -1036,7 +1045,7 @@ export default function TournamentBracket({
               </svg>
             </div>
           ) : (
-            <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+            <div ref={desktopContainerRef} className="relative flex items-start gap-8 lg:gap-14 w-full pb-6">
               {finalCenter && logoSrc && (
                 <div
                   className="absolute pointer-events-none z-0 flex justify-center items-center"
@@ -1055,9 +1064,8 @@ export default function TournamentBracket({
               )}
               {rounds.map((round, i) => {
                 const isCompact = shouldBeCompact(i);
-                const growWeight = getRoundGrowWeight(i, "left");
-                const bleedLeft = i === 2 ? "-85%" : i === 3 ? "-65%" : undefined;
-                const innerBleedLeft = i === 2 ? "-20%" : i === 3 ? "-20%" : undefined;
+                const isFinalColumn = i === rounds.length - 1;
+                const growWeight = getRoundGrowWeight(i, isFinalColumn ? "final" : "left");
 
                 return (
                   <BracketColumn
@@ -1074,8 +1082,6 @@ export default function TournamentBracket({
                     leafColumnRef={i === 0 ? (el) => (leafColumnRef.current = el) : undefined}
                     growWeight={growWeight}
                     compact={isCompact}
-                    bleedLeft={bleedLeft}
-                    innerBleedLeft={innerBleedLeft}
                     editable={editable}
                     onRecordResult={onRecordResult}
                   />
