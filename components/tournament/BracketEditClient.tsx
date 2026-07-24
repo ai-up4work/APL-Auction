@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Lock, RotateCcw, Sparkles, CheckCircle2, AlertCircle } from "lucide-react";
+import { Lock, RotateCcw, Sparkles, CheckCircle2, AlertCircle, Save, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteHeader } from "@/components/landing/site-header";
 import { useScrollTop } from "@/hooks/use-scroll-top";
@@ -13,7 +13,7 @@ import type { Round, MatchNode } from "@/components/tournament/TournamentBracket
 import DoubleElimBoard from "@/components/tournament/DoubleElimBoard";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 import { useAuth } from "@/context/AuthContext";
-import { getOrgIdForUser } from "@/lib/tournament/tournament";
+import { getOrgIdForUser, updateTournament } from "@/lib/tournament/tournament";
 import { updateBracketMatchResult } from "@/lib/tournament/bracketData";
 import {
   generateBracketForTournament,
@@ -22,6 +22,7 @@ import {
 } from "@/lib/tournament/generateBracket";
 
 type GateState = "checking" | "denied" | "allowed";
+type BracketFormat = "single_elimination" | "double_elimination";
 
 function findInRounds(rounds: Round[], matchId: string): MatchNode | null {
   for (const r of rounds) {
@@ -56,7 +57,7 @@ export default function BracketEditClient({
   tournamentId: string;
   tournamentOrgId: string | null;
   tournamentName: string;
-  format: "single_elimination" | "double_elimination";
+  format: BracketFormat;
   initialSingleRounds: Round[] | null;
   initialDoubleData: DoubleElimData | null;
 }) {
@@ -69,6 +70,25 @@ export default function BracketEditClient({
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [seedingMethod, setSeedingMethod] = useState<SeedingMethod>("random");
+
+  // ── Format — same field the Details section on the Tournament edit page
+  // writes to. Changing it here only updates the `tournaments.format`
+  // column; it does NOT reshape the matches that already exist. That's
+  // why a change nudges the admin toward Regenerate rather than silently
+  // rendering the old data against the new bracket type.
+  const [formatValue, setFormatValue] = useState<BracketFormat>(format);
+  const [isSavingFormat, setIsSavingFormat] = useState(false);
+  const [formatSaveError, setFormatSaveError] = useState<string | null>(null);
+  const [formatSavedAt, setFormatSavedAt] = useState<number | null>(null);
+  const formatDirty = formatValue !== format;
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
 
   const handleNavigation = (path: string) => {
     router.push(path);
@@ -95,7 +115,65 @@ export default function BracketEditClient({
     };
   }, [authLoading, user, tournamentOrgId]);
 
+  // Keep local format state in sync if the server prop changes underneath
+  // us (e.g. after router.refresh() following a save).
+  useEffect(() => {
+    setFormatValue(format);
+  }, [format]);
+
   const hasBracket = format === "single_elimination" ? !!initialSingleRounds : !!initialDoubleData;
+
+  const saveFormat = async () => {
+    setIsSavingFormat(true);
+    setFormatSaveError(null);
+
+    // A format change makes the existing bracket structurally wrong (wrong
+    // number of rounds, no losers bracket, etc). Rather than leave stale
+    // matches sitting around mismatched with the new format, clear them as
+    // part of the save — even mid-tournament. If the admin wants to keep a
+    // record of what happened, that's on them to capture before confirming.
+    if (hasBracket) {
+      const del = await deleteBracketForTournament(tournamentId);
+      if (!del.ok) {
+        setIsSavingFormat(false);
+        setFormatSaveError(del.error ?? "Couldn't clear the existing bracket.");
+        return;
+      }
+    }
+
+    const ok = await updateTournament(tournamentId, { format: formatValue });
+    setIsSavingFormat(false);
+    if (!ok) {
+      setFormatSaveError("Couldn't save the format — please try again.");
+      return;
+    }
+    setFormatSavedAt(Date.now());
+    router.refresh();
+  };
+
+  const handleSaveFormat = () => {
+    if (!formatDirty) return;
+
+    // Changing format while a bracket already exists means clearing it out
+    // (see saveFormat above) — confirm before doing something destructive,
+    // especially mid-tournament.
+    if (hasBracket) {
+      setConfirmDialog({
+        title: "Change tournament format?",
+        message: `This tournament already has a bracket built as ${
+          format === "single_elimination" ? "Single Elimination" : "Double Elimination"
+        }. Switching to "${
+          formatValue === "single_elimination" ? "Single Elimination" : "Double Elimination"
+        }" will permanently delete all existing matches and results — including any that are already decided — so the bracket can be rebuilt from scratch in the new format. This can't be undone.`,
+        confirmLabel: "Delete matches & change format",
+        destructive: true,
+        onConfirm: saveFormat,
+      });
+      return;
+    }
+
+    saveFormat();
+  };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -109,7 +187,7 @@ export default function BracketEditClient({
     router.refresh();
   };
 
-  const handleRegenerate = async () => {
+  const regenerate = async () => {
     setIsGenerating(true);
     setGenerateError(null);
 
@@ -133,6 +211,17 @@ export default function BracketEditClient({
       return;
     }
     router.refresh();
+  };
+
+  const handleRegenerate = () => {
+    setConfirmDialog({
+      title: "Delete & regenerate bracket?",
+      message:
+        "This will permanently delete all existing matches and results for this tournament and build a fresh bracket. This can't be undone.",
+      confirmLabel: "Delete & regenerate",
+      destructive: true,
+      onConfirm: regenerate,
+    });
   };
 
   const recordResult = async (
@@ -213,45 +302,101 @@ export default function BracketEditClient({
 
           {gate === "allowed" && (
             <>
-              {/* TOOLBAR — matches the Bracket section on the Tournament edit
-                  page (same card, same copy, same button styling), sitting
-                  directly above the board it controls. Only shown once a
-                  bracket exists; the empty state below has its own inline
-                  seeding control before the first generate. */}
-              {hasBracket && (
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
-                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-                    <div className="mb-4 sm:mb-0">
-                      <label className="text-gray-400 text-sm block mb-1">Reseed using</label>
+              {/* FORMAT + TOOLBAR — two cards side by side on larger screens
+                  so this header doesn't eat vertical space; they stack on
+                  narrow/mobile widths where there isn't room for both. */}
+              <div className={`grid grid-cols-1 ${hasBracket ? "lg:grid-cols-2" : ""} gap-6 mb-6`}>
+                {/* FORMAT — same field as Details → Format on the Tournament
+                    edit page, surfaced here since it's the thing that most
+                    directly affects this screen. Saving only updates the
+                    tournaments.format column; it does not reshape existing
+                    matches, so a change here is flagged until the admin
+                    regenerates. */}
+                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                      <Settings2 className="h-3.5 w-3.5 text-gold" />
+                    </div>
+                    <h2 className="text-lg font-bold text-white font-cinzel">{tournamentName}</h2>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-gray-400 text-sm shrink-0">Format</span>
+                    <select
+                      value={formatValue}
+                      onChange={(e) => setFormatValue(e.target.value as BracketFormat)}
+                      className="flex-1 min-w-[10rem] bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                    >
+                      <option value="single_elimination">Single Elimination</option>
+                      <option value="double_elimination">Double Elimination</option>
+                    </select>
+                    <Button
+                      onClick={handleSaveFormat}
+                      disabled={!formatDirty || isSavingFormat}
+                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                    >
+                      <Save className="mr-2 h-4 w-4" />
+                      {isSavingFormat ? "Saving…" : "Save format"}
+                    </Button>
+                  </div>
+
+                  {formatDirty && (
+                    <p className="text-gray-500 text-xs mt-2">
+                      {hasBracket
+                        ? "Saving will delete the existing bracket's matches and results so it can be rebuilt in the new format."
+                        : "Saving updates the tournament's format for when the bracket is generated."}
+                    </p>
+                  )}
+                  {formatSavedAt && !formatDirty && (
+                    <span className="flex items-center gap-1.5 text-green-500 text-sm mt-3">
+                      <CheckCircle2 className="h-4 w-4" /> Saved
+                    </span>
+                  )}
+                  {formatSaveError && (
+                    <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+                      <AlertCircle className="h-4 w-4" /> {formatSaveError}
+                    </span>
+                  )}
+                </div>
+
+                {/* TOOLBAR — matches the Bracket section on the Tournament edit
+                    page (same card, same copy, same button styling), sitting
+                    directly above the board it controls. Only shown once a
+                    bracket exists; the empty state below has its own inline
+                    seeding control before the first generate. */}
+                {hasBracket && (
+                  <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-gray-400 text-sm shrink-0">Reseed using</span>
                       <select
                         value={seedingMethod}
                         onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                        className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                        className="flex-1 min-w-[10rem] bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
                       >
                         <option value="random">Random draw</option>
                         <option value="creation_order">Team creation order</option>
                       </select>
+                      <Button
+                        onClick={handleRegenerate}
+                        disabled={isGenerating}
+                        className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
+                      >
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
+                      </Button>
                     </div>
-                    <Button
-                      onClick={handleRegenerate}
-                      disabled={isGenerating}
-                      className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
-                    >
-                      <RotateCcw className="mr-2 h-4 w-4" />
-                      {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
-                    </Button>
+                    <p className="text-gray-500 text-xs mt-2">
+                      This deletes all existing matches and results for this tournament and
+                      builds a fresh bracket.
+                    </p>
+                    {generateError && (
+                      <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+                        <AlertCircle className="h-4 w-4" /> {generateError}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-gray-500 text-xs mt-2">
-                    This deletes all existing matches and results for this tournament and builds
-                    a fresh bracket.
-                  </p>
-                  {generateError && (
-                    <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
-                      <AlertCircle className="h-4 w-4" /> {generateError}
-                    </span>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
 
               {!hasBracket ? (
                 <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center mx-auto">
@@ -310,6 +455,48 @@ export default function BracketEditClient({
           )}
         </div>
       </section>
+
+      {/* CONFIRM MODAL — replaces window.confirm() so destructive/consequential
+          actions (regenerate, format change over an existing bracket) match
+          the rest of the UI instead of popping the browser's native dialog. */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          onClick={() => setConfirmDialog(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle className={`h-5 w-5 ${confirmDialog.destructive ? "text-red-500" : "text-gold"}`} />
+              <h3 className="text-lg font-bold text-white font-cinzel">{confirmDialog.title}</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-6">{confirmDialog.message}</p>
+            <div className="flex justify-end gap-3">
+              <Button
+                onClick={() => setConfirmDialog(null)}
+                className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                  setConfirmDialog(null);
+                }}
+                className={
+                  confirmDialog.destructive
+                    ? "bg-red-600/80 hover:bg-red-600 text-white font-bold"
+                    : "bg-gold hover:bg-gold/90 text-black font-bold"
+                }
+              >
+                {confirmDialog.confirmLabel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

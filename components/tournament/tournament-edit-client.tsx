@@ -112,6 +112,17 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [generateSuccess, setGenerateSuccess] = useState(false)
 
+  // ── Confirm modal — replaces window.confirm() so destructive actions
+  // (format change wiping an existing bracket, delete & regenerate) match
+  // the rest of the UI instead of popping the browser's native dialog.
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string
+    message: string
+    confirmLabel: string
+    destructive?: boolean
+    onConfirm: () => void
+  } | null>(null)
+
   const handleNavigation = (path: string) => {
     router.push(path)
     window.scrollTo(0, 0)
@@ -171,10 +182,28 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     twitter !== tournament.twitter ||
     discord !== tournament.discord
 
-  const handleSave = async () => {
-    if (!dirty) return
+  const formatChanging = format !== tournament.format
+
+  const saveDetails = async () => {
     setIsSaving(true)
     setSaveError(null)
+
+    // Format changed while a bracket already exists — the old bracket no
+    // longer matches (wrong round count, no losers bracket, etc), so clear
+    // it out as part of this save rather than let it go stale. This mirrors
+    // the Bracket edit page's behavior.
+    if (formatChanging && bracketExists) {
+      const del = await deleteBracketForTournament(tournament.id)
+      if (!del.ok) {
+        setIsSaving(false)
+        setSaveError(del.error ?? "Couldn't clear the existing bracket.")
+        return
+      }
+      setBracketExists(false)
+      setGenerateSuccess(false)
+      setGenerateError(null)
+    }
+
     const ok = await updateTournament(tournament.id, {
       name,
       format,
@@ -194,6 +223,35 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     } else {
       setSaveError("Couldn't save — please try again.")
     }
+  }
+
+  const handleSave = () => {
+    if (!dirty) return
+
+    if (formatChanging && bracketExists) {
+      setConfirmDialog({
+        title: "Change tournament format?",
+        message: `This tournament already has a bracket built as ${
+          tournament.format === "single_elimination"
+            ? "Single Elimination"
+            : tournament.format === "double_elimination"
+              ? "Double Elimination"
+              : "Round Robin"
+        }. Switching to "${
+          format === "single_elimination"
+            ? "Single Elimination"
+            : format === "double_elimination"
+              ? "Double Elimination"
+              : "Round Robin"
+        }" will permanently delete all existing matches and results — including any that are already decided — so the bracket can be rebuilt from scratch in the new format. This can't be undone.`,
+        confirmLabel: "Delete matches & save",
+        destructive: true,
+        onConfirm: saveDetails,
+      })
+      return
+    }
+
+    saveDetails()
   }
 
   const prizesDirty = JSON.stringify(prizes) !== JSON.stringify(savedPrizes)
@@ -233,7 +291,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     }
   }
 
-  const handleRegenerateBracket = async () => {
+  const regenerateBracket = async () => {
     setIsGenerating(true)
     setGenerateError(null)
     setGenerateSuccess(false)
@@ -254,6 +312,17 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     } else {
       setGenerateError(result.error ?? "Couldn't generate the bracket.")
     }
+  }
+
+  const handleRegenerateBracket = () => {
+    setConfirmDialog({
+      title: "Delete & regenerate bracket?",
+      message:
+        "This will permanently delete all existing matches and results for this tournament and build a fresh bracket. This can't be undone.",
+      confirmLabel: "Delete & regenerate",
+      destructive: true,
+      onConfirm: regenerateBracket,
+    })
   }
 
   return (
@@ -343,6 +412,11 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                         <option value="double_elimination">Double Elimination</option>
                         <option value="round_robin">Round Robin</option>
                       </select>
+                      {formatChanging && bracketExists && (
+                        <p className="text-gray-500 text-xs mt-1">
+                          Saving will delete the existing bracket's matches and results.
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -679,6 +753,46 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
           )}
         </div>
       </section>
+
+      {/* CONFIRM MODAL — same styling as the Bracket edit page's version */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+          onClick={() => setConfirmDialog(null)}
+        >
+          <div
+            className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle className={`h-5 w-5 ${confirmDialog.destructive ? "text-red-500" : "text-gold"}`} />
+              <h3 className="text-lg font-bold text-white font-cinzel">{confirmDialog.title}</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-6">{confirmDialog.message}</p>
+            <div className="flex justify-end gap-3">
+              <Button
+                onClick={() => setConfirmDialog(null)}
+                className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  confirmDialog.onConfirm()
+                  setConfirmDialog(null)
+                }}
+                className={
+                  confirmDialog.destructive
+                    ? "bg-red-600/80 hover:bg-red-600 text-white font-bold"
+                    : "bg-gold hover:bg-gold/90 text-black font-bold"
+                }
+              >
+                {confirmDialog.confirmLabel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
