@@ -137,7 +137,14 @@ export async function getTournamentsForUser(userId: string): Promise<{
 /**
  * Updates tournament fields that have real columns — which, per the real
  * schema, is now most of them: name, format, status, category,
- * description, startDate, imageUrl, prizePool, website, twitter, discord.
+ * description, startDate, imageUrl, logoUrl, prizePool, website, twitter,
+ * discord.
+ *
+ * `imageUrl` maps to `tournaments.image_url` (the banner shown on the
+ * tournament page) and `logoUrl` maps to `tournaments.logo_url` (the
+ * smaller badge/watermark shown on the bracket and elsewhere) — these are
+ * two distinct columns, kept separate on purpose.
+ *
  * Still NOT covered here (no column/table, or intentionally derived —
  * see getTournamentById's schema note below): fixtures results/status,
  * prizes list, awards, pointsTable, squads, liveMatch, leaderboards.
@@ -156,6 +163,7 @@ export async function updateTournament(
     description: string;
     startDate: string; // ISO date, e.g. "2026-08-01"
     imageUrl: string;
+    logoUrl: string;
     prizePool: string;
     website: string;
     twitter: string;
@@ -165,10 +173,11 @@ export async function updateTournament(
   if (Object.keys(patch).length === 0) return true;
 
   // Map camelCase -> snake_case column names; everything else passes through.
-  const { startDate, imageUrl, prizePool, ...rest } = patch;
+  const { startDate, imageUrl, logoUrl, prizePool, ...rest } = patch;
   const payload: Record<string, unknown> = { ...rest };
   if (startDate !== undefined) payload.start_date = startDate;
   if (imageUrl !== undefined) payload.image_url = imageUrl;
+  if (logoUrl !== undefined) payload.logo_url = logoUrl;
   if (prizePool !== undefined) payload.prize_pool = prizePool;
 
   const { error } = await supabase.from("tournaments").update(payload).eq("id", id);
@@ -189,6 +198,7 @@ export type TournamentEditData = {
   description: string;
   startDate: string; // "" if unset, else "YYYY-MM-DD"
   imageUrl: string;
+  logoUrl: string;
   prizePool: string;
   website: string;
   twitter: string;
@@ -209,7 +219,7 @@ export async function getTournamentForEdit(id: string): Promise<TournamentEditDa
   const { data, error } = await supabase
     .from("tournaments")
     .select(
-      "id, name, format, status, category, description, start_date, image_url, prize_pool, website, twitter, discord, org_id"
+      "id, name, format, status, category, description, start_date, image_url, logo_url, prize_pool, website, twitter, discord, org_id"
     )
     .eq("id", id)
     .single();
@@ -228,6 +238,7 @@ export async function getTournamentForEdit(id: string): Promise<TournamentEditDa
     description: data.description ?? "",
     startDate: data.start_date ?? "",
     imageUrl: data.image_url ?? "",
+    logoUrl: data.logo_url ?? "",
     prizePool: data.prize_pool ?? "",
     website: data.website ?? "",
     twitter: data.twitter ?? "",
@@ -531,6 +542,7 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
       description,
       start_date,
       image_url,
+      logo_url,
       prize_pool,
       website,
       twitter,

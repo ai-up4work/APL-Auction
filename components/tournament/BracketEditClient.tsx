@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Lock, RotateCcw, Sparkles, CheckCircle2, AlertCircle, Save, Settings2 } from "lucide-react";
+import { Lock, RotateCcw, Sparkles, CheckCircle2, AlertCircle, Save, Settings2, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { SiteHeader } from "@/components/landing/site-header";
 import { useScrollTop } from "@/hooks/use-scroll-top";
 import { pageStyles } from "@/data/site-data";
@@ -53,6 +54,7 @@ export default function BracketEditClient({
   format,
   initialSingleRounds,
   initialDoubleData,
+  initialLogoUrl,
 }: {
   tournamentId: string;
   tournamentOrgId: string | null;
@@ -60,6 +62,12 @@ export default function BracketEditClient({
   format: BracketFormat;
   initialSingleRounds: Round[] | null;
   initialDoubleData: DoubleElimData | null;
+  /** Current value of tournaments.logo_url, passed down from the server
+   *  page so this panel can seed its own logo editor without a separate
+   *  fetch. Same column the Tournament edit page's Details → "Tournament
+   *  logo URL" field writes to — this is just a second place to set it,
+   *  right above the board it's used on. */
+  initialLogoUrl?: string;
 }) {
   useScrollTop();
   const router = useRouter();
@@ -81,6 +89,16 @@ export default function BracketEditClient({
   const [formatSaveError, setFormatSaveError] = useState<string | null>(null);
   const [formatSavedAt, setFormatSavedAt] = useState<number | null>(null);
   const formatDirty = formatValue !== format;
+
+  // ── Logo — tournaments.logo_url, the watermark shown behind the Final
+  // on this same board. Kept as its own tiny save flow (like Format) so
+  // it doesn't get tangled up with the destructive format-change path.
+  const [logoUrl, setLogoUrl] = useState(initialLogoUrl ?? "");
+  const [logoBroken, setLogoBroken] = useState(false);
+  const [isSavingLogo, setIsSavingLogo] = useState(false);
+  const [logoSaveError, setLogoSaveError] = useState<string | null>(null);
+  const [logoSavedAt, setLogoSavedAt] = useState<number | null>(null);
+  const logoDirty = logoUrl !== (initialLogoUrl ?? "");
 
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -120,6 +138,14 @@ export default function BracketEditClient({
   useEffect(() => {
     setFormatValue(format);
   }, [format]);
+
+  useEffect(() => {
+    setLogoUrl(initialLogoUrl ?? "");
+  }, [initialLogoUrl]);
+
+  useEffect(() => {
+    setLogoBroken(false);
+  }, [logoUrl]);
 
   const hasBracket = format === "single_elimination" ? !!initialSingleRounds : !!initialDoubleData;
 
@@ -173,6 +199,20 @@ export default function BracketEditClient({
     }
 
     saveFormat();
+  };
+
+  const handleSaveLogo = async () => {
+    if (!logoDirty) return;
+    setIsSavingLogo(true);
+    setLogoSaveError(null);
+    const ok = await updateTournament(tournamentId, { logoUrl });
+    setIsSavingLogo(false);
+    if (!ok) {
+      setLogoSaveError("Couldn't save the logo — please try again.");
+      return;
+    }
+    setLogoSavedAt(Date.now());
+    router.refresh();
   };
 
   const handleGenerate = async () => {
@@ -302,10 +342,13 @@ export default function BracketEditClient({
 
           {gate === "allowed" && (
             <>
-              {/* FORMAT + TOOLBAR — two cards side by side on larger screens
-                  so this header doesn't eat vertical space; they stack on
-                  narrow/mobile widths where there isn't room for both. */}
-              <div className={`grid grid-cols-1 ${hasBracket ? "lg:grid-cols-2" : ""} gap-6 mb-6`}>
+              {/* FORMAT + LOGO + TOOLBAR — cards side by side on larger
+                  screens so this header doesn't eat vertical space; they
+                  stack on narrow/mobile widths where there isn't room for
+                  all of them. */}
+              <div
+                className={`grid grid-cols-1 ${hasBracket ? "lg:grid-cols-3" : "lg:grid-cols-2"} gap-6 mb-6`}
+              >
                 {/* FORMAT — same field as Details → Format on the Tournament
                     edit page, surfaced here since it's the thing that most
                     directly affects this screen. Saving only updates the
@@ -317,7 +360,7 @@ export default function BracketEditClient({
                     <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
                       <Settings2 className="h-3.5 w-3.5 text-gold" />
                     </div>
-                    <h2 className="text-lg font-bold text-white font-cinzel">{tournamentName}</h2>
+                    <h2 className="text-lg font-bold text-white font-cinzel truncate">{tournamentName}</h2>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
@@ -359,6 +402,66 @@ export default function BracketEditClient({
                   )}
                 </div>
 
+                {/* LOGO — tournaments.logo_url, the watermark shown behind
+                    the Final on the board below. Same column as the
+                    Tournament edit page's "Tournament logo URL" field —
+                    this is just a second, closer-to-the-result place to
+                    set it. */}
+                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+                      <ImageOff className="h-3.5 w-3.5 text-gold" />
+                    </div>
+                    <h2 className="text-lg font-bold text-white font-cinzel">Bracket logo</h2>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Input
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="https://…"
+                      className="bg-black/50 border-gold/30 text-white flex-1 min-w-0"
+                    />
+                    <div className="w-10 h-10 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                      {logoUrl && !logoBroken ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={logoUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={() => setLogoBroken(true)}
+                        />
+                      ) : (
+                        <ImageOff className="h-4 w-4 text-gray-600" />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 mt-3">
+                    <Button
+                      onClick={handleSaveLogo}
+                      disabled={!logoDirty || isSavingLogo}
+                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                    >
+                      <Save className="mr-2 h-4 w-4" />
+                      {isSavingLogo ? "Saving…" : "Save logo"}
+                    </Button>
+                    {logoSavedAt && !logoDirty && (
+                      <span className="flex items-center gap-1.5 text-green-500 text-sm">
+                        <CheckCircle2 className="h-4 w-4" /> Saved
+                      </span>
+                    )}
+                  </div>
+                  {logoSaveError && (
+                    <span className="flex items-center gap-1.5 text-red-500 text-sm mt-2">
+                      <AlertCircle className="h-4 w-4" /> {logoSaveError}
+                    </span>
+                  )}
+                  <p className="text-gray-500 text-xs mt-2">
+                    Falls back to your org's logo if left blank.
+                  </p>
+                </div>
+
                 {/* TOOLBAR — matches the Bracket section on the Tournament edit
                     page (same card, same copy, same button styling), sitting
                     directly above the board it controls. Only shown once a
@@ -366,12 +469,12 @@ export default function BracketEditClient({
                     seeding control before the first generate. */}
                 {hasBracket && (
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-gray-400 text-sm shrink-0">Reseed using</span>
+                    <div className="flex flex-col gap-3">
+                      <span className="text-gray-400 text-sm">Reseed using</span>
                       <select
                         value={seedingMethod}
                         onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                        className="flex-1 min-w-[10rem] bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
                       >
                         <option value="random">Random draw</option>
                         <option value="creation_order">Team creation order</option>
@@ -437,11 +540,17 @@ export default function BracketEditClient({
                       title="Bracket"
                       editable
                       onRecordResult={recordResult}
+                      logoSrc={initialLogoUrl}
                     />
                   )}
 
                   {format === "double_elimination" && initialDoubleData && (
-                    <DoubleElimBoard data={initialDoubleData} editable onRecordResult={recordResult} />
+                    <DoubleElimBoard
+                      data={initialDoubleData}
+                      editable
+                      onRecordResult={recordResult}
+                      logoSrc={initialLogoUrl}
+                    />
                   )}
                 </>
               )}

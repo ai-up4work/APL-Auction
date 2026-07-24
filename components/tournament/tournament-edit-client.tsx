@@ -88,6 +88,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   const [startDate, setStartDate] = useState(tournament.startDate)
   const [imageUrl, setImageUrl] = useState(tournament.imageUrl)
   const [imageBroken, setImageBroken] = useState(false)
+  const [logoUrl, setLogoUrl] = useState(tournament.logoUrl)
+  const [logoBroken, setLogoBroken] = useState(false)
   const [prizePool, setPrizePool] = useState(tournament.prizePool)
   const [website, setWebsite] = useState(tournament.website)
   const [twitter, setTwitter] = useState(tournament.twitter)
@@ -169,6 +171,10 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     setImageBroken(false)
   }, [imageUrl])
 
+  useEffect(() => {
+    setLogoBroken(false)
+  }, [logoUrl])
+
   const dirty =
     name !== tournament.name ||
     format !== tournament.format ||
@@ -177,6 +183,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     description !== tournament.description ||
     startDate !== tournament.startDate ||
     imageUrl !== tournament.imageUrl ||
+    logoUrl !== tournament.logoUrl ||
     prizePool !== tournament.prizePool ||
     website !== tournament.website ||
     twitter !== tournament.twitter ||
@@ -212,6 +219,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       description,
       startDate,
       imageUrl,
+      logoUrl,
       prizePool,
       website,
       twitter,
@@ -481,28 +489,62 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                     />
                   </div>
 
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
-                    <div className="flex gap-3 items-start">
-                      <Input
-                        value={imageUrl}
-                        onChange={(e) => setImageUrl(e.target.value)}
-                        placeholder="https://…"
-                        className="bg-black/50 border-gold/30 text-white flex-1"
-                      />
-                      <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
-                        {imageUrl && !imageBroken ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={imageUrl}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            onError={() => setImageBroken(true)}
-                          />
-                        ) : (
-                          <ImageOff className="h-4 w-4 text-gray-600" />
-                        )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
+                      <div className="flex gap-3 items-start">
+                        <Input
+                          value={imageUrl}
+                          onChange={(e) => setImageUrl(e.target.value)}
+                          placeholder="https://…"
+                          className="bg-black/50 border-gold/30 text-white flex-1"
+                        />
+                        <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                          {imageUrl && !imageBroken ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={imageUrl}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={() => setImageBroken(true)}
+                            />
+                          ) : (
+                            <ImageOff className="h-4 w-4 text-gray-600" />
+                          )}
+                        </div>
                       </div>
+                      <p className="text-gray-500 text-xs mt-1">
+                        Wide banner shown at the top of the tournament page.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-1">Tournament logo URL</label>
+                      <div className="flex gap-3 items-start">
+                        <Input
+                          value={logoUrl}
+                          onChange={(e) => setLogoUrl(e.target.value)}
+                          placeholder="https://…"
+                          className="bg-black/50 border-gold/30 text-white flex-1"
+                        />
+                        <div className="w-12 h-12 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                          {logoUrl && !logoBroken ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={logoUrl}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={() => setLogoBroken(true)}
+                            />
+                          ) : (
+                            <ImageOff className="h-4 w-4 text-gray-600" />
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-gray-500 text-xs mt-1">
+                        Square badge — used as the watermark behind the Final on the bracket.
+                        Falls back to your org's logo if left blank.
+                      </p>
                     </div>
                   </div>
 

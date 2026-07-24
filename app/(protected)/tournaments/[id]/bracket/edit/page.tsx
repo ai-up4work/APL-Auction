@@ -22,9 +22,12 @@ export default async function TournamentBracketEditPage({
 }) {
   const { id } = await params;
 
+  // `logo_url` is the tournament's own logo (separate from `image_url`,
+  // the banner). Joined org logo is the fallback for tournaments that
+  // haven't set their own yet — same pattern as the public bracket page.
   const { data: tournament, error } = await supabase
     .from("tournaments")
-    .select("id, name, format, org_id")
+    .select("id, name, format, org_id, logo_url, organizations:org_id ( logo_url )")
     .eq("id", id)
     .single();
 
@@ -37,6 +40,14 @@ export default async function TournamentBracketEditPage({
       <EmptyState message="Round-robin tournaments don't use a bracket — there's nothing to edit here." />
     );
   }
+
+  // Supabase returns a to-one join as an object, but as an array in a
+  // couple of client-version/query-shape combinations — normalize either
+  // way rather than assuming.
+  const org = Array.isArray(tournament.organizations)
+    ? tournament.organizations[0]
+    : tournament.organizations;
+  const resolvedLogo = tournament.logo_url ?? org?.logo_url ?? undefined;
 
   const rows = await getBracketMatchesForTournament(tournament.id);
 
@@ -58,6 +69,7 @@ export default async function TournamentBracketEditPage({
       format={tournament.format as "single_elimination" | "double_elimination"}
       initialSingleRounds={singleRounds}
       initialDoubleData={doubleData}
+      initialLogoUrl={resolvedLogo}
     />
   );
 }
