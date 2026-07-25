@@ -67,7 +67,7 @@ export default function RegisterPage() {
       return
     }
 
-    router.push("/profile/")
+    router.push("/organization/")
     router.refresh()
   }
 
