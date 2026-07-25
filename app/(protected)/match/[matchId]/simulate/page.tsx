@@ -53,6 +53,7 @@ function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
 
   return {
     ...setup,
+    officials: setup.officials ? setup.officials : { referee : "Merline", thirdUmpire : "Askalaan", umpires : "Sr George", format: "T20 · 20 overs per side" },
     venue: setup.venue?.trim() ? setup.venue : "Simulated Grounds",
     date: setup.date?.trim() ? setup.date : isoDate,
     time: setup.time?.trim() ? setup.time : hhmm,
@@ -434,7 +435,7 @@ export default function SimulateMatchPage() {
               <Button
                 onClick={() => handleStart(true)}
                 disabled={runState === "running" || runState === "paused"}
-                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40"
+                className="bg-gold hover:bg-gold/90 text-green-400 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40"
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Reset &amp; Simulate
