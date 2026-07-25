@@ -2,10 +2,15 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
+import Link from "next/link"
 import { Gavel, Play, Pause, Square, RotateCcw, Radio, Zap, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TypeText } from "@/components/landing/type-text"
+import { useScrollTop } from "@/hooks/use-scroll-top"
+import { SiteHeader } from "@/components/landing/site-header"
+import { SiteFooter } from "@/components/landing/site-footer"
+import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { parseMatchSetup, type MatchSetup } from "@/lib/matches/cricket-engine"
 import {
@@ -46,14 +51,27 @@ function poolFromSetup(setup: MatchSetup, side: "team1" | "team2"): SimPlayerPoo
   }
 }
 
+// Fills in any MISSING or BLANK match-info fields with sensible
+// defaults — checked field-by-field (via .trim()) rather than checking
+// whether the parent `officials` object exists at all. A match whose
+// `officials` object is present but has e.g. an empty `format: ""`
+// would previously pass the `setup.officials ? setup.officials : {...}`
+// check (the object itself is truthy) and keep the blank field forever.
 function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
   const now = new Date()
   const isoDate = now.toISOString().split("T")[0]
   const hhmm = now.toTimeString().slice(0, 5)
 
+  const officials = setup.officials ?? ({} as MatchSetup["officials"])
+
   return {
     ...setup,
-    officials: setup.officials ? setup.officials : { referee : "Merline", thirdUmpire : "Askalaan", umpires : "Sr George", format: "T20 · 20 overs per side" },
+    officials: {
+      referee: officials.referee?.trim() ? officials.referee : "Merline",
+      thirdUmpire: officials.thirdUmpire?.trim() ? officials.thirdUmpire : "Askalaan",
+      umpires: officials.umpires?.trim() ? officials.umpires : "Sr George",
+      format: officials.format?.trim() ? officials.format : "T20 · 20 overs per side",
+    },
     venue: setup.venue?.trim() ? setup.venue : "Simulated Grounds",
     date: setup.date?.trim() ? setup.date : isoDate,
     time: setup.time?.trim() ? setup.time : hhmm,
@@ -61,20 +79,25 @@ function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
   }
 }
 
-const statusMeta: Record<RunState, { label: string; color: string }> = {
-  idle: { label: "IDLE", color: "#9CA3AF" },
-  running: { label: "LIVE", color: "#F5A623" },
-  paused: { label: "PAUSED", color: "#C0C0C0" },
-  done: { label: "COMPLETE", color: "#4ADE80" },
-  error: { label: "ERROR", color: "#F87171" },
+// Same "badge chip" language used in the Core Modules section on the
+// homepage (h-7 px-3 border rounded, font-mono tracking-[2px] label) so
+// the run status reads as part of the same design system.
+const statusMeta: Record<RunState, { label: string; accent: string }> = {
+  idle: { label: "IDLE", accent: "#9CA3AF" },
+  running: { label: "LIVE", accent: "#F5A623" },
+  paused: { label: "PAUSED", accent: "#C0C0C0" },
+  done: { label: "COMPLETE", accent: "#4ADE80" },
+  error: { label: "ERROR", accent: "#F87171" },
 }
 
-// Same panel shell used throughout match-detail-client.tsx, so this page
-// reads as part of the same product instead of a bolted-on admin tool.
+// Same card shell used throughout the site (testimonials, contact,
+// match-detail tabs): black/50 base, gold/20 border, gold/40 on hover —
+// so this page reads as part of the same product instead of a
+// bolted-on admin tool.
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div
-      className={`bg-black/50 backdrop-blur-xl border border-gold/30 rounded-lg p-6 md:p-10 shadow-[0_10px_40px_rgba(0,0,0,0.5)] ${className}`}
+      className={`bg-black/50 border border-gold/20 shine hover:border-gold/40 transition-all duration-300 rounded-lg p-6 md:p-10 shadow-lg shadow-black/40 ${className}`}
     >
       {children}
     </div>
@@ -82,9 +105,12 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 }
 
 export default function SimulateMatchPage() {
+  useScrollTop()
+  const router = useRouter()
   const params = useParams<{ matchId: string }>()
   const matchIdFromRoute = params?.matchId ?? ""
 
+  const [isNavOpen, setIsNavOpen] = useState(false)
   const [matchIdInput, setMatchIdInput] = useState(matchIdFromRoute)
   const [runState, setRunState] = useState<RunState>("idle")
   const [speedMs, setSpeedMs] = useState(1200)
@@ -104,14 +130,32 @@ export default function SimulateMatchPage() {
   // immediately instead of racing new inserts / deletes.
   const runTokenRef = useRef(0)
 
+  const handleNavigation = (path: string) => {
+    router.push(path)
+    window.scrollTo(0, 0)
+  }
+  const scrollToSection = (sectionId: string) => {
+    router.push(`/#${sectionId}`)
+    setIsNavOpen(false)
+  }
+
   const setRun = (s: RunState) => {
     runStateRef.current = s
     setRunState(s)
   }
 
+  // Captures logIdRef.current into a local `id` BEFORE calling setLog,
+  // rather than reading logIdRef.current from inside the updater
+  // closure. At very low speedMs, multiple pushLog() calls can get
+  // queued before React flushes state, and each queued updater would
+  // otherwise close over the *same* ref and could read it after a
+  // later call had already bumped it again — producing two log lines
+  // with an identical id (and the "two children with the same key"
+  // warning). Capturing the value up front removes that race.
   const pushLog = (text: string, emphasis?: boolean) => {
     logIdRef.current += 1
-    setLog((prev) => [...prev.slice(-300), { id: logIdRef.current, text, emphasis }])
+    const id = logIdRef.current
+    setLog((prev) => [...prev.slice(-300), { id, text, emphasis }])
   }
 
   const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
@@ -189,7 +233,11 @@ export default function SimulateMatchPage() {
         setup.venue !== parsedSetup.venue ||
         setup.date !== parsedSetup.date ||
         setup.time !== parsedSetup.time ||
-        setup.toss !== parsedSetup.toss
+        setup.toss !== parsedSetup.toss ||
+        setup.officials.format !== parsedSetup.officials?.format ||
+        setup.officials.referee !== parsedSetup.officials?.referee ||
+        setup.officials.umpires !== parsedSetup.officials?.umpires ||
+        setup.officials.thirdUmpire !== parsedSetup.officials?.thirdUmpire
 
       const { data: bracketRow } = await supabase
         .from("bracket_matches")
@@ -220,7 +268,9 @@ export default function SimulateMatchPage() {
         .eq("id", matchId)
       if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
       if (infoWasFilled) {
-        pushLog(`Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}".`)
+        pushLog(
+          `Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}", format: "${setup.officials.format}".`
+        )
       }
 
       const oversLimit = setup.overs ?? 20
@@ -356,38 +406,59 @@ export default function SimulateMatchPage() {
   const status = statusMeta[runState]
 
   return (
-    <main className="min-h-screen bg-black text-white relative">
-      <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-black to-black/95" />
+    <main className="overflow-x-hidden max-w-full">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `${pageStyles}
+          html, body {
+            overflow-x: hidden;
+            max-width: 100%;
+          }`,
+        }}
+      />
 
-      <div className="container mx-auto px-4 py-16 relative z-10">
-        <div className="max-w-3xl mx-auto">
-          {/* ── Header ── */}
-          <div className="text-center mb-12 fade-in">
-            <div className="inline-flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-md flex items-center justify-center shrink-0 bg-gold/10 border border-gold">
-                <Gavel className="w-6 h-6 text-gold" />
-              </div>
-            </div>
-            <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider inline-block">
-              <TypeText text="Match " speed={45} />
-              <TypeText text="Simulator" speed={45} delay={220} className="text-gold" />
-            </h1>
-            <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
-              Generates a full match, ball by ball, writing directly into <code className="text-gold">balls</code> and
-              updating <code className="text-gold">matches</code> / <code className="text-gold">bracket_matches</code>{" "}
-              as it goes. Open the live match page in another tab to watch it update in real time.
-            </p>
+      <SiteHeader
+        activeSection="tournament"
+        isNavOpen={isNavOpen}
+        setIsNavOpen={setIsNavOpen}
+        scrollToSection={scrollToSection}
+        handleNavigation={handleNavigation}
+      />
+
+      {/* ═══════════════════════════════════════════
+          HEADER — same section-pattern + gold-gradient
+          title treatment as every other section on site.
+      ═══════════════════════════════════════════ */}
+      <section className="relative pt-28 pb-12 section-pattern bg-black border-b border-gold/10">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10 text-center fade-in">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-md mb-6 bg-gold/10 border border-gold shrink-0">
+            <Gavel className="w-6 h-6 text-gold" />
           </div>
+          <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider section-title inline-block">
+            <TypeText text="Match " speed={45} />
+            <TypeText text="Simulator" speed={45} delay={220} className="gold-gradient-text" />
+          </h1>
+          <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
+            Generates a full match, ball by ball, writing directly into <code className="text-gold">balls</code> and
+            updating <code className="text-gold">matches</code> / <code className="text-gold">bracket_matches</code>{" "}
+            as it goes. Open the live match page in another tab to watch it update in real time.
+          </p>
+        </div>
+      </section>
 
+      <section className="py-16 relative section-pattern">
+        <div className="absolute inset-0 z-0 section-gradient" />
+        <div className="container mx-auto px-4 relative z-10 max-w-3xl">
           {/* ── Control panel ── */}
-          <Panel className="mb-8 space-y-8">
+          <Panel className="mb-8 space-y-8 fade-in-up stagger-1">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div
                 className="flex items-center gap-2 h-7 px-3 border rounded w-fit"
-                style={{ borderColor: status.color, backgroundColor: "rgba(0,0,0,0.4)" }}
+                style={{ borderColor: status.accent, backgroundColor: "rgba(0,0,0,0.4)" }}
               >
-                <Radio className="w-3 h-3" style={{ color: status.color }} />
-                <span className="text-[11px] font-mono tracking-[2px]" style={{ color: status.color }}>
+                <Radio className="w-3 h-3" style={{ color: status.accent }} />
+                <span className="text-[11px] font-mono tracking-[2px]" style={{ color: status.accent }}>
                   {status.label}
                 </span>
               </div>
@@ -435,7 +506,7 @@ export default function SimulateMatchPage() {
               <Button
                 onClick={() => handleStart(true)}
                 disabled={runState === "running" || runState === "paused"}
-                className="bg-gold hover:bg-gold/90 text-green-400 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40"
+                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40"
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Reset &amp; Simulate
@@ -477,24 +548,48 @@ export default function SimulateMatchPage() {
           </Panel>
 
           {/* ── Log panel ── */}
-          <Panel>
+          <Panel className="fade-in-up stagger-2">
             <div className="flex items-center justify-between mb-4">
-              <span className="font-cinzel text-xs text-gray-300 tracking-widest">DELIVERY LOG</span>
+              <span className="font-cinzel text-xs text-gold uppercase tracking-widest">Delivery Log</span>
               <span className="font-mono text-[10px] text-gray-500 tracking-widest">{log.length} EVENTS</span>
             </div>
-            <div className="h-96 overflow-y-auto font-mono text-xs space-y-1.5 pr-1">
+            <div className="border border-gold/10 rounded-md bg-black/40 h-96 overflow-y-auto font-mono text-xs p-4 space-y-1.5">
               {log.length === 0 && (
                 <p className="text-gray-500">Log will appear here once the simulation starts.</p>
               )}
-              {log.map((l) => (
-                <p key={l.id} className={l.emphasis ? "text-gold font-bold" : "text-gray-400"}>
+              {log.map((l, index) => (
+                // Keyed on `${l.id}-${index}` rather than l.id alone —
+                // id comes from a ref counter that's bumped synchronously
+                // in pushLog(), but under very fast simulation speeds
+                // React can still end up rendering two entries with a
+                // matching id if state updates get batched unexpectedly.
+                // Pairing with array index guarantees uniqueness within
+                // this render regardless of what id turns out to be.
+                <p key={`${l.id}-${index}`} className={l.emphasis ? "text-gold font-bold" : "text-gray-400"}>
                   {l.text}
                 </p>
               ))}
             </div>
           </Panel>
+
+          <div className="text-center mt-10 fade-in-up stagger-3">
+            {matchIdFromRoute ? (
+              <Link href={`/match/${matchIdFromRoute}`}>
+                <Button
+                  variant="outline"
+                  className="border-gold text-gold hover:bg-gold/10 bg-transparent font-bold"
+                >
+                  Back to Match
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/">
+                <Button className="bg-gold hover:bg-gold/90 py-2 text-black font-bold">Back Home</Button>
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
     </main>
   )
 }
