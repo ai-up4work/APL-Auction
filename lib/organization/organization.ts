@@ -1,5 +1,6 @@
 // app/lib/organization/organization.ts
 import { supabase } from "@/lib/supabase";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  ORG CONTEXT                                                        */
@@ -147,21 +148,8 @@ export async function createTournament(
   return data.id;
 }
 
-/** Deletes a tournament outright. Unlike a friendly match, a tournament
- *  typically has real dependents — auctions, teams, bracket matches,
- *  players sold into those teams, etc. This only issues a delete on the
- *  `tournaments` row itself; whether those dependents disappear with it
- *  depends entirely on your schema's FK constraints:
- *  - If the relevant FKs (auctions.tournament_id, bracket_matches.*,
- *    teams.auction_id, etc.) are set to ON DELETE CASCADE, this cleans
- *    up everything automatically.
- *  - If they're NOT NULL / RESTRICT instead, this call will fail with a
- *    foreign-key-violation error (surfaced below as a friendly message)
- *    rather than silently leaving orphaned or broken data.
- *  Confirm which behavior your schema has before relying on this in
- *  production — if it's RESTRICT, you'll want an explicit cascading
- *  delete here instead (auctions -> teams -> players -> bracket_matches
- *  -> tournament, in that order) before this will succeed. */
+/** Deletes a tournament outright. See original notes on FK/cascade
+ *  behavior — this only issues a delete on the `tournaments` row. */
 export async function deleteTournament(tournamentId: string): Promise<UpdateOrgResult> {
   const { error } = await supabase.from("tournaments").delete().eq("id", tournamentId);
   if (error) {
@@ -177,24 +165,36 @@ export async function deleteTournament(tournamentId: string): Promise<UpdateOrgR
   return { ok: true };
 }
 
-/* ────────────────────────────────────────────────────────────────── */
-/*  AUCTIONS (lookup only — auction creation/editing lives elsewhere)  */
-/*                                                                      */
-/*  Used by the Matches tab's "team source: from an auction" flow, so   */
-/*  a friendly/standalone match can pull its two teams (and their sold  */
-/*  players) from an auction that's already been run for this org,      */
-/*  instead of typing team names in by hand.                            */
-/* ────────────────────────────────────────────────────────────────── */
-
-export interface AuctionOption {
-  id: string;
-  name: string;
+/** Bulk delete — same FK caveats as the single-row version apply per id. */
+export async function deleteTournaments(tournamentIds: string[]): Promise<{ okIds: string[]; failedIds: string[] }> {
+  const okIds: string[] = [];
+  const failedIds: string[] = [];
+  for (const id of tournamentIds) {
+    const result = await deleteTournament(id);
+    if (result.ok) okIds.push(id);
+    else failedIds.push(id);
+  }
+  return { okIds, failedIds };
 }
 
-export async function getAuctionsForOrg(orgId: string): Promise<AuctionOption[]> {
+/* ────────────────────────────────────────────────────────────────── */
+/*  AUCTIONS (lookup only — auction creation/editing lives elsewhere)  */
+/* ────────────────────────────────────────────────────────────────── */
+
+export interface AuctionSummary {
+  id: string;
+  name: string;
+  status: string;
+  tournamentName: string | null;
+  createdAt: string;
+}
+
+export type AuctionOption = AuctionSummary;
+
+export async function getAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
   const { data, error } = await supabase
     .from("auctions")
-    .select("id, name")
+    .select("id, name, status, created_at, tournaments(name)")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
 
@@ -202,7 +202,54 @@ export async function getAuctionsForOrg(orgId: string): Promise<AuctionOption[]>
     console.error("getAuctionsForOrg failed:", error.message);
     return [];
   }
-  return data ?? [];
+  return (data ?? []).map((a: any) => ({
+    id: a.id,
+    name: a.name,
+    status: a.status,
+    tournamentName: a.tournaments?.name ?? null,
+    createdAt: a.created_at,
+  }));
+}
+
+export interface CreateAuctionInput {
+  name: string;
+  tournamentId?: string;
+}
+
+export async function createAuction(
+  orgId: string,
+  userId: string,
+  input: CreateAuctionInput
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .insert({
+      org_id: orgId,
+      name: input.name.trim(),
+      created_by: userId,
+      tournament_id: input.tournamentId ?? null,
+      status: "setup",
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("createAuction failed:", error?.message);
+    return null;
+  }
+  return data.id;
+}
+
+export async function deleteAuction(auctionId: string): Promise<UpdateOrgResult> {
+  const { error } = await supabase.from("auctions").delete().eq("id", auctionId);
+  if (error) {
+    console.error("deleteAuction failed:", error.message);
+    if (error.code === "23503") {
+      return { ok: false, error: "This auction still has teams or players linked to it and can't be deleted yet." };
+    }
+    return { ok: false, error: "Couldn't delete that auction — please try again." };
+  }
+  return { ok: true };
 }
 
 export interface AuctionTeamOption {
@@ -211,10 +258,6 @@ export interface AuctionTeamOption {
   code: string;
 }
 
-/** Teams that belong to one specific auction — populates the "Team 1" /
- *  "Team 2" pickers once the org has chosen which auction to pull from.
- *  An auction can have many teams, so picking the auction alone isn't
- *  enough to know which two are playing this match. */
 export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeamOption[]> {
   const { data, error } = await supabase
     .from("teams")
@@ -231,17 +274,6 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  FRIENDLY MATCHES                                                   */
-/*                                                                      */
-/*  Reuses the exact same `matches` table and match_setup shape the     */
-/*  standalone match editor/simulator already read/write — "friendly    */
-/*  match" here is just a label, not a different data model.            */
-/*                                                                      */
-/*  A match has no direct FK to tournaments (see schema notes elsewhere */
-/*  in this codebase) — the only path from a match to a tournament is   */
-/*  bracket_matches.overlay_match_id -> matches.id, bracket_matches.     */
-/*  tournament_id -> tournaments.id. So "is this match part of a        */
-/*  tournament" is a lookup against bracket_matches, not a column on    */
-/*  matches itself.                                                     */
 /* ────────────────────────────────────────────────────────────────── */
 
 export interface FriendlyMatchSummary {
@@ -250,13 +282,13 @@ export interface FriendlyMatchSummary {
   team2Name: string;
   round: string;
   createdAt: string;
-  /** Non-null only if a bracket_matches row's overlay_match_id points at
-   *  this match — i.e. it's connected to a tournament bracket slot. Set
-   *  from /tournaments/[id]/edit, not from this file. */
   tournamentName: string | null;
-  /** True if there's an on_air_channels row with at least one channel,
-   *  or a weather_readings row with coords set, for this match. */
   overlayConfigured: boolean;
+  /** True if this match's teams were pulled from an auction (i.e. it has
+   *  a non-empty squads array in match_setup) rather than typed manually.
+   *  Used purely for the "linked to auction" status badge — there is no
+   *  separate FK for this, so it's inferred from the presence of squads. */
+  auctionLinked: boolean;
 }
 
 export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
@@ -285,7 +317,6 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
   ]);
 
   if (bracketsErr) {
-    // Non-fatal — matches just show as "Standalone" until this resolves.
     console.error("getFriendlyMatchesForOrg(brackets) failed:", bracketsErr.message);
   }
 
@@ -315,6 +346,7 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       createdAt: m.created_at,
       tournamentName: tournamentByMatch.get(m.id) ?? null,
       overlayConfigured: overlaySet.has(m.id),
+      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
     };
   });
 }
@@ -323,20 +355,6 @@ export type CreateFriendlyMatchInput =
   | { teamSource: "manual"; team1Name: string; team2Name: string; round?: string }
   | { teamSource: "auction"; auctionId: string; team1Id: string; team2Id: string; round?: string };
 
-/** Creates a minimal matches row with just enough match_setup to satisfy
- *  parseMatchSetup downstream (see simulate/page.tsx), then hands the
- *  new match's id back so the caller can route straight into the
- *  existing /match/[id]/edit flow to fill in venue, squads, etc.
- *
- *  matches.auction_id is a plain NOT NULL UNIQUE text column (no FK) —
- *  it's set to the match's own id here as a placeholder, matching the
- *  same self-referential trick edit/page.tsx's resolveAuctionId() uses
- *  once squads actually need a real `auctions` row to sync into.
- *
- *  teamSource: "auction" pulls the two chosen teams' name/code straight
- *  from `teams`, plus every player already sold to either team, and
- *  pre-fills match_setup.squads with them — the org doesn't retype a
- *  roster that already exists from running the auction. */
 export async function createFriendlyMatch(
   orgId: string,
   input: CreateFriendlyMatchInput
@@ -371,8 +389,6 @@ export async function createFriendlyMatch(
       .in("sold_to_team_id", [input.team1Id, input.team2Id]);
 
     if (playersErr) {
-      // Non-fatal — the match still gets created with an empty squad
-      // list; the org can add players manually on the edit page.
       console.error("createFriendlyMatch(auction players) failed:", playersErr.message);
     }
 
@@ -415,18 +431,6 @@ export async function createFriendlyMatch(
   return data.id;
 }
 
-/** Deletes a friendly match outright. Friendly matches live in the same
- *  `matches` table as tournament matches, but (unlike a tournament) a
- *  friendly match has no bracket/auction rows depending on it, so this
- *  is a plain single-row delete rather than a cascading cleanup.
- *  `on_air_channels` / `weather_readings` rows for this match_id are
- *  left behind as orphans unless your schema has ON DELETE CASCADE set
- *  on their match_id FK — add that constraint (or delete them here
- *  explicitly) if you want overlay config cleaned up automatically.
- *
- *  Callers should check `tournamentName` on the summary first and block
- *  the delete in the UI if it's set — a bracket-linked match should be
- *  disconnected from its bracket slot before being deleted here. */
 export async function deleteFriendlyMatch(matchId: string): Promise<boolean> {
   const { error } = await supabase.from("matches").delete().eq("id", matchId);
   if (error) {
@@ -434,6 +438,21 @@ export async function deleteFriendlyMatch(matchId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+/** Bulk delete for the Matches tab's multi-select. Callers should filter
+ *  out tournament-linked matches before calling this (same rule as the
+ *  single-match delete: disconnect from the bracket first). Returns which
+ *  ids succeeded so the UI can drop only those from local state and report
+ *  the rest as failures. */
+export async function deleteFriendlyMatches(matchIds: string[]): Promise<{ okIds: string[]; failedIds: string[] }> {
+  if (matchIds.length === 0) return { okIds: [], failedIds: [] };
+  const { error } = await supabase.from("matches").delete().in("id", matchIds);
+  if (error) {
+    console.error("deleteFriendlyMatches failed:", error.message);
+    return { okIds: [], failedIds: matchIds };
+  }
+  return { okIds: matchIds, failedIds: [] };
 }
 
 function shortCode(name: string): string {
@@ -444,6 +463,64 @@ function shortCode(name: string): string {
     .join("")
     .toUpperCase()
     .slice(0, 4) || "TBD";
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  REALTIME SYNC                                                       */
+/*                                                                       */
+/*  Keeps the dashboard's Matches/Tournaments tabs in sync with changes  */
+/*  made elsewhere (another tab, an admin panel, a teammate's session)   */
+/*  without a manual refresh. Each subscribe function returns the raw    */
+/*  Supabase channel — callers are responsible for calling               */
+/*  supabase.removeChannel(channel) on unmount.                          */
+/* ────────────────────────────────────────────────────────────────── */
+
+/** Fires `onChange` any time a matches row for this org is inserted,
+ *  updated, or deleted. The payload isn't shaped into a FriendlyMatchSummary
+ *  here (that requires the bracket/overlay joins), so callers should treat
+ *  this purely as a "something changed, go refetch" signal. */
+export function subscribeToOrgMatches(orgId: string, onChange: () => void): RealtimeChannel {
+  const channel = supabase
+    .channel(`org-matches-${orgId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "matches", filter: `org_id=eq.${orgId}` },
+      onChange
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "bracket_matches" },
+      onChange
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "on_air_channels" },
+      onChange
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "weather_readings" },
+      onChange
+    )
+    .subscribe();
+  return channel;
+}
+
+/** Fires `onChange` any time a tournaments row for this org changes. */
+export function subscribeToOrgTournaments(orgId: string, onChange: () => void): RealtimeChannel {
+  const channel = supabase
+    .channel(`org-tournaments-${orgId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "tournaments", filter: `org_id=eq.${orgId}` },
+      onChange
+    )
+    .subscribe();
+  return channel;
+}
+
+export function unsubscribe(channel: RealtimeChannel): void {
+  supabase.removeChannel(channel);
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -542,11 +619,6 @@ export interface AssignableTeam {
   tournamentName: string | null;
 }
 
-/** Every team across every auction in this org — this is the picker list
- *  for "assign this bank player to a team". Relies on PostgREST's FK
- *  embedding (teams.auction_id -> auctions.id, auctions.tournament_id ->
- *  tournaments.id); adjust the embed alias if your supabase-js/PostgREST
- *  relationship names differ from the raw FK constraint names. */
 export async function getAssignableTeamsForOrg(orgId: string): Promise<AssignableTeam[]> {
   const { data, error } = await supabase
     .from("teams")
@@ -576,11 +648,6 @@ export interface AssignResult {
   error?: string;
 }
 
-/** Copies a bank player onto a team's real roster — inserts a new
- *  `players` row (auction_id + sold_to_team_id set, is_manual_entry:
- *  true so it's excluded from any live-auction draw pool), and logs the
- *  assignment for history. The bank row itself is untouched, so the
- *  same player can be assigned again elsewhere later. */
 export async function assignBankPlayerToTeam(
   bankPlayer: BankPlayer,
   team: AssignableTeam,
@@ -611,7 +678,6 @@ export async function assignBankPlayerToTeam(
   }
 
   if (isCaptain) {
-    // Only one captain per team — clear any existing one first.
     await supabase.from("players").update({ owner_team_code: null }).eq("sold_to_team_id", team.teamId).neq("id", inserted.id);
   }
 
@@ -621,8 +687,6 @@ export async function assignBankPlayerToTeam(
     team_id: team.teamId,
   });
   if (logErr) {
-    // Non-fatal — the player is already on the team roster; only the
-    // history log failed to write.
     console.error("assignBankPlayerToTeam(log) failed:", logErr.message);
   }
 
@@ -631,13 +695,6 @@ export async function assignBankPlayerToTeam(
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  OVERLAYS                                                           */
-/*                                                                      */
-/*  Wraps the existing on_air_channels / weather_readings tables, both  */
-/*  1:1 on match_id already — this just gives them an editable surface. */
-/*  getMatchesForOverlayPicker is kept for now in case anything else    */
-/*  still calls it, but the Matches tab no longer needs it: it opens    */
-/*  the overlay editor directly with a matchId it already has, instead  */
-/*  of asking the org to re-pick a match from a second dropdown.        */
 /* ────────────────────────────────────────────────────────────────── */
 
 export interface OverlayMatchOption {
@@ -703,11 +760,6 @@ export async function saveOverlayChannels(
 }
 
 export async function saveOverlayWeatherCoords(matchId: string, lat: number, lng: number): Promise<boolean> {
-  // `data` is NOT NULL on weather_readings — since this editor only ever
-  // manages coords (the live weather reading itself is presumably
-  // populated by a separate fetch job), write an empty object as a
-  // placeholder if there's no existing row rather than leaving `data`
-  // unset and violating the NOT NULL constraint.
   const { data: existing } = await supabase.from("weather_readings").select("data").eq("match_id", matchId).maybeSingle();
 
   const { error } = await supabase

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -20,6 +20,9 @@ import {
   Link2,
   Wand2,
   Gamepad2,
+  Search,
+  CheckSquare,
+  Square,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,11 +35,11 @@ import {
   getTournamentsForOrg,
   createTournament,
   deleteTournament,
-  // Matches: renamed conceptually to "matches" (standalone + tournament-linked),
-  // but keeping existing lib function names where they already do the right thing.
+  deleteTournaments,
   getFriendlyMatchesForOrg,
   createFriendlyMatch,
   deleteFriendlyMatch,
+  deleteFriendlyMatches,
   getPlayerBank,
   addBankPlayer,
   updateBankPlayer,
@@ -48,6 +51,9 @@ import {
   saveOverlayWeatherCoords,
   getAuctionsForOrg,
   getTeamsForAuction,
+  subscribeToOrgMatches,
+  subscribeToOrgTournaments,
+  unsubscribe,
   type OrgSummary,
   type TournamentSummary,
   type FriendlyMatchSummary,
@@ -85,16 +91,36 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel block mb-1.5">{children}</label>
 }
 
-function Badge({ tone, children }: { tone: "gold" | "gray"; children: React.ReactNode }) {
+/* Status badge with a leading glyph, matching the ✓ Linked / ✗ None /
+ * ⚠ Incomplete vocabulary used across the dashboard's quick-ref cards. */
+type BadgeTone = "linked" | "none" | "warn" | "neutral"
+
+function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.ReactNode }) {
+  const styles: Record<BadgeTone, string> = {
+    linked: "border-gold/40 text-gold",
+    none: "border-white/15 text-gray-400",
+    warn: "border-yellow-500/40 text-yellow-400",
+    neutral: "border-white/15 text-gray-300",
+  }
+  const glyph: Record<BadgeTone, string> = {
+    linked: "✓",
+    none: "✗",
+    warn: "⚠",
+    neutral: "",
+  }
   return (
     <span
-      className={`text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border ${
-        tone === "gold" ? "border-gold/40 text-gold" : "border-white/15 text-gray-400"
-      }`}
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border ${styles[tone]}`}
     >
+      {glyph[tone] && <span>{glyph[tone]}</span>}
       {children}
     </span>
   )
+}
+
+// Kept for any older call sites still expecting the plain two-tone badge.
+function Badge({ tone, children }: { tone: "gold" | "gray"; children: React.ReactNode }) {
+  return <StatusBadge tone={tone === "gold" ? "linked" : "none"}>{children}</StatusBadge>
 }
 
 export default function OrganizationClient() {
@@ -107,9 +133,6 @@ export default function OrganizationClient() {
   const [org, setOrg] = useState<OrgSummary | null>(null)
   const [tab, setTab] = useState<Tab>("overview")
 
-  // Which match is currently having its overlay configured. Lives at this
-  // level (not inside MatchesTab's local state tree) only so a future
-  // "jump to overlay setup" deep link from another tab can set it directly.
   const [overlayMatchId, setOverlayMatchId] = useState<string | null>(null)
 
   const handleNavigation = (path: string) => {
@@ -284,7 +307,8 @@ function OverviewTab({ org, onJump }: { org: OrgSummary; onJump: (t: Tab) => voi
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  MATCHES — standalone by default; tournament link is read-only here */
+/*  MATCHES — quick-ref cards, search, multi-select + bulk delete,      */
+/*  realtime sync with admin panels                                    */
 /* ────────────────────────────────────────────────────────────────── */
 
 function MatchesTab({
@@ -302,6 +326,7 @@ function MatchesTab({
   const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
   const [auctions, setAuctions] = useState<AuctionOption[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   // Creation form
   const [teamSource, setTeamSource] = useState<TeamSource>("manual")
@@ -319,16 +344,39 @@ function MatchesTab({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  useEffect(() => {
-    Promise.all([getFriendlyMatchesForOrg(org.id), getAuctionsForOrg(org.id)]).then(([m, a]) => {
+  // Search / filter
+  const [query, setQuery] = useState("")
+
+  // Multi-select + bulk delete
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  const reload = () => {
+    setSyncing(true)
+    return Promise.all([getFriendlyMatchesForOrg(org.id), getAuctionsForOrg(org.id)]).then(([m, a]) => {
       setMatches(m)
       setAuctions(a)
       setLoaded(true)
+      setSyncing(false)
     })
+  }
+
+  useEffect(() => {
+    reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Once an auction is picked, load its teams so the org can choose which
-  // two are actually playing — an auction usually has more than two.
+  // Real-time sync: any change to this org's matches, or to the bracket /
+  // overlay tables that affect how a match's status badges render, triggers
+  // a silent refetch so the dashboard stays current with admin panels.
+  useEffect(() => {
+    const channel = subscribeToOrgMatches(org.id, () => {
+      reload()
+    })
+    return () => unsubscribe(channel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.id])
+
   useEffect(() => {
     setAuctionTeam1Id("")
     setAuctionTeam2Id("")
@@ -383,6 +431,59 @@ function MatchesTab({
       return
     }
     setMatches((prev) => prev.filter((m) => m.id !== match.id))
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.delete(match.id)
+      return next
+    })
+  }
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return matches
+    return matches.filter(
+      (m) =>
+        m.team1Name.toLowerCase().includes(q) ||
+        m.team2Name.toLowerCase().includes(q) ||
+        m.round.toLowerCase().includes(q) ||
+        (m.tournamentName ?? "").toLowerCase().includes(q)
+    )
+  }, [matches, query])
+
+  // Only standalone (non-bracket-linked) matches in the current filtered
+  // view are selectable for bulk delete — bracket-linked ones must be
+  // disconnected on the tournament page first, same rule as single delete.
+  const selectableIds = useMemo(() => filtered.filter((m) => !m.tournamentName).map((m) => m.id), [filtered])
+  const allSelectableChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      if (allSelectableChecked) return new Set()
+      return new Set(selectableIds)
+    })
+  }
+
+  const toggleSelectOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    if (!confirm(`Delete ${selected.size} match${selected.size === 1 ? "" : "es"}? This can't be undone.`)) return
+    setBulkDeleting(true)
+    setDeleteError(null)
+    const { okIds, failedIds } = await deleteFriendlyMatches(Array.from(selected))
+    setBulkDeleting(false)
+    setMatches((prev) => prev.filter((m) => !okIds.includes(m.id)))
+    setSelected(new Set())
+    if (failedIds.length > 0) {
+      setDeleteError(`${failedIds.length} match${failedIds.length === 1 ? "" : "es"} couldn't be deleted — please try again.`)
+    }
   }
 
   return (
@@ -513,13 +614,30 @@ function MatchesTab({
       </Panel>
 
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Matches</h2>
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+            Your Matches
+            {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
+          </h2>
+          <div className="relative w-full sm:w-64">
+            <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search teams, round, tournament…"
+              className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
+            />
+          </div>
+        </div>
+
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : matches.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No matches yet — create one above.</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No matches match "{query}".</p>
         ) : (
           <div className="space-y-2">
             {deleteError && (
@@ -527,24 +645,63 @@ function MatchesTab({
                 <AlertCircle className="h-4 w-4" /> {deleteError}
               </p>
             )}
-            {matches.map((m) => (
+
+            {selectableIds.length > 0 && (
+              <div className="flex items-center justify-between gap-3 px-1 pb-1">
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+                >
+                  {allSelectableChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                  {allSelectableChecked ? "Deselect all" : "Select all standalone"}
+                </button>
+                {selected.size > 0 && (
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                    className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-red-400 hover:text-red-300 disabled:opacity-50"
+                  >
+                    {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Delete {selected.size} selected
+                  </button>
+                )}
+              </div>
+            )}
+
+            {filtered.map((m) => (
               <div
                 key={m.id}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
               >
-                <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-semibold truncate">
-                    {m.team1Name} vs {m.team2Name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {m.tournamentName ? (
-                      <Badge tone="gold">{m.tournamentName}{m.round ? ` · ${m.round}` : ""}</Badge>
-                    ) : (
-                      <Badge tone="gray">Standalone</Badge>
-                    )}
-                    {m.overlayConfigured && <Badge tone="gray">Overlay set up</Badge>}
-                  </div>
-                </Link>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {!m.tournamentName && (
+                    <button
+                      onClick={() => toggleSelectOne(m.id)}
+                      className="text-gray-500 hover:text-gold shrink-0"
+                      aria-label="Select match"
+                    >
+                      {selected.has(m.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    </button>
+                  )}
+                  <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
+                    <p className="text-white text-sm font-semibold truncate">
+                      {m.team1Name} vs {m.team2Name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {m.tournamentName ? (
+                        <StatusBadge tone="linked">{m.tournamentName}{m.round ? ` · ${m.round}` : ""}</StatusBadge>
+                      ) : (
+                        <StatusBadge tone="none">Standalone</StatusBadge>
+                      )}
+                      {m.overlayConfigured ? (
+                        <StatusBadge tone="linked">Overlay</StatusBadge>
+                      ) : (
+                        <StatusBadge tone="warn">Overlay not set</StatusBadge>
+                      )}
+                      {m.auctionLinked && <StatusBadge tone="neutral">From auction</StatusBadge>}
+                    </div>
+                  </Link>
+                </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <button
                     onClick={() => onOpenOverlay(m.id)}
@@ -723,13 +880,14 @@ function OverlayModal({ matchId, onClose }: { matchId: string; onClose: () => vo
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  TOURNAMENTS — bracket + match-connection happens on the edit page  */
+/*  TOURNAMENTS — search, multi-select + bulk delete, realtime sync    */
 /* ────────────────────────────────────────────────────────────────── */
 
 function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const router = useRouter()
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const [name, setName] = useState("")
   const [format, setFormat] = useState<"single_elimination" | "double_elimination" | "round_robin">(
@@ -742,11 +900,30 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  useEffect(() => {
-    getTournamentsForOrg(org.id).then((t) => {
+  const [query, setQuery] = useState("")
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  const reload = () => {
+    setSyncing(true)
+    return getTournamentsForOrg(org.id).then((t) => {
       setTournaments(t)
       setLoaded(true)
+      setSyncing(false)
     })
+  }
+
+  useEffect(() => {
+    reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.id])
+
+  useEffect(() => {
+    const channel = subscribeToOrgTournaments(org.id, () => {
+      reload()
+    })
+    return () => unsubscribe(channel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
   const handleCreate = async () => {
@@ -783,6 +960,59 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
       return
     }
     setTournaments((prev) => prev.filter((x) => x.id !== t.id))
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.delete(t.id)
+      return next
+    })
+  }
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return tournaments
+    return tournaments.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.format.toLowerCase().includes(q) ||
+        t.status.toLowerCase().includes(q) ||
+        (t.category ?? "").toLowerCase().includes(q)
+    )
+  }, [tournaments, query])
+
+  const allChecked = filtered.length > 0 && filtered.every((t) => selected.has(t.id))
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => (allChecked ? new Set() : new Set(filtered.map((t) => t.id))))
+  }
+
+  const toggleSelectOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    if (
+      !confirm(
+        `Delete ${selected.size} tournament${selected.size === 1 ? "" : "s"}? This can't be undone, and will skip any that still have auctions, teams, or matches attached.`
+      )
+    )
+      return
+    setBulkDeleting(true)
+    setDeleteError(null)
+    const { okIds, failedIds } = await deleteTournaments(Array.from(selected))
+    setBulkDeleting(false)
+    setTournaments((prev) => prev.filter((t) => !okIds.includes(t.id)))
+    setSelected(new Set())
+    if (failedIds.length > 0) {
+      setDeleteError(
+        `${failedIds.length} tournament${failedIds.length === 1 ? "" : "s"} couldn't be deleted — they still have auctions, teams, or matches attached.`
+      )
+    }
   }
 
   return (
@@ -838,7 +1068,21 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
       </Panel>
 
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Tournaments</h2>
+        <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+            Your Tournaments
+            {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
+          </h2>
+          <div className="relative w-full sm:w-64">
+            <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, format, status…"
+              className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
+            />
+          </div>
+        </div>
         <p className="text-gray-500 text-xs mb-4">
           Open a tournament's bracket to connect each slot to a match — that's where a bracket match becomes a real
           match with its own teams and, optionally, an overlay.
@@ -849,6 +1093,8 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
           </p>
         ) : tournaments.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No tournaments yet — create one above.</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No tournaments match "{query}".</p>
         ) : (
           <div className="space-y-2">
             {deleteError && (
@@ -856,18 +1102,49 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
                 <AlertCircle className="h-4 w-4" /> {deleteError}
               </p>
             )}
-            {tournaments.map((t) => (
+
+            <div className="flex items-center justify-between gap-3 px-1 pb-1">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+              >
+                {allChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                {allChecked ? "Deselect all" : "Select all"}
+              </button>
+              {selected.size > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-red-400 hover:text-red-300 disabled:opacity-50"
+                >
+                  {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  Delete {selected.size} selected
+                </button>
+              )}
+            </div>
+
+            {filtered.map((t) => (
               <div
                 key={t.id}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
               >
-                <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-semibold truncate">{t.name}</p>
-                  <p className="text-gray-500 text-xs mt-0.5">
-                    {t.format.replace("_", " ")} · {t.status}
-                    {t.category ? ` · ${t.category}` : ""}
-                  </p>
-                </Link>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <button
+                    onClick={() => toggleSelectOne(t.id)}
+                    className="text-gray-500 hover:text-gold shrink-0"
+                    aria-label="Select tournament"
+                  >
+                    {selected.has(t.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                  </button>
+                  <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
+                    <p className="text-white text-sm font-semibold truncate">{t.name}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <StatusBadge tone="neutral">{t.format.replace("_", " ")}</StatusBadge>
+                      <StatusBadge tone={t.status === "setup" ? "warn" : "linked"}>{t.status}</StatusBadge>
+                      {t.category && <StatusBadge tone="neutral">{t.category}</StatusBadge>}
+                    </div>
+                  </Link>
+                </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <Link
                     href={`/tournaments/${t.id}/edit`}
