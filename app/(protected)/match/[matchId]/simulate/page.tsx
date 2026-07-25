@@ -437,7 +437,7 @@ export default function SimulateMatchPage() {
           </div>
           <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider section-title inline-block">
             <TypeText text="Match " speed={45} />
-            <TypeText text="Simulator" speed={45} delay={220} className="gold-gradient-text" />
+            <TypeText text="Simulator" speed={45} delay={220} className="text-gold" />
           </h1>
           <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
             Generates a full match, ball by ball, writing directly into <code className="text-gold">balls</code> and
