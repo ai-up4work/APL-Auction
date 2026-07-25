@@ -67,10 +67,10 @@ function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
   return {
     ...setup,
     officials: {
-      referee: officials.referee?.trim() ? officials.referee : "Merline",
-      thirdUmpire: officials.thirdUmpire?.trim() ? officials.thirdUmpire : "Askalaan",
-      umpires: officials.umpires?.trim() ? officials.umpires : "Sr George",
-      format: officials.format?.trim() ? officials.format : "T20 · 20 overs per side",
+      referee: officials?.referee?.trim() ? officials.referee : "Merline",
+      thirdUmpire: officials?.thirdUmpire?.trim() ? officials.thirdUmpire : "Askalaan",
+      umpires: officials?.umpires?.trim() ? officials.umpires : "Sr George",
+      format: officials?.format?.trim() ? officials.format : "T20 · 20 overs per side",
     },
     venue: setup.venue?.trim() ? setup.venue : "Simulated Grounds",
     date: setup.date?.trim() ? setup.date : isoDate,
@@ -234,10 +234,10 @@ export default function SimulateMatchPage() {
         setup.date !== parsedSetup.date ||
         setup.time !== parsedSetup.time ||
         setup.toss !== parsedSetup.toss ||
-        setup.officials.format !== parsedSetup.officials?.format ||
-        setup.officials.referee !== parsedSetup.officials?.referee ||
-        setup.officials.umpires !== parsedSetup.officials?.umpires ||
-        setup.officials.thirdUmpire !== parsedSetup.officials?.thirdUmpire
+        setup.officials?.format !== parsedSetup.officials?.format ||
+        setup.officials?.referee !== parsedSetup.officials?.referee ||
+        setup.officials?.umpires !== parsedSetup.officials?.umpires ||
+        setup.officials?.thirdUmpire !== parsedSetup.officials?.thirdUmpire
 
       const { data: bracketRow } = await supabase
         .from("bracket_matches")
@@ -269,7 +269,7 @@ export default function SimulateMatchPage() {
       if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
       if (infoWasFilled) {
         pushLog(
-          `Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}", format: "${setup.officials.format}".`
+          `Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}", format: "${setup.officials?.format}".`
         )
       }
 

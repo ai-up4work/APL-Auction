@@ -151,6 +151,148 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// PLAYERS-TABLE SYNC
+//
+// match_setup.squads is convenient JSON for the live page/simulator,
+// but it's not what the relational schema actually wants: `balls`
+// references striker_player_id / bowler_player_id / etc. as real FKs
+// into `players`, and `players.auction_id` is itself a hard FK into
+// `auctions` (not just a loose label). So squads saved here also need
+// real rows in `players` (and `teams`, since players.sold_to_team_id
+// points there too) before those FKs can ever be populated.
+//
+// Two cases:
+//  1. This match is genuinely tied to a real auction — `matches.auction_id`
+//     already matches a row in `auctions`. Reuse that auction_id as-is,
+//     so squads land alongside whatever auction data already exists.
+//  2. This is a manual / simulated match with no backing auction.
+//     `matches.auction_id` is either missing or doesn't resolve to a
+//     real `auctions` row. In that case we provision a minimal
+//     `auctions` row using the match's own id as the auction id (a
+//     match id and an auction id are both uuids, so this is a safe,
+//     stable 1:1 key), then point matches.auction_id at it. Every
+//     future save reuses the same auction_id since it's now real.
+// ─────────────────────────────────────────────────────────────
+
+interface SyncResult {
+  auctionId: string
+  teamsUpserted: number
+  playersUpserted: number
+}
+
+async function resolveAuctionId(matchId: string, matchNameHint: string): Promise<string> {
+  const { data: matchRow, error: matchErr } = await supabase
+    .from("matches")
+    .select("auction_id")
+    .eq("id", matchId)
+    .maybeSingle()
+  if (matchErr) throw new Error(`Couldn't read match: ${matchErr.message}`)
+
+  const candidate = matchRow?.auction_id?.trim()
+  if (candidate) {
+    const { data: existingAuction } = await supabase.from("auctions").select("id").eq("id", candidate).maybeSingle()
+    if (existingAuction) return candidate // already points at a real auction — reuse it
+  }
+
+  // No real auction backs this match — provision one keyed to the
+  // match's own id, then link matches.auction_id to it so this only
+  // has to happen once.
+  const auctionId = matchId
+  const { error: auctionErr } = await supabase
+    .from("auctions")
+    .upsert({ id: auctionId, name: matchNameHint || "Manual Match", status: "completed", tournament_opt_out: true }, { onConflict: "id" })
+  if (auctionErr) throw new Error(`Couldn't provision auction record: ${auctionErr.message}`)
+
+  const { error: linkErr } = await supabase.from("matches").update({ auction_id: auctionId }).eq("id", matchId)
+  if (linkErr) throw new Error(`Couldn't link match to auction: ${linkErr.message}`)
+
+  return auctionId
+}
+
+async function upsertTeam(auctionId: string, code: string, name: string, owner: string): Promise<string | null> {
+  if (!code.trim()) return null
+  const { data: existing } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("auction_id", auctionId)
+    .eq("code", code)
+    .maybeSingle()
+  if (existing) {
+    await supabase.from("teams").update({ name, owner: owner || "Unknown" }).eq("id", existing.id)
+    return existing.id
+  }
+  const { data: inserted, error } = await supabase
+    .from("teams")
+    .insert({ auction_id: auctionId, code, name, owner: owner || "Unknown" })
+    .select("id")
+    .single()
+  if (error) throw new Error(`Couldn't create team "${name}": ${error.message}`)
+  return inserted.id
+}
+
+async function upsertPlayer(
+  auctionId: string,
+  player: SquadPlayer,
+  teamId: string | null,
+  teamCode: string,
+  captainName: string
+): Promise<void> {
+  const name = player.name.trim()
+  if (!name) return
+
+  const payload = {
+    auction_id: auctionId,
+    name,
+    role: player.role,
+    is_manual_entry: true,
+    is_captain: name.toLowerCase() === captainName.trim().toLowerCase(),
+    sold_to_team_id: teamId,
+    owner_team_code: teamCode || null,
+    status: "sold" as const,
+  }
+
+  const { data: existing } = await supabase
+    .from("players")
+    .select("id")
+    .eq("auction_id", auctionId)
+    .ilike("name", name)
+    .maybeSingle()
+
+  if (existing) {
+    const { error } = await supabase.from("players").update(payload).eq("id", existing.id)
+    if (error) throw new Error(`Couldn't update player "${name}": ${error.message}`)
+  } else {
+    const { error } = await supabase.from("players").insert(payload)
+    if (error) throw new Error(`Couldn't create player "${name}": ${error.message}`)
+  }
+}
+
+async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promise<SyncResult> {
+  const matchNameHint = `${form.team1Name || "Team 1"} vs ${form.team2Name || "Team 2"}`
+  const auctionId = await resolveAuctionId(matchId, matchNameHint)
+
+  let teamsUpserted = 0
+  let playersUpserted = 0
+
+  for (const squad of form.squads) {
+    const teamName = squad.teamId === "team1" ? form.team1Name : form.team2Name
+    const teamCode = squad.teamId === "team1" ? form.team1Short : form.team2Short
+    if (!teamCode.trim()) continue // no short code yet — can't key a team row without one
+
+    const teamId = await upsertTeam(auctionId, teamCode, teamName || teamCode, squad.captain)
+    teamsUpserted += 1
+
+    for (const player of squad.players) {
+      if (!player.name.trim()) continue
+      await upsertPlayer(auctionId, player, teamId, teamCode, squad.captain)
+      playersUpserted += 1
+    }
+  }
+
+  return { auctionId, teamsUpserted, playersUpserted }
+}
+
 // Same card shell used on the simulate page and throughout the site.
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -191,6 +333,8 @@ export default function EditMatchPage() {
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [state, setState] = useState<SaveState>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
   const [form, setForm] = useState<EditableSetup>(emptySetup())
   const rawSetupRef = useRef<Record<string, any> | null>(null)
 
@@ -286,6 +430,8 @@ export default function EditMatchPage() {
     if (!matchId) return
     setState("saving")
     setErrorMsg(null)
+    setSyncMsg(null)
+    setSyncErrorMsg(null)
     try {
       const updated = toRawSetup(rawSetupRef.current, form)
       const { error } = await supabase.from("matches").update({ match_setup: updated }).eq("id", matchId)
@@ -296,6 +442,23 @@ export default function EditMatchPage() {
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to save match data.")
       setState("error")
+      return // don't attempt the players sync if match_setup itself failed to save
+    }
+
+    // Sync squads into the real players/teams tables. Kept separate
+    // from the match_setup save above — if this part fails (e.g. a
+    // duplicate team code, or an RLS rule blocking the write), the
+    // match_setup save has already succeeded and shouldn't be reported
+    // as an error too.
+    try {
+      const result = await syncSquadsToPlayers(matchId, form)
+      setSyncMsg(
+        `Synced to players table (auction ${result.auctionId.slice(0, 8)}…): ${result.teamsUpserted} team${
+          result.teamsUpserted === 1 ? "" : "s"
+        }, ${result.playersUpserted} player${result.playersUpserted === 1 ? "" : "s"}.`
+      )
+    } catch (err) {
+      setSyncErrorMsg(err instanceof Error ? err.message : "Failed to sync squads to the players table.")
     }
   }
 
@@ -613,23 +776,37 @@ export default function EditMatchPage() {
               {/* ── SAVE BAR ── */}
               <div className="sticky bottom-4 z-20 fade-in-up stagger-5">
                 <Panel className="p-4 md:p-5 flex items-center justify-between flex-wrap gap-3 shadow-2xl shadow-black/60">
-                  <div className="flex items-center gap-2 text-sm">
-                    {state === "saving" && (
-                      <span className="flex items-center gap-2 text-gray-400">
-                        <Loader2 className="h-4 w-4 animate-spin text-gold" /> Saving…
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <div className="flex items-center gap-2">
+                      {state === "saving" && (
+                        <span className="flex items-center gap-2 text-gray-400">
+                          <Loader2 className="h-4 w-4 animate-spin text-gold" /> Saving…
+                        </span>
+                      )}
+                      {state === "saved" && (
+                        <span className="flex items-center gap-2 text-green-400 font-cinzel">
+                          <CheckCircle2 className="h-4 w-4" /> Saved
+                        </span>
+                      )}
+                      {state === "error" && errorMsg && (
+                        <span className="flex items-center gap-2 text-red-400">
+                          <AlertTriangle className="h-4 w-4" /> {errorMsg}
+                        </span>
+                      )}
+                      {state === "idle" && !syncMsg && !syncErrorMsg && (
+                        <span className="text-gray-500">Unsaved changes are kept locally until you save.</span>
+                      )}
+                    </div>
+                    {syncMsg && (
+                      <span className="flex items-center gap-2 text-gray-400 text-xs">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" /> {syncMsg}
                       </span>
                     )}
-                    {state === "saved" && (
-                      <span className="flex items-center gap-2 text-green-400 font-cinzel">
-                        <CheckCircle2 className="h-4 w-4" /> Saved
+                    {syncErrorMsg && (
+                      <span className="flex items-center gap-2 text-amber-400 text-xs">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Players sync: {syncErrorMsg}
                       </span>
                     )}
-                    {state === "error" && errorMsg && (
-                      <span className="flex items-center gap-2 text-red-400">
-                        <AlertTriangle className="h-4 w-4" /> {errorMsg}
-                      </span>
-                    )}
-                    {(state === "idle") && <span className="text-gray-500">Unsaved changes are kept locally until you save.</span>}
                   </div>
                   <div className="flex items-center gap-3">
                     <Link href={`/match/${matchId}`}>
@@ -662,6 +839,8 @@ export default function EditMatchPage() {
           )}
         </div>
       </section>
+
+      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }
