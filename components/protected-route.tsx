@@ -31,7 +31,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/unauthorized")
+      router.replace("/auth/unauthorized")
     }
   }, [loading, user, router])
 

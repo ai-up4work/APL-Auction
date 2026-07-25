@@ -1,4 +1,4 @@
-// app/unauthorized/page.tsx
+// app/auth/unauthorized/page.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 // Shown when someone lands on a protected route without a session. Link to
 // this from ProtectedRoute instead of (or before) redirecting straight to
