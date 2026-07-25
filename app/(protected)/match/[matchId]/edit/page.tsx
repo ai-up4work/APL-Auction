@@ -23,12 +23,20 @@ import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 // Runtime-only fields the simulator owns (target, currentInnings) are
 // preserved as-is on save rather than edited here, since editing them
 // mid-match would desync the live scorecard.
+//
+// `playerId`, when present, links this jsonb player entry back to a
+// specific row in the relational `players` table. It's never shown or
+// edited directly in the UI — it's populated automatically after a
+// successful sync (see syncSquadsToPlayers) and round-tripped on every
+// subsequent load/save so renames update the existing `players` row
+// instead of creating a duplicate via name-matching.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
   name: string
   role: string
   xi: boolean
+  playerId?: string
 }
 
 interface Squad {
@@ -100,7 +108,12 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
       teamId,
       captain: found.captain ?? "",
       players: Array.isArray(found.players)
-        ? found.players.map((p: any) => ({ name: p?.name ?? "", role: p?.role ?? "Batter", xi: !!p?.xi }))
+        ? found.players.map((p: any) => ({
+            name: p?.name ?? "",
+            role: p?.role ?? "Batter",
+            xi: !!p?.xi,
+            playerId: typeof p?.playerId === "string" && p.playerId.trim() ? p.playerId : undefined,
+          }))
         : [],
     }
   }
@@ -130,6 +143,8 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
 // Merges the edited fields back into whatever the raw match_setup blob
 // already contained, so runtime-only keys the simulator owns (target,
 // currentInnings) survive a save untouched instead of being wiped.
+// `playerId` is included on every player entry (as undefined if absent)
+// so it round-trips through JSON without extra bookkeeping.
 function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Record<string, any> {
   return {
     ...(raw ?? {}),
@@ -146,7 +161,12 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
     squads: form.squads.map((s) => ({
       teamId: s.teamId,
       captain: s.captain,
-      players: s.players,
+      players: s.players.map((p) => ({
+        name: p.name,
+        role: p.role,
+        xi: p.xi,
+        playerId: p.playerId,
+      })),
     })),
   }
 }
@@ -158,9 +178,10 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
 // but it's not what the relational schema actually wants: `balls`
 // references striker_player_id / bowler_player_id / etc. as real FKs
 // into `players`, and `players.auction_id` is itself a hard FK into
-// `auctions` (not just a loose label). So squads saved here also need
-// real rows in `players` (and `teams`, since players.sold_to_team_id
-// points there too) before those FKs can ever be populated.
+// `auctions` (NOT NULL — a team or player cannot be inserted without a
+// real auction row to point at). So squads saved here also need real
+// rows in `players` (and `teams`, since players.sold_to_team_id points
+// there too) before those FKs can ever be populated.
 //
 // Two cases:
 //  1. This match is genuinely tied to a real auction — `matches.auction_id`
@@ -171,14 +192,30 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
 //     real `auctions` row. In that case we provision a minimal
 //     `auctions` row using the match's own id as the auction id (a
 //     match id and an auction id are both uuids, so this is a safe,
-//     stable 1:1 key), then point matches.auction_id at it. Every
+//     stable 1:1 key), flagged `is_synthetic: true` so it's never
+//     confused with a real auction by anything that lists/aggregates
+//     over `auctions`, then point matches.auction_id at it. Every
 //     future save reuses the same auction_id since it's now real.
+//
+// PLAYER IDENTITY — matched by id first, name only as a fallback:
+// Each SquadPlayer may carry a `playerId` once it's been synced once.
+// upsertPlayer() prefers that id for matching/updating; it only falls
+// back to case-insensitive name matching (and then insert-as-new) when
+// no id is present, or the id no longer resolves (row deleted
+// elsewhere). This stops a rename in the editor from forking a
+// duplicate `players` row, and keeps any `balls` rows already pointing
+// at that player's id correctly anchored across edits.
 // ─────────────────────────────────────────────────────────────
 
 interface SyncResult {
   auctionId: string
   teamsUpserted: number
   playersUpserted: number
+}
+
+interface SyncOutcome {
+  result: SyncResult
+  updatedSquads: Squad[]
 }
 
 async function resolveAuctionId(matchId: string, matchNameHint: string): Promise<string> {
@@ -196,12 +233,19 @@ async function resolveAuctionId(matchId: string, matchNameHint: string): Promise
   }
 
   // No real auction backs this match — provision one keyed to the
-  // match's own id, then link matches.auction_id to it so this only
-  // has to happen once.
+  // match's own id, flagged as synthetic, then link matches.auction_id
+  // to it so this only has to happen once.
   const auctionId = matchId
-  const { error: auctionErr } = await supabase
-    .from("auctions")
-    .upsert({ id: auctionId, name: matchNameHint || "Manual Match", status: "completed", tournament_opt_out: true }, { onConflict: "id" })
+  const { error: auctionErr } = await supabase.from("auctions").upsert(
+    {
+      id: auctionId,
+      name: matchNameHint || "Manual Match",
+      status: "completed",
+      tournament_opt_out: true,
+      is_synthetic: true,
+    },
+    { onConflict: "id" }
+  )
   if (auctionErr) throw new Error(`Couldn't provision auction record: ${auctionErr.message}`)
 
   const { error: linkErr } = await supabase.from("matches").update({ auction_id: auctionId }).eq("id", matchId)
@@ -231,16 +275,18 @@ async function upsertTeam(auctionId: string, code: string, name: string, owner: 
   return inserted.id
 }
 
+// Returns the id of the players row this squad entry now corresponds
+// to — either the existing row it matched/updated, or a freshly
+// inserted one. Callers use this to write the id back into
+// match_setup so future syncs skip name-matching entirely.
 async function upsertPlayer(
   auctionId: string,
   player: SquadPlayer,
   teamId: string | null,
   teamCode: string,
   captainName: string
-): Promise<void> {
+): Promise<string> {
   const name = player.name.trim()
-  if (!name) return
-
   const payload = {
     auction_id: auctionId,
     name,
@@ -252,45 +298,85 @@ async function upsertPlayer(
     status: "sold" as const,
   }
 
-  const { data: existing } = await supabase
+  // Prefer matching by id — this is what prevents a rename from
+  // forking a duplicate players row, and keeps any balls rows already
+  // referencing this player's id correctly anchored.
+  if (player.playerId) {
+    const { data: existingById } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", player.playerId)
+      .maybeSingle()
+    if (existingById) {
+      const { error } = await supabase.from("players").update(payload).eq("id", player.playerId)
+      if (error) throw new Error(`Couldn't update player "${name}": ${error.message}`)
+      return player.playerId
+    }
+    // playerId was set but no longer resolves (row deleted elsewhere)
+    // — fall through to name-matching / insert rather than erroring.
+  }
+
+  const { data: existingByName } = await supabase
     .from("players")
     .select("id")
     .eq("auction_id", auctionId)
     .ilike("name", name)
     .maybeSingle()
 
-  if (existing) {
-    const { error } = await supabase.from("players").update(payload).eq("id", existing.id)
+  if (existingByName) {
+    const { error } = await supabase.from("players").update(payload).eq("id", existingByName.id)
     if (error) throw new Error(`Couldn't update player "${name}": ${error.message}`)
-  } else {
-    const { error } = await supabase.from("players").insert(payload)
-    if (error) throw new Error(`Couldn't create player "${name}": ${error.message}`)
+    return existingByName.id
   }
+
+  const { data: inserted, error } = await supabase.from("players").insert(payload).select("id").single()
+  if (error) throw new Error(`Couldn't create player "${name}": ${error.message}`)
+  return inserted.id
 }
 
-async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promise<SyncResult> {
+// Syncs every squad's team + players into the relational tables, and
+// returns an updated copy of the squads with each player's `playerId`
+// filled in from the sync — callers should fold this back into both
+// local form state and match_setup so subsequent saves reuse the ids
+// instead of re-matching by name.
+async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promise<SyncOutcome> {
   const matchNameHint = `${form.team1Name || "Team 1"} vs ${form.team2Name || "Team 2"}`
   const auctionId = await resolveAuctionId(matchId, matchNameHint)
 
   let teamsUpserted = 0
   let playersUpserted = 0
+  const updatedSquads: Squad[] = []
 
   for (const squad of form.squads) {
     const teamName = squad.teamId === "team1" ? form.team1Name : form.team2Name
     const teamCode = squad.teamId === "team1" ? form.team1Short : form.team2Short
-    if (!teamCode.trim()) continue // no short code yet — can't key a team row without one
+
+    if (!teamCode.trim()) {
+      // No short code yet — can't key a team row without one. Leave
+      // this squad's players untouched (no ids assigned) rather than
+      // failing the whole sync.
+      updatedSquads.push(squad)
+      continue
+    }
 
     const teamId = await upsertTeam(auctionId, teamCode, teamName || teamCode, squad.captain)
     teamsUpserted += 1
 
+    const updatedPlayers: SquadPlayer[] = []
     for (const player of squad.players) {
-      if (!player.name.trim()) continue
-      await upsertPlayer(auctionId, player, teamId, teamCode, squad.captain)
+      if (!player.name.trim()) {
+        updatedPlayers.push(player)
+        continue
+      }
+      const id = await upsertPlayer(auctionId, player, teamId, teamCode, squad.captain)
       playersUpserted += 1
+      updatedPlayers.push({ ...player, playerId: id })
     }
+
+    updatedSquads.push({ ...squad, players: updatedPlayers })
   }
 
-  return { auctionId, teamsUpserted, playersUpserted }
+  return { result: { auctionId, teamsUpserted, playersUpserted }, updatedSquads }
 }
 
 // Same card shell used on the simulate page and throughout the site.
@@ -432,6 +518,9 @@ export default function EditMatchPage() {
     setErrorMsg(null)
     setSyncMsg(null)
     setSyncErrorMsg(null)
+
+    let savedForm = form
+
     try {
       const updated = toRawSetup(rawSetupRef.current, form)
       const { error } = await supabase.from("matches").update({ match_setup: updated }).eq("id", matchId)
@@ -451,7 +540,37 @@ export default function EditMatchPage() {
     // match_setup save has already succeeded and shouldn't be reported
     // as an error too.
     try {
-      const result = await syncSquadsToPlayers(matchId, form)
+      const { result, updatedSquads } = await syncSquadsToPlayers(matchId, savedForm)
+
+      // Fold the resolved playerIds back into local state so future
+      // saves reuse them instead of re-matching by name every time.
+      setForm((prev) => ({ ...prev, squads: updatedSquads }))
+
+      // Also write the ids back into match_setup itself — otherwise a
+      // page refresh would reload squads without playerId and we'd be
+      // back to name-matching on the very next save.
+      const withIds = {
+        ...(rawSetupRef.current ?? {}),
+        squads: updatedSquads.map((s) => ({
+          teamId: s.teamId,
+          captain: s.captain,
+          players: s.players.map((p) => ({
+            name: p.name,
+            role: p.role,
+            xi: p.xi,
+            playerId: p.playerId,
+          })),
+        })),
+      }
+      const { error: idLinkErr } = await supabase.from("matches").update({ match_setup: withIds }).eq("id", matchId)
+      if (!idLinkErr) {
+        rawSetupRef.current = withIds
+      }
+      // If idLinkErr fires, the players/teams sync itself still
+      // succeeded — only the id-linkage write-back failed. The next
+      // save will just re-match any missing-id players by name again,
+      // so this is a soft failure and not worth surfacing as an error.
+
       setSyncMsg(
         `Synced to players table (auction ${result.auctionId.slice(0, 8)}…): ${result.teamsUpserted} team${
           result.teamsUpserted === 1 ? "" : "s"
@@ -495,7 +614,7 @@ export default function EditMatchPage() {
           </div>
           <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider section-title inline-block">
             <TypeText text="Match " speed={45} />
-            <TypeText text="Editor" speed={45} delay={220} className="gold-gradient-text" />
+            <TypeText text="Editor" speed={45} delay={220} className="text-gold" />
           </h1>
           <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
             Set teams, venue, officials, format, and squads for this match. Everything here writes directly into{" "}
@@ -839,8 +958,6 @@ export default function EditMatchPage() {
           )}
         </div>
       </section>
-
-      <SiteFooter scrollToSection={scrollToSection} handleNavigation={handleNavigation} />
     </main>
   )
 }
