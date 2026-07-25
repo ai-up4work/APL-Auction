@@ -18,6 +18,8 @@ import {
   AlertCircle,
   UserPlus,
   Link2,
+  Wand2,
+  Gamepad2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,6 +32,8 @@ import {
   getTournamentsForOrg,
   createTournament,
   deleteTournament,
+  // Matches: renamed conceptually to "matches" (standalone + tournament-linked),
+  // but keeping existing lib function names where they already do the right thing.
   getFriendlyMatchesForOrg,
   createFriendlyMatch,
   deleteFriendlyMatch,
@@ -39,28 +43,30 @@ import {
   deleteBankPlayer,
   getAssignableTeamsForOrg,
   assignBankPlayerToTeam,
-  getMatchesForOverlayPicker,
   getOverlayConfig,
   saveOverlayChannels,
   saveOverlayWeatherCoords,
+  getAuctionsForOrg,
+  getTeamsForAuction,
   type OrgSummary,
   type TournamentSummary,
   type FriendlyMatchSummary,
   type BankPlayer,
   type AssignableTeam,
-  type OverlayMatchOption,
   type OverlayConfig,
+  type AuctionOption,
+  type AuctionTeamOption,
 } from "@/lib/organization/organization"
 
-type Tab = "overview" | "tournaments" | "matches" | "playerBank" | "overlays"
+type Tab = "overview" | "matches" | "tournaments" | "playerBank"
 type GateState = "checking" | "denied" | "allowed"
+type TeamSource = "manual" | "auction"
 
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "overview", label: "Overview", icon: Building2 },
+  { key: "matches", label: "Matches", icon: Swords },
   { key: "tournaments", label: "Tournaments", icon: Trophy },
-  { key: "matches", label: "Friendly Matches", icon: Swords },
   { key: "playerBank", label: "Player Bank", icon: Users },
-  { key: "overlays", label: "Overlays", icon: Radio },
 ]
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
@@ -79,6 +85,18 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel block mb-1.5">{children}</label>
 }
 
+function Badge({ tone, children }: { tone: "gold" | "gray"; children: React.ReactNode }) {
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border ${
+        tone === "gold" ? "border-gold/40 text-gold" : "border-white/15 text-gray-400"
+      }`}
+    >
+      {children}
+    </span>
+  )
+}
+
 export default function OrganizationClient() {
   useScrollTop()
   const router = useRouter()
@@ -88,6 +106,11 @@ export default function OrganizationClient() {
   const [gate, setGate] = useState<GateState>("checking")
   const [org, setOrg] = useState<OrgSummary | null>(null)
   const [tab, setTab] = useState<Tab>("overview")
+
+  // Which match is currently having its overlay configured. Lives at this
+  // level (not inside MatchesTab's local state tree) only so a future
+  // "jump to overlay setup" deep link from another tab can set it directly.
+  const [overlayMatchId, setOverlayMatchId] = useState<string | null>(null)
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -177,11 +200,17 @@ export default function OrganizationClient() {
                 ))}
               </nav>
 
-              {tab === "overview" && <OverviewTab org={org} />}
+              {tab === "overview" && <OverviewTab org={org} onJump={setTab} />}
+              {tab === "matches" && (
+                <MatchesTab
+                  org={org}
+                  overlayMatchId={overlayMatchId}
+                  onOpenOverlay={setOverlayMatchId}
+                  onCloseOverlay={() => setOverlayMatchId(null)}
+                />
+              )}
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
-              {tab === "matches" && <FriendlyMatchesTab org={org} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
-              {tab === "overlays" && <OverlaysTab org={org} />}
             </>
           )}
         </div>
@@ -194,34 +223,507 @@ export default function OrganizationClient() {
 /*  OVERVIEW                                                           */
 /* ────────────────────────────────────────────────────────────────── */
 
-function OverviewTab({ org }: { org: OrgSummary }) {
+function OverviewTab({ org, onJump }: { org: OrgSummary; onJump: (t: Tab) => void }) {
   return (
-    <Panel>
-      <h2 className="text-lg font-bold text-white font-cinzel mb-4">Overview</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-          <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Organization</p>
-          <p className="text-white text-sm mt-1">{org.name}</p>
+    <div className="space-y-6">
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Overview</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
+            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Organization</p>
+            <p className="text-white text-sm mt-1">{org.name}</p>
+          </div>
+          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
+            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Slug</p>
+            <p className="text-white text-sm mt-1 font-mono">{org.slug}</p>
+          </div>
+          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
+            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Plan</p>
+            <p className="text-white text-sm mt-1 capitalize">{org.plan}</p>
+          </div>
         </div>
-        <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-          <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Slug</p>
-          <p className="text-white text-sm mt-1 font-mono">{org.slug}</p>
+      </Panel>
+
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Where things live</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button
+            onClick={() => onJump("matches")}
+            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
+          >
+            <Swords className="h-4 w-4 text-gold mb-2" />
+            <p className="text-white text-sm font-semibold">Matches</p>
+            <p className="text-gray-500 text-xs mt-1">
+              Create a standalone match, choose manual or auction-linked teams, and optionally set up an overlay.
+            </p>
+          </button>
+          <button
+            onClick={() => onJump("tournaments")}
+            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
+          >
+            <Trophy className="h-4 w-4 text-gold mb-2" />
+            <p className="text-white text-sm font-semibold">Tournaments</p>
+            <p className="text-gray-500 text-xs mt-1">
+              Create a tournament, then build its bracket — that's where a bracket slot gets connected to a match.
+            </p>
+          </button>
+          <button
+            onClick={() => onJump("playerBank")}
+            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
+          >
+            <Users className="h-4 w-4 text-gold mb-2" />
+            <p className="text-white text-sm font-semibold">Player Bank</p>
+            <p className="text-gray-500 text-xs mt-1">
+              A reusable pool of players you can assign onto any team, in any match or tournament.
+            </p>
+          </button>
         </div>
-        <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-          <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Plan</p>
-          <p className="text-white text-sm mt-1 capitalize">{org.plan}</p>
-        </div>
-      </div>
-      <p className="text-gray-400 text-sm mt-6">
-        Use the tabs above to create tournaments and friendly matches, manage a reusable player
-        bank, and connect broadcast overlays to your matches.
-      </p>
-    </Panel>
+      </Panel>
+    </div>
   )
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  TOURNAMENTS                                                        */
+/*  MATCHES — standalone by default; tournament link is read-only here */
+/* ────────────────────────────────────────────────────────────────── */
+
+function MatchesTab({
+  org,
+  overlayMatchId,
+  onOpenOverlay,
+  onCloseOverlay,
+}: {
+  org: OrgSummary
+  overlayMatchId: string | null
+  onOpenOverlay: (id: string) => void
+  onCloseOverlay: () => void
+}) {
+  const router = useRouter()
+  const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
+  const [auctions, setAuctions] = useState<AuctionOption[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  // Creation form
+  const [teamSource, setTeamSource] = useState<TeamSource>("manual")
+  const [team1, setTeam1] = useState("")
+  const [team2, setTeam2] = useState("")
+  const [auctionId, setAuctionId] = useState("")
+  const [auctionTeams, setAuctionTeams] = useState<AuctionTeamOption[]>([])
+  const [auctionTeamsLoaded, setAuctionTeamsLoaded] = useState(false)
+  const [auctionTeam1Id, setAuctionTeam1Id] = useState("")
+  const [auctionTeam2Id, setAuctionTeam2Id] = useState("")
+  const [round, setRound] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  useEffect(() => {
+    Promise.all([getFriendlyMatchesForOrg(org.id), getAuctionsForOrg(org.id)]).then(([m, a]) => {
+      setMatches(m)
+      setAuctions(a)
+      setLoaded(true)
+    })
+  }, [org.id])
+
+  // Once an auction is picked, load its teams so the org can choose which
+  // two are actually playing — an auction usually has more than two.
+  useEffect(() => {
+    setAuctionTeam1Id("")
+    setAuctionTeam2Id("")
+    if (!auctionId) {
+      setAuctionTeams([])
+      return
+    }
+    setAuctionTeamsLoaded(false)
+    getTeamsForAuction(auctionId).then((t) => {
+      setAuctionTeams(t)
+      setAuctionTeamsLoaded(true)
+    })
+  }, [auctionId])
+
+  const canCreate =
+    teamSource === "manual"
+      ? Boolean(team1.trim() && team2.trim())
+      : Boolean(auctionTeam1Id && auctionTeam2Id && auctionTeam1Id !== auctionTeam2Id)
+
+  const handleCreate = async () => {
+    if (!canCreate) return
+    setIsCreating(true)
+    setCreateError(null)
+    const id = await createFriendlyMatch(
+      org.id,
+      teamSource === "manual"
+        ? { teamSource: "manual", team1Name: team1.trim(), team2Name: team2.trim(), round }
+        : { teamSource: "auction", auctionId, team1Id: auctionTeam1Id, team2Id: auctionTeam2Id, round }
+    )
+    setIsCreating(false)
+    if (!id) {
+      setCreateError("Couldn't create the match — please try again.")
+      return
+    }
+    router.push(`/match/${id}/edit`)
+  }
+
+  const handleDelete = async (match: FriendlyMatchSummary) => {
+    if (match.tournamentName) {
+      alert(
+        `"${match.team1Name} vs ${match.team2Name}" is connected to the ${match.tournamentName} bracket. Disconnect it from the bracket on the tournament's edit page before deleting it here.`
+      )
+      return
+    }
+    if (!confirm(`Delete the match "${match.team1Name} vs ${match.team2Name}"? This can't be undone.`)) return
+    setDeletingId(match.id)
+    setDeleteError(null)
+    const ok = await deleteFriendlyMatch(match.id)
+    setDeletingId(null)
+    if (!ok) {
+      setDeleteError("Couldn't delete that match — please try again.")
+      return
+    }
+    setMatches((prev) => prev.filter((m) => m.id !== match.id))
+  }
+
+  return (
+    <div className="space-y-6">
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
+          <Plus className="h-4 w-4 text-gold" /> Create a Match
+        </h2>
+        <p className="text-gray-500 text-xs mb-4">
+          Every match created here is standalone. A match only becomes part of a tournament when a bracket slot on
+          that tournament's page is connected to it.
+        </p>
+
+        <FieldLabel>Team source</FieldLabel>
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setTeamSource("manual")}
+            className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide px-3 py-2 rounded-md border transition-colors ${
+              teamSource === "manual" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            <Pencil className="h-3.5 w-3.5" /> Manual
+          </button>
+          <button
+            onClick={() => setTeamSource("auction")}
+            className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide px-3 py-2 rounded-md border transition-colors ${
+              teamSource === "auction" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            <Gamepad2 className="h-3.5 w-3.5" /> From an auction
+          </button>
+        </div>
+
+        {teamSource === "manual" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <FieldLabel>Team 1 Name</FieldLabel>
+              <Input value={team1} onChange={(e) => setTeam1(e.target.value)} placeholder="Emberfall Paladins" className="bg-black/50 border-gold/30 text-white" />
+            </div>
+            <div>
+              <FieldLabel>Team 2 Name</FieldLabel>
+              <Input value={team2} onChange={(e) => setTeam2(e.target.value)} placeholder="Duskmere Reapers" className="bg-black/50 border-gold/30 text-white" />
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 space-y-4">
+            <div>
+              <FieldLabel>Auction</FieldLabel>
+              {auctions.length === 0 ? (
+                <p className="text-gray-500 text-sm italic">No auctions in this org yet — run one first, or use manual teams.</p>
+              ) : (
+                <select
+                  value={auctionId}
+                  onChange={(e) => setAuctionId(e.target.value)}
+                  className="w-full sm:w-80 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                >
+                  <option value="">Select an auction…</option>
+                  {auctions.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {auctionId && (
+              !auctionTeamsLoaded ? (
+                <p className="text-gray-500 text-sm flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
+                </p>
+              ) : auctionTeams.length < 2 ? (
+                <p className="text-gray-500 text-sm italic">This auction doesn't have two teams yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Team 1</FieldLabel>
+                    <select
+                      value={auctionTeam1Id}
+                      onChange={(e) => setAuctionTeam1Id(e.target.value)}
+                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                    >
+                      <option value="">Select a team…</option>
+                      {auctionTeams.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.id === auctionTeam2Id}>
+                          {t.name} ({t.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <FieldLabel>Team 2</FieldLabel>
+                    <select
+                      value={auctionTeam2Id}
+                      onChange={(e) => setAuctionTeam2Id(e.target.value)}
+                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                    >
+                      <option value="">Select a team…</option>
+                      {auctionTeams.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.id === auctionTeam1Id}>
+                          {t.name} ({t.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )
+            )}
+            <p className="text-gray-500 text-xs">Each team's sold players are pulled in automatically.</p>
+          </div>
+        )}
+
+        <div className="mb-4">
+          <FieldLabel>Round / Label (optional)</FieldLabel>
+          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Friendly match" className="bg-black/50 border-gold/30 text-white sm:w-80" />
+        </div>
+
+        {createError && (
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
+            <AlertCircle className="h-4 w-4" /> {createError}
+          </p>
+        )}
+        <Button
+          onClick={handleCreate}
+          disabled={!canCreate || isCreating}
+          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+        >
+          {isCreating ? "Creating…" : "Create & Continue Setup"}
+        </Button>
+      </Panel>
+
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Matches</h2>
+        {!loaded ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        ) : matches.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No matches yet — create one above.</p>
+        ) : (
+          <div className="space-y-2">
+            {deleteError && (
+              <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
+                <AlertCircle className="h-4 w-4" /> {deleteError}
+              </p>
+            )}
+            {matches.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
+              >
+                <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-semibold truncate">
+                    {m.team1Name} vs {m.team2Name}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {m.tournamentName ? (
+                      <Badge tone="gold">{m.tournamentName}{m.round ? ` · ${m.round}` : ""}</Badge>
+                    ) : (
+                      <Badge tone="gray">Standalone</Badge>
+                    )}
+                    {m.overlayConfigured && <Badge tone="gray">Overlay set up</Badge>}
+                  </div>
+                </Link>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => onOpenOverlay(m.id)}
+                    title="Set up overlay"
+                    className="text-gray-500 hover:text-gold transition-colors"
+                  >
+                    <Radio className="h-3.5 w-3.5" />
+                  </button>
+                  <Link
+                    href={`/match/${m.id}/edit`}
+                    className="text-gray-500 hover:text-gold transition-colors outline-none"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Link>
+                  <button
+                    onClick={() => handleDelete(m)}
+                    disabled={deletingId === m.id}
+                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {deletingId === m.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {overlayMatchId && (
+        <OverlayModal matchId={overlayMatchId} onClose={onCloseOverlay} />
+      )}
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  OVERLAY MODAL — scoped to one match, opened from its row           */
+/* ────────────────────────────────────────────────────────────────── */
+
+function OverlayModal({ matchId, onClose }: { matchId: string; onClose: () => void }) {
+  const [config, setConfig] = useState<OverlayConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const [channelLabel, setChannelLabel] = useState("")
+  const [channelUrl, setChannelUrl] = useState("")
+  const [lat, setLat] = useState("")
+  const [lng, setLng] = useState("")
+  const [savingChannels, setSavingChannels] = useState(false)
+  const [savingWeather, setSavingWeather] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    getOverlayConfig(matchId).then((c) => {
+      setConfig(c)
+      setLat(c.weatherLat?.toString() ?? "")
+      setLng(c.weatherLng?.toString() ?? "")
+      setLoading(false)
+    })
+  }, [matchId])
+
+  const addChannel = async () => {
+    if (!config || !channelLabel.trim() || !channelUrl.trim()) return
+    const updated = [...config.channels, { label: channelLabel.trim(), url: channelUrl.trim() }]
+    setSavingChannels(true)
+    const ok = await saveOverlayChannels(matchId, updated)
+    setSavingChannels(false)
+    if (ok) {
+      setConfig({ ...config, channels: updated })
+      setChannelLabel("")
+      setChannelUrl("")
+      setSaveMsg("Channels saved.")
+      setTimeout(() => setSaveMsg(null), 2000)
+    }
+  }
+
+  const removeChannel = async (index: number) => {
+    if (!config) return
+    const updated = config.channels.filter((_, i) => i !== index)
+    setSavingChannels(true)
+    const ok = await saveOverlayChannels(matchId, updated)
+    setSavingChannels(false)
+    if (ok) setConfig({ ...config, channels: updated })
+  }
+
+  const saveWeather = async () => {
+    const latNum = parseFloat(lat)
+    const lngNum = parseFloat(lng)
+    if (Number.isNaN(latNum) || Number.isNaN(lngNum)) return
+    setSavingWeather(true)
+    const ok = await saveOverlayWeatherCoords(matchId, latNum, lngNum)
+    setSavingWeather(false)
+    if (ok) {
+      setSaveMsg("Weather location saved.")
+      setTimeout(() => setSaveMsg(null), 2000)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
+      <div
+        className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-lg w-full shadow-2xl max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
+          <Radio className="h-4 w-4 text-gold" /> Overlay setup
+        </h3>
+        <p className="text-gray-400 text-sm mb-4">Channels and the weather location for this match's broadcast overlay.</p>
+
+        {loading || !config ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2 mb-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading overlay config…
+          </p>
+        ) : (
+          <>
+            <h4 className="text-white font-bold font-cinzel mb-3 text-xs uppercase tracking-widest">On-Air Channels</h4>
+            <div className="space-y-2 mb-4">
+              {config.channels.length === 0 && (
+                <p className="text-gray-500 text-sm italic">No channels linked yet.</p>
+              )}
+              {config.channels.map((c, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-semibold">{c.label}</p>
+                    <p className="text-gray-500 text-xs truncate">{c.url}</p>
+                  </div>
+                  <button onClick={() => removeChannel(i)} className="text-gray-500 hover:text-red-400 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 mb-6">
+              <Input value={channelLabel} onChange={(e) => setChannelLabel(e.target.value)} placeholder="Channel name" className="bg-black/50 border-gold/30 text-white sm:w-40" />
+              <Input value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)} placeholder="Stream URL" className="bg-black/50 border-gold/30 text-white flex-1" />
+              <Button onClick={addChannel} disabled={!channelLabel.trim() || !channelUrl.trim() || savingChannels} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap">
+                <Plus className="mr-1.5 h-4 w-4" /> Add
+              </Button>
+            </div>
+
+            <h4 className="text-white font-bold font-cinzel mb-3 text-xs uppercase tracking-widest">Weather Location</h4>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <FieldLabel>Latitude</FieldLabel>
+                <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="6.9271" className="bg-black/50 border-gold/30 text-white" />
+              </div>
+              <div>
+                <FieldLabel>Longitude</FieldLabel>
+                <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="79.8612" className="bg-black/50 border-gold/30 text-white" />
+              </div>
+            </div>
+            <Button onClick={saveWeather} disabled={!lat.trim() || !lng.trim() || savingWeather} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
+              {savingWeather ? "Saving…" : "Save Location"}
+            </Button>
+
+            {saveMsg && (
+              <p className="flex items-center gap-1.5 text-green-400 text-sm mt-4">
+                <CheckCircle2 className="h-4 w-4" /> {saveMsg}
+              </p>
+            )}
+          </>
+        )}
+
+        <div className="flex justify-end mt-6">
+          <Button onClick={onClose} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20">
+            Done
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  TOURNAMENTS — bracket + match-connection happens on the edit page  */
 /* ────────────────────────────────────────────────────────────────── */
 
 function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -237,8 +739,6 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  // Per-row, same reasoning as FriendlyMatchesTab: only the row actually
-  // being deleted should show a spinner/be disabled.
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
@@ -269,7 +769,7 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const handleDelete = async (t: TournamentSummary) => {
     if (
       !confirm(
-        `Delete the tournament "${t.name}"? This can't be undone, and will fail if it still has auctions, teams, or matches attached.`
+        `Delete the tournament "${t.name}"? This can't be undone, and will fail if it still has auctions, teams, or bracket matches attached.`
       )
     ) {
       return
@@ -333,12 +833,16 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
           disabled={!name.trim() || isCreating}
           className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
         >
-          {isCreating ? "Creating…" : "Create & Continue Setup"}
+          {isCreating ? "Creating…" : "Create & Build Bracket"}
         </Button>
       </Panel>
 
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Tournaments</h2>
+        <p className="text-gray-500 text-xs mb-4">
+          Open a tournament's bracket to connect each slot to a match — that's where a bracket match becomes a real
+          match with its own teams and, optionally, an overlay.
+        </p>
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -393,155 +897,7 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  FRIENDLY MATCHES                                                    */
-/* ────────────────────────────────────────────────────────────────── */
-
-function FriendlyMatchesTab({ org }: { org: OrgSummary }) {
-  const router = useRouter()
-  const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
-  const [loaded, setLoaded] = useState(false)
-
-  const [team1, setTeam1] = useState("")
-  const [team2, setTeam2] = useState("")
-  const [round, setRound] = useState("")
-  const [isCreating, setIsCreating] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-
-  // Delete state is tracked per-row (deletingId) rather than as a single
-  // shared bool, so removing one match doesn't disable the buttons on
-  // every other row in the list while its request is in flight.
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-
-  useEffect(() => {
-    getFriendlyMatchesForOrg(org.id).then((m) => {
-      setMatches(m)
-      setLoaded(true)
-    })
-  }, [org.id])
-
-  const handleCreate = async () => {
-    if (!team1.trim() || !team2.trim()) return
-    setIsCreating(true)
-    setCreateError(null)
-    const id = await createFriendlyMatch(org.id, { team1Name: team1.trim(), team2Name: team2.trim(), round })
-    setIsCreating(false)
-    if (!id) {
-      setCreateError("Couldn't create the match — please try again.")
-      return
-    }
-    router.push(`/match/${id}/edit`)
-  }
-
-  const handleDelete = async (match: FriendlyMatchSummary) => {
-    if (
-      !confirm(
-        `Delete the friendly match "${match.team1Name} vs ${match.team2Name}"? This can't be undone.`
-      )
-    ) {
-      return
-    }
-    setDeletingId(match.id)
-    setDeleteError(null)
-    const ok = await deleteFriendlyMatch(match.id)
-    setDeletingId(null)
-    if (!ok) {
-      setDeleteError("Couldn't delete that match — please try again.")
-      return
-    }
-    setMatches((prev) => prev.filter((m) => m.id !== match.id))
-  }
-
-  return (
-    <div className="space-y-6">
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
-          <Plus className="h-4 w-4 text-gold" /> Create a Friendly Match
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <FieldLabel>Team 1 Name</FieldLabel>
-            <Input value={team1} onChange={(e) => setTeam1(e.target.value)} placeholder="Emberfall Paladins" className="bg-black/50 border-gold/30 text-white" />
-          </div>
-          <div>
-            <FieldLabel>Team 2 Name</FieldLabel>
-            <Input value={team2} onChange={(e) => setTeam2(e.target.value)} placeholder="Duskmere Reapers" className="bg-black/50 border-gold/30 text-white" />
-          </div>
-        </div>
-        <div className="mb-4">
-          <FieldLabel>Round / Label (optional)</FieldLabel>
-          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Friendly Match" className="bg-black/50 border-gold/30 text-white sm:w-80" />
-        </div>
-        {createError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
-            <AlertCircle className="h-4 w-4" /> {createError}
-          </p>
-        )}
-        <Button
-          onClick={handleCreate}
-          disabled={!team1.trim() || !team2.trim() || isCreating}
-          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-        >
-          {isCreating ? "Creating…" : "Create & Continue Setup"}
-        </Button>
-      </Panel>
-
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Friendly Matches</h2>
-        {!loaded ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : matches.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No friendly matches yet — create one above.</p>
-        ) : (
-          <div className="space-y-2">
-            {deleteError && (
-              <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
-                <AlertCircle className="h-4 w-4" /> {deleteError}
-              </p>
-            )}
-            {matches.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
-              >
-                <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-semibold truncate">
-                    {m.team1Name} vs {m.team2Name}
-                  </p>
-                  <p className="text-gray-500 text-xs mt-0.5">{m.round}</p>
-                </Link>
-                <div className="flex items-center gap-3 shrink-0">
-                  <Link
-                    href={`/match/${m.id}/edit`}
-                    className="text-gray-500 hover:text-gold transition-colors outline-none"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(m)}
-                    disabled={deletingId === m.id}
-                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {deletingId === m.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-    </div>
-  )
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/*  PLAYER BANK                                                         */
+/*  PLAYER BANK — unchanged                                             */
 /* ────────────────────────────────────────────────────────────────── */
 
 function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -715,7 +1071,7 @@ function AssignPlayerModal({ org, player, onClose }: { org: OrgSummary; player: 
             <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
           </p>
         ) : teams.length === 0 ? (
-          <p className="text-gray-500 text-sm mb-4">No teams found yet — create a tournament or friendly match with teams first.</p>
+          <p className="text-gray-500 text-sm mb-4">No teams found yet — create a tournament or match with teams first.</p>
         ) : (
           <>
             <FieldLabel>Team</FieldLabel>
@@ -759,168 +1115,6 @@ function AssignPlayerModal({ org, player, onClose }: { org: OrgSummary; player: 
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/*  OVERLAYS                                                            */
-/* ────────────────────────────────────────────────────────────────── */
-
-function OverlaysTab({ org }: { org: OrgSummary }) {
-  const [matches, setMatches] = useState<OverlayMatchOption[]>([])
-  const [selectedMatchId, setSelectedMatchId] = useState("")
-  const [config, setConfig] = useState<OverlayConfig | null>(null)
-  const [loadingConfig, setLoadingConfig] = useState(false)
-
-  const [channelLabel, setChannelLabel] = useState("")
-  const [channelUrl, setChannelUrl] = useState("")
-  const [lat, setLat] = useState("")
-  const [lng, setLng] = useState("")
-
-  const [savingChannels, setSavingChannels] = useState(false)
-  const [savingWeather, setSavingWeather] = useState(false)
-  const [saveMsg, setSaveMsg] = useState<string | null>(null)
-
-  useEffect(() => {
-    getMatchesForOverlayPicker(org.id).then(setMatches)
-  }, [org.id])
-
-  useEffect(() => {
-    if (!selectedMatchId) {
-      setConfig(null)
-      return
-    }
-    setLoadingConfig(true)
-    getOverlayConfig(selectedMatchId).then((c) => {
-      setConfig(c)
-      setLat(c.weatherLat?.toString() ?? "")
-      setLng(c.weatherLng?.toString() ?? "")
-      setLoadingConfig(false)
-    })
-  }, [selectedMatchId])
-
-  const addChannel = async () => {
-    if (!config || !channelLabel.trim() || !channelUrl.trim()) return
-    const updated = [...config.channels, { label: channelLabel.trim(), url: channelUrl.trim() }]
-    setSavingChannels(true)
-    const ok = await saveOverlayChannels(selectedMatchId, updated)
-    setSavingChannels(false)
-    if (ok) {
-      setConfig({ ...config, channels: updated })
-      setChannelLabel("")
-      setChannelUrl("")
-      setSaveMsg("Channels saved.")
-      setTimeout(() => setSaveMsg(null), 2000)
-    }
-  }
-
-  const removeChannel = async (index: number) => {
-    if (!config) return
-    const updated = config.channels.filter((_, i) => i !== index)
-    setSavingChannels(true)
-    const ok = await saveOverlayChannels(selectedMatchId, updated)
-    setSavingChannels(false)
-    if (ok) setConfig({ ...config, channels: updated })
-  }
-
-  const saveWeather = async () => {
-    const latNum = parseFloat(lat)
-    const lngNum = parseFloat(lng)
-    if (Number.isNaN(latNum) || Number.isNaN(lngNum)) return
-    setSavingWeather(true)
-    const ok = await saveOverlayWeatherCoords(selectedMatchId, latNum, lngNum)
-    setSavingWeather(false)
-    if (ok) {
-      setSaveMsg("Weather location saved.")
-      setTimeout(() => setSaveMsg(null), 2000)
-    }
-  }
-
-  return (
-    <div className="space-y-6">
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
-          <Radio className="h-4 w-4 text-gold" /> Connect Overlays
-        </h2>
-        <FieldLabel>Match</FieldLabel>
-        <select
-          value={selectedMatchId}
-          onChange={(e) => setSelectedMatchId(e.target.value)}
-          className="w-full sm:w-96 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
-        >
-          <option value="">Select a match…</option>
-          {matches.map((m) => (
-            <option key={m.matchId} value={m.matchId}>{m.label}</option>
-          ))}
-        </select>
-      </Panel>
-
-      {selectedMatchId && (
-        loadingConfig || !config ? (
-          <Panel>
-            <p className="text-gray-500 text-sm flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading overlay config…
-            </p>
-          </Panel>
-        ) : (
-          <>
-            <Panel>
-              <h3 className="text-white font-bold font-cinzel mb-4 text-sm uppercase tracking-widest">On-Air Channels</h3>
-              <div className="space-y-2 mb-4">
-                {config.channels.length === 0 && (
-                  <p className="text-gray-500 text-sm italic">No channels linked yet.</p>
-                )}
-                {config.channels.map((c, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-2.5">
-                    <div className="min-w-0">
-                      <p className="text-white text-sm font-semibold">{c.label}</p>
-                      <p className="text-gray-500 text-xs truncate">{c.url}</p>
-                    </div>
-                    <button onClick={() => removeChannel(i)} className="text-gray-500 hover:text-red-400 shrink-0">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Input value={channelLabel} onChange={(e) => setChannelLabel(e.target.value)} placeholder="Channel name, e.g. YouTube" className="bg-black/50 border-gold/30 text-white sm:w-48" />
-                <Input value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)} placeholder="Stream URL" className="bg-black/50 border-gold/30 text-white flex-1" />
-                <Button onClick={addChannel} disabled={!channelLabel.trim() || !channelUrl.trim() || savingChannels} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap">
-                  <Plus className="mr-1.5 h-4 w-4" /> Add
-                </Button>
-              </div>
-            </Panel>
-
-            <Panel>
-              <h3 className="text-white font-bold font-cinzel mb-4 text-sm uppercase tracking-widest">Weather Location</h3>
-              <p className="text-gray-500 text-xs mb-4">
-                Sets the venue coordinates the weather overlay reads from. The live reading itself
-                is populated separately — this only points it at the right place.
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-4 sm:w-80">
-                <div>
-                  <FieldLabel>Latitude</FieldLabel>
-                  <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="6.9271" className="bg-black/50 border-gold/30 text-white" />
-                </div>
-                <div>
-                  <FieldLabel>Longitude</FieldLabel>
-                  <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="79.8612" className="bg-black/50 border-gold/30 text-white" />
-                </div>
-              </div>
-              <Button onClick={saveWeather} disabled={!lat.trim() || !lng.trim() || savingWeather} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
-                {savingWeather ? "Saving…" : "Save Location"}
-              </Button>
-            </Panel>
-
-            {saveMsg && (
-              <p className="flex items-center gap-1.5 text-green-400 text-sm">
-                <CheckCircle2 className="h-4 w-4" /> {saveMsg}
-              </p>
-            )}
-          </>
-        )
-      )}
     </div>
   )
 }

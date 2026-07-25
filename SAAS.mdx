@@ -1,0 +1,1360 @@
+# Valiant League SaaS Implementation
+
+Complete enterprise-grade SaaS transformation of the Valiant League application with multi-tenant architecture, comprehensive authentication, role-based authorization, and advanced tournament management systems.
+
+---
+
+## 🏗️ Architecture Overview
+
+The Valiant League SaaS is built on a **multi-tenant, organization-first** architecture using Supabase as the backend database. The application supports auctions (cricket player bidding), tournaments (bracket-based competitions), and real-time match tracking with comprehensive analytics.
+
+### Core Design Principles
+
+- **Multi-Tenant Isolation**: Complete data isolation between organizations
+- **Role-Based Access Control (RBAC)**: Three-tier permission model (Admin, Manager, Viewer)
+- **Real-time Capabilities**: WebSocket support for live auctions and matches
+- **Scalable Architecture**: Horizontal scaling via serverless functions and databases
+- **Type Safety**: Full TypeScript implementation with strict type checking
+- **Security First**: RLS policies, input validation, and secure session management
+
+---
+
+## 📊 Database Schema
+
+### Overview
+
+The database consists of **20+ tables** organized into logical domains:
+
+```
+Organizations & Users
+├── organizations
+├── user_profiles
+├── org_memberships
+
+Auctions Domain
+├── auctions
+├── teams
+├── players
+├── auction_lots
+├── bid_history
+├── rules
+├── session_config
+├── feedback
+
+Tournaments Domain
+├── tournaments
+├── bracket_matches
+├── standings
+├── tournament_prizes
+├── tournament_awards
+├── tournament_activity
+
+Matches & Live Data
+├── matches
+├── balls
+├── match_state
+├── engine_state
+├── match_team_stats
+
+System Tables
+├── player_bank
+├── player_bank_assignments
+├── weather_readings
+├── on_air_channels
+├── audit_logs
+```
+
+### Core Tables Details
+
+#### Organizations (`organizations`)
+
+Primary container for all multi-tenant data.
+
+```sql
+CREATE TABLE organizations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  description text,
+  logo_url text,
+  created_by uuid NOT NULL REFERENCES auth.users(id),
+  plan text NOT NULL DEFAULT 'free', -- free, pro, enterprise
+  status text NOT NULL DEFAULT 'active', -- active, suspended, deleted
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Contains organization metadata and billing information.
+
+**Key Features**:
+- `slug`: URL-friendly identifier for organization URLs
+- `plan`: Subscription tier affecting feature availability
+- `status`: Soft delete support via status field
+- Audit timestamps for tracking changes
+
+#### User Profiles (`user_profiles`)
+
+Extended user information linked to Supabase Auth.
+
+```sql
+CREATE TABLE user_profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id),
+  email text NOT NULL,
+  full_name text,
+  avatar_url text,
+  username text NOT NULL UNIQUE,
+  bio text,
+  banner_url text,
+  current_org_id uuid REFERENCES organizations(id),
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Store user profile data separately from Supabase Auth for flexible management.
+
+**Key Features**:
+- `current_org_id`: User's last selected organization
+- `username`: Unique username for profiles
+- Social media metadata (bio, banner)
+
+#### Organization Memberships (`org_memberships`)
+
+Maps users to organizations with role-based access.
+
+```sql
+CREATE TABLE org_memberships (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES organizations(id),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  role text NOT NULL DEFAULT 'viewer', -- admin, manager, viewer
+  status text NOT NULL DEFAULT 'active', -- active, invited, suspended
+  invited_at timestamp DEFAULT now(),
+  joined_at timestamp,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now(),
+  UNIQUE(org_id, user_id)
+);
+```
+
+**Purpose**: Join table enabling users to belong to multiple organizations with different roles.
+
+**Key Features**:
+- `role`: Controls permission level (hierarchical: viewer < manager < admin)
+- `status`: Invitation workflow support
+- Audit timestamps for membership changes
+
+#### Auctions (`auctions`)
+
+Represents cricket player auction events.
+
+```sql
+CREATE TABLE auctions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL DEFAULT 'APL Season 1',
+  status text NOT NULL DEFAULT 'setup', -- setup, live, paused, completed
+  org_id uuid NOT NULL REFERENCES organizations(id),
+  created_by uuid NOT NULL REFERENCES auth.users(id),
+  tournament_id uuid REFERENCES tournaments(id),
+  tournament_opt_out boolean DEFAULT false,
+  is_synthetic boolean DEFAULT false,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now(),
+  launched_at timestamp,
+  completed_at timestamp
+);
+```
+
+**Purpose**: Container for player bidding events.
+
+**Key Features**:
+- Lifecycle tracking (setup → live → paused → completed)
+- Tournament linkage for integrated tournaments
+- Synthetic auctions for testing/demos
+
+#### Players (`players`)
+
+Cricket player records available for auction.
+
+```sql
+CREATE TABLE players (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id uuid NOT NULL REFERENCES auctions(id),
+  name text NOT NULL,
+  role text NOT NULL, -- Batter, Bowler, All-rounder, WK-Batter
+  origin text NOT NULL DEFAULT 'Local', -- Local, Overseas
+  price integer NOT NULL DEFAULT 500,
+  capped boolean DEFAULT false,
+  country text DEFAULT '',
+  img text DEFAULT '',
+  status text DEFAULT 'available', -- available, sold, unsold
+  lot_order integer,
+  sold_to_team_id uuid REFERENCES teams(id),
+  sold_price integer,
+  is_captain boolean DEFAULT false,
+  is_manual_entry boolean DEFAULT false,
+  reentry_count integer DEFAULT 0,
+  owner_team_code text,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Catalog of players available in an auction.
+
+**Key Features**:
+- Role-based classification for team composition
+- Price tracking (base and final)
+- Captain designation support
+- Reentry capability for unsold players
+
+#### Teams (`teams`)
+
+Teams participating in auctions and tournaments.
+
+```sql
+CREATE TABLE teams (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id uuid NOT NULL REFERENCES auctions(id),
+  code text NOT NULL,
+  name text NOT NULL,
+  tier text NOT NULL DEFAULT 'Pro', -- A, B, C, Pro, Elite, Legend
+  owner text NOT NULL,
+  color text NOT NULL DEFAULT '#e45d35',
+  logo text DEFAULT '',
+  roster integer DEFAULT 0,
+  remaining_purse integer DEFAULT 50000,
+  pin text NOT NULL DEFAULT '000000',
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Team records for auctions and tournaments.
+
+**Key Features**:
+- Tier system for team classification
+- Budget tracking (remaining_purse)
+- PIN protection for team access
+- Customizable branding (color, logo)
+
+#### Auction Lots (`auction_lots`)
+
+Individual player lots during auction.
+
+```sql
+CREATE TABLE auction_lots (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id uuid NOT NULL REFERENCES auctions(id),
+  player_id uuid NOT NULL REFERENCES players(id),
+  lot_number integer NOT NULL,
+  status text NOT NULL DEFAULT 'pending', -- pending, shuffling, sold, unsold
+  current_bid integer NOT NULL DEFAULT 0,
+  base_price integer NOT NULL DEFAULT 500,
+  winning_team_id uuid REFERENCES teams(id),
+  winning_team_code text,
+  started_at timestamp DEFAULT now(),
+  closed_at timestamp
+);
+```
+
+**Purpose**: Tracks individual lot progression during auctions.
+
+**Key Features**:
+- Real-time bid tracking
+- Status progression for auction workflow
+- Timestamp tracking for duration analysis
+
+#### Bid History (`bid_history`)
+
+Complete audit trail of all bids placed.
+
+```sql
+CREATE TABLE bid_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lot_id uuid NOT NULL REFERENCES auction_lots(id),
+  auction_id uuid NOT NULL REFERENCES auctions(id),
+  team_id uuid NOT NULL REFERENCES teams(id),
+  team_code text NOT NULL,
+  team_name text NOT NULL,
+  team_color text NOT NULL,
+  amount integer NOT NULL,
+  placed_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Immutable record of every bid for audit and analytics.
+
+**Key Features**:
+- Denormalized team data for fast queries
+- Timestamp precision for leaderboards
+
+#### Rules (`rules`)
+
+Auction configuration and rule settings.
+
+```sql
+CREATE TABLE rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id uuid NOT NULL UNIQUE REFERENCES auctions(id),
+  total_points integer NOT NULL DEFAULT 50000,
+  team_size integer NOT NULL DEFAULT 16,
+  base_price integer NOT NULL DEFAULT 500,
+  max_overseas_players integer NOT NULL DEFAULT 0,
+  max_bid_time_seconds integer NOT NULL DEFAULT 300,
+  unsold_reentry_rounds integer NOT NULL DEFAULT 1,
+  tiers jsonb NOT NULL, -- bid increment tiers
+  target_player_count integer DEFAULT 140,
+  current_round integer DEFAULT 0,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Configurable auction parameters.
+
+**Key Features**:
+- JSONB tiers for flexible bid increments
+- Dynamic configuration without code changes
+- Round tracking for multi-round auctions
+
+#### Tournaments (`tournaments`)
+
+Tournament containers supporting single/double elimination and round-robin.
+
+```sql
+CREATE TABLE tournaments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES organizations(id),
+  name text NOT NULL,
+  format text NOT NULL, -- single_elimination, double_elimination, round_robin
+  category text, -- Auction, Bracket, Overlay, League
+  status text DEFAULT 'setup', -- setup, live, completed
+  created_by uuid REFERENCES auth.users(id),
+  description text,
+  image_url text,
+  logo_url text,
+  start_date date,
+  prize_pool text,
+  website text,
+  twitter text,
+  discord text,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Organize competitive play with multiple formats.
+
+**Key Features**:
+- Multi-format support
+- Metadata for branding and marketing
+- Social media integration fields
+
+#### Bracket Matches (`bracket_matches`)
+
+Match fixtures in tournament brackets.
+
+```sql
+CREATE TABLE bracket_matches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tournament_id uuid NOT NULL REFERENCES tournaments(id),
+  bracket_type text DEFAULT 'winners', -- winners, losers, grand_final, round_robin
+  round integer NOT NULL,
+  position integer NOT NULL,
+  team_a_id uuid REFERENCES teams(id),
+  team_b_id uuid REFERENCES teams(id),
+  winner_team_id uuid REFERENCES teams(id),
+  score_a integer,
+  score_b integer,
+  feeder_match_a_id uuid REFERENCES bracket_matches(id),
+  feeder_match_b_id uuid REFERENCES bracket_matches(id),
+  overlay_match_id uuid REFERENCES matches(id),
+  scheduled_at timestamp,
+  venue text,
+  status text DEFAULT 'upcoming', -- upcoming, live, completed
+  result_source text, -- overlay, manual
+  created_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Track match progression and results in tournament brackets.
+
+**Key Features**:
+- Recursive structure for bracket advancement
+- Overlay match linkage for live stats
+- Multiple result source support
+
+#### Matches (`matches`)
+
+Detailed match records with ball-by-ball data.
+
+```sql
+CREATE TABLE matches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id text NOT NULL UNIQUE,
+  match_setup jsonb NOT NULL,
+  match_setup_completed boolean DEFAULT false,
+  org_id uuid REFERENCES organizations(id),
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Container for match sessions with detailed statistics.
+
+#### Balls (`balls`)
+
+Ball-by-ball cricket data.
+
+```sql
+CREATE TABLE balls (
+  id bigint PRIMARY KEY DEFAULT nextval('balls_id_seq'),
+  match_id uuid NOT NULL REFERENCES matches(id),
+  innings_number smallint NOT NULL,
+  sequence integer NOT NULL,
+  over_number smallint NOT NULL,
+  ball_number smallint NOT NULL,
+  striker_name text,
+  non_striker_name text,
+  bowler_name text,
+  runs smallint DEFAULT 0,
+  extra_type text,
+  is_wicket boolean DEFAULT false,
+  dismissal_type text,
+  batsman_out text,
+  fielder text,
+  is_free_hit boolean DEFAULT false,
+  created_at timestamp DEFAULT now(),
+  batting_team_id uuid REFERENCES teams(id),
+  bowling_team_id uuid REFERENCES teams(id),
+  striker_player_id uuid REFERENCES players(id),
+  non_striker_player_id uuid REFERENCES players(id),
+  bowler_player_id uuid REFERENCES players(id)
+);
+```
+
+**Purpose**: Granular cricket event tracking.
+
+**Key Features**:
+- Sequence tracking for replay capability
+- Wicket and extra handling
+- Player identification via IDs and names
+
+#### Standings (`standings`)
+
+Tournament standings with performance metrics.
+
+```sql
+CREATE TABLE standings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id uuid NOT NULL REFERENCES teams(id),
+  tournament_id uuid REFERENCES tournaments(id),
+  played smallint DEFAULT 0,
+  won smallint DEFAULT 0,
+  lost smallint DEFAULT 0,
+  tied smallint DEFAULT 0,
+  no_result smallint DEFAULT 0,
+  points smallint DEFAULT 0,
+  runs_scored integer DEFAULT 0,
+  balls_faced integer DEFAULT 0,
+  runs_conceded integer DEFAULT 0,
+  balls_bowled integer DEFAULT 0,
+  nrr numeric DEFAULT 0,
+  form jsonb DEFAULT '[]',
+  updated_at timestamp DEFAULT now()
+);
+```
+
+**Purpose**: Aggregate tournament performance data.
+
+**Key Features**:
+- Net Run Rate (NRR) calculation
+- Form tracking as JSONB array
+- Real-time update capability
+
+---
+
+## 🔐 Authentication & Authorization
+
+### Authentication Flow
+
+```
+User Input (Credentials)
+    ↓
+[Client] SignIn/SignUp Form
+    ↓
+[Client] POST /api/auth/route.ts
+    ↓
+[Server] Supabase Auth
+    ↓
+[Server] Create Session/JWT
+    ↓
+[Server] Set HttpOnly Cookie
+    ↓
+[Browser] Store Session
+    ↓
+[Middleware] Verify Cookie on Each Request
+    ↓
+[Authorized Access]
+```
+
+### Auth Types (`types/saas.ts`)
+
+```typescript
+interface User {
+  id: string;
+  email: string;
+  fullName?: string;
+  avatar?: string;
+  currentOrgId?: string;
+}
+
+interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  logo?: string;
+  plan: 'free' | 'pro' | 'enterprise';
+  status: 'active' | 'suspended' | 'deleted';
+}
+
+interface OrgMembership {
+  id: string;
+  orgId: string;
+  userId: string;
+  role: 'admin' | 'manager' | 'viewer';
+  status: 'active' | 'invited' | 'suspended';
+}
+```
+
+### Auth Library (`lib/auth.ts`)
+
+**Session Management:**
+- `getCurrentUser()` - Retrieve authenticated user with org context
+- `getSession()` - Get current session from cookies
+
+**User Operations:**
+- `signUp(email, password, fullName)` - Create account
+- `signIn(email, password)` - Authenticate user
+- `signOut()` - Logout and clear session
+- `resetPassword(email)` - Initiate password reset
+- `updatePassword(newPassword)` - Change password
+- `updateUserProfile(updates)` - Update profile info
+
+**Organization Context:**
+- `setCurrentOrganization(orgId)` - Switch active org
+- `checkOrgPermission(orgId, requiredRole)` - Verify permissions
+
+---
+
+## 🏢 Organizations & Multi-Tenancy
+
+### Organization Library (`lib/organizations.ts`)
+
+**Organization Management:**
+- `createOrganization(name, slug, createdBy)` - New organization
+- `getOrganization(id)` - Retrieve org by ID
+- `getOrganizationBySlug(slug)` - Retrieve org by slug
+- `updateOrganization(id, updates)` - Update org details
+- `deleteOrganization(id)` - Soft delete organization
+
+**Member Management:**
+- `getOrgMembers(orgId)` - List all members
+- `inviteToOrganization(orgId, email, role)` - Invite user
+- `updateMemberRole(orgId, userId, newRole)` - Change member role
+- `removeMember(orgId, userId)` - Remove member
+
+**Permission Checks:**
+- `checkOrgPermission(orgId, userId, requiredRole)` - Verify role
+- `getUserRoleInOrg(orgId, userId)` - Get member's role
+- `canUserAccessOrg(userId, orgId)` - Check org access
+
+### Role Hierarchy
+
+```
+viewer (read-only)
+  ↑
+  └─→ manager (create/edit)
+        ↑
+        └─→ admin (full control)
+```
+
+**Viewer Permissions:**
+- View auctions, tournaments, teams
+- View match results
+- Read-only access to data
+
+**Manager Permissions:**
+- Create auctions and tournaments
+- Add teams and players
+- Manage tournament brackets
+- View analytics
+
+**Admin Permissions:**
+- All manager permissions
+- Invite and remove members
+- Change member roles
+- Update organization settings
+- Access admin dashboard
+
+---
+
+## 🔌 API Routes
+
+### Authentication Endpoint (`app/api/auth/route.ts`)
+
+**POST /api/auth?action=signup**
+```typescript
+Request:
+{
+  email: string;
+  password: string;
+  fullName: string;
+}
+
+Response:
+{
+  user: { id, email, fullName };
+  message: "Account created";
+}
+```
+
+**POST /api/auth?action=signin**
+```typescript
+Request:
+{
+  email: string;
+  password: string;
+}
+
+Response:
+{
+  user: { id, email, currentOrgId };
+  message: "Signed in";
+  session: { accessToken, refreshToken };
+}
+```
+
+**POST /api/auth?action=signout**
+```
+Response:
+{
+  message: "Signed out";
+}
+```
+
+**GET /api/auth?action=get-user**
+```
+Response:
+{
+  user: { id, email, fullName, avatar, currentOrgId };
+}
+```
+
+### Organizations Endpoint (`app/api/org/route.ts`)
+
+**POST /api/org?action=create**
+```typescript
+Request:
+{
+  name: string;
+  slug: string;
+  description?: string;
+}
+
+Response:
+{
+  organization: Organization;
+}
+```
+
+**GET /api/org?orgId=...**
+Retrieve organization details
+
+**PUT /api/org?action=update**
+Update organization (admin only)
+
+**GET /api/org?action=get-members&orgId=...**
+List organization members
+
+**POST /api/org?action=invite-member**
+Invite user to organization (admin only)
+
+**POST /api/org?action=update-member-role**
+Change member role (admin only)
+
+**POST /api/org?action=remove-member**
+Remove member (admin only)
+
+---
+
+## 🎯 Auction System
+
+### Auction Database Operations
+
+**Creating an Auction:**
+```typescript
+const auction = await supabase
+  .from('auctions')
+  .insert({
+    name: 'APL Season 1',
+    org_id: currentOrgId,
+    created_by: userId,
+    status: 'setup'
+  })
+  .single();
+```
+
+**Adding Players:**
+```typescript
+const players = await supabase
+  .from('players')
+  .insert([
+    {
+      auction_id: auctionId,
+      name: 'Player Name',
+      role: 'Batter',
+      origin: 'Local',
+      price: 500,
+      country: 'USA'
+    }
+  ])
+  .select();
+```
+
+**Creating Teams:**
+```typescript
+const team = await supabase
+  .from('teams')
+  .insert({
+    auction_id: auctionId,
+    code: 'TEAM_A',
+    name: 'Team A',
+    owner: 'Owner Name',
+    tier: 'Pro',
+    remaining_purse: 50000
+  })
+  .single();
+```
+
+**Recording Bids:**
+```typescript
+// 1. Create lot (player becomes available)
+const lot = await supabase
+  .from('auction_lots')
+  .insert({
+    auction_id: auctionId,
+    player_id: playerId,
+    lot_number: 1,
+    base_price: 500,
+    status: 'pending'
+  })
+  .single();
+
+// 2. Record bids
+const bid = await supabase
+  .from('bid_history')
+  .insert({
+    lot_id: lotId,
+    team_id: teamId,
+    amount: bidAmount,
+    auction_id: auctionId
+  });
+
+// 3. Update lot with highest bid
+await supabase
+  .from('auction_lots')
+  .update({ current_bid: bidAmount })
+  .eq('id', lotId);
+```
+
+**Completing Auction:**
+```typescript
+// Mark player as sold
+await supabase
+  .from('players')
+  .update({
+    status: 'sold',
+    sold_to_team_id: winningTeamId,
+    sold_price: finalBid
+  })
+  .eq('id', playerId);
+
+// Close lot
+await supabase
+  .from('auction_lots')
+  .update({
+    status: 'sold',
+    winning_team_id: winningTeamId,
+    closed_at: new Date()
+  })
+  .eq('id', lotId);
+```
+
+---
+
+## 🏆 Tournament System
+
+### Tournament Management
+
+**Creating a Tournament:**
+```typescript
+const tournament = await supabase
+  .from('tournaments')
+  .insert({
+    org_id: currentOrgId,
+    name: 'APL Season 1 Tournament',
+    format: 'single_elimination',
+    category: 'Bracket',
+    created_by: userId,
+    status: 'setup'
+  })
+  .single();
+```
+
+**Adding Teams:**
+```typescript
+const teams = await supabase
+  .from('teams')
+  .insert([
+    {
+      tournament_id: tournamentId,
+      name: 'Team A',
+      code: 'TEA',
+      owner: 'Owner A'
+    },
+    {
+      tournament_id: tournamentId,
+      name: 'Team B',
+      code: 'TEB',
+      owner: 'Owner B'
+    }
+  ]);
+```
+
+**Generating Bracket:**
+```typescript
+// For single elimination with N teams
+const matches = generateBracketMatches(teams, 'single_elimination');
+
+const bracketMatches = await supabase
+  .from('bracket_matches')
+  .insert(matches);
+```
+
+**Recording Match Results:**
+```typescript
+const result = await supabase
+  .from('bracket_matches')
+  .update({
+    status: 'completed',
+    score_a: teamAScore,
+    score_b: teamBScore,
+    winner_team_id: winningTeamId,
+    result_source: 'manual'
+  })
+  .eq('id', matchId)
+  .select();
+
+// Update standings
+await updateStandings(winnerId, tournamentId, true);
+await updateStandings(loserId, tournamentId, false);
+```
+
+**Standings Calculation:**
+```typescript
+function calculateStandings(matches) {
+  const standings = {};
+  
+  matches.forEach(match => {
+    if (!standings[match.winner_id]) {
+      standings[match.winner_id] = {
+        played: 0,
+        won: 0,
+        lost: 0,
+        points: 0
+      };
+    }
+    
+    standings[match.winner_id].won++;
+    standings[match.winner_id].points += 2;
+    standings[match.winner_id].played++;
+    
+    // Similar for loser
+  });
+  
+  return Object.entries(standings)
+    .sort((a, b) => b[1].points - a[1].points);
+}
+```
+
+---
+
+## 🔐 Row-Level Security (RLS)
+
+All tables implement RLS policies to ensure data isolation:
+
+### Auction Policies
+
+```sql
+-- Users can only see auctions in their organizations
+CREATE POLICY "Users can view org auctions"
+  ON auctions FOR SELECT
+  USING (org_id IN (
+    SELECT org_id FROM org_memberships WHERE user_id = auth.uid()
+  ));
+
+-- Only managers+ can create auctions
+CREATE POLICY "Managers can create auctions"
+  ON auctions FOR INSERT
+  WITH CHECK (
+    org_id IN (
+      SELECT org_id FROM org_memberships 
+      WHERE user_id = auth.uid() AND role IN ('manager', 'admin')
+    )
+  );
+```
+
+### Tournament Policies
+
+```sql
+-- Users can only manage tournaments in their orgs
+CREATE POLICY "Users can view org tournaments"
+  ON tournaments FOR SELECT
+  USING (org_id IN (
+    SELECT org_id FROM org_memberships WHERE user_id = auth.uid()
+  ));
+```
+
+---
+
+## 🛡️ Security Features
+
+### Input Validation
+
+All API routes validate inputs:
+```typescript
+const schema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  fullName: z.string().min(2)
+});
+
+const validated = schema.parse(input);
+```
+
+### SQL Injection Prevention
+
+Supabase automatically uses parameterized queries:
+```typescript
+// ✅ Safe - parameterized
+await supabase
+  .from('teams')
+  .select()
+  .eq('name', userInput);
+
+// ❌ Dangerous - string concatenation
+const query = `SELECT * FROM teams WHERE name = '${userInput}'`;
+```
+
+### Session Security
+
+- HttpOnly cookies prevent XSS access
+- SameSite=Strict prevents CSRF
+- Secure flag ensures HTTPS only
+- Token expiration and refresh
+
+### CORS Protection
+
+```typescript
+headers: {
+  'Access-Control-Allow-Origin': process.env.NEXT_PUBLIC_APP_URL,
+  'Access-Control-Allow-Credentials': 'true'
+}
+```
+
+---
+
+## 🎨 UI Components Architecture
+
+### Authentication Components
+
+**SignInForm** (`components/auth/SignInForm.tsx`)
+- Email/password inputs
+- Form validation
+- Error handling
+- Forgot password link
+- Auto-redirect on success
+
+**SignUpForm** (`components/auth/SignUpForm.tsx`)
+- Full name field
+- Email validation
+- Password strength indicator
+- Confirmation field
+- Terms acceptance
+
+### Admin Components
+
+**Admin Dashboard** (`components/Admin/AdminHeader.tsx`)
+- Auction management
+- Team configuration
+- Player management
+- Rules editor
+- Launch controls
+
+**Teams Tab** (`components/Admin/TeamsTab.tsx`)
+- Team creation/editing
+- Budget management
+- Color customization
+- Logo upload
+
+**Players Tab** (`components/Admin/PlayersTab.tsx`)
+- Player import/export
+- Role assignment
+- Pricing configuration
+- Image management
+
+**Rules Tab** (`components/Admin/RulesTab.tsx`)
+- Bid increment tiers
+- Team size configuration
+- Time limit settings
+- Override options
+
+---
+
+## 📊 Data Flow Architecture
+
+```
+┌─────────────────┐
+│   User Client   │
+└────────┬────────┘
+         │ HTTP Request
+         ▼
+┌─────────────────┐
+│  Next.js Route  │
+│   (API Handler) │
+└────────┬────────┘
+         │ Verify Session
+         ▼
+┌─────────────────┐
+│  Auth Check     │
+│  (Middleware)   │
+└────────┬────────┘
+         │ Get Current User
+         ▼
+┌─────────────────┐
+│ Permission      │
+│ Check (RBAC)    │
+└────────┬────────┘
+         │ Query with org_id
+         ▼
+┌─────────────────┐
+│   Supabase      │
+│   Client SDK    │
+└────────┬────────┘
+         │ RLS Policy Check
+         ▼
+┌─────────────────┐
+│   PostgreSQL    │
+│   Database      │
+└────────┬────────┘
+         │ Return Data
+         ▼
+┌─────────────────┐
+│   User Client   │
+│   (Response)    │
+└─────────────────┘
+```
+
+---
+
+## 🚀 Performance Optimizations
+
+### Database Indexes
+
+All frequently queried columns are indexed:
+```sql
+CREATE INDEX idx_org_memberships_user_id ON org_memberships(user_id);
+CREATE INDEX idx_auctions_org_id ON auctions(org_id);
+CREATE INDEX idx_tournament_org_id ON tournaments(org_id);
+CREATE INDEX idx_bid_history_lot_id ON bid_history(lot_id);
+```
+
+### Denormalization Strategy
+
+Team data in `bid_history` for fast queries:
+```sql
+-- Instead of joining teams table
+SELECT 
+  bh.amount,
+  bh.team_name,  -- Denormalized
+  bh.team_color  -- Denormalized
+FROM bid_history bh
+WHERE bh.lot_id = $1
+ORDER BY bh.placed_at DESC;
+```
+
+### Query Optimization
+
+```typescript
+// ✅ Efficient - single query
+const auction = await supabase
+  .from('auctions')
+  .select(`
+    *,
+    teams(*),
+    auction_lots(*, bid_history(*))
+  `)
+  .eq('id', auctionId)
+  .single();
+
+// ❌ Inefficient - N+1 queries
+const auction = await supabase.from('auctions').select().single();
+for (const lot of auction.lots) {
+  const bids = await supabase.from('bid_history').select().eq('lot_id', lot.id);
+}
+```
+
+### Caching Strategy
+
+```typescript
+// Cache organization data for 5 minutes
+const orgs = await cache(
+  () => getOrgMembers(orgId),
+  { revalidate: 300 }
+);
+```
+
+---
+
+## 🔄 Real-time Updates
+
+### Supabase Realtime
+
+```typescript
+// Listen for bid changes
+const subscription = supabase
+  .channel(`auction:${auctionId}`)
+  .on(
+    'postgres_changes',
+    {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'bid_history',
+      filter: `lot_id=eq.${lotId}`
+    },
+    (payload) => {
+      console.log('New bid:', payload.new);
+      updateBidUI(payload.new);
+    }
+  )
+  .subscribe();
+
+return () => supabase.removeChannel(subscription);
+```
+
+---
+
+## 📁 File Structure
+
+```
+app/
+├── api/
+│   ├── auth/route.ts              # Authentication endpoints
+│   ├── org/route.ts               # Organization management
+│   ├── auctions/route.ts          # Auction operations
+│   ├── tournaments/route.ts       # Tournament operations
+│   └── matches/route.ts           # Match management
+├── auth/
+│   ├── layout.tsx
+│   ├── login/page.tsx             # Login page
+│   ├── signup/page.tsx            # Signup page
+│   └── reset/page.tsx             # Password reset
+├── dashboard/
+│   └── page.tsx                   # Main dashboard
+├── org/
+│   └── [orgId]/
+│       ├── layout.tsx
+│       ├── page.tsx               # Org home
+│       ├── auctions/page.tsx      # Auction listing
+│       ├── tournaments/page.tsx   # Tournament listing
+│       └── settings/page.tsx      # Org settings
+├── layout.tsx
+├── page.tsx                       # Landing page
+└── middleware.ts                  # Route protection
+
+components/
+├── auth/
+│   ├── SignInForm.tsx
+│   ├── SignUpForm.tsx
+│   └── PasswordResetForm.tsx
+├── Admin/
+│   ├── AdminHeader.tsx
+│   ├── AuctionSwitcher.tsx
+│   ├── TeamsTab.tsx
+│   ├── PlayersTab.tsx
+│   ├── RulesTab.tsx
+│   └── LaunchTab.tsx
+├── tournament/
+│   ├── TournamentClient.tsx
+│   ├── BracketPanel.tsx
+│   ├── MatchResultCard.tsx
+│   └── StandingsTable.tsx
+└── organization/
+    └── OrganizationClient.tsx
+
+lib/
+├── auth.ts                        # Auth functions
+├── organizations.ts               # Org functions
+├── auctions.ts                    # Auction operations
+├── tournaments.ts                 # Tournament operations
+├── supabase.ts                    # Supabase client
+└── utils.ts                       # Utility functions
+
+types/
+├── saas.ts                        # SaaS type definitions
+├── auction.ts                     # Auction types
+├── tournament.ts                  # Tournament types
+└── user.ts                        # User types
+
+styles/
+├── globals.css                    # Global styles
+└── components.css                 # Component styles
+
+middleware.ts                      # Next.js middleware
+```
+
+---
+
+## 🔧 Environment Variables
+
+Required environment variables in `.env.local`:
+
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# Application
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Optional: Image optimization
+NEXT_PUBLIC_IMAGE_URL=https://your-cdn.com
+```
+
+---
+
+## 🧪 Testing Guide
+
+### Setup Test Account
+
+1. Create test user in Supabase Auth dashboard
+2. Verify email
+3. Create organization
+4. Invite team members
+
+### Test Flows
+
+**Auction Flow:**
+1. Login as manager
+2. Create auction
+3. Add players
+4. Create teams
+5. Launch auction
+6. Place bids
+7. Mark sold/unsold
+8. Complete auction
+
+**Tournament Flow:**
+1. Create tournament
+2. Add teams
+3. Generate bracket
+4. Record match results
+5. Verify standings calculation
+6. Check NRR calculation
+
+**Permission Flow:**
+1. Create org as admin
+2. Invite manager
+3. Try restricted operations as manager
+4. Verify permission denial
+5. Promote to admin
+6. Verify new permissions
+
+---
+
+## 📈 Monitoring & Analytics
+
+### Query Monitoring
+
+Monitor slow queries in Supabase dashboard:
+- Check query performance
+- Identify missing indexes
+- Review connection pool usage
+
+### Error Tracking
+
+```typescript
+try {
+  // Database operation
+} catch (error) {
+  console.error('Database error:', {
+    table: 'auctions',
+    operation: 'insert',
+    error: error.message
+  });
+  // Send to error tracking service
+}
+```
+
+### User Analytics
+
+Track key metrics:
+- Auction completion rate
+- Average bid time
+- Tournament participation
+- Member engagement
+
+---
+
+## 🚀 Deployment Checklist
+
+- [ ] Environment variables configured
+- [ ] Database migrations applied
+- [ ] RLS policies enabled
+- [ ] CORS properly configured
+- [ ] Email service connected
+- [ ] Backups configured
+- [ ] CDN configured for images
+- [ ] Monitoring setup
+- [ ] Error tracking enabled
+- [ ] Load testing completed
+- [ ] Security audit passed
+- [ ] Documentation reviewed
+
+---
+
+## 📚 Additional Resources
+
+- [Supabase Documentation](https://supabase.com/docs)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs)
+- [TypeScript Documentation](https://www.typescriptlang.org/docs)
+- [Vercel Deployment Guide](https://vercel.com/docs)
+
+---
+
+## 🤝 Support & Contribution
+
+For issues, questions, or contributions:
+- Create an issue in the repository
+- Submit pull requests with improvements
+- Share feedback and suggestions
+
+---
+
+**Last Updated**: July 2026  
+**Version**: 2.0  
+**Maintained by**: Valiant League Team

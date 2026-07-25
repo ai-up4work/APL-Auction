@@ -178,11 +178,70 @@ export async function deleteTournament(tournamentId: string): Promise<UpdateOrgR
 }
 
 /* ────────────────────────────────────────────────────────────────── */
+/*  AUCTIONS (lookup only — auction creation/editing lives elsewhere)  */
+/*                                                                      */
+/*  Used by the Matches tab's "team source: from an auction" flow, so   */
+/*  a friendly/standalone match can pull its two teams (and their sold  */
+/*  players) from an auction that's already been run for this org,      */
+/*  instead of typing team names in by hand.                            */
+/* ────────────────────────────────────────────────────────────────── */
+
+export interface AuctionOption {
+  id: string;
+  name: string;
+}
+
+export async function getAuctionsForOrg(orgId: string): Promise<AuctionOption[]> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .select("id, name")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getAuctionsForOrg failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export interface AuctionTeamOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+/** Teams that belong to one specific auction — populates the "Team 1" /
+ *  "Team 2" pickers once the org has chosen which auction to pull from.
+ *  An auction can have many teams, so picking the auction alone isn't
+ *  enough to know which two are playing this match. */
+export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeamOption[]> {
+  const { data, error } = await supabase
+    .from("teams")
+    .select("id, name, code")
+    .eq("auction_id", auctionId)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("getTeamsForAuction failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/* ────────────────────────────────────────────────────────────────── */
 /*  FRIENDLY MATCHES                                                   */
 /*                                                                      */
 /*  Reuses the exact same `matches` table and match_setup shape the     */
 /*  standalone match editor/simulator already read/write — "friendly    */
 /*  match" here is just a label, not a different data model.            */
+/*                                                                      */
+/*  A match has no direct FK to tournaments (see schema notes elsewhere */
+/*  in this codebase) — the only path from a match to a tournament is   */
+/*  bracket_matches.overlay_match_id -> matches.id, bracket_matches.     */
+/*  tournament_id -> tournaments.id. So "is this match part of a        */
+/*  tournament" is a lookup against bracket_matches, not a column on    */
+/*  matches itself.                                                     */
 /* ────────────────────────────────────────────────────────────────── */
 
 export interface FriendlyMatchSummary {
@@ -191,6 +250,13 @@ export interface FriendlyMatchSummary {
   team2Name: string;
   round: string;
   createdAt: string;
+  /** Non-null only if a bracket_matches row's overlay_match_id points at
+   *  this match — i.e. it's connected to a tournament bracket slot. Set
+   *  from /tournaments/[id]/edit, not from this file. */
+  tournamentName: string | null;
+  /** True if there's an on_air_channels row with at least one channel,
+   *  or a weather_readings row with coords set, for this match. */
+  overlayConfigured: boolean;
 }
 
 export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
@@ -205,7 +271,41 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
     return [];
   }
 
-  return (data ?? []).map((m) => {
+  const matches = data ?? [];
+  const matchIds = matches.map((m) => m.id);
+  if (matchIds.length === 0) return [];
+
+  const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }] = await Promise.all([
+    supabase
+      .from("bracket_matches")
+      .select("overlay_match_id, tournaments(name)")
+      .in("overlay_match_id", matchIds),
+    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+  ]);
+
+  if (bracketsErr) {
+    // Non-fatal — matches just show as "Standalone" until this resolves.
+    console.error("getFriendlyMatchesForOrg(brackets) failed:", bracketsErr.message);
+  }
+
+  const tournamentByMatch = new Map<string, string>();
+  (brackets ?? []).forEach((b: any) => {
+    if (b.overlay_match_id && b.tournaments?.name) {
+      tournamentByMatch.set(b.overlay_match_id, b.tournaments.name);
+    }
+  });
+
+  const overlaySet = new Set<string>();
+  (channelRows ?? []).forEach((c: any) => {
+    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
+  });
+  (weatherRows ?? []).forEach((w: any) => {
+    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
+    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
+  });
+
+  return matches.map((m) => {
     const setup = (m.match_setup ?? {}) as Record<string, any>;
     return {
       id: m.id,
@@ -213,15 +313,15 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       team2Name: setup.team2?.name ?? "Team 2",
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
+      tournamentName: tournamentByMatch.get(m.id) ?? null,
+      overlayConfigured: overlaySet.has(m.id),
     };
   });
 }
 
-export interface CreateFriendlyMatchInput {
-  team1Name: string;
-  team2Name: string;
-  round?: string;
-}
+export type CreateFriendlyMatchInput =
+  | { teamSource: "manual"; team1Name: string; team2Name: string; round?: string }
+  | { teamSource: "auction"; auctionId: string; team1Id: string; team2Id: string; round?: string };
 
 /** Creates a minimal matches row with just enough match_setup to satisfy
  *  parseMatchSetup downstream (see simulate/page.tsx), then hands the
@@ -231,25 +331,70 @@ export interface CreateFriendlyMatchInput {
  *  matches.auction_id is a plain NOT NULL UNIQUE text column (no FK) —
  *  it's set to the match's own id here as a placeholder, matching the
  *  same self-referential trick edit/page.tsx's resolveAuctionId() uses
- *  once squads actually need a real `auctions` row to sync into. */
+ *  once squads actually need a real `auctions` row to sync into.
+ *
+ *  teamSource: "auction" pulls the two chosen teams' name/code straight
+ *  from `teams`, plus every player already sold to either team, and
+ *  pre-fills match_setup.squads with them — the org doesn't retype a
+ *  roster that already exists from running the auction. */
 export async function createFriendlyMatch(
   orgId: string,
   input: CreateFriendlyMatchInput
 ): Promise<string | null> {
   const newId = crypto.randomUUID();
 
+  let team1: { name: string; short: string };
+  let team2: { name: string; short: string };
+  let squads: { name: string; role: string; team: string }[] = [];
+
+  if (input.teamSource === "manual") {
+    team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name) };
+    team2 = { name: input.team2Name.trim(), short: shortCode(input.team2Name) };
+  } else {
+    const { data: teamRows, error: teamErr } = await supabase
+      .from("teams")
+      .select("id, name, code")
+      .in("id", [input.team1Id, input.team2Id]);
+
+    if (teamErr || !teamRows || teamRows.length !== 2) {
+      console.error("createFriendlyMatch(auction teams) failed:", teamErr?.message);
+      return null;
+    }
+    const t1 = teamRows.find((t) => t.id === input.team1Id)!;
+    const t2 = teamRows.find((t) => t.id === input.team2Id)!;
+    team1 = { name: t1.name, short: t1.code };
+    team2 = { name: t2.name, short: t2.code };
+
+    const { data: playerRows, error: playersErr } = await supabase
+      .from("players")
+      .select("name, role, sold_to_team_id")
+      .in("sold_to_team_id", [input.team1Id, input.team2Id]);
+
+    if (playersErr) {
+      // Non-fatal — the match still gets created with an empty squad
+      // list; the org can add players manually on the edit page.
+      console.error("createFriendlyMatch(auction players) failed:", playersErr.message);
+    }
+
+    squads = (playerRows ?? []).map((p) => ({
+      name: p.name,
+      role: p.role,
+      team: p.sold_to_team_id === input.team1Id ? team1.short : team2.short,
+    }));
+  }
+
   const matchSetup = {
     tournamentName: "",
     round: input.round?.trim() || "Friendly Match",
-    team1: { name: input.team1Name.trim(), short: shortCode(input.team1Name) },
-    team2: { name: input.team2Name.trim(), short: shortCode(input.team2Name) },
+    team1,
+    team2,
     venue: "",
     date: "",
     time: "",
     toss: "",
     overs: 20,
     officials: { format: "", umpires: "", thirdUmpire: "", referee: "" },
-    squads: [],
+    squads,
   };
 
   const { data, error } = await supabase
@@ -277,7 +422,11 @@ export async function createFriendlyMatch(
  *  `on_air_channels` / `weather_readings` rows for this match_id are
  *  left behind as orphans unless your schema has ON DELETE CASCADE set
  *  on their match_id FK — add that constraint (or delete them here
- *  explicitly) if you want overlay config cleaned up automatically. */
+ *  explicitly) if you want overlay config cleaned up automatically.
+ *
+ *  Callers should check `tournamentName` on the summary first and block
+ *  the delete in the UI if it's set — a bracket-linked match should be
+ *  disconnected from its bracket slot before being deleted here. */
 export async function deleteFriendlyMatch(matchId: string): Promise<boolean> {
   const { error } = await supabase.from("matches").delete().eq("id", matchId);
   if (error) {
@@ -485,6 +634,10 @@ export async function assignBankPlayerToTeam(
 /*                                                                      */
 /*  Wraps the existing on_air_channels / weather_readings tables, both  */
 /*  1:1 on match_id already — this just gives them an editable surface. */
+/*  getMatchesForOverlayPicker is kept for now in case anything else    */
+/*  still calls it, but the Matches tab no longer needs it: it opens    */
+/*  the overlay editor directly with a matchId it already has, instead  */
+/*  of asking the org to re-pick a match from a second dropdown.        */
 /* ────────────────────────────────────────────────────────────────── */
 
 export interface OverlayMatchOption {
