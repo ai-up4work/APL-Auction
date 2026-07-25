@@ -316,7 +316,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       <style
         dangerouslySetInnerHTML={{
           __html: `${pageStyles}
-          html, body {
+          body {
             overflow-x: hidden;
             max-width: 100%;
           }`,
