@@ -1,13 +1,14 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, MapPin, Radio, Shield, Lock, Clock3 } from "lucide-react"
+import { Calendar, MapPin, Radio, Shield, Lock, Clock3, RefreshCw } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
+import { useLiveMatch } from "@/hooks/use-live-match"
 import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
@@ -21,15 +22,13 @@ import type {
   InningsComplete,
 } from "@/data/match-data"
 import MatchGraphs, { type OverRow } from "./match-graphs"
+import type { MatchDetail as GraphMatchDetail } from "@/data/tournament-data"
 
 interface MatchDetailClientProps {
   match: MatchDetail
   /** Undefined for standalone/friendly matches with no tournament link. */
   tournamentSlug?: string
 }
-
-// How often to re-poll the live match endpoint while a match is in progress.
-const LIVE_POLL_MS = 8000
 
 function initials(name: string) {
   return name
@@ -40,15 +39,15 @@ function initials(name: string) {
     .toUpperCase()
 }
 
-type Tab = "scorecard" | "info" | "squads" | "overs" | "graphs" | "stats"
+type Tab = "info" |"scorecard" | "squads" | "overs" | "graphs" | "stats"
 
 // All 6 tabs are always rendered — never hidden based on data
 // availability. Tabs without underlying data are shown locked (see
 // isTabLocked) instead, so the visitor knows the feature exists and needs
 // to be set up, rather than wondering why a tab silently disappeared.
 const TABS: { key: Tab; label: string }[] = [
-  { key: "scorecard", label: "Scorecard" },
   { key: "info", label: "Info" },
+  { key: "scorecard", label: "Scorecard" },
   { key: "squads", label: "Squads" },
   { key: "overs", label: "Overs" },
   { key: "graphs", label: "Graphs" },
@@ -125,7 +124,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>("scorecard")
+  const [tab, setTab] = useState<Tab>("info")
   const [innings, setInnings] = useState<1 | 2>(2)
 
   const handleNavigation = (path: string) => {
@@ -138,34 +137,19 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   }
 
   // ── live state ──
-  // `match` is refreshed from the server on a poll while the game is live.
-  const [match, setMatch] = useState<MatchDetail>(initialMatch)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Replaces the old 8s setInterval poll of /api/match/[id]/live. This
+  // hook does an initial fetch + aggregation, then subscribes to
+  // Supabase Realtime on `balls` / `bracket_matches` / `matches` for
+  // this match id, recomputing scorecards + win probability from fresh
+  // ball-by-ball data the instant anything changes — no fixed delay,
+  // and it stays subscribed even if the match starts out "not_started"
+  // (fixing the old bug where a tab left open before the match went
+  // live would never start polling).
+  const { match, isSyncing } = useLiveMatch(initialMatch.id, initialMatch)
 
   const status = match.matchStatus // "not_started" | "live" | "completed"
   const live = status === "live"
   const hasBallData = match.hasBallData
-
-  useEffect(() => {
-    if (!live) return
-
-    async function poll() {
-      try {
-        const res = await fetch(`/api/match/${match.id}/live`, { cache: "no-store" })
-        if (!res.ok) return
-        const fresh: MatchDetail = await res.json()
-        setMatch(fresh)
-      } catch {
-        // Transient network/poll failure — just try again next tick.
-      }
-    }
-
-    pollRef.current = setInterval(poll, LIVE_POLL_MS)
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, match.id])
 
   const inn2 = live ? match.innings2Partial : match.innings2Final
   const runs = live ? currentTotal(match.innings2Partial) : match.innings2Final.total
@@ -338,17 +322,29 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-              {status === "live" && (
-                <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
-                  <Radio className="h-3 w-3" />
-                  LIVE
-                </span>
-              )}
-              {status === "completed" && <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>}
-              {status === "not_started" && (
-                <span className="flex items-center gap-1.5 bg-amber-500/15 text-amber-400 text-xs font-bold font-cinzel px-3 py-1.5 rounded-full border border-amber-500/30">
-                  <Clock3 className="h-3 w-3" />
-                  Not Started
+              <div className="flex items-center gap-2">
+                {status === "live" && (
+                  <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
+                    <Radio className="h-3 w-3" />
+                    LIVE
+                  </span>
+                )}
+                {status === "completed" && <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>}
+                {status === "not_started" && (
+                  <span className="flex items-center gap-1.5 bg-amber-500/15 text-amber-400 text-xs font-bold font-cinzel px-3 py-1.5 rounded-full border border-amber-500/30">
+                    <Clock3 className="h-3 w-3" />
+                    Not Started
+                  </span>
+                )}
+              </div>
+
+              {/* Subtle realtime-sync indicator — shows briefly whenever
+                  the hook is re-fetching after a Supabase Realtime event.
+                  Not an error state, just a "data just updated" cue. */}
+              {isSyncing && (
+                <span className="flex items-center gap-1.5 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Syncing
                 </span>
               )}
             </div>
@@ -666,11 +662,11 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
               </div>
             ) : (
               <MatchGraphs
-                match={match as any}
+                match={match as unknown as GraphMatchDetail}
                 live={live}
                 overRunsB={live ? partialOverRuns(match.innings2Partial) : match.innings2Final.overRuns}
                 winProb={winProb ?? { a: 50, b: 50 }}
-                stepIndex={0}
+                stepIndex={match.liveScript.length}
                 overs1={getOverByOverData(1)}
                 overs2={getOverByOverData(2)}
               />
