@@ -1,4 +1,4 @@
-// app/admin/page.tsx
+// app/auction/admin/page.tsx
 "use client";
 
 import { useState } from "react";

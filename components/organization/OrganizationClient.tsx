@@ -50,6 +50,7 @@ import {
   saveOverlayChannels,
   saveOverlayWeatherCoords,
   getAuctionsForOrg,
+  createAuction,
   getTeamsForAuction,
   subscribeToOrgMatches,
   subscribeToOrgTournaments,
@@ -227,6 +228,7 @@ export default function OrganizationClient() {
               {tab === "matches" && (
                 <MatchesTab
                   org={org}
+                  userId={user!.id}
                   overlayMatchId={overlayMatchId}
                   onOpenOverlay={setOverlayMatchId}
                   onCloseOverlay={() => setOverlayMatchId(null)}
@@ -313,11 +315,13 @@ function OverviewTab({ org, onJump }: { org: OrgSummary; onJump: (t: Tab) => voi
 
 function MatchesTab({
   org,
+  userId,
   overlayMatchId,
   onOpenOverlay,
   onCloseOverlay,
 }: {
   org: OrgSummary
+  userId: string
   overlayMatchId: string | null
   onOpenOverlay: (id: string) => void
   onCloseOverlay: () => void
@@ -340,6 +344,13 @@ function MatchesTab({
   const [round, setRound] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+
+  // Creating a brand-new auction inline, without leaving the dashboard —
+  // it starts with zero teams, so it becomes usable for a match as soon as
+  // teams are added for it over in the auction admin panel.
+  const [newAuctionName, setNewAuctionName] = useState("")
+  const [isCreatingAuction, setIsCreatingAuction] = useState(false)
+  const [createAuctionError, setCreateAuctionError] = useState<string | null>(null)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -412,6 +423,24 @@ function MatchesTab({
       return
     }
     router.push(`/match/${id}/edit`)
+  }
+
+  const handleCreateAuction = async () => {
+    if (!newAuctionName.trim()) return
+    setIsCreatingAuction(true)
+    setCreateAuctionError(null)
+    const id = await createAuction(org.id, userId, { name: newAuctionName.trim() })
+    setIsCreatingAuction(false)
+    if (!id) {
+      setCreateAuctionError("Couldn't create the auction — please try again.")
+      return
+    }
+    setAuctions((prev) => [
+      { id, name: newAuctionName.trim(), status: "setup", tournamentName: null, createdAt: new Date().toISOString() },
+      ...prev,
+    ])
+    setAuctionId(id)
+    setNewAuctionName("")
   }
 
   const handleDelete = async (match: FriendlyMatchSummary) => {
@@ -533,18 +562,44 @@ function MatchesTab({
             <div>
               <FieldLabel>Auction</FieldLabel>
               {auctions.length === 0 ? (
-                <p className="text-gray-500 text-sm italic">No auctions in this org yet — run one first, or use manual teams.</p>
+                <p className="text-gray-500 text-sm italic mb-2">No auctions in this org yet.</p>
               ) : (
                 <select
                   value={auctionId}
                   onChange={(e) => setAuctionId(e.target.value)}
-                  className="w-full sm:w-80 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                  className="w-full sm:w-80 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 mb-2"
                 >
                   <option value="">Select an auction…</option>
                   {auctions.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
+              )}
+
+              {/* Create a new auction right here — no need to leave the
+                  dashboard just to get an auction that a match can pull
+                  teams from. It starts empty; teams get added afterward
+                  from the auction admin panel. */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  value={newAuctionName}
+                  onChange={(e) => setNewAuctionName(e.target.value)}
+                  placeholder="New auction name"
+                  className="bg-black/50 border-gold/30 text-white sm:w-64 text-sm"
+                />
+                <Button
+                  onClick={handleCreateAuction}
+                  disabled={!newAuctionName.trim() || isCreatingAuction}
+                  className="bg-transparent hover:bg-gold/10 text-gold border border-gold/40 font-bold disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  {isCreatingAuction ? "Creating…" : "Create Auction"}
+                </Button>
+              </div>
+              {createAuctionError && (
+                <p className="flex items-center gap-1.5 text-red-500 text-sm mt-2">
+                  <AlertCircle className="h-4 w-4" /> {createAuctionError}
+                </p>
               )}
             </div>
 
@@ -554,7 +609,12 @@ function MatchesTab({
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
                 </p>
               ) : auctionTeams.length < 2 ? (
-                <p className="text-gray-500 text-sm italic">This auction doesn't have two teams yet.</p>
+                <p className="text-gray-500 text-sm italic">
+                  This auction doesn't have two teams yet.{" "}
+                  <Link href="/auction/admin" className="text-gold underline hover:no-underline">
+                    Set up teams in the auction admin panel →
+                  </Link>
+                </p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>

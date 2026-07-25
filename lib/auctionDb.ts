@@ -649,14 +649,14 @@ export const DEFAULT_SESSION: SessionConfig = {
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST ALL AUCTIONS
 //
-// No explicit .eq("created_by", ...) filter here on purpose: RLS on the
-// `auctions` table (see rls_auction_scoping.sql) is the source of truth for
-// "which auctions can this user see" — it already restricts every select to
-// rows the caller owns or shares an org with. Filtering here too would be
-// redundant, and worse, would silently diverge from the RLS policy if one
-// is ever changed without updating the other. If RLS is NOT yet applied to
-// your database, this function will currently return every auction in the
-// table — run the migration first.
+// Explicitly scoped to the caller's current org (or, if they don't belong
+// to one, to just their own personal auctions) — this used to rely purely
+// on RLS with no filter here, which meant a single dev/admin account that
+// had created auctions under several different orgs would see ALL of them
+// on every visit, regardless of which org they were currently in. RLS is
+// still the backstop (see rls_auction_scoping.sql) in case this filter is
+// ever removed or bypassed, but the query itself no longer depends on it
+// alone.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AuctionSummary {
@@ -672,15 +672,25 @@ export interface AuctionSummary {
 }
 
 export async function listAuctions(): Promise<AuctionSummary[]> {
-  const { data, error } = await supabase
+  const { userId, orgId } = await getCurrentUserAndOrg();
+
+  let query = supabase
     .from("auctions")
     .select(`
       id, name, status, created_at, launched_at, completed_at,
       teams:teams(count),
       players:players(count),
       session_config(auction_logo)
-    `)
-    .order("created_at", { ascending: false });
+    `);
+
+  // In an org: only that org's auctions. Not in an org: only this user's
+  // own org_id-less (personal) auctions — never someone else's, and never
+  // another org's just because this account happened to create them.
+  query = orgId
+    ? query.eq("org_id", orgId)
+    : query.is("org_id", null).eq("created_by", userId);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) throw sbErr(error, "listAuctions");
 
