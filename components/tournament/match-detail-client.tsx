@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, MapPin, Radio, Shield } from "lucide-react"
+import { Calendar, MapPin, Radio, Shield, Lock, Clock3 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
@@ -42,12 +42,21 @@ function initials(name: string) {
 
 type Tab = "scorecard" | "info" | "squads" | "overs" | "graphs" | "stats"
 
-const TABS: Tab[] = ["scorecard", "info", "squads", "overs", "graphs"]
+// All 6 tabs are always rendered — never hidden based on data
+// availability. Tabs without underlying data are shown locked (see
+// isTabLocked) instead, so the visitor knows the feature exists and needs
+// to be set up, rather than wondering why a tab silently disappeared.
+const TABS: { key: Tab; label: string }[] = [
+  { key: "scorecard", label: "Scorecard" },
+  { key: "info", label: "Info" },
+  { key: "squads", label: "Squads" },
+  { key: "overs", label: "Overs" },
+  { key: "graphs", label: "Graphs" },
+  { key: "stats", label: "Stats" },
+]
 
 const images = {
   bg: "https://www.hindustantimes.com/ht-img/img/2024/09/30/1600x900/Cricket_3_1727677442716_1727677564058.jpg",
-  "team-a": "/Franchises/CSK.png",
-  "team-b": "/Franchises/RCB.png",
   tournament: "/valiant-league-logo.png",
 }
 
@@ -70,6 +79,48 @@ function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   )
 }
 
+/** A field that may not have been filled in yet by whoever set up the
+ *  match. Rather than hiding it entirely (which hides the fact that it's
+ *  missing), we always render the label and show an explicit "Not set"
+ *  placeholder in its place, styled distinctly (dashed border, muted
+ *  text) so it reads as "this needs attention" rather than as real data. */
+function SetupField({
+  icon,
+  value,
+  fallback = "Not set",
+}: {
+  icon?: React.ReactNode
+  value: string
+  fallback?: string
+}) {
+  const isSet = value.trim().length > 0
+  return (
+    <span
+      className={`flex items-center gap-2 ${
+        isSet ? "" : "border border-dashed border-gray-600 rounded-full px-3 py-1 text-gray-500 italic"
+      }`}
+    >
+      {icon}
+      {isSet ? value : fallback}
+    </span>
+  )
+}
+
+/** Shown in place of a tab's real content when that tab has no underlying
+ *  data yet. Used for locked tabs so the message is consistent everywhere
+ *  instead of each tab inventing its own "no data" text. */
+function LockedTabPanel({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-16 px-6 border border-dashed border-gold/20 rounded-lg bg-white/[0.02] mb-8">
+      <div className="h-12 w-12 rounded-full bg-white/5 border border-gold/20 flex items-center justify-center mb-4">
+        <Lock className="h-5 w-5 text-gray-500" />
+      </div>
+      <p className="text-gray-200 font-semibold font-cinzel uppercase tracking-wide text-sm mb-2">{title}</p>
+      <p className="text-gray-500 text-sm max-w-sm">{hint}</p>
+    </div>
+  )
+}
+
 export default function MatchDetailClient({ match: initialMatch, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
   const router = useRouter()
@@ -88,12 +139,12 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
   // ── live state ──
   // `match` is refreshed from the server on a poll while the game is live.
-  // There is no client-side simulation of deliveries — every number here
-  // is either the initial server-rendered snapshot or a refetch of the
-  // same real aggregation the server used.
   const [match, setMatch] = useState<MatchDetail>(initialMatch)
-  const [live, setLive] = useState(initialMatch.isLive)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const status = match.matchStatus // "not_started" | "live" | "completed"
+  const live = status === "live"
+  const hasBallData = match.hasBallData
 
   useEffect(() => {
     if (!live) return
@@ -104,7 +155,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         if (!res.ok) return
         const fresh: MatchDetail = await res.json()
         setMatch(fresh)
-        setLive(fresh.isLive)
       } catch {
         // Transient network/poll failure — just try again next tick.
       }
@@ -132,14 +182,26 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   const crr = ballsBowled > 0 ? (runs / (ballsBowled / 6)).toFixed(2) : "0.00"
   const rrr = live && ballsLeft > 0 && need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : null
 
-  const winProb = match.winProb // undefined unless match_state.live_state actually has it
+  const winProb = match.winProb
 
-  // Over-by-over summary built from real aggregated data only: over number,
-  // runs scored in that over, and any wickets that fell during it (from
-  // `fow`, matched by over string). No per-ball sequence or bowler/batter
-  // matchup text is available from the current aggregation — that would
-  // require match-data.ts to group `balls` by over rather than just sum
-  // totals into `overRuns`. Flagging rather than fabricating it.
+  // Tab lock state — never hide a tab, just mark it locked when the
+  // underlying data doesn't exist yet.
+  const isTabLocked = (t: Tab): boolean => {
+    switch (t) {
+      case "scorecard":
+      case "overs":
+      case "graphs":
+        return !hasBallData
+      case "squads":
+        return match.squads.length === 0
+      case "stats":
+        return !winProb
+      case "info":
+      default:
+        return false
+    }
+  }
+
   const getOverByOverData = (inn: 1 | 2 = innings): OverRow[] => {
     const source: InningsComplete = inn === 1 ? match.innings1 : match.innings2Final
     const liveOverRuns = inn === 2 && live ? partialOverRuns(match.innings2Partial) : null
@@ -225,7 +287,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
           <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
             <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-              <LogoSlot src={images["team-a"]} alt={`${match.teamA.name} logo`} />
+              <LogoSlot src={match.teamA.logo} alt={`${match.teamA.name} logo`} />
               <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                 {match.teamA.name}
               </h1>
@@ -238,27 +300,34 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
             </div>
 
             <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-              <LogoSlot src={images["team-b"]} alt={`${match.teamB.name} logo`} />
+              <LogoSlot src={match.teamB.logo} alt={`${match.teamB.name} logo`} />
               <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                 {match.teamB.name}
               </h1>
             </div>
           </div>
 
+          {/* Venue/date are ALWAYS shown, even when blank — an empty
+              field is shown as an explicit "Not set" pill rather than
+              disappearing, so whoever manages this match knows it still
+              needs filling in. */}
           <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-3 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg max-w-full">
-            <span className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-gold shrink-0" /> {match.venue}
-            </span>
-            <span className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-gold shrink-0" /> {match.date} · {match.time}
-            </span>
+            <SetupField icon={<MapPin className="h-4 w-4 text-gold shrink-0" />} value={match.venue} fallback="Venue not set" />
+            <SetupField
+              icon={<Calendar className="h-4 w-4 text-gold shrink-0" />}
+              value={[match.date, match.time].filter(Boolean).join(" · ")}
+              fallback="Date & time not set"
+            />
           </div>
 
-          {match.toss && (
-            <p className="text-gold mt-6 text-sm font-semibold tracking-wide bg-gold/10 px-5 py-2 rounded-full border border-gold/30 backdrop-blur-sm max-w-full text-center break-words">
-              {match.toss}
-            </p>
-          )}
+          {/* Toss used to be hidden entirely when empty — now always
+              shown with an explicit placeholder for the same reason. */}
+          <div className="mt-6">
+            <SetupField
+              value={match.toss}
+              fallback="Toss not recorded"
+            />
+          </div>
         </div>
       </section>
 
@@ -269,155 +338,193 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-              {live ? (
+              {status === "live" && (
                 <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
                   <Radio className="h-3 w-3" />
                   LIVE
                 </span>
-              ) : (
-                <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>
+              )}
+              {status === "completed" && <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>}
+              {status === "not_started" && (
+                <span className="flex items-center gap-1.5 bg-amber-500/15 text-amber-400 text-xs font-bold font-cinzel px-3 py-1.5 rounded-full border border-amber-500/30">
+                  <Clock3 className="h-3 w-3" />
+                  Not Started
+                </span>
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div className="rounded-lg p-4 border border-gold/10 bg-white/[0.02] min-w-0">
-                <span className="text-white font-bold font-cinzel">{match.teamA.short}</span>
-                <p className="text-2xl font-bold text-white font-cinzel mt-1">
-                  {match.innings1.total}/{match.innings1.wkts}
-                  <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
+            {status === "not_started" ? (
+              // No balls recorded at all — showing "0/0" with CRR/RRR and
+              // a fabricated "need X runs" line here would look like a
+              // real live match. Instead, say plainly that there's
+              // nothing to show yet.
+              <div className="text-center py-6">
+                <p className="text-gray-300 font-semibold mb-1">This match hasn't started yet.</p>
+                <p className="text-gray-500 text-sm">
+                  Scorecards, overs, and live stats will appear here once ball-by-ball data starts coming in.
                 </p>
               </div>
-              <div
-                className={`rounded-lg p-4 border min-w-0 ${
-                  live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"
-                }`}
-              >
-                <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
-                <p className="text-2xl font-bold text-white font-cinzel mt-1">
-                  {runs}/{wkts}
-                  <span className="text-sm text-gray-400 font-normal ml-2">({overLabel} ov)</span>
-                </p>
-              </div>
-            </div>
-
-            <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
-              {live
-                ? `${match.teamB.short} need ${need} runs from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`
-                : match.resultNote}
-            </p>
-
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-                <span className="text-gray-400">CRR </span>
-                <span className="text-gold font-bold font-cinzel">{crr}</span>
-              </div>
-              {rrr && (
-                <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-                  <span className="text-gray-400">RRR </span>
-                  <span className="text-gold font-bold font-cinzel">{rrr}</span>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div className="rounded-lg p-4 border border-gold/10 bg-white/[0.02] min-w-0">
+                    <span className="text-white font-bold font-cinzel">{match.teamA.short}</span>
+                    <p className="text-2xl font-bold text-white font-cinzel mt-1">
+                      {match.innings1.total}/{match.innings1.wkts}
+                      <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
+                    </p>
+                  </div>
+                  <div
+                    className={`rounded-lg p-4 border min-w-0 ${
+                      live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"
+                    }`}
+                  >
+                    <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
+                    <p className="text-2xl font-bold text-white font-cinzel mt-1">
+                      {runs}/{wkts}
+                      <span className="text-sm text-gray-400 font-normal ml-2">({overLabel} ov)</span>
+                    </p>
+                  </div>
                 </div>
-              )}
-            </div>
+
+                <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
+                  {live
+                    ? `${match.teamB.short} need ${need} runs from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`
+                    : match.resultNote || "Match completed."}
+                </p>
+
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
+                    <span className="text-gray-400">CRR </span>
+                    <span className="text-gold font-bold font-cinzel">{crr}</span>
+                  </div>
+                  {rrr && (
+                    <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
+                      <span className="text-gray-400">RRR </span>
+                      <span className="text-gold font-bold font-cinzel">{rrr}</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </section>
 
       {/* ═══════════════════════════════════════════
-          TABS NAVIGATION
+          TABS NAVIGATION — all tabs always visible;
+          locked ones are dimmed with a lock icon
+          rather than hidden.
       ═══════════════════════════════════════════ */}
       <section className="px-4 relative z-10">
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full flex flex-wrap gap-1 mb-8">
-            {TABS.map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md transition-all duration-300 ${
-                  tab === t ? "bg-gold text-black" : "text-gray-300 hover:text-gold"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+            {TABS.map(({ key, label }) => {
+              const locked = isTabLocked(key)
+              const active = tab === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md transition-all duration-300 ${
+                    active ? "bg-gold text-black" : locked ? "text-gray-600 hover:text-gray-400" : "text-gray-300 hover:text-gold"
+                  }`}
+                  title={locked ? `${label} — no data yet` : undefined}
+                >
+                  {label}
+                  {locked && <Lock className="h-2.5 w-2.5" />}
+                </button>
+              )
+            })}
           </div>
 
           {/* SCORECARD TAB */}
           {tab === "scorecard" && (
             <div className="mb-8">
-              <div className="flex flex-col sm:flex-row gap-2 mb-6">
-                <button
-                  onClick={() => setInnings(1)}
-                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
-                    innings === 1 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
-                  }`}
-                >
-                  {match.teamA.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
-                </button>
-                <button
-                  onClick={() => setInnings(2)}
-                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
-                    innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
-                  }`}
-                >
-                  {match.teamB.short} — 2nd Innings · {runs}/{wkts}
-                </button>
-              </div>
-
-              {innings === 1 && (
+              {!hasBallData ? (
+                <LockedTabPanel
+                  title="Scorecard not available yet"
+                  hint="No deliveries have been recorded for this match. The batting and bowling cards will populate automatically once ball-by-ball scoring begins."
+                />
+              ) : (
                 <>
-                  <BattingCard
-                    title={`${match.teamA.short} Batting`}
-                    rows={match.innings1.batting}
-                    extras={match.innings1.extras}
-                    extrasNote={match.innings1.extrasNote}
-                    total={match.innings1.total}
-                    wkts={match.innings1.wkts}
-                    overs={match.innings1.overs}
-                    dnb={match.innings1.dnb}
-                  />
-                  <FowList fow={match.innings1.fow} />
-                  <BowlingCard title={`${match.teamB.short} Bowling`} rows={match.innings1.bowling} />
-                </>
-              )}
+                  <div className="flex flex-col sm:flex-row gap-2 mb-6">
+                    <button
+                      onClick={() => setInnings(1)}
+                      className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
+                        innings === 1 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
+                      }`}
+                    >
+                      {match.teamA.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
+                    </button>
+                    <button
+                      onClick={() => setInnings(2)}
+                      className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
+                        innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
+                      }`}
+                    >
+                      {match.teamB.short} — 2nd Innings · {runs}/{wkts}
+                    </button>
+                  </div>
 
-              {innings === 2 && live && (
-                <>
-                  <BattingCard
-                    title={`${match.teamB.short} Batting`}
-                    rows={match.innings2Partial.batting}
-                    extras={0}
-                    extrasNote="—"
-                    total={runs}
-                    wkts={wkts}
-                    overs={overLabel}
-                    live
-                    creaseNote={notOutBatters(match.innings2Partial.batting)}
-                  />
-                  <FowList fow={match.innings2Partial.fow} />
-                  <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Partial.bowling} live />
-                </>
-              )}
+                  {innings === 1 && (
+                    <>
+                      <BattingCard
+                        title={`${match.teamA.short} Batting`}
+                        rows={match.innings1.batting}
+                        extras={match.innings1.extras}
+                        extrasNote={match.innings1.extrasNote}
+                        total={match.innings1.total}
+                        wkts={match.innings1.wkts}
+                        overs={match.innings1.overs}
+                        dnb={match.innings1.dnb}
+                      />
+                      <FowList fow={match.innings1.fow} />
+                      <BowlingCard title={`${match.teamB.short} Bowling`} rows={match.innings1.bowling} />
+                    </>
+                  )}
 
-              {innings === 2 && !live && (
-                <>
-                  <BattingCard
-                    title={`${match.teamB.short} Batting`}
-                    rows={match.innings2Final.batting}
-                    extras={match.innings2Final.extras}
-                    extrasNote={match.innings2Final.extrasNote}
-                    total={match.innings2Final.total}
-                    wkts={match.innings2Final.wkts}
-                    overs={match.innings2Final.overs}
-                    dnb={match.innings2Final.dnb}
-                  />
-                  <FowList fow={match.innings2Final.fow} />
-                  <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Final.bowling} />
+                  {innings === 2 && live && (
+                    <>
+                      <BattingCard
+                        title={`${match.teamB.short} Batting`}
+                        rows={match.innings2Partial.batting}
+                        extras={0}
+                        extrasNote="—"
+                        total={runs}
+                        wkts={wkts}
+                        overs={overLabel}
+                        live
+                        creaseNote={notOutBatters(match.innings2Partial.batting)}
+                      />
+                      <FowList fow={match.innings2Partial.fow} />
+                      <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Partial.bowling} live />
+                    </>
+                  )}
+
+                  {innings === 2 && !live && (
+                    <>
+                      <BattingCard
+                        title={`${match.teamB.short} Batting`}
+                        rows={match.innings2Final.batting}
+                        extras={match.innings2Final.extras}
+                        extrasNote={match.innings2Final.extrasNote}
+                        total={match.innings2Final.total}
+                        wkts={match.innings2Final.wkts}
+                        overs={match.innings2Final.overs}
+                        dnb={match.innings2Final.dnb}
+                      />
+                      <FowList fow={match.innings2Final.fow} />
+                      <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Final.bowling} />
+                    </>
+                  )}
                 </>
               )}
             </div>
           )}
 
-          {/* INFO TAB */}
+          {/* INFO TAB — never locked; every field shows a "Not set"
+              placeholder instead of being omitted when blank */}
           {tab === "info" && (
             <div className="space-y-4 mb-8">
               <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
@@ -426,20 +533,20 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   {[
                     ["Series", match.tournamentName ? `${match.tournamentName} — ${match.round}` : match.round],
                     ["Venue", match.venue],
-                    ["Date & Time", `${match.date} · ${match.time}`],
+                    ["Date & Time", [match.date, match.time].filter(Boolean).join(" · ")],
                     ["Toss", match.toss],
                     ["Umpires", match.officials.umpires],
                     ["Third Umpire", match.officials.thirdUmpire],
                     ["Match Referee", match.officials.referee],
                     ["Format", match.officials.format],
-                  ]
-                    .filter(([, value]) => value)
-                    .map(([label, value]) => (
-                      <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3 min-w-0">
-                        <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">{label}</p>
-                        <p className="text-gray-200 text-sm mt-1 break-words">{value}</p>
-                      </div>
-                    ))}
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-white/[0.02] border border-gold/10 rounded-md p-3 min-w-0">
+                      <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">{label}</p>
+                      <p className={`text-sm mt-1 break-words ${value ? "text-gray-200" : "text-gray-600 italic"}`}>
+                        {value || "Not set"}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -449,7 +556,10 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
           {tab === "squads" && (
             <div className="space-y-6 mb-8">
               {match.squads.length === 0 ? (
-                <p className="text-gray-500 text-sm text-center py-8">Squads have not been announced yet.</p>
+                <LockedTabPanel
+                  title="Squads not announced yet"
+                  hint="Playing XI and bench lists will show up here once squads are added for this match."
+                />
               ) : (
                 match.squads.map((s) => <MatchSquadPanel key={s.team} squad={s} />)
               )}
@@ -458,121 +568,139 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
           {/* OVERS TAB */}
           {tab === "overs" &&
-            (() => {
-              const overOverData = getOverByOverData(innings)
-              return (
-                <div className="mb-8 space-y-4 fade-in">
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <button
-                      onClick={() => setInnings(1)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                        innings === 1
-                          ? "bg-gold text-black shadow-md shadow-gold/20"
-                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                      }`}
-                    >
-                      {match.teamA.short} (1st Inn)
-                    </button>
-                    <button
-                      onClick={() => setInnings(2)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                        innings === 2
-                          ? "bg-gold text-black shadow-md shadow-gold/20"
-                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                      }`}
-                    >
-                      {match.teamB.short} (2nd Inn)
-                    </button>
-                  </div>
-
-                  {overOverData.length === 0 ? (
-                    <p className="text-gray-500 text-sm text-center py-8">No overs bowled yet.</p>
-                  ) : (
-                    <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
-                      <div className="grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
-                        <div>Over</div>
-                        <div>Wickets</div>
-                        <div className="text-right">Runs</div>
-                      </div>
-
-                      {[...overOverData].reverse().map((ov, index) => (
-                        <div
-                          key={ov.num}
-                          className={`grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
-                            index < overOverData.length - 1 ? "border-b border-gold/10" : ""
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
-                            <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
-                          </div>
-
-                          <div className="flex flex-wrap gap-1.5 items-center min-w-0">
-                            {ov.balls.length > 0 ? (
-                              ov.balls.map((b, ballIdx) => (
-                                <span
-                                  key={ballIdx}
-                                  className="h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold bg-red-600 text-white shadow-sm shadow-red-900/50"
-                                >
-                                  {b}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-gray-600 text-xs">—</span>
-                            )}
-                          </div>
-
-                          <div className="text-right text-base font-bold text-white font-cinzel pr-1">
-                            {ov.totalRuns}
-                          </div>
-                        </div>
-                      ))}
+            (!hasBallData ? (
+              <div className="mb-8">
+                <LockedTabPanel
+                  title="Over-by-over data not available yet"
+                  hint="This breaks down runs and wickets per over — it fills in automatically once deliveries are recorded."
+                />
+              </div>
+            ) : (
+              (() => {
+                const overOverData = getOverByOverData(innings)
+                return (
+                  <div className="mb-8 space-y-4 fade-in">
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <button
+                        onClick={() => setInnings(1)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                          innings === 1
+                            ? "bg-gold text-black shadow-md shadow-gold/20"
+                            : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                        }`}
+                      >
+                        {match.teamA.short} (1st Inn)
+                      </button>
+                      <button
+                        onClick={() => setInnings(2)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                          innings === 2
+                            ? "bg-gold text-black shadow-md shadow-gold/20"
+                            : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                        }`}
+                      >
+                        {match.teamB.short} (2nd Inn)
+                      </button>
                     </div>
-                  )}
-                  <p className="text-[10px] text-gray-600 text-center pt-2">
-                    Ball-by-ball breakdown within each over isn't available yet — showing runs and wickets per over.
-                  </p>
-                </div>
-              )
-            })()}
+
+                    {overOverData.length === 0 ? (
+                      <p className="text-gray-500 text-sm text-center py-8">No overs bowled in this innings yet.</p>
+                    ) : (
+                      <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
+                        <div className="grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] bg-white/[0.03] border-b border-gold/10 p-3 text-[10px] uppercase font-bold tracking-widest text-gray-400 font-cinzel">
+                          <div>Over</div>
+                          <div>Wickets</div>
+                          <div className="text-right">Runs</div>
+                        </div>
+
+                        {[...overOverData].reverse().map((ov, index) => (
+                          <div
+                            key={ov.num}
+                            className={`grid grid-cols-[4rem_1fr_3.5rem] sm:grid-cols-[5.5rem_1fr_4.5rem] items-center p-4 transition-colors hover:bg-white/[0.01] ${
+                              index < overOverData.length - 1 ? "border-b border-gold/10" : ""
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-bold text-white font-cinzel">Ov {ov.num}</h4>
+                              <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{ov.score}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5 items-center min-w-0">
+                              {ov.balls.length > 0 ? (
+                                ov.balls.map((b, ballIdx) => (
+                                  <span
+                                    key={ballIdx}
+                                    className="h-6 min-w-[1.5rem] px-1 rounded flex items-center justify-center text-xs font-bold bg-red-600 text-white shadow-sm shadow-red-900/50"
+                                  >
+                                    {b}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-gray-600 text-xs">—</span>
+                              )}
+                            </div>
+
+                            <div className="text-right text-base font-bold text-white font-cinzel pr-1">
+                              {ov.totalRuns}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-gray-600 text-center pt-2">
+                      Ball-by-ball breakdown within each over isn't available yet — showing runs and wickets per over.
+                    </p>
+                  </div>
+                )
+              })()
+            ))}
 
           {/* GRAPHS TAB */}
-          {tab === "graphs" && (
-            <MatchGraphs
-              match={match as any}
-              live={live}
-              overRunsB={live ? partialOverRuns(match.innings2Partial) : match.innings2Final.overRuns}
-              winProb={winProb ?? { a: 50, b: 50 }}
-              stepIndex={0}
-              overs1={getOverByOverData(1)}
-              overs2={getOverByOverData(2)}
-            />
-          )}
+          {tab === "graphs" &&
+            (!hasBallData ? (
+              <div className="mb-8">
+                <LockedTabPanel
+                  title="Graphs not available yet"
+                  hint="Run-rate and win-probability charts need at least some ball-by-ball data to draw — check back once the match is underway."
+                />
+              </div>
+            ) : (
+              <MatchGraphs
+                match={match as any}
+                live={live}
+                overRunsB={live ? partialOverRuns(match.innings2Partial) : match.innings2Final.overRuns}
+                winProb={winProb ?? { a: 50, b: 50 }}
+                stepIndex={0}
+                overs1={getOverByOverData(1)}
+                overs2={getOverByOverData(2)}
+              />
+            ))}
 
           {/* STATS TAB */}
           {tab === "stats" && (
             <div className="space-y-4 mb-8">
-              <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                <h2 className="text-lg font-bold text-white mb-3 font-cinzel">WIN PROBABILITY</h2>
-                {winProb ? (
-                  <>
-                    <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
-                      <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
-                      <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
-                    </div>
-                    <div className="flex justify-between mt-2 text-xs font-cinzel">
-                      <span className="text-gold">
-                        {match.teamA.short} {winProb.a}%
-                      </span>
-                      <span className="text-red-500">
-                        {match.teamB.short} {winProb.b}%
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-gray-500 text-sm">Win probability isn't available for this match.</p>
-                )}
-              </div>
+              {!winProb ? (
+                <LockedTabPanel
+                  title="Win probability not available"
+                  hint="This is powered by the live match engine and only appears while that engine has published a reading for this match."
+                />
+              ) : (
+                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+                  <h2 className="text-lg font-bold text-white mb-3 font-cinzel">WIN PROBABILITY</h2>
+                  <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
+                    <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
+                    <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
+                  </div>
+                  <div className="flex justify-between mt-2 text-xs font-cinzel">
+                    <span className="text-gold">
+                      {match.teamA.short} {winProb.a}%
+                    </span>
+                    <span className="text-red-500">
+                      {match.teamB.short} {winProb.b}%
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -589,22 +717,12 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
           </div>
         </div>
       </section>
-
-      <SectionDivider />
     </main>
   )
 }
 
 // ─────────────────────────────────────────────────────────────
 // Live-partial helpers
-//
-// `innings2Partial` currently ships from match-data.ts as a snapshot of
-// batting/bowling/fow only (see innings2Partial construction there) — it
-// doesn't carry its own running total/wkts/overs the way `innings2Final`
-// does. These helpers derive them from what IS present. If you want the
-// partial state to carry its own total/wkts/overs directly, it's cleaner
-// to add those fields server-side in match-data.ts's innings2Partial
-// object (trivial: it already computes `innings2Agg` before slicing).
 // ─────────────────────────────────────────────────────────────
 function currentTotal(partial: MatchDetail["innings2Partial"]): number {
   return partial.batting.reduce((sum, b) => sum + b.runs, 0)

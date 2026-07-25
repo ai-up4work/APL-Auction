@@ -1,47 +1,61 @@
 // data/match-data.ts
 //
-// Match-detail data layer, backed by Supabase — no hardcoded match data.
+// Match-detail data layer, backed by Supabase.
 //
-// SOURCE OF TRUTH:
-//   - `matches.match_setup` (jsonb)   → static config: teams, venue, date,
-//                                       time, toss, pitch, context, round,
-//                                       officials, squads.
-//   - `balls`                        → ball-by-ball truth. Batting cards,
-//                                       bowling cards, fall of wickets,
-//                                       extras, and over-by-over totals are
-//                                       ALL derived from this table rather
-//                                       than trusted from a cached snapshot,
-//                                       so completed and in-progress
-//                                       matches use the exact same code path.
-//   - `match_state.live_state`       → used ONLY for the handful of fields
-//                                       that need actual match-engine logic
-//                                       rather than arithmetic on `balls`
-//                                       (e.g. win probability). Everything
-//                                       else is recomputed from `balls` so
-//                                       stale/missing live_state can't
-//                                       desync the scorecard.
-//   - `bracket_matches` + `tournaments` → optional tournament back-link.
+// SOURCE OF TRUTH (reconciled against the real `public` schema):
 //
-// ASSUMPTIONS CALLED OUT INLINE (please verify against your real data):
-//   1. `matches.match_setup` shape — see `MatchSetup` below. Adjust the
-//      parsing in `parseMatchSetup` if your actual jsonb differs.
-//   2. Bowler is not charged runs on `bye`/`leg_bye` extras; batter does
-//      not get fours/sixes credit on any extra; wides don't count as a
-//      ball faced by the batter; no-balls do. Standard scoring convention,
-//      but tweak `aggregateInnings` if your rules differ.
-//   3. Tournament linkage is matches → bracket_matches.overlay_match_id →
-//      bracket_matches.tournament_id → tournaments.id → slugify(name).
-//      Your `tournaments` table has no `slug` column, so this assumes
-//      slugify(tournament.name) matches the curated slugs used in
-//      site-data.ts/tournament-data.ts. If it doesn't, add a real `slug`
-//      column to `tournaments` and swap the `.select` below to use it.
+//   - `matches.match_setup` (jsonb, NOT NULL) → confirmed real shape:
+//         {
+//           date, time, toss, overs,
+//           team1: { name, short },
+//           team2: { name, short },
+//           venue,
+//           tournamentId
+//         }
+//     This is the baseline. It has NO real foreign keys to `teams` — team
+//     identity here is just an embedded name/short pair. It's the only
+//     source of truth for STANDALONE / FRIENDLY matches.
+//
+//   - `bracket_matches` → for matches that ARE part of a tournament
+//     bracket, this table links back via `overlay_match_id = matches.id`
+//     and carries REAL foreign keys: `team_a_id` / `team_b_id` →
+//     `teams.id`, plus its own `tournament_id`, `venue`, `scheduled_at`,
+//     `status`, `score_a` / `score_b`. Preferred over match_setup's
+//     embedded fields when it exists.
+//
+//   - `teams` → scoped to an `auction_id`, reached only via
+//     bracket_matches.team_a_id/team_b_id (no direct matches → teams FK).
+//
+//   - `balls` → ball-by-ball truth. Batting/bowling cards, fall of
+//     wickets, extras, and over-by-over totals are ALL derived from this
+//     table.
+//
+//   - `match_state.live_state` → used ONLY for win probability.
+//
+// MATCH STATUS:
+//   Whether a match is "live" can't be inferred from overs/wickets
+//   arithmetic alone — a match with 0 balls recorded and a match that's
+//   genuinely in progress can look identical to that arithmetic (both
+//   have runs < target, wickets < 10, overs < limit). So `matchStatus` is
+//   now explicit:
+//     - "not_started": no rows in `balls` for this match at all (or
+//       bracket_matches.status === "upcoming" when a bracket row exists)
+//     - "live": at least one ball recorded and still in progress (or
+//       bracket_matches.status === "live")
+//     - "completed": innings finished by overs/wickets/target, or
+//       bracket_matches.status === "completed"
+//   The UI should use `matchStatus`, not guess from raw totals.
+//
+// LOOKUP RESULT SHAPE:
+//   getMatchDetailById returns a MatchLookupResult — either
+//   { ok: true, match } or a typed failure with a human-readable reason —
+//   instead of `null`, so the page can render a real diagnostic.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
 
 // ─────────────────────────────────────────────────────────────
-// PUBLIC TYPES (unchanged shape — MatchDetailClient doesn't need to care
-// that this data now comes from Supabase instead of a static object)
+// PUBLIC TYPES
 // ─────────────────────────────────────────────────────────────
 export interface BattingRow {
   name: string
@@ -83,11 +97,24 @@ export interface InningsComplete {
   potm?: { name: string; note: string }
 }
 
+export interface MatchTeamRef {
+  /** Real teams.id when resolved via bracket_matches; otherwise the short code. */
+  id: string
+  name: string
+  short: string
+  /** Only populated when resolved via bracket_matches → teams. */
+  logo?: string
+  color?: string
+}
+
+export type MatchStatus = "not_started" | "live" | "completed"
+
 export interface MatchDetail {
   id: string
   tournamentSlug?: string
   tournamentName?: string
   round: string
+  /** Empty string means genuinely not set — the UI should show that explicitly, not hide it. */
   venue: string
   date: string
   time: string
@@ -102,8 +129,8 @@ export interface MatchDetail {
     referee: string
     format: string
   }
-  teamA: { id: string; name: string; short: string }
-  teamB: { id: string; name: string; short: string }
+  teamA: MatchTeamRef
+  teamB: MatchTeamRef
   innings1: InningsComplete
   innings2Final: InningsComplete
   innings2Partial: {
@@ -117,12 +144,31 @@ export interface MatchDetail {
     fow: FowEntry[]
   }
   squads: MatchSquad[]
-  /** true while innings 2 hasn't reached its final recorded ball yet */
+  /** Explicit status — see the block comment above. Prefer this over isLive. */
+  matchStatus: MatchStatus
+  /** Derived from matchStatus === "live", kept for callers that only need the boolean. */
   isLive: boolean
-  /** From match_state.live_state, when the engine populates it. Everything
-   *  else on this object is derived from `balls`, not from this blob. */
+  /** True once at least one ball has been recorded for this match, in either innings. */
+  hasBallData: boolean
+  /** From match_state.live_state, when the engine populates it. */
   winProb?: { a: number; b: number }
 }
+
+/**
+ * Why a lookup failed, plus enough detail to actually debug it.
+ */
+export interface MatchLookupFailure {
+  ok: false
+  reason:
+    | "match_not_found"
+    | "match_setup_invalid"
+    | "tournament_mismatch"
+    | "balls_query_failed"
+  message: string
+  detail?: string
+}
+
+export type MatchLookupResult = { ok: true; match: MatchDetail } | MatchLookupFailure
 
 // ─────────────────────────────────────────────────────────────
 // DB ROW SHAPES (trimmed to the columns we actually use)
@@ -140,20 +186,21 @@ interface MatchSetupSquad {
   players: MatchSetupSquadPlayer[]
 }
 
-/**
- * Expected shape of `matches.match_setup`. This is a guess based on what
- * the UI needs and what isn't already covered by dedicated columns
- * elsewhere in the schema — confirm against how your match-setup flow
- * actually writes this jsonb, and adjust `parseMatchSetup` if it differs.
- */
+interface MatchSetupTeam {
+  name: string
+  short: string
+}
+
 interface MatchSetup {
-  teamAId: string
-  teamBId: string
-  round?: string
-  venue?: string
+  team1: MatchSetupTeam
+  team2: MatchSetupTeam
   date?: string
   time?: string
-  toss?: string
+  toss?: string | null
+  overs?: number
+  venue?: string
+  tournamentId?: string
+  round?: string
   pitch?: string
   context?: string
   target?: number
@@ -178,17 +225,32 @@ interface BallRow {
   non_striker_name: string | null
   bowler_name: string | null
   runs: number
-  extra_type: string | null // 'wide' | 'no_ball' | 'bye' | 'leg_bye' | 'penalty' | null
+  extra_type: string | null
   is_wicket: boolean
   dismissal_type: string | null
   batsman_out: string | null
   fielder: string | null
 }
 
+interface BracketMatchRow {
+  id: string
+  tournament_id: string
+  team_a_id: string | null
+  team_b_id: string | null
+  venue: string | null
+  scheduled_at: string | null
+  status: "upcoming" | "live" | "completed"
+  round: number
+  score_a: number | null
+  score_b: number | null
+}
+
 interface TeamRow {
   id: string
   name: string
   code: string
+  logo: string | null
+  color: string
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -230,7 +292,6 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
     const isLegBye = row.extra_type === "leg_bye"
     const isLegal = !isWide && !isNoBall
 
-    // ── team total / extras ──
     teamTotal += row.runs
     if (row.extra_type) {
       extrasTotal += row.runs
@@ -241,34 +302,24 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
       else extrasByType.p += row.runs
     }
 
-    // ── batter ──
     if (!batting.has(striker)) {
       batting.set(striker, { runs: 0, balls: 0, fours: 0, sixes: 0, out: false, how: "", order: battingOrder++ })
     }
     const bat = batting.get(striker)!
-    // Wides aren't faced by the batter; no-balls are.
     if (!isWide) bat.balls += 1
-    // Byes/leg-byes/wides/no-ball-extra-runs aren't credited to the batter's
-    // run tally — only genuine bat-off runs are (approximated here as "no
-    // extra_type at all", which misses runs scored off a no-ball bat
-    // contact; adjust if your `balls` rows separate bat-runs from
-    // no-ball-runs explicitly).
     if (!row.extra_type) {
       bat.runs += row.runs
       if (row.runs === 4) bat.fours += 1
       if (row.runs === 6) bat.sixes += 1
     }
 
-    // ── bowler ──
     if (!bowling.has(bowler)) {
       bowling.set(bowler, { legalBalls: 0, runs: 0, wkts: 0, order: bowlingOrder++ })
     }
     const bowl = bowling.get(bowler)!
     if (isLegal) bowl.legalBalls += 1
-    // Byes/leg-byes aren't charged against the bowler's runs conceded.
     if (!isBye && !isLegBye) bowl.runs += row.runs
 
-    // ── wicket ──
     if (row.is_wicket) {
       teamWkts += 1
       bat.out = true
@@ -276,7 +327,6 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
         ? `${row.dismissal_type}${row.fielder ? ` (${row.fielder})` : ""}`
         : "out"
       bat.how = dismissalText
-      // Run-outs aren't credited to the bowler.
       if (row.dismissal_type !== "run_out") bowl.wkts += 1
       fow.push([
         `${teamWkts}-${teamTotal}`,
@@ -345,19 +395,28 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
 // ─────────────────────────────────────────────────────────────
 // FETCHERS
 // ─────────────────────────────────────────────────────────────
+function isMatchSetupTeam(v: unknown): v is MatchSetupTeam {
+  return !!v && typeof v === "object" && typeof (v as any).name === "string" && typeof (v as any).short === "string"
+}
+
 function parseMatchSetup(raw: unknown): MatchSetup | null {
   if (!raw || typeof raw !== "object") return null
   const setup = raw as Partial<MatchSetup>
-  if (!setup.teamAId || !setup.teamBId) return null
+  if (!isMatchSetupTeam(setup.team1) || !isMatchSetupTeam(setup.team2)) return null
   return setup as MatchSetup
 }
 
-function buildSquads(setup: MatchSetup, teamA: TeamRow, teamB: TeamRow): MatchSquad[] {
+function buildSquads(setup: MatchSetup, teamAName: string, teamBName: string): MatchSquad[] {
   if (!setup.squads || setup.squads.length === 0) return []
   return setup.squads.map((s) => {
-    const team = s.teamId === teamA.id ? teamA : s.teamId === teamB.id ? teamB : null
+    const tag = s.teamId?.toLowerCase?.() ?? ""
+    const isTeamA =
+      tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
+    const isTeamB =
+      tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
+    const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
     return {
-      team: team?.name ?? "Unknown Team",
+      team: teamName,
       captain: s.captain,
       players: s.players.map((p) => ({ name: p.name, role: p.role, xi: p.xi })),
     }
@@ -366,52 +425,65 @@ function buildSquads(setup: MatchSetup, teamA: TeamRow, teamB: TeamRow): MatchSq
 
 /**
  * Fetch a single match and assemble it into the `MatchDetail` shape the
- * client component expects. Returns null if the match doesn't exist, or
- * (when `tournamentSlug` is passed) if it exists but doesn't belong to
- * that tournament.
- *
- * Pass no `tournamentSlug` for the standalone `/match/[matchId]` route —
- * any match resolves there, tournament-linked or not (friendlies included).
+ * client component expects. Returns a MatchLookupResult rather than
+ * `null`, so the caller can render exactly why a lookup failed.
  */
 export async function getMatchDetailById(
   matchId: string,
   tournamentSlug?: string
-): Promise<MatchDetail | null> {
+): Promise<MatchLookupResult> {
   const { data: matchRow, error: matchErr } = await supabase
     .from("matches")
     .select("id, match_setup")
     .eq("id", matchId)
     .maybeSingle()
 
-  if (matchErr || !matchRow) return null
+  if (matchErr) {
+    return {
+      ok: false,
+      reason: "match_not_found",
+      message: "The database rejected the lookup for this match.",
+      detail: matchErr.message,
+    }
+  }
+
+  if (!matchRow) {
+    return {
+      ok: false,
+      reason: "match_not_found",
+      message: "No match exists with this ID.",
+      detail: `matchId "${matchId}" returned no row from "matches". Either the ID is wrong, the row was never inserted, or a Row-Level Security policy on "matches" is silently hiding it from this request.`,
+    }
+  }
 
   const setup = parseMatchSetup(matchRow.match_setup)
-  if (!setup) return null
+  if (!setup) {
+    return {
+      ok: false,
+      reason: "match_setup_invalid",
+      message: "This match exists, but its setup data is missing or malformed.",
+      detail: `"matches.match_setup" for id "${matchId}" doesn't have valid team1/team2 objects (each needs { name, short }). Raw value: ${JSON.stringify(
+        matchRow.match_setup
+      )}`,
+    }
+  }
 
-  const { data: teamRows, error: teamErr } = await supabase
-    .from("teams")
-    .select("id, name, code")
-    .in("id", [setup.teamAId, setup.teamBId])
-
-  if (teamErr || !teamRows || teamRows.length < 2) return null
-  const teamA = teamRows.find((t) => t.id === setup.teamAId) as TeamRow
-  const teamB = teamRows.find((t) => t.id === setup.teamBId) as TeamRow
-
-  // ── optional tournament linkage ──
-  let resolvedTournamentSlug: string | undefined
-  let resolvedTournamentName: string | undefined
-
+  // ── bracket linkage: authoritative when present ──
   const { data: bracketRow } = await supabase
     .from("bracket_matches")
-    .select("tournament_id")
+    .select("id, tournament_id, team_a_id, team_b_id, venue, scheduled_at, status, round, score_a, score_b")
     .eq("overlay_match_id", matchId)
-    .maybeSingle()
+    .maybeSingle<BracketMatchRow>()
 
-  if (bracketRow?.tournament_id) {
+  let resolvedTournamentSlug: string | undefined
+  let resolvedTournamentName: string | undefined
+  const tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId
+
+  if (tournamentIdToResolve) {
     const { data: tournamentRow } = await supabase
       .from("tournaments")
       .select("name")
-      .eq("id", bracketRow.tournament_id)
+      .eq("id", tournamentIdToResolve)
       .maybeSingle()
 
     if (tournamentRow?.name) {
@@ -422,7 +494,34 @@ export async function getMatchDetailById(
 
   if (tournamentSlug !== undefined) {
     if (!resolvedTournamentSlug || resolvedTournamentSlug !== slugify(tournamentSlug)) {
-      return null
+      return {
+        ok: false,
+        reason: "tournament_mismatch",
+        message: "This match exists, but not under the tournament in this URL.",
+        detail: `URL tournamentSlug is "${tournamentSlug}", but this match resolves to "${
+          resolvedTournamentSlug ?? "no tournament"
+        }".`,
+      }
+    }
+  }
+
+  // ── team identity: prefer real teams rows via bracket_matches, else
+  //    fall back to the embedded match_setup.team1/team2 ──
+  let teamA: MatchTeamRef = { id: setup.team1.short, name: setup.team1.name, short: setup.team1.short }
+  let teamB: MatchTeamRef = { id: setup.team2.short, name: setup.team2.name, short: setup.team2.short }
+
+  if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
+    const { data: teamRows } = await supabase
+      .from("teams")
+      .select("id, name, code, logo, color")
+      .in("id", [bracketRow.team_a_id, bracketRow.team_b_id])
+
+    const teamARow = teamRows?.find((t) => t.id === bracketRow.team_a_id) as TeamRow | undefined
+    const teamBRow = teamRows?.find((t) => t.id === bracketRow.team_b_id) as TeamRow | undefined
+
+    if (teamARow && teamBRow) {
+      teamA = { id: teamARow.id, name: teamARow.name, short: teamARow.code, logo: teamARow.logo ?? undefined, color: teamARow.color }
+      teamB = { id: teamBRow.id, name: teamBRow.name, short: teamBRow.code, logo: teamBRow.logo ?? undefined, color: teamBRow.color }
     }
   }
 
@@ -435,25 +534,49 @@ export async function getMatchDetailById(
     .eq("match_id", matchId)
     .order("sequence", { ascending: true })
 
-  if (ballErr) return null
+  if (ballErr) {
+    return {
+      ok: false,
+      reason: "balls_query_failed",
+      message: "The database rejected the lookup for this match's ball-by-ball data.",
+      detail: ballErr.message,
+    }
+  }
 
-  const innings1Balls = (ballRows ?? []).filter((b) => b.innings_number === 1)
-  const innings2Balls = (ballRows ?? []).filter((b) => b.innings_number === 2)
+  const allBalls = ballRows ?? []
+  const hasBallData = allBalls.length > 0
+
+  const innings1Balls = allBalls.filter((b) => b.innings_number === 1)
+  const innings2Balls = allBalls.filter((b) => b.innings_number === 2)
 
   const innings1 = aggregateInnings(innings1Balls)
   const innings2Agg = aggregateInnings(innings2Balls)
 
   const target = setup.target ?? innings1.total + 1
-  // 20-over T20 assumed for "is this innings finished" — adjust if you
-  // support other formats (overs limit isn't in match_setup above; add a
-  // field there if it varies per match).
-  const oversLimit = 20
+  const oversLimit = setup.overs ?? 20
   const [innings2OversNum, innings2BallsNum] = innings2Agg.overs.split(".").map(Number)
   const innings2LegalBalls = innings2OversNum * 6 + innings2BallsNum
-  const isLive =
+
+  // Arithmetic can only distinguish "live" from "completed" — it cannot
+  // tell "0 balls bowled, not started" apart from "in progress", since
+  // both satisfy runs < target && wkts < 10 && overs < limit. So it's
+  // only consulted when we already know balls have been recorded.
+  const arithmeticIsLive =
+    hasBallData &&
     innings2LegalBalls < oversLimit * 6 &&
     innings2Agg.wkts < 10 &&
     !(innings2Agg.total >= target && target > 0)
+
+  let matchStatus: MatchStatus
+  if (bracketRow?.status) {
+    matchStatus = bracketRow.status === "live" ? "live" : bracketRow.status === "completed" ? "completed" : "not_started"
+  } else if (!hasBallData) {
+    matchStatus = "not_started"
+  } else {
+    matchStatus = arithmeticIsLive ? "live" : "completed"
+  }
+
+  const isLive = matchStatus === "live"
 
   // ── live-engine-only fields ──
   let winProb: { a: number; b: number } | undefined
@@ -468,9 +591,6 @@ export async function getMatchDetailById(
     winProb = { a: liveState.winProbA, b: liveState.winProbB }
   }
 
-  // ── innings2Partial: same aggregated data, kept as its own field to
-  // match the existing MatchDetailClient prop shape (it renders this while
-  // `isLive` is true, and innings2Final once the match is done) ──
   const innings2Partial = {
     runsAtStart: 0,
     wktsAtStart: 0,
@@ -482,34 +602,38 @@ export async function getMatchDetailById(
     fow: innings2Agg.fow,
   }
 
-  return {
+  const match: MatchDetail = {
     id: matchRow.id,
     tournamentSlug: resolvedTournamentSlug,
     tournamentName: resolvedTournamentName,
-    round: setup.round ?? "",
-    venue: setup.venue ?? "",
-    date: setup.date ?? "",
-    time: setup.time ?? "",
+    round: setup.round ?? (bracketRow?.round !== undefined ? `Round ${bracketRow.round}` : ""),
+    venue: setup.venue || bracketRow?.venue || "",
+    date: setup.date || (bracketRow?.scheduled_at ? new Date(bracketRow.scheduled_at).toLocaleDateString() : ""),
+    time: setup.time || (bracketRow?.scheduled_at ? new Date(bracketRow.scheduled_at).toLocaleTimeString() : ""),
     toss: setup.toss ?? "",
     target,
-    resultNote: setup.resultNote ?? (isLive ? "" : "Match completed"),
+    resultNote: setup.resultNote ?? (matchStatus === "completed" ? "Match completed" : ""),
     pitch: setup.pitch ?? "",
     context: setup.context ?? "",
     officials: {
       umpires: setup.officials?.umpires ?? "",
       thirdUmpire: setup.officials?.thirdUmpire ?? "",
       referee: setup.officials?.referee ?? "",
-      format: setup.officials?.format ?? "T20 · 20 overs per side",
+      format: setup.officials?.format ?? `T20 · ${oversLimit} overs per side`,
     },
-    teamA: { id: teamA.id, name: teamA.name, short: teamA.code },
-    teamB: { id: teamB.id, name: teamB.name, short: teamB.code },
+    teamA,
+    teamB,
     innings1,
     innings2Final: innings2Agg,
     innings2Partial,
-    squads: buildSquads(setup, teamA, teamB),
+    squads: buildSquads(setup, teamA.name, teamB.name),
+    matchStatus,
     isLive,
+    hasBallData,
     winProb,
   }
+
+  return { ok: true, match }
 }
 
 export async function hasMatchDetail(matchId: string): Promise<boolean> {
