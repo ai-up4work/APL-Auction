@@ -140,6 +140,16 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         matchStatus = arithmeticIsLive ? "live" : "completed"
       }
 
+      // Explicit — mirrors the same logic used server-side in
+      // getMatchDetailById, so the two never disagree about which
+      // innings is in progress. If the row predates this field, fall
+      // back to a best-effort guess rather than treating it as fact.
+      const currentInnings: 1 | 2 = setup.currentInnings ?? (hasBallData ? 2 : 1)
+
+      // If no balls have landed for innings 2 yet, don't reset it — this
+      // clears fully once `handleClear` on the simulate page wipes the
+      // `balls` table, at which point innings2Balls will legitimately be
+      // empty and hasBallData will be false too.
       const liveScript = buildLiveScriptFromBalls(innings2Balls, target, oversLimit)
       const last = liveScript[liveScript.length - 1]
       const winProb = last ? { a: last.wpA, b: last.wpB } : undefined
@@ -166,6 +176,7 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         matchStatus,
         isLive: matchStatus === "live",
         hasBallData,
+        currentInnings,
         winProb,
         liveScript,
       }))

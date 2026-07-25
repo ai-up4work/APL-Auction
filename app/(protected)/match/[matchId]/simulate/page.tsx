@@ -3,9 +3,8 @@
 
 import { useRef, useState } from "react"
 import { useParams } from "next/navigation"
-import { Gavel, Play, Pause, Square, RotateCcw, Radio, Zap } from "lucide-react"
+import { Gavel, Play, Pause, Square, RotateCcw, Radio, Zap, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { TypeText } from "@/components/landing/type-text"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { parseMatchSetup, type MatchSetup } from "@/lib/matches/cricket-engine"
@@ -69,6 +68,18 @@ const statusMeta: Record<RunState, { label: string; color: string }> = {
   error: { label: "ERROR", color: "#F87171" },
 }
 
+// Same panel shell used throughout match-detail-client.tsx, so this page
+// reads as part of the same product instead of a bolted-on admin tool.
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`bg-black/50 backdrop-blur-xl border border-gold/30 rounded-lg p-6 md:p-10 shadow-[0_10px_40px_rgba(0,0,0,0.5)] ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
 export default function SimulateMatchPage() {
   const params = useParams<{ matchId: string }>()
   const matchIdFromRoute = params?.matchId ?? ""
@@ -84,17 +95,12 @@ export default function SimulateMatchPage() {
   const speedRef = useRef(speedMs)
   const logIdRef = useRef(0)
 
-  // Replaces the old shared `stopRequestedRef` boolean. Every call to
-  // handleStart() bumps this to a new unique value ("this run's token").
-  // Any in-flight delivery loop from a PREVIOUS run captures its own
-  // token at start time and compares against runTokenRef.current on
-  // every iteration — the moment they differ, that loop knows a newer
-  // run has since started (via Stop, or Reset & Simulate clicked again
-  // before the old loop noticed it should stop) and exits immediately
-  // instead of racing the new run's inserts. This is what was causing
-  // "duplicate key value violates unique constraint
-  // balls_match_id_innings_number_sequence_key" — two overlapping loops
-  // both computing sequence numbers from 0 and both trying to insert.
+  // Every call to handleStart() bumps this to a new unique value ("this
+  // run's token"). Any in-flight delivery loop from a PREVIOUS run
+  // captures its own token at start time and compares against
+  // runTokenRef.current on every iteration — the moment they differ,
+  // that loop knows a newer run (or a Clear) has since started and exits
+  // immediately instead of racing new inserts / deletes.
   const runTokenRef = useRef(0)
 
   const setRun = (s: RunState) => {
@@ -203,12 +209,16 @@ export default function SimulateMatchPage() {
         await supabase.from("bracket_matches").update({ status: "live" }).eq("id", bracketRow.id)
       }
 
+      // currentInnings is the explicit source of truth for which innings
+      // is in progress — the UI reads this instead of guessing from ball
+      // counts, so "Team B need X runs" never shows up while team A is
+      // still batting.
+      const { error: infoUpdateErr } = await supabase
+        .from("matches")
+        .update({ match_setup: { ...setup, currentInnings: 1 } })
+        .eq("id", matchId)
+      if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
       if (infoWasFilled) {
-        const { error: infoUpdateErr } = await supabase
-          .from("matches")
-          .update({ match_setup: setup })
-          .eq("id", matchId)
-        if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
         pushLog(`Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}".`)
       }
 
@@ -217,6 +227,7 @@ export default function SimulateMatchPage() {
       const teamBPool = poolFromSetup(setup, "team2") ?? generatePlaceholderPool(setup.team2.name, setup.team2.short)
 
       pushLog(`Starting simulation: ${teamAPool.teamName} vs ${teamBPool.teamName}, ${oversLimit} overs a side.`, true)
+      pushLog(`1st innings: ${teamAPool.teamName} batting.`, true)
 
       let innings1 = createInningsState({
         inningsNumber: 1,
@@ -231,13 +242,19 @@ export default function SimulateMatchPage() {
       const target = innings1.runs + 1
       pushLog(`Innings 1 complete: ${teamAPool.teamName} ${innings1.runs}/${innings1.wkts}. Target: ${target}.`, true)
 
+      // Flip currentInnings to 2 in the SAME write that sets the target,
+      // so the two facts ("2nd innings has started" and "this is the
+      // target") always land together — no window where one has updated
+      // and the other hasn't.
       const { error: setupUpdateErr } = await supabase
         .from("matches")
-        .update({ match_setup: { ...setup, overs: oversLimit, target } })
+        .update({ match_setup: { ...setup, overs: oversLimit, target, currentInnings: 2 } })
         .eq("id", matchId)
       if (setupUpdateErr) throw new Error(`Failed updating target: ${setupUpdateErr.message}`)
 
       if (myToken !== runTokenRef.current) return
+
+      pushLog(`2nd innings: ${teamBPool.teamName} chasing ${target}.`, true)
 
       let innings2 = createInningsState({
         inningsNumber: 2,
@@ -281,11 +298,65 @@ export default function SimulateMatchPage() {
     setRun("idle")
   }
 
+  // Wipes every trace of this match's simulated data — balls, live/engine
+  // state, bracket score/status, and the runtime-only match_setup keys
+  // (target, currentInnings) — while leaving team1/team2/venue/etc alone.
+  // This is what makes the live match page fall back to "not_started"
+  // and empty scorecards the instant it's clicked, via Realtime.
+  async function handleClear() {
+    const matchId = matchIdInput.trim()
+    if (!matchId) {
+      setErrorMsg("Paste a match_id first.")
+      return
+    }
+
+    runTokenRef.current++ // kill any in-flight loop immediately
+    setRun("idle")
+    setErrorMsg(null)
+    setLog([])
+    setScoreLine("")
+
+    try {
+      await supabase.from("balls").delete().eq("match_id", matchId)
+      await supabase.from("match_state").delete().eq("match_id", matchId)
+      await supabase.from("engine_state").delete().eq("match_id", matchId)
+
+      const { data: bracketRow } = await supabase
+        .from("bracket_matches")
+        .select("id")
+        .eq("overlay_match_id", matchId)
+        .maybeSingle()
+
+      if (bracketRow) {
+        await supabase
+          .from("bracket_matches")
+          .update({ status: "upcoming", score_a: null, score_b: null })
+          .eq("id", bracketRow.id)
+      }
+
+      const { data: matchRow } = await supabase
+        .from("matches")
+        .select("match_setup")
+        .eq("id", matchId)
+        .maybeSingle()
+
+      if (matchRow?.match_setup) {
+        const { target, currentInnings, ...rest } = matchRow.match_setup as Record<string, unknown>
+        await supabase.from("matches").update({ match_setup: rest }).eq("id", matchId)
+      }
+
+      pushLog("Cleared — all deliveries, live state, and match progress have been wiped.", true)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to clear match data.")
+      setRun("error")
+    }
+  }
+
   const status = statusMeta[runState]
 
   return (
-    <main className="min-h-screen bg-black text-white relative section-pattern">
-      <div className="absolute inset-0 z-0 section-gradient" />
+    <main className="min-h-screen bg-black text-white relative">
+      <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-black to-black/95" />
 
       <div className="container mx-auto px-4 py-16 relative z-10">
         <div className="max-w-3xl mx-auto">
@@ -296,7 +367,7 @@ export default function SimulateMatchPage() {
                 <Gavel className="w-6 h-6 text-gold" />
               </div>
             </div>
-            <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 section-title inline-block">
+            <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider inline-block">
               <TypeText text="Match " speed={45} />
               <TypeText text="Simulator" speed={45} delay={220} className="text-gold" />
             </h1>
@@ -307,115 +378,120 @@ export default function SimulateMatchPage() {
             </p>
           </div>
 
-          {/* ── Control card ── */}
-          <Card className="bg-black/70 border border-gold/20 box-hover-effect shine transition-all duration-300 mb-8 fade-in-up stagger-1">
-            <CardContent className="p-6 md:p-10 space-y-8">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div
-                  className="flex items-center gap-2 h-7 px-3 border rounded w-fit"
-                  style={{ borderColor: status.color, backgroundColor: "rgba(0,0,0,0.4)" }}
-                >
-                  <Radio className="w-3 h-3" style={{ color: status.color }} />
-                  <span className="text-[11px] font-mono tracking-[2px]" style={{ color: status.color }}>
-                    {status.label}
-                  </span>
-                </div>
-                {scoreLine && <span className="font-cinzel font-bold text-sm text-gold">{scoreLine}</span>}
+          {/* ── Control panel ── */}
+          <Panel className="mb-8 space-y-8">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div
+                className="flex items-center gap-2 h-7 px-3 border rounded w-fit"
+                style={{ borderColor: status.color, backgroundColor: "rgba(0,0,0,0.4)" }}
+              >
+                <Radio className="w-3 h-3" style={{ color: status.color }} />
+                <span className="text-[11px] font-mono tracking-[2px]" style={{ color: status.color }}>
+                  {status.label}
+                </span>
               </div>
+              {scoreLine && <span className="font-cinzel font-bold text-sm text-gold">{scoreLine}</span>}
+            </div>
 
-              <div>
-                <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel">
-                  Match ID <span className="text-gray-500 normal-case">(from URL)</span>
-                </label>
-                <input
-                  value={matchIdInput}
-                  readOnly
-                  placeholder="Navigate to /match/<id>/simulate"
-                  className="mt-2 w-full bg-black/60 border border-gold/20 rounded-md px-3 py-2.5 text-sm font-mono text-gray-300 cursor-not-allowed focus:outline-none"
-                />
-                {!matchIdFromRoute && (
-                  <p className="text-red-400 text-xs mt-2">
-                    No match id found in the URL. Go to /match/&lt;id&gt;/simulate instead of this page directly.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel flex items-center gap-2">
-                  <Zap className="w-3.5 h-3.5 text-gold" />
-                  Speed: <span className="text-gold">{speedMs}ms</span> per ball
-                </label>
-                <input
-                  type="range"
-                  min={200}
-                  max={3000}
-                  step={100}
-                  value={speedMs}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    setSpeedMs(v)
-                    speedRef.current = v
-                  }}
-                  className="w-full mt-3 accent-[#f5a623]"
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-3 pt-6 border-t border-gold/10">
-                <Button
-                  onClick={() => handleStart(true)}
-                  disabled={runState === "running" || runState === "paused"}
-                  className="pulse bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40 disabled:animate-none"
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset &amp; Simulate
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handlePauseResume}
-                  disabled={runState !== "running" && runState !== "paused"}
-                  className="border-gold text-gold hover:bg-gold/10 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 bg-transparent disabled:opacity-40"
-                >
-                  {runState === "paused" ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}
-                  {runState === "paused" ? "Resume" : "Pause"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleStop}
-                  disabled={runState !== "running" && runState !== "paused"}
-                  className="border-red-500/40 text-red-400 hover:bg-red-500/10 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 bg-transparent disabled:opacity-40"
-                >
-                  <Square className="mr-2 h-4 w-4" />
-                  Stop
-                </Button>
-              </div>
-
-              {errorMsg && (
-                <p className="text-red-400 text-sm border border-red-500/30 bg-red-500/10 rounded-md px-4 py-3">
-                  {errorMsg}
+            <div>
+              <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel">
+                Match ID <span className="text-gray-500 normal-case">(from URL)</span>
+              </label>
+              <input
+                value={matchIdInput}
+                readOnly
+                placeholder="Navigate to /match/<id>/simulate"
+                className="mt-2 w-full bg-black/60 border border-gold/20 rounded-md px-3 py-2.5 text-sm font-mono text-gray-300 cursor-not-allowed focus:outline-none"
+              />
+              {!matchIdFromRoute && (
+                <p className="text-red-400 text-xs mt-2">
+                  No match id found in the URL. Go to /match/&lt;id&gt;/simulate instead of this page directly.
                 </p>
               )}
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* ── Log card ── */}
-          <Card className="bg-black/70 border border-gold/20 glow-effect fade-in-up stagger-2">
-            <CardContent className="p-4 md:p-6">
-              <div className="flex items-center justify-between mb-4">
-                <span className="font-cinzel text-xs text-gray-300 tracking-widest">DELIVERY LOG</span>
-                <span className="font-mono text-[10px] text-gray-500 tracking-widest">{log.length} EVENTS</span>
-              </div>
-              <div className="h-96 overflow-y-auto font-mono text-xs space-y-1.5 pr-1">
-                {log.length === 0 && (
-                  <p className="text-gray-500">Log will appear here once the simulation starts.</p>
-                )}
-                {log.map((l) => (
-                  <p key={l.id} className={l.emphasis ? "text-gold font-bold" : "text-gray-400"}>
-                    {l.text}
-                  </p>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel flex items-center gap-2">
+                <Zap className="w-3.5 h-3.5 text-gold" />
+                Speed: <span className="text-gold">{speedMs}ms</span> per ball
+              </label>
+              <input
+                type="range"
+                min={200}
+                max={3000}
+                step={100}
+                value={speedMs}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setSpeedMs(v)
+                  speedRef.current = v
+                }}
+                className="w-full mt-3 accent-[#f5a623]"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-3 pt-6 border-t border-gold/10">
+              <Button
+                onClick={() => handleStart(true)}
+                disabled={runState === "running" || runState === "paused"}
+                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 disabled:opacity-40"
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Reset &amp; Simulate
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handlePauseResume}
+                disabled={runState !== "running" && runState !== "paused"}
+                className="border-gold text-gold hover:bg-gold/10 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 bg-transparent disabled:opacity-40"
+              >
+                {runState === "paused" ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}
+                {runState === "paused" ? "Resume" : "Pause"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleStop}
+                disabled={runState !== "running" && runState !== "paused"}
+                className="border-red-500/40 text-red-400 hover:bg-red-500/10 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 bg-transparent disabled:opacity-40"
+              >
+                <Square className="mr-2 h-4 w-4" />
+                Stop
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleClear}
+                disabled={runState === "running" || runState === "paused"}
+                className="border-red-500/40 text-red-400 hover:bg-red-500/10 font-bold font-cinzel uppercase tracking-wide text-xs px-6 py-6 bg-transparent disabled:opacity-40"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Clear
+              </Button>
+            </div>
+
+            {errorMsg && (
+              <p className="text-red-400 text-sm border border-red-500/30 bg-red-500/10 rounded-md px-4 py-3">
+                {errorMsg}
+              </p>
+            )}
+          </Panel>
+
+          {/* ── Log panel ── */}
+          <Panel>
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-cinzel text-xs text-gray-300 tracking-widest">DELIVERY LOG</span>
+              <span className="font-mono text-[10px] text-gray-500 tracking-widest">{log.length} EVENTS</span>
+            </div>
+            <div className="h-96 overflow-y-auto font-mono text-xs space-y-1.5 pr-1">
+              {log.length === 0 && (
+                <p className="text-gray-500">Log will appear here once the simulation starts.</p>
+              )}
+              {log.map((l) => (
+                <p key={l.id} className={l.emphasis ? "text-gold font-bold" : "text-gray-400"}>
+                  {l.text}
+                </p>
+              ))}
+            </div>
+          </Panel>
         </div>
       </div>
     </main>

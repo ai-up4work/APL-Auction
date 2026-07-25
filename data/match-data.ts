@@ -10,7 +10,8 @@
 //           team1: { name, short },
 //           team2: { name, short },
 //           venue,
-//           tournamentId
+//           tournamentId,
+//           currentInnings   // 1 | 2 — explicit, set by the simulator
 //         }
 //     This is the baseline. It has NO real foreign keys to `teams` — team
 //     identity here is just an embedded name/short pair. It's the only
@@ -45,6 +46,16 @@
 //     - "completed": innings finished by overs/wickets/target, or
 //       bracket_matches.status === "completed"
 //   The UI should use `matchStatus`, not guess from raw totals.
+//
+// CURRENT INNINGS:
+//   Similarly, WHICH innings is in progress is read from the explicit
+//   `match_setup.currentInnings` flag rather than inferred from
+//   `target`'s presence. Arithmetic alone can't distinguish "1st innings
+//   still batting, no target computed yet" from "2nd innings hasn't
+//   started" — both have hasBallData possibly true/false independently.
+//   `currentInnings` removes that ambiguity: it's written by the
+//   simulator (or any future manual scoring UI) at the exact moment each
+//   innings starts.
 //
 // LOOKUP RESULT SHAPE:
 //   getMatchDetailById returns a MatchLookupResult — either
@@ -150,6 +161,13 @@ export interface MatchDetail {
   isLive: boolean
   /** True once at least one ball has been recorded for this match, in either innings. */
   hasBallData: boolean
+  /**
+   * Explicit — which innings is currently in progress (or most recently
+   * was, once completed). Read from `match_setup.currentInnings`, falling
+   * back to a best-effort guess (2 once any ball data exists, else 1)
+   * only for older rows written before this field existed.
+   */
+  currentInnings: 1 | 2
   /** From match_state.live_state, when the engine populates it. */
   winProb?: { a: number; b: number }
 }
@@ -212,6 +230,7 @@ interface MatchSetup {
     format?: string
   }
   squads?: MatchSetupSquad[]
+  currentInnings?: 1 | 2
 }
 
 interface BallRow {
@@ -578,6 +597,11 @@ export async function getMatchDetailById(
 
   const isLive = matchStatus === "live"
 
+  // Explicit currentInnings from match_setup wins. Only for rows written
+  // before this field existed do we fall back to a guess — and even then
+  // it's a guess, never treated as ground truth for new data.
+  const currentInnings: 1 | 2 = setup.currentInnings ?? (hasBallData ? 2 : 1)
+
   // ── live-engine-only fields ──
   let winProb: { a: number; b: number } | undefined
   const { data: liveStateRow } = await supabase
@@ -630,6 +654,7 @@ export async function getMatchDetailById(
     matchStatus,
     isLive,
     hasBallData,
+    currentInnings,
     winProb,
   }
 

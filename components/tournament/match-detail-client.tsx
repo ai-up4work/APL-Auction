@@ -144,19 +144,28 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   // ball-by-ball data the instant anything changes — no fixed delay,
   // and it stays subscribed even if the match starts out "not_started"
   // (fixing the old bug where a tab left open before the match went
-  // live would never start polling).
+  // live would never start polling). It also reacts instantly when the
+  // simulate page's "Clear" wipes `balls`/`match_state`/`match_setup` —
+  // hasBallData flips back to false and every tab falls back to its
+  // locked/empty state automatically.
   const { match, isSyncing } = useLiveMatch(initialMatch.id, initialMatch)
 
   const status = match.matchStatus // "not_started" | "live" | "completed"
   const live = status === "live"
   const hasBallData = match.hasBallData
 
+  // Explicit — read from match_setup.currentInnings (see data/match-data.ts)
+  // rather than inferred from target/ball counts. This is what stops the
+  // score strip from showing a phantom "Team B need X runs" while team A
+  // is still batting in the 1st innings.
+  const innings2Started = match.currentInnings === 2
+
   const inn2 = live ? match.innings2Partial : match.innings2Final
   const runs = live ? currentTotal(match.innings2Partial) : match.innings2Final.total
   const wkts = live ? currentWkts(match.innings2Partial) : match.innings2Final.wkts
   const overLabel = live ? currentOvers(match.innings2Partial) : match.innings2Final.overs
 
-  const need = match.target - runs
+  const need = innings2Started ? match.target - runs : null
   const ballsBowled = (() => {
     const [o, b] = overLabel.split(".").map(Number)
     return (o || 0) * 6 + (b || 0)
@@ -164,7 +173,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   const oversLimitBalls = 120 // T20; adjust if match-data.ts starts carrying a per-match overs limit
   const ballsLeft = oversLimitBalls - ballsBowled
   const crr = ballsBowled > 0 ? (runs / (ballsBowled / 6)).toFixed(2) : "0.00"
-  const rrr = live && ballsLeft > 0 && need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : null
+  const rrr = innings2Started && live && ballsLeft > 0 && need !== null && need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : null
 
   const winProb = match.winProb
 
@@ -372,28 +381,41 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   </div>
                   <div
                     className={`rounded-lg p-4 border min-w-0 ${
-                      live ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5" : "border-gold/10 bg-white/[0.02]"
+                      innings2Started && live
+                        ? "border-gold shadow-[0_0_15px_rgba(245,166,35,0.1)] bg-gold/5"
+                        : "border-gold/10 bg-white/[0.02]"
                     }`}
                   >
                     <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
-                    <p className="text-2xl font-bold text-white font-cinzel mt-1">
-                      {runs}/{wkts}
-                      <span className="text-sm text-gray-400 font-normal ml-2">({overLabel} ov)</span>
-                    </p>
+                    {innings2Started ? (
+                      <p className="text-2xl font-bold text-white font-cinzel mt-1">
+                        {runs}/{wkts}
+                        <span className="text-sm text-gray-400 font-normal ml-2">({overLabel} ov)</span>
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic mt-2">Yet to bat</p>
+                    )}
                   </div>
                 </div>
 
+                {/* Status line — only ever describes the innings that's
+                    actually in progress, using the explicit
+                    currentInnings flag rather than guessed arithmetic. */}
                 <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
-                  {live
-                    ? `${match.teamB.short} need ${need} runs from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`
-                    : match.resultNote || "Match completed."}
+                  {status === "completed"
+                    ? match.resultNote || "Match completed."
+                    : !innings2Started
+                      ? `${match.teamA.short} batting — 1st innings in progress.`
+                      : `${match.teamB.short} need ${need} run${need === 1 ? "" : "s"} from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`}
                 </p>
 
                 <div className="flex flex-wrap gap-4 text-sm">
-                  <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-                    <span className="text-gray-400">CRR </span>
-                    <span className="text-gold font-bold font-cinzel">{crr}</span>
-                  </div>
+                  {innings2Started && (
+                    <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
+                      <span className="text-gray-400">CRR </span>
+                      <span className="text-gold font-bold font-cinzel">{crr}</span>
+                    </div>
+                  )}
                   {rrr && (
                     <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
                       <span className="text-gray-400">RRR </span>
@@ -455,11 +477,14 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     </button>
                     <button
                       onClick={() => setInnings(2)}
-                      className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
+                      disabled={!innings2Started}
+                      className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words disabled:opacity-40 disabled:cursor-not-allowed ${
                         innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
                       }`}
                     >
-                      {match.teamB.short} — 2nd Innings · {runs}/{wkts}
+                      {innings2Started
+                        ? `${match.teamB.short} — 2nd Innings · ${runs}/${wkts}`
+                        : `${match.teamB.short} — yet to bat`}
                     </button>
                   </div>
 
@@ -480,7 +505,14 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     </>
                   )}
 
-                  {innings === 2 && live && (
+                  {innings === 2 && !innings2Started && (
+                    <LockedTabPanel
+                      title="2nd innings not started"
+                      hint={`${match.teamB.short} haven't come out to bat yet — this fills in the moment the chase begins.`}
+                    />
+                  )}
+
+                  {innings === 2 && innings2Started && live && (
                     <>
                       <BattingCard
                         title={`${match.teamB.short} Batting`}
@@ -498,7 +530,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     </>
                   )}
 
-                  {innings === 2 && !live && (
+                  {innings === 2 && innings2Started && !live && (
                     <>
                       <BattingCard
                         title={`${match.teamB.short} Batting`}
@@ -589,7 +621,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                       </button>
                       <button
                         onClick={() => setInnings(2)}
-                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                        disabled={!innings2Started}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                           innings === 2
                             ? "bg-gold text-black shadow-md shadow-gold/20"
                             : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
@@ -599,7 +632,9 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                       </button>
                     </div>
 
-                    {overOverData.length === 0 ? (
+                    {innings === 2 && !innings2Started ? (
+                      <p className="text-gray-500 text-sm text-center py-8">2nd innings hasn't started yet.</p>
+                    ) : overOverData.length === 0 ? (
                       <p className="text-gray-500 text-sm text-center py-8">No overs bowled in this innings yet.</p>
                     ) : (
                       <div className="border border-gold/20 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">

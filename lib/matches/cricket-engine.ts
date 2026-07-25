@@ -191,6 +191,14 @@ export interface MatchSetup {
   resultNote?: string
   officials?: { umpires?: string; thirdUmpire?: string; referee?: string; format?: string }
   squads?: MatchSetupSquad[]
+  /**
+   * Explicit source of truth for which innings is currently in progress.
+   * Set by the simulator (and any future manual scoring UI) at the exact
+   * moment each innings starts — never inferred from ball counts, so the
+   * "who's batting / who needs what" UI can never show a phantom target
+   * for an innings that hasn't started yet.
+   */
+  currentInnings?: 1 | 2
 }
 
 function isMatchSetupTeam(v: unknown): v is MatchSetupTeam {
