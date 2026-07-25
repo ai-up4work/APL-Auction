@@ -147,6 +147,36 @@ export async function createTournament(
   return data.id;
 }
 
+/** Deletes a tournament outright. Unlike a friendly match, a tournament
+ *  typically has real dependents — auctions, teams, bracket matches,
+ *  players sold into those teams, etc. This only issues a delete on the
+ *  `tournaments` row itself; whether those dependents disappear with it
+ *  depends entirely on your schema's FK constraints:
+ *  - If the relevant FKs (auctions.tournament_id, bracket_matches.*,
+ *    teams.auction_id, etc.) are set to ON DELETE CASCADE, this cleans
+ *    up everything automatically.
+ *  - If they're NOT NULL / RESTRICT instead, this call will fail with a
+ *    foreign-key-violation error (surfaced below as a friendly message)
+ *    rather than silently leaving orphaned or broken data.
+ *  Confirm which behavior your schema has before relying on this in
+ *  production — if it's RESTRICT, you'll want an explicit cascading
+ *  delete here instead (auctions -> teams -> players -> bracket_matches
+ *  -> tournament, in that order) before this will succeed. */
+export async function deleteTournament(tournamentId: string): Promise<UpdateOrgResult> {
+  const { error } = await supabase.from("tournaments").delete().eq("id", tournamentId);
+  if (error) {
+    console.error("deleteTournament failed:", error.message);
+    if (error.code === "23503") {
+      return {
+        ok: false,
+        error: "This tournament still has auctions, teams, or matches linked to it and can't be deleted yet.",
+      };
+    }
+    return { ok: false, error: "Couldn't delete that tournament — please try again." };
+  }
+  return { ok: true };
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /*  FRIENDLY MATCHES                                                   */
 /*                                                                      */
@@ -238,6 +268,23 @@ export async function createFriendlyMatch(
     return null;
   }
   return data.id;
+}
+
+/** Deletes a friendly match outright. Friendly matches live in the same
+ *  `matches` table as tournament matches, but (unlike a tournament) a
+ *  friendly match has no bracket/auction rows depending on it, so this
+ *  is a plain single-row delete rather than a cascading cleanup.
+ *  `on_air_channels` / `weather_readings` rows for this match_id are
+ *  left behind as orphans unless your schema has ON DELETE CASCADE set
+ *  on their match_id FK — add that constraint (or delete them here
+ *  explicitly) if you want overlay config cleaned up automatically. */
+export async function deleteFriendlyMatch(matchId: string): Promise<boolean> {
+  const { error } = await supabase.from("matches").delete().eq("id", matchId);
+  if (error) {
+    console.error("deleteFriendlyMatch failed:", error.message);
+    return false;
+  }
+  return true;
 }
 
 function shortCode(name: string): string {

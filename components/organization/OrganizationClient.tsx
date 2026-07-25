@@ -29,8 +29,10 @@ import {
   getOrgForUser,
   getTournamentsForOrg,
   createTournament,
+  deleteTournament,
   getFriendlyMatchesForOrg,
   createFriendlyMatch,
+  deleteFriendlyMatch,
   getPlayerBank,
   addBankPlayer,
   updateBankPlayer,
@@ -235,6 +237,11 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
+  // Per-row, same reasoning as FriendlyMatchesTab: only the row actually
+  // being deleted should show a spinner/be disabled.
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   useEffect(() => {
     getTournamentsForOrg(org.id).then((t) => {
       setTournaments(t)
@@ -257,6 +264,25 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
       return
     }
     router.push(`/tournaments/${id}/edit`)
+  }
+
+  const handleDelete = async (t: TournamentSummary) => {
+    if (
+      !confirm(
+        `Delete the tournament "${t.name}"? This can't be undone, and will fail if it still has auctions, teams, or matches attached.`
+      )
+    ) {
+      return
+    }
+    setDeletingId(t.id)
+    setDeleteError(null)
+    const result = await deleteTournament(t.id)
+    setDeletingId(null)
+    if (!result.ok) {
+      setDeleteError(result.error ?? "Couldn't delete that tournament — please try again.")
+      return
+    }
+    setTournaments((prev) => prev.filter((x) => x.id !== t.id))
   }
 
   return (
@@ -321,21 +347,43 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
           <p className="text-gray-500 text-sm italic">No tournaments yet — create one above.</p>
         ) : (
           <div className="space-y-2">
+            {deleteError && (
+              <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
+                <AlertCircle className="h-4 w-4" /> {deleteError}
+              </p>
+            )}
             {tournaments.map((t) => (
-              <Link
+              <div
                 key={t.id}
-                href={`/tournaments/${t.id}/edit`}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
               >
-                <div className="min-w-0">
+                <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
                   <p className="text-white text-sm font-semibold truncate">{t.name}</p>
                   <p className="text-gray-500 text-xs mt-0.5">
                     {t.format.replace("_", " ")} · {t.status}
                     {t.category ? ` · ${t.category}` : ""}
                   </p>
+                </Link>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Link
+                    href={`/tournaments/${t.id}/edit`}
+                    className="text-gray-500 hover:text-gold transition-colors outline-none"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Link>
+                  <button
+                    onClick={() => handleDelete(t)}
+                    disabled={deletingId === t.id}
+                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {deletingId === t.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 </div>
-                <Pencil className="h-3.5 w-3.5 text-gold shrink-0" />
-              </Link>
+              </div>
             ))}
           </div>
         )}
@@ -359,6 +407,12 @@ function FriendlyMatchesTab({ org }: { org: OrgSummary }) {
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
+  // Delete state is tracked per-row (deletingId) rather than as a single
+  // shared bool, so removing one match doesn't disable the buttons on
+  // every other row in the list while its request is in flight.
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   useEffect(() => {
     getFriendlyMatchesForOrg(org.id).then((m) => {
       setMatches(m)
@@ -377,6 +431,25 @@ function FriendlyMatchesTab({ org }: { org: OrgSummary }) {
       return
     }
     router.push(`/match/${id}/edit`)
+  }
+
+  const handleDelete = async (match: FriendlyMatchSummary) => {
+    if (
+      !confirm(
+        `Delete the friendly match "${match.team1Name} vs ${match.team2Name}"? This can't be undone.`
+      )
+    ) {
+      return
+    }
+    setDeletingId(match.id)
+    setDeleteError(null)
+    const ok = await deleteFriendlyMatch(match.id)
+    setDeletingId(null)
+    if (!ok) {
+      setDeleteError("Couldn't delete that match — please try again.")
+      return
+    }
+    setMatches((prev) => prev.filter((m) => m.id !== match.id))
   }
 
   return (
@@ -423,20 +496,42 @@ function FriendlyMatchesTab({ org }: { org: OrgSummary }) {
           <p className="text-gray-500 text-sm italic">No friendly matches yet — create one above.</p>
         ) : (
           <div className="space-y-2">
+            {deleteError && (
+              <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
+                <AlertCircle className="h-4 w-4" /> {deleteError}
+              </p>
+            )}
             {matches.map((m) => (
-              <Link
+              <div
                 key={m.id}
-                href={`/match/${m.id}/edit`}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
               >
-                <div className="min-w-0">
+                <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
                   <p className="text-white text-sm font-semibold truncate">
                     {m.team1Name} vs {m.team2Name}
                   </p>
                   <p className="text-gray-500 text-xs mt-0.5">{m.round}</p>
+                </Link>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Link
+                    href={`/match/${m.id}/edit`}
+                    className="text-gray-500 hover:text-gold transition-colors outline-none"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Link>
+                  <button
+                    onClick={() => handleDelete(m)}
+                    disabled={deletingId === m.id}
+                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {deletingId === m.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 </div>
-                <Pencil className="h-3.5 w-3.5 text-gold shrink-0" />
-              </Link>
+              </div>
             ))}
           </div>
         )}
