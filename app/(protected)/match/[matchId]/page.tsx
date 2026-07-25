@@ -1,4 +1,4 @@
-// app/match/[matchId]/page.tsx
+// app/(protected)/match/[matchId]/page.tsx
 import type { Metadata } from "next"
 import MatchDetailClient from "@/components/tournament/match-detail-client"
 import { getMatchDetailById } from "@/data/match-data"

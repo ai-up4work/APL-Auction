@@ -34,31 +34,57 @@ interface TeamRow {
 export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
   const [match, setMatch] = useState<LiveMatchDetail>({ ...initialMatch, liveScript: [] })
   const [isSyncing, setIsSyncing] = useState(false)
+  const [channelStatus, setChannelStatus] = useState<string>("connecting")
   const teamAFallback = useRef(initialMatch.teamA)
   const teamBFallback = useRef(initialMatch.teamB)
 
   const refresh = useCallback(async () => {
     setIsSyncing(true)
     try {
-      const { data: matchRow } = await supabase.from("matches").select("match_setup").eq("id", matchId).maybeSingle()
-      if (!matchRow) return
-      const setup = parseMatchSetup(matchRow.match_setup)
-      if (!setup) return
+      const { data: matchRow, error: matchRowErr } = await supabase
+        .from("matches")
+        .select("match_setup")
+        .eq("id", matchId)
+        .maybeSingle()
 
-      const { data: bracketRow } = await supabase
+      if (matchRowErr) {
+        console.error("[useLiveMatch] matches select failed:", matchRowErr.message)
+        return
+      }
+      if (!matchRow) {
+        console.warn("[useLiveMatch] no matches row for id:", matchId, "— either wrong id or RLS is hiding it")
+        return
+      }
+
+      const setup = parseMatchSetup(matchRow.match_setup)
+      if (!setup) {
+        console.warn("[useLiveMatch] match_setup failed to parse:", matchRow.match_setup)
+        return
+      }
+
+      const { data: bracketRow, error: bracketErr } = await supabase
         .from("bracket_matches")
         .select("id, team_a_id, team_b_id, venue, status")
         .eq("overlay_match_id", matchId)
         .maybeSingle<BracketRow>()
 
+      if (bracketErr) {
+        console.error("[useLiveMatch] bracket_matches select failed:", bracketErr.message)
+      }
+
       let teamA: MatchTeamRef = teamAFallback.current
       let teamB: MatchTeamRef = teamBFallback.current
 
       if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
-        const { data: teamRows } = await supabase
+        const { data: teamRows, error: teamsErr } = await supabase
           .from("teams")
           .select("id, name, code, logo, color")
           .in("id", [bracketRow.team_a_id, bracketRow.team_b_id])
+
+        if (teamsErr) {
+          console.error("[useLiveMatch] teams select failed:", teamsErr.message)
+        }
+
         const a = teamRows?.find((t) => t.id === bracketRow.team_a_id) as TeamRow | undefined
         const b = teamRows?.find((t) => t.id === bracketRow.team_b_id) as TeamRow | undefined
         if (a && b) {
@@ -67,7 +93,7 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         }
       }
 
-      const { data: ballRows } = await supabase
+      const { data: ballRows, error: ballsErr } = await supabase
         .from("balls")
         .select(
           "id, match_id, innings_number, sequence, over_number, ball_number, striker_name, non_striker_name, bowler_name, runs, extra_type, is_wicket, dismissal_type, batsman_out, fielder"
@@ -75,8 +101,19 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         .eq("match_id", matchId)
         .order("sequence", { ascending: true })
 
+      if (ballsErr) {
+        console.error("[useLiveMatch] balls select failed:", ballsErr.message)
+      }
+
       const allBalls = (ballRows ?? []) as BallRow[]
       const hasBallData = allBalls.length > 0
+
+      if (allBalls.length === 0) {
+        console.log("[useLiveMatch] refresh ran but got 0 ball rows for match:", matchId)
+      } else {
+        console.log(`[useLiveMatch] refresh got ${allBalls.length} ball rows`)
+      }
+
       const innings1Balls = allBalls.filter((b) => b.innings_number === 1)
       const innings2Balls = allBalls.filter((b) => b.innings_number === 2)
 
@@ -138,19 +175,35 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
   }, [matchId])
 
   useEffect(() => {
-    refresh() // always subscribe/refresh regardless of initial status — fixes the not_started→live gap
+    refresh()
 
     const channel = supabase
       .channel(`match-live-${matchId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "balls", filter: `match_id=eq.${matchId}` }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "bracket_matches", filter: `overlay_match_id=eq.${matchId}` }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `id=eq.${matchId}` }, refresh)
-      .subscribe()
+      .on("postgres_changes", { event: "*", schema: "public", table: "balls", filter: `match_id=eq.${matchId}` }, (payload) => {
+        console.log("[useLiveMatch] realtime event on balls:", payload.eventType, payload)
+        refresh()
+      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bracket_matches", filter: `overlay_match_id=eq.${matchId}` },
+        (payload) => {
+          console.log("[useLiveMatch] realtime event on bracket_matches:", payload.eventType, payload)
+          refresh()
+        }
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `id=eq.${matchId}` }, (payload) => {
+        console.log("[useLiveMatch] realtime event on matches:", payload.eventType, payload)
+        refresh()
+      })
+      .subscribe((status, err) => {
+        console.log(`[useLiveMatch] channel status for match ${matchId}:`, status, err ?? "")
+        setChannelStatus(status)
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
   }, [matchId, refresh])
 
-  return { match, isSyncing }
+  return { match, isSyncing, channelStatus }
 }
