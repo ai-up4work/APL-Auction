@@ -1,4 +1,5 @@
 // app/tournament/[slug]/match/[matchId]/page.tsx
+import type { ComponentProps } from "react"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import MatchDetailClient from "@/components/tournament/match-detail-client"
@@ -7,6 +8,15 @@ import { getMatchDetailById, getTournamentBySlug } from "@/data/tournament-data"
 interface MatchPageProps {
   params: Promise<{ slug: string; matchId: string }>
 }
+
+// `getMatchDetailById` returns tournament-data's `MatchDetail` shape, but
+// `MatchDetailClient` expects the (structurally different) `MatchDetail`
+// type from `@/data/match-data`. Rather than importing that type directly
+// here — which would require this file to know which of the two
+// same-named types is "correct" — we derive it straight from the
+// component's own prop signature, the same way match-detail-client.tsx
+// itself bridges the two types when passing data into MatchGraphs.
+type ClientMatch = ComponentProps<typeof MatchDetailClient>["match"]
 
 export async function generateMetadata({ params }: MatchPageProps): Promise<Metadata> {
   const { slug, matchId } = await params
@@ -36,5 +46,5 @@ export default async function MatchPage({ params }: MatchPageProps) {
     notFound()
   }
 
-  return <MatchDetailClient match={match} tournamentSlug={slug} />
+  return <MatchDetailClient match={match as unknown as ClientMatch} tournamentSlug={slug} />
 }
