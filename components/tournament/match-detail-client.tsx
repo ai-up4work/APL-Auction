@@ -336,7 +336,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       ═══════════════════════════════════════════ */}
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
-          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30"
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-80"
           style={{ backgroundImage: `url('${images.bg}')` }}
         >
           <span className="sr-only">Image not available</span>
