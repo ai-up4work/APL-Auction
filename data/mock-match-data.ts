@@ -280,6 +280,7 @@ export const mockLiveMatch: MockMatchDetail = {
   innings2Final,
   innings2Partial,
   squads,
+  currentInnings: 2 as MatchDetail["currentInnings"],
   matchStatus: "live",
   isLive: true,
   hasBallData: true,
