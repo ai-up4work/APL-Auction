@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -39,9 +39,11 @@ function initials(name: string) {
     .toUpperCase()
 }
 
-type Tab = "info" |"scorecard" | "squads" | "overs" | "graphs" | "stats"
+// "stats" removed as a standalone tab — win probability now lives inline
+// in the score strip instead (see WinProbabilityBar below).
+type Tab = "info" | "scorecard" | "squads" | "overs" | "graphs"
 
-// All 6 tabs are always rendered — never hidden based on data
+// All tabs are always rendered — never hidden based on data
 // availability. Tabs without underlying data are shown locked (see
 // isTabLocked) instead, so the visitor knows the feature exists and needs
 // to be set up, rather than wondering why a tab silently disappeared.
@@ -51,7 +53,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "squads", label: "Squads" },
   { key: "overs", label: "Overs" },
   { key: "graphs", label: "Graphs" },
-  { key: "stats", label: "Stats" },
 ]
 
 const images = {
@@ -120,12 +121,69 @@ function LockedTabPanel({ title, hint }: { title: string; hint: string }) {
   )
 }
 
+/** Who actually won, based on final totals — independent of whatever the
+ *  live win-probability model last happened to output. Used once the
+ *  match is completed to snap the probability display to a clean,
+ *  resolved state rather than showing a stale mid-chase percentage. */
+function determineWinner(match: MatchDetail): "a" | "b" | "tie" {
+  const totalA = match.innings1.total
+  const totalB = match.innings2Final.total
+  if (totalA === totalB) return "tie"
+  return totalB > totalA ? "b" : "a"
+}
+
+/** Compact win-probability bar, now shown inline in the score strip
+ *  instead of behind its own Stats tab. Renders nothing if winProb isn't
+ *  available yet (e.g. before the live match engine has published a
+ *  reading), so the score strip degrades gracefully rather than showing
+ *  an empty bar. Once the match is completed, `winProb` is expected to
+ *  already be the snapped final value (100/0, or 50/50 on a tie) — this
+ *  component just adjusts the label from "Win Probability" to "Final". */
+function WinProbabilityBar({
+  winProb,
+  teamAShort,
+  teamBShort,
+  completed,
+}: {
+  winProb: { a: number; b: number } | undefined
+  teamAShort: string
+  teamBShort: string
+  completed?: boolean
+}) {
+  if (!winProb) return null
+  const tied = completed && winProb.a === winProb.b
+  return (
+    <div className="mt-4 pt-4 border-t border-gold/10">
+      <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel mb-2">
+        {completed ? "Final" : "Win Probability"}
+      </p>
+      <div className="flex h-2 rounded-full overflow-hidden bg-white/10">
+        <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
+        <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
+      </div>
+      <div className="flex justify-between mt-2 text-xs font-cinzel">
+        <span className="text-gold font-bold">
+          {teamAShort} {winProb.a}%
+        </span>
+        <span className="text-red-500 font-bold">
+          {teamBShort} {winProb.b}%
+        </span>
+      </div>
+      {tied && <p className="text-gray-500 text-[10.5px] text-center mt-2 font-cinzel">Match Tied</p>}
+    </div>
+  )
+}
+
 export default function MatchDetailClient({ match: initialMatch, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [tab, setTab] = useState<Tab>("info")
-  const [innings, setInnings] = useState<1 | 2>(2)
+  // Default to innings 1 — this gets kept in sync with whichever innings
+  // is actually in progress by the effect below, so opening Scorecard /
+  // Overs / Graphs mid-1st-innings shows the live 1st innings instead of
+  // an empty "2nd innings not started" panel.
+  const [innings, setInnings] = useState<1 | 2>(1)
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -152,13 +210,32 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
   const status = match.matchStatus // "not_started" | "live" | "completed"
   const live = status === "live"
+  const completed = status === "completed"
   const hasBallData = match.hasBallData
 
   // Explicit — read from match_setup.currentInnings (see data/match-data.ts)
   // rather than inferred from target/ball counts. This is what stops the
   // score strip from showing a phantom "Team B need X runs" while team A
   // is still batting in the 1st innings.
-  const innings2Started = match.currentInnings === 2
+  //
+  // Fallback: also treat the 2nd innings as started if there's already
+  // real ball data for it (batting rows recorded), in case the explicit
+  // `currentInnings` flag lags behind the actual live scoring feed —
+  // otherwise tabs/toggles that depend on this (Scorecard, Overs, and
+  // the Graphs sub-tabs) can stay incorrectly locked even while the
+  // chase is visibly in progress elsewhere on the page (e.g. the win
+  // probability bar).
+  const innings2Started = match.currentInnings === 2 || match.innings2Partial.batting.length > 0
+
+  // Keep the innings selector pinned to whichever innings is actually in
+  // progress: re-sync whenever the visitor switches tabs, and whenever
+  // the match itself flips from 1st to 2nd innings while a tab is open.
+  // Without this, `innings` could stay stuck on its initial/previous
+  // value and a freshly-opened Scorecard/Overs tab would show the wrong
+  // (or locked) innings instead of the live one.
+  useEffect(() => {
+    setInnings(innings2Started ? 2 : 1)
+  }, [tab, innings2Started])
 
   const inn2 = live ? match.innings2Partial : match.innings2Final
   const runs = live ? currentTotal(match.innings2Partial) : match.innings2Final.total
@@ -175,7 +252,20 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   const crr = ballsBowled > 0 ? (runs / (ballsBowled / 6)).toFixed(2) : "0.00"
   const rrr = innings2Started && live && ballsLeft > 0 && need !== null && need > 0 ? (need / (ballsLeft / 6)).toFixed(2) : null
 
-  const winProb = match.winProb
+  // Win probability — once the match is completed, this is snapped to a
+  // clean, resolved value (100/0 for the winner, or 50/50 on a tie)
+  // based on the actual final totals, rather than whatever the live
+  // probability model last happened to output. That snapped value is
+  // the single source of truth passed to BOTH the score-strip bar and
+  // the Graphs tab's Win Probability chart, so they can never disagree.
+  const winner = completed ? determineWinner(match) : null
+  const winProb = winner
+    ? winner === "tie"
+      ? { a: 50, b: 50 }
+      : winner === "a"
+        ? { a: 100, b: 0 }
+        : { a: 0, b: 100 }
+    : match.winProb
 
   // Tab lock state — never hide a tab, just mark it locked when the
   // underlying data doesn't exist yet.
@@ -187,8 +277,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         return !hasBallData
       case "squads":
         return match.squads.length === 0
-      case "stats":
-        return !winProb
       case "info":
       default:
         return false
@@ -325,7 +413,10 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       </section>
 
       {/* ═══════════════════════════════════════════
-          SCORE STRIP
+          SCORE STRIP — now also carries the win
+          probability bar inline (see
+          WinProbabilityBar), replacing the old
+          standalone Stats tab.
       ═══════════════════════════════════════════ */}
       <section className="px-4 relative z-10 -mt-8">
         <div className="container mx-auto max-w-3xl">
@@ -423,6 +514,18 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     </div>
                   )}
                 </div>
+
+                {/* Win probability — folded in here instead of behind a
+                    separate Stats tab. Renders nothing if winProb isn't
+                    available yet, so it never shows an empty/fake bar.
+                    Once completed, `winProb` is already the snapped
+                    final value and the bar labels itself "Final". */}
+                <WinProbabilityBar
+                  winProb={winProb}
+                  teamAShort={match.teamA.short}
+                  teamBShort={match.teamB.short}
+                  completed={completed}
+                />
               </>
             )}
           </div>
@@ -478,13 +581,23 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     <button
                       onClick={() => setInnings(2)}
                       disabled={!innings2Started}
-                      className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words disabled:opacity-40 disabled:cursor-not-allowed ${
-                        innings === 2 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
+                      title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
+                      className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words disabled:cursor-not-allowed ${
+                        innings === 2
+                          ? "bg-gold/15 border-gold text-gold font-bold"
+                          : !innings2Started
+                            ? "border-dashed border-gray-700 text-gray-600"
+                            : "border-gold/20 text-gray-300"
                       }`}
                     >
-                      {innings2Started
-                        ? `${match.teamB.short} — 2nd Innings · ${runs}/${wkts}`
-                        : `${match.teamB.short} — yet to bat`}
+                      {innings2Started ? (
+                        `${match.teamB.short} — 2nd Innings · ${runs}/${wkts}`
+                      ) : (
+                        <>
+                          <Lock className="h-3 w-3 shrink-0" />
+                          {match.teamB.short} — yet to bat
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -622,12 +735,16 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                       <button
                         onClick={() => setInnings(2)}
                         disabled={!innings2Started}
-                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                        title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
+                        className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:cursor-not-allowed ${
                           innings === 2
                             ? "bg-gold text-black shadow-md shadow-gold/20"
-                            : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                            : !innings2Started
+                              ? "bg-white/[0.02] border border-dashed border-gray-700 text-gray-600"
+                              : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
                         }`}
                       >
+                        {!innings2Started && <Lock className="h-2.5 w-2.5" />}
                         {match.teamB.short} (2nd Inn)
                       </button>
                     </div>
@@ -704,36 +821,10 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                 stepIndex={match.liveScript.length}
                 overs1={getOverByOverData(1)}
                 overs2={getOverByOverData(2)}
+                innings2Started={innings2Started}
+                completed={completed}
               />
             ))}
-
-          {/* STATS TAB */}
-          {tab === "stats" && (
-            <div className="space-y-4 mb-8">
-              {!winProb ? (
-                <LockedTabPanel
-                  title="Win probability not available"
-                  hint="This is powered by the live match engine and only appears while that engine has published a reading for this match."
-                />
-              ) : (
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                  <h2 className="text-lg font-bold text-white mb-3 font-cinzel">WIN PROBABILITY</h2>
-                  <div className="flex h-2.5 rounded-full overflow-hidden bg-white/10">
-                    <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
-                    <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
-                  </div>
-                  <div className="flex justify-between mt-2 text-xs font-cinzel">
-                    <span className="text-gold">
-                      {match.teamA.short} {winProb.a}%
-                    </span>
-                    <span className="text-red-500">
-                      {match.teamB.short} {winProb.b}%
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="text-center mb-16">
             {tournamentSlug ? (
