@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { aggregateInnings, parseMatchSetup, buildSquads, type BallRow } from "@/lib/matches/cricket-engine"
-import { buildLiveScriptFromBalls } from "@/lib/matches/win-probability"
+import { buildFullMatchLiveScript } from "@/lib/matches/win-probability"
 import type { MatchDetail, MatchStatus, MatchTeamRef } from "@/data/match-data"
 
 export interface LiveScriptStep {
@@ -142,17 +142,17 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
 
       // Explicit — mirrors the same logic used server-side in
       // getMatchDetailById, so the two never disagree about which
-      // innings is in progress. If the row predates this field, fall
-      // back to a best-effort guess rather than treating it as fact.
+      // innings is in progress.
       const currentInnings: 1 | 2 = setup.currentInnings ?? (hasBallData ? 2 : 1)
 
-      // If no balls have landed for innings 2 yet, don't reset it — this
-      // clears fully once `handleClear` on the simulate page wipes the
-      // `balls` table, at which point innings2Balls will legitimately be
-      // empty and hasBallData will be false too.
-      const liveScript = buildLiveScriptFromBalls(innings2Balls, target, oversLimit)
+      // Full-match timeline: a flat 50/50 line through every legal ball
+      // of innings 1 (there's no chase pressure yet, so 50/50 is correct
+      // — not "no data"), followed by the real pressure-based curve once
+      // innings 2 starts. This is what fixes the graph rendering a
+      // single dot instead of a continuous line during the 1st innings.
+      const liveScript = buildFullMatchLiveScript(innings1Balls, innings2Balls, target, oversLimit)
       const last = liveScript[liveScript.length - 1]
-      const winProb = last ? { a: last.wpA, b: last.wpB } : undefined
+      const winProb = last ? { a: last.wpA, b: last.wpB } : hasBallData ? { a: 50, b: 50 } : undefined
 
       setMatch((prev) => ({
         ...prev,
@@ -166,7 +166,12 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
           runsAtStart: 0,
           wktsAtStart: 0,
           overAtStart: "0.0",
-          overRunsAtStart: [],
+          // Fixed: this used to be hardcoded to [], which meant the
+          // Overs and Graphs tabs always saw an empty over-by-over
+          // breakdown for a live 2nd innings no matter how many overs
+          // had actually been bowled. It now carries the real, currently
+          // aggregated per-over runs for innings 2.
+          overRunsAtStart: innings2Agg.overRuns,
           over19ExtraRuns: 0,
           batting: innings2Agg.batting,
           bowling: innings2Agg.bowling,

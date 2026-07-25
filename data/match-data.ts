@@ -619,7 +619,12 @@ export async function getMatchDetailById(
     runsAtStart: 0,
     wktsAtStart: 0,
     overAtStart: "0.0",
-    overRunsAtStart: [] as number[],
+    // Fixed: this was hardcoded to [], which meant the Overs and Graphs
+    // tabs saw an empty over-by-over breakdown on the very first SSR
+    // paint of a live 2nd innings, no matter how many overs had actually
+    // been bowled. It now carries the real, currently aggregated
+    // per-over runs for innings 2.
+    overRunsAtStart: innings2Agg.overRuns,
     over19ExtraRuns: 0,
     batting: innings2Agg.batting,
     bowling: innings2Agg.bowling,
