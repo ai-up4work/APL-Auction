@@ -217,12 +217,16 @@ function PartnershipsView({ match }: { match: MatchDetail }) {
     return <p className="text-gray-500 text-sm py-8 text-center">No partnership data available for this innings yet.</p>
   }
 
+  // FowEntry is ["wkt-score", "batterName", "over"], e.g. ["1-28", "Nuwan Dias", "4.2"].
+  // The score lives in the part after the dash in index 0 — NOT index 1 (that's the name).
+  const scoreAtFall = (entry: (typeof fow)[number]) => Number(entry[0].split("-")[1] ?? entry[0])
+
   const partnerships = fow.map((f, i) => {
-    const prevRuns = i === 0 ? 0 : Number(fow[i - 1][1])
+    const prevRuns = i === 0 ? 0 : scoreAtFall(fow[i - 1])
     const prevOver = i === 0 ? 0 : Number(fow[i - 1][2])
     return {
       wkt: i + 1,
-      runs: Number(f[1]) - prevRuns,
+      runs: scoreAtFall(f) - prevRuns,
       overs: (Number(f[2]) - prevOver).toFixed(1),
       fallScore: f[1],
       fallOver: f[2],
