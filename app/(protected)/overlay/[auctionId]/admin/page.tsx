@@ -1,3 +1,4 @@
+// app/overlay/[auctionId]/admin/page.tsx
 "use client";
 
 import React, { use, useEffect, useRef, useState } from "react";
@@ -335,7 +336,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       // last, alongside the rest, guarantees the first mount already has
       // the real data.
       setMatchId(match.id);
-      setMatchSetup(match.match_setup);
+      setMatchSetup(match.match_setup); // already normalized by getOrCreateMatch
       setLiveState(live ? sanitizeLiveState(live) : emptyLiveState);
       setEngineSyncState(engine ? sanitizeEngineState(engine) : null);
       setWeatherData(weather ? weather.data : defaultWeatherData);

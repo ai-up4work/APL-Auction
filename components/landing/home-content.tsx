@@ -318,8 +318,8 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                 </div>
               </div>
             ))}
-          </div>
-        </div>
+          <div>
+        </div>/
       </section> */}
 
       {/* ═══════════════════════════════════════════════════════════

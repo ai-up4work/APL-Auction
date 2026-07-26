@@ -155,6 +155,92 @@ export interface MatchRow {
   match_setup_completed: boolean;
 }
 
+// Mirrors emptyMatchSetup in page.tsx — duplicated here (not imported)
+// because page.tsx's version isn't exported. Only used as the seed row
+// for a brand-new auctionId; every subsequent read returns the real data.
+const emptyOverlayTeam = () => ({
+  name: "",
+  shortCode: "",
+  color: "#c9971f",
+  logoUrl: "",
+  squad: [] as string[],
+  squadPlayers: [] as { id: string; name: string; imageUrl?: string }[],
+});
+
+const EMPTY_MATCH_SETUP: MatchSetup = {
+  tournamentName: "",
+  season: "",
+  tournamentLogoUrl: "",
+  venue: "",
+  format: "T20",
+  matchNumber: "",
+  matchTitle: "",
+  teamA: emptyOverlayTeam(),
+  kickoffTime: "",
+  teamB: emptyOverlayTeam(),
+  matchMeta: "",
+  tournament: "",
+  tossWinner: "",
+  tossDecision: "",
+};
+
+// ── shape normalization ──────────────────────────────────────────────
+// `matches.match_setup` is a bare jsonb column with no DB-level schema —
+// two very different producers write into it:
+//   1. The org dashboard's "standalone friendly match" flow
+//      (createFriendlyMatch in lib/organization/organization.ts), which
+//      writes { team1, team2, round, venue, squads, ... }.
+//   2. This overlay admin flow, which reads/writes the real MatchSetup
+//      shape: { teamA, teamB, tossWinner, tournamentName, ... }.
+// A friendly match's `id` doubles as its `auction_id` (see
+// createFriendlyMatch), so visiting /overlay/{friendlyMatchId} resolves
+// straight to that row via getOrCreateMatch — but its match_setup is
+// still team1/team2-shaped at that point. Without normalizing here,
+// every consumer of MatchRow (OverlayAdminPage first among them) would
+// read `matchSetup.teamA.name` off an object that only has `team1`, and
+// crash. This function detects that shape and maps it onto MatchSetup;
+// anything already overlay-shaped is merged over the empty defaults so
+// no nested field is ever undefined.
+function isFriendlyMatchShape(raw: unknown): raw is Record<string, any> {
+  return (
+    !!raw &&
+    typeof raw === "object" &&
+    ("team1" in (raw as object) || "team2" in (raw as object)) &&
+    !("teamA" in (raw as object))
+  );
+}
+
+export function normalizeMatchSetup(raw: unknown): MatchSetup {
+  if (isFriendlyMatchShape(raw)) {
+    const r = raw as Record<string, any>;
+    return {
+      ...EMPTY_MATCH_SETUP,
+      venue: typeof r.venue === "string" ? r.venue : "",
+      matchTitle: typeof r.round === "string" ? r.round : "",
+      teamA: {
+        ...emptyOverlayTeam(),
+        name: r.team1?.name ?? "",
+        shortCode: r.team1?.short ?? "",
+      },
+      teamB: {
+        ...emptyOverlayTeam(),
+        name: r.team2?.name ?? "",
+        shortCode: r.team2?.short ?? "",
+      },
+    };
+  }
+
+  if (!raw || typeof raw !== "object") return EMPTY_MATCH_SETUP;
+
+  const r = raw as Record<string, any>;
+  return {
+    ...EMPTY_MATCH_SETUP,
+    ...r,
+    teamA: { ...emptyOverlayTeam(), ...(r.teamA ?? {}) },
+    teamB: { ...emptyOverlayTeam(), ...(r.teamB ?? {}) },
+  };
+}
+
 export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | null> {
   const { data: existing, error: selectErr } = await supabase
     .from("matches")
@@ -166,7 +252,9 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     logDbError("getOrCreateMatch select", selectErr);
     return null;
   }
-  if (existing) return existing as MatchRow;
+  if (existing) {
+    return { ...existing, match_setup: normalizeMatchSetup(existing.match_setup) } as MatchRow;
+  }
 
   const { data: created, error: insertErr } = await supabase
     .from("matches")
@@ -178,28 +266,8 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     logDbError("getOrCreateMatch insert", insertErr);
     return null;
   }
-  return created as MatchRow;
+  return { ...created, match_setup: normalizeMatchSetup(created.match_setup) } as MatchRow;
 }
-
-// Mirrors emptyMatchSetup in page.tsx — duplicated here (not imported)
-// because page.tsx's version isn't exported. Only used as the seed row
-// for a brand-new auctionId; every subsequent read returns the real data.
-const EMPTY_MATCH_SETUP: MatchSetup = {
-  tournamentName: "",
-  season: "",
-  tournamentLogoUrl: "",
-  venue: "",
-  format: "T20",
-  matchNumber: "",
-  matchTitle: "",
-  teamA: { name: "", shortCode: "", color: "#c9971f", logoUrl: "", squad: [], squadPlayers: [] },
-  kickoffTime: "",
-  teamB: { name: "", shortCode: "", color: "#c9971f", logoUrl: "", squad: [], squadPlayers: [] },
-  matchMeta: "",
-  tournament: "",
-  tossWinner: "",
-  tossDecision: "",
-};
 
 export async function saveMatchSetup(
   auctionId: string,

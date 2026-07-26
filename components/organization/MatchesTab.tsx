@@ -8,7 +8,6 @@ import {
   Trash2,
   Pencil,
   Loader2,
-  CheckCircle2,
   AlertCircle,
   Gamepad2,
   Shield,
@@ -29,9 +28,6 @@ import {
   createAuction,
   getTeamsForAuction,
   getTeamPool,
-  getOverlayConfig,
-  saveOverlayChannels,
-  saveOverlayWeatherCoords,
   subscribeToOrgMatches,
   unsubscribe,
   type OrgSummary,
@@ -39,7 +35,6 @@ import {
   type AuctionOption,
   type AuctionTeamOption,
   type PoolTeam,
-  type OverlayConfig,
 } from "@/lib/organization/organization"
 
 // "pool" = pick two teams that already exist in the org's Team Pool.
@@ -92,21 +87,9 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
 /*  realtime sync with admin panels                                    */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function MatchesTab({
-  org,
-  userId,
-  overlayMatchId,
-  onOpenOverlay,
-  onCloseOverlay,
-}: {
-  org: OrgSummary
-  userId: string
-  overlayMatchId: string | null
-  onOpenOverlay: (id: string) => void
-  onCloseOverlay: () => void
-}) {
+export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const router = useRouter()
-  const { confirm, confirmAndRun, ConfirmDialogElement } = useConfirmDialog()
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
   const [auctions, setAuctions] = useState<AuctionOption[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -240,8 +223,12 @@ export function MatchesTab({
       setCreateError("Couldn't create the match — please try again.")
       return
     }
-    // After creating a match, redirect to overlay creation with match ID pre-populated
-    router.push(`/overlay?matchId=${id}`)
+    // After creating a match, redirect to the overlay admin panel with the
+    // new match's id pre-populated. This route is /overlay/[auctionId]/admin
+    // — a friendly match's own id doubles as its auction_id (see
+    // createFriendlyMatch in organization.ts), so `id` here is exactly what
+    // that route expects.
+    router.push(`/match/${id}/edit`)
   }
 
   const handleCreateAuction = async () => {
@@ -533,11 +520,6 @@ export function MatchesTab({
           </div>
         )}
 
-        <div className="mb-4">
-          <FieldLabel>Round / Label (optional)</FieldLabel>
-          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Friendly match" className="bg-black/50 border-gold/30 text-white sm:w-80" />
-        </div>
-
         {createError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
             <AlertCircle className="h-4 w-4" /> {createError}
@@ -643,7 +625,7 @@ export function MatchesTab({
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <button
-                    onClick={() => onOpenOverlay(m.id)}
+                    onClick={() => router.push(`/overlay/${m.id}/admin`)}
                     title="Set up overlay"
                     className="text-gray-500 hover:text-gold transition-colors"
                   >
@@ -673,149 +655,7 @@ export function MatchesTab({
         )}
       </Panel>
 
-      {overlayMatchId && (
-        <OverlayModal matchId={overlayMatchId} onClose={onCloseOverlay} />
-      )}
-
       {ConfirmDialogElement}
-    </div>
-  )
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/*  OVERLAY MODAL — scoped to one match, opened from its row           */
-/* ────────────────────────────────────────────────────────────────── */
-
-function OverlayModal({ matchId, onClose }: { matchId: string; onClose: () => void }) {
-  const [config, setConfig] = useState<OverlayConfig | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  const [channelLabel, setChannelLabel] = useState("")
-  const [channelUrl, setChannelUrl] = useState("")
-  const [lat, setLat] = useState("")
-  const [lng, setLng] = useState("")
-  const [savingChannels, setSavingChannels] = useState(false)
-  const [savingWeather, setSavingWeather] = useState(false)
-  const [saveMsg, setSaveMsg] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    getOverlayConfig(matchId).then((c) => {
-      setConfig(c)
-      setLat(c.weatherLat?.toString() ?? "")
-      setLng(c.weatherLng?.toString() ?? "")
-      setLoading(false)
-    })
-  }, [matchId])
-
-  const addChannel = async () => {
-    if (!config || !channelLabel.trim() || !channelUrl.trim()) return
-    const updated = [...config.channels, { label: channelLabel.trim(), url: channelUrl.trim() }]
-    setSavingChannels(true)
-    const ok = await saveOverlayChannels(matchId, updated)
-    setSavingChannels(false)
-    if (ok) {
-      setConfig({ ...config, channels: updated })
-      setChannelLabel("")
-      setChannelUrl("")
-      setSaveMsg("Channels saved.")
-      setTimeout(() => setSaveMsg(null), 2000)
-    }
-  }
-
-  const removeChannel = async (index: number) => {
-    if (!config) return
-    const updated = config.channels.filter((_, i) => i !== index)
-    setSavingChannels(true)
-    const ok = await saveOverlayChannels(matchId, updated)
-    setSavingChannels(false)
-    if (ok) setConfig({ ...config, channels: updated })
-  }
-
-  const saveWeather = async () => {
-    const latNum = parseFloat(lat)
-    const lngNum = parseFloat(lng)
-    if (Number.isNaN(latNum) || Number.isNaN(lngNum)) return
-    setSavingWeather(true)
-    const ok = await saveOverlayWeatherCoords(matchId, latNum, lngNum)
-    setSavingWeather(false)
-    if (ok) {
-      setSaveMsg("Weather location saved.")
-      setTimeout(() => setSaveMsg(null), 2000)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
-      <div
-        className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-lg w-full shadow-2xl max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
-          <Radio className="h-4 w-4 text-gold" /> Overlay setup
-        </h3>
-        <p className="text-gray-400 text-sm mb-4">Channels and the weather location for this match's broadcast overlay.</p>
-
-        {loading || !config ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2 mb-4">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading overlay config…
-          </p>
-        ) : (
-          <>
-            <h4 className="text-white font-bold font-cinzel mb-3 text-xs uppercase tracking-widest">On-Air Channels</h4>
-            <div className="space-y-2 mb-4">
-              {config.channels.length === 0 && (
-                <p className="text-gray-500 text-sm italic">No channels linked yet.</p>
-              )}
-              {config.channels.map((c, i) => (
-                <div key={i} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-semibold">{c.label}</p>
-                    <p className="text-gray-500 text-xs truncate">{c.url}</p>
-                  </div>
-                  <button onClick={() => removeChannel(i)} className="text-gray-500 hover:text-red-400 shrink-0">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 mb-6">
-              <Input value={channelLabel} onChange={(e) => setChannelLabel(e.target.value)} placeholder="Channel name" className="bg-black/50 border-gold/30 text-white sm:w-40" />
-              <Input value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)} placeholder="Stream URL" className="bg-black/50 border-gold/30 text-white flex-1" />
-              <Button onClick={addChannel} disabled={!channelLabel.trim() || !channelUrl.trim() || savingChannels} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap">
-                <Plus className="mr-1.5 h-4 w-4" /> Add
-              </Button>
-            </div>
-
-            <h4 className="text-white font-bold font-cinzel mb-3 text-xs uppercase tracking-widest">Weather Location</h4>
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <FieldLabel>Latitude</FieldLabel>
-                <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="6.9271" className="bg-black/50 border-gold/30 text-white" />
-              </div>
-              <div>
-                <FieldLabel>Longitude</FieldLabel>
-                <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="79.8612" className="bg-black/50 border-gold/30 text-white" />
-              </div>
-            </div>
-            <Button onClick={saveWeather} disabled={!lat.trim() || !lng.trim() || savingWeather} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
-              {savingWeather ? "Saving…" : "Save Location"}
-            </Button>
-
-            {saveMsg && (
-              <p className="flex items-center gap-1.5 text-green-400 text-sm mt-4">
-                <CheckCircle2 className="h-4 w-4" /> {saveMsg}
-              </p>
-            )}
-          </>
-        )}
-
-        <div className="flex justify-end mt-6">
-          <Button onClick={onClose} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20">
-            Done
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }

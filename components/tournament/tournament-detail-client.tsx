@@ -321,13 +321,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* SQUADS */}
-                {hasSquads && (
-                  <TabsContent value="squads" className="mt-0">
-                    <SquadsPanel squads={tournament.squads!} />
-                  </TabsContent>
-                )}
-
-                {/* SQUADS */}
                 <TabsContent value="squads" className="mt-0">
                   {hasSquads ? (
                     <SquadsPanel squads={tournament.squads!} />

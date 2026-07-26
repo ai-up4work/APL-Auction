@@ -44,8 +44,6 @@ export default function OrganizationClient() {
   const [org, setOrg] = useState<OrgSummary | null>(null)
   const [tab, setTab] = useState<Tab>("overview")
 
-  const [overlayMatchId, setOverlayMatchId] = useState<string | null>(null)
-
   useEffect(() => {
     if (authLoading) return
     if (!user) {
@@ -135,15 +133,7 @@ export default function OrganizationClient() {
                   />
                 </div>
               )}
-              {tab === "matches" && (
-                <MatchesTab
-                  org={org}
-                  userId={user!.id}
-                  overlayMatchId={overlayMatchId}
-                  onOpenOverlay={setOverlayMatchId}
-                  onCloseOverlay={() => setOverlayMatchId(null)}
-                />
-              )}
+              {tab === "matches" && <MatchesTab org={org} userId={user!.id} />}
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
               {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
