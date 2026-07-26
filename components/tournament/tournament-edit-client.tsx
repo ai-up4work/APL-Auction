@@ -672,7 +672,16 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 )}
               </div>
 
-              {/* BRACKET — generates bracket_matches from the linked auction's teams */}
+ 
+              <div id="teams" className="scroll-mt-28 mb-6">
+                <TeamsManager
+                  tournamentId={tournament.id}
+                  orgId={tournament.orgId!}
+                  tournamentName={tournament.name}
+                />
+              </div>
+
+                           {/* BRACKET — generates bracket_matches from the linked auction's teams */}
               <div id="bracket" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
                 <SectionHeading icon={Swords} title="Bracket" />
 
@@ -750,13 +759,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 )}
               </div>
 
-              <div id="teams" className="scroll-mt-28 mb-6">
-                <TeamsManager
-                  tournamentId={tournament.id}
-                  orgId={tournament.orgId!}
-                  tournamentName={tournament.name}
-                />
-              </div>
 
               {/* MATCHES / SCHEDULE — bracket_matches fixtures each get a
                   "Create Match" action that inserts into `matches` and links

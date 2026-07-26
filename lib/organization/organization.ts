@@ -431,28 +431,45 @@ export async function createFriendlyMatch(
   return data.id;
 }
 
-export async function deleteFriendlyMatch(matchId: string): Promise<boolean> {
+/** Friendly wrapper around a Postgres FK-violation (23503) so the caller
+ *  can show something more useful than "please try again" when a match
+ *  still has live-play data (balls, match_state, engine_state, etc.) or is
+ *  still linked from a bracket. */
+export async function deleteFriendlyMatch(matchId: string): Promise<UpdateOrgResult> {
   const { error } = await supabase.from("matches").delete().eq("id", matchId);
   if (error) {
     console.error("deleteFriendlyMatch failed:", error.message);
-    return false;
+    if (error.code === "23503") {
+      return {
+        ok: false,
+        error:
+          "This match still has recorded play data or a bracket link and can't be deleted yet. Disconnect it from its bracket slot first, or contact support if it has live scoring data.",
+      };
+    }
+    return { ok: false, error: "Couldn't delete that match — please try again." };
   }
-  return true;
+  return { ok: true };
 }
 
 /** Bulk delete for the Matches tab's multi-select. Callers should filter
  *  out tournament-linked matches before calling this (same rule as the
- *  single-match delete: disconnect from the bracket first). Returns which
- *  ids succeeded so the UI can drop only those from local state and report
- *  the rest as failures. */
-export async function deleteFriendlyMatches(matchIds: string[]): Promise<{ okIds: string[]; failedIds: string[] }> {
-  if (matchIds.length === 0) return { okIds: [], failedIds: [] };
-  const { error } = await supabase.from("matches").delete().in("id", matchIds);
-  if (error) {
-    console.error("deleteFriendlyMatches failed:", error.message);
-    return { okIds: [], failedIds: matchIds };
+ *  single-match delete: disconnect from the bracket first).
+ *
+ *  Deletes one row at a time (rather than a single `.in()` call) so that
+ *  one match with FK-blocking play data doesn't cause the entire batch to
+ *  fail — the UI can drop only the ids that actually succeeded and report
+ *  the rest, with reasons, as failures. */
+export async function deleteFriendlyMatches(
+  matchIds: string[]
+): Promise<{ okIds: string[]; failed: { id: string; error: string }[] }> {
+  const okIds: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+  for (const id of matchIds) {
+    const result = await deleteFriendlyMatch(id);
+    if (result.ok) okIds.push(id);
+    else failed.push({ id, error: result.error ?? "Couldn't delete that match." });
   }
-  return { okIds: matchIds, failedIds: [] };
+  return { okIds, failed };
 }
 
 function shortCode(name: string): string {
@@ -473,6 +490,13 @@ function shortCode(name: string): string {
 /*  without a manual refresh. Each subscribe function returns the raw    */
 /*  Supabase channel — callers are responsible for calling               */
 /*  supabase.removeChannel(channel) on unmount.                          */
+/*                                                                       */
+/*  NOTE: bracket_matches / on_air_channels / weather_readings have no   */
+/*  org_id column, so these subscriptions can't be filtered server-side  */
+/*  by org today — every org's dashboard will refetch on any org's       */
+/*  change to those tables. Fine at small scale; worth adding an org_id  */
+/*  column (denormalized via the parent match/tournament) if this ever   */
+/*  shows up as real traffic.                                            */
 /* ────────────────────────────────────────────────────────────────── */
 
 /** Fires `onChange` any time a matches row for this org is inserted,
@@ -688,6 +712,137 @@ export async function assignBankPlayerToTeam(
   });
   if (logErr) {
     console.error("assignBankPlayerToTeam(log) failed:", logErr.message);
+  }
+
+  return { ok: true };
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  TEAM POOL                                                          */
+/*                                                                       */
+/*  Org-scoped, reusable team templates — the team equivalent of the    */
+/*  Player Bank above. A pool entry is not itself a playable team; it's */
+/*  "assigned" into a specific auction, which copies it into a real     */
+/*  `teams` row (mirrors how a bank player is copied into `players`).   */
+/* ────────────────────────────────────────────────────────────────── */
+
+export interface PoolTeam {
+  id: string;
+  name: string;
+  code: string;
+  owner: string;
+  color: string;
+  logo: string;
+  tier: string;
+  notes: string | null;
+}
+
+export interface PoolTeamInput {
+  name: string;
+  code: string;
+  owner?: string;
+  color?: string;
+  logo?: string;
+  tier?: PoolTeam["tier"];
+  notes?: string;
+}
+
+export async function getTeamPool(orgId: string): Promise<PoolTeam[]> {
+  const { data, error } = await supabase
+    .from("team_pool")
+    .select("id, name, code, owner, color, logo, tier, notes")
+    .eq("org_id", orgId)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("getTeamPool failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function addPoolTeam(orgId: string, userId: string, input: PoolTeamInput): Promise<PoolTeam | null> {
+  const { data, error } = await supabase
+    .from("team_pool")
+    .insert({
+      org_id: orgId,
+      created_by: userId,
+      name: input.name,
+      code: input.code,
+      owner: input.owner ?? "",
+      color: input.color ?? "#e45d35",
+      logo: input.logo ?? "",
+      tier: input.tier ?? "Pro",
+      notes: input.notes ?? null,
+    })
+    .select("id, name, code, owner, color, logo, tier, notes")
+    .single();
+
+  if (error || !data) {
+    console.error("addPoolTeam failed:", error?.message);
+    return null;
+  }
+  return data;
+}
+
+export async function updatePoolTeam(poolTeamId: string, patch: Partial<PoolTeamInput>): Promise<boolean> {
+  const { error } = await supabase.from("team_pool").update(patch).eq("id", poolTeamId);
+  if (error) {
+    console.error("updatePoolTeam failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function deletePoolTeam(poolTeamId: string): Promise<boolean> {
+  const { error } = await supabase.from("team_pool").delete().eq("id", poolTeamId);
+  if (error) {
+    console.error("deletePoolTeam failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+/* ── Assignment: pool team -> a real auction's team list ── */
+
+/** Auctions in the org that a pool team can be dropped into. Reuses
+ *  getAuctionsForOrg's shape; "completed" auctions are excluded since
+ *  adding a team there wouldn't do anything useful. */
+export async function getAssignableAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
+  const auctions = await getAuctionsForOrg(orgId);
+  return auctions.filter((a) => a.status !== "completed");
+}
+
+export async function assignPoolTeamToAuction(poolTeam: PoolTeam, auction: AuctionSummary): Promise<AssignResult> {
+  const { data: inserted, error } = await supabase
+    .from("teams")
+    .insert({
+      auction_id: auction.id,
+      name: poolTeam.name,
+      code: poolTeam.code,
+      owner: poolTeam.owner || "TBD",
+      color: poolTeam.color || "#e45d35",
+      logo: poolTeam.logo || "",
+      tier: poolTeam.tier || "Pro",
+    })
+    .select("id")
+    .single();
+
+  if (error || !inserted) {
+    console.error("assignPoolTeamToAuction(insert team) failed:", error?.message);
+    if (error?.code === "23505") {
+      return { ok: false, error: "That team code is already used in this auction — try a different code." };
+    }
+    return { ok: false, error: "Couldn't add this team to the auction — please try again." };
+  }
+
+  const { error: logErr } = await supabase.from("team_pool_assignments").insert({
+    pool_team_id: poolTeam.id,
+    teams_row_id: inserted.id,
+    auction_id: auction.id,
+  });
+  if (logErr) {
+    console.error("assignPoolTeamToAuction(log) failed:", logErr.message);
   }
 
   return { ok: true };

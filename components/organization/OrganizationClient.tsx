@@ -23,13 +23,16 @@ import {
   Search,
   CheckSquare,
   Square,
+  Shield,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { SiteHeader } from "@/components/landing/site-header"
+import { AppHeader } from "@/components/app-header"
+import { OverviewTab } from "@/components/organization/OverviewTab"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   getOrgForUser,
   getTournamentsForOrg,
@@ -46,6 +49,11 @@ import {
   deleteBankPlayer,
   getAssignableTeamsForOrg,
   assignBankPlayerToTeam,
+  getTeamPool,
+  addPoolTeam,
+  deletePoolTeam,
+  getAssignableAuctionsForOrg,
+  assignPoolTeamToAuction,
   getOverlayConfig,
   saveOverlayChannels,
   saveOverlayWeatherCoords,
@@ -59,13 +67,15 @@ import {
   type TournamentSummary,
   type FriendlyMatchSummary,
   type BankPlayer,
+  type PoolTeam,
   type AssignableTeam,
   type OverlayConfig,
   type AuctionOption,
+  type AuctionSummary,
   type AuctionTeamOption,
 } from "@/lib/organization/organization"
 
-type Tab = "overview" | "matches" | "tournaments" | "playerBank"
+type Tab = "overview" | "matches" | "tournaments" | "teamPool" | "playerBank"
 type GateState = "checking" | "denied" | "allowed"
 type TeamSource = "manual" | "auction"
 
@@ -73,10 +83,12 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
   { key: "overview", label: "Overview", icon: Building2 },
   { key: "matches", label: "Matches", icon: Swords },
   { key: "tournaments", label: "Tournaments", icon: Trophy },
+  { key: "teamPool", label: "Team Pool", icon: Shield },
   { key: "playerBank", label: "Player Bank", icon: Users },
 ]
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
+const TIER_OPTIONS = ["A", "B", "C", "Pro", "Elite", "Legend"]
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -129,21 +141,11 @@ export default function OrganizationClient() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
 
-  const [isNavOpen, setIsNavOpen] = useState(false)
   const [gate, setGate] = useState<GateState>("checking")
   const [org, setOrg] = useState<OrgSummary | null>(null)
   const [tab, setTab] = useState<Tab>("overview")
 
   const [overlayMatchId, setOverlayMatchId] = useState<string | null>(null)
-
-  const handleNavigation = (path: string) => {
-    router.push(path)
-    window.scrollTo(0, 0)
-  }
-  const scrollToSection = (sectionId: string) => {
-    router.push(`/#${sectionId}`)
-    setIsNavOpen(false)
-  }
 
   useEffect(() => {
     if (authLoading) return
@@ -175,17 +177,11 @@ export default function OrganizationClient() {
         }}
       />
 
-      <SiteHeader
-        activeSection="tournament"
-        isNavOpen={isNavOpen}
-        setIsNavOpen={setIsNavOpen}
-        scrollToSection={scrollToSection}
-        handleNavigation={handleNavigation}
-      />
+      <AppHeader title="Organization" />
 
-      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-28 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 max-w-5xl">
+        <div className="container mx-auto px-4 relative z-10 max-w-7xl">
           {gate === "checking" && <p className="text-center text-gray-400">Checking access…</p>}
 
           {gate === "denied" && (
@@ -224,7 +220,22 @@ export default function OrganizationClient() {
                 ))}
               </nav>
 
-              {tab === "overview" && <OverviewTab org={org} onJump={setTab} />}
+              {tab === "overview" && (
+                <div>
+                  <OverviewTab
+                    org={org}
+                    onSelectPath={(path) => {
+                      if (path === "auction") {
+                        setTab("tournaments")
+                      } else if (path === "manual") {
+                        setTab("tournaments")
+                      } else {
+                        setTab("matches")
+                      }
+                    }}
+                  />
+                </div>
+              )}
               {tab === "matches" && (
                 <MatchesTab
                   org={org}
@@ -235,76 +246,13 @@ export default function OrganizationClient() {
                 />
               )}
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
+              {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
             </>
           )}
         </div>
       </section>
     </main>
-  )
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/*  OVERVIEW                                                           */
-/* ────────────────────────────────────────────────────────────────── */
-
-function OverviewTab({ org, onJump }: { org: OrgSummary; onJump: (t: Tab) => void }) {
-  return (
-    <div className="space-y-6">
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Overview</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Organization</p>
-            <p className="text-white text-sm mt-1">{org.name}</p>
-          </div>
-          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Slug</p>
-            <p className="text-white text-sm mt-1 font-mono">{org.slug}</p>
-          </div>
-          <div className="bg-white/[0.02] border border-gold/10 rounded-md p-4">
-            <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">Plan</p>
-            <p className="text-white text-sm mt-1 capitalize">{org.plan}</p>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Where things live</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            onClick={() => onJump("matches")}
-            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
-          >
-            <Swords className="h-4 w-4 text-gold mb-2" />
-            <p className="text-white text-sm font-semibold">Matches</p>
-            <p className="text-gray-500 text-xs mt-1">
-              Create a standalone match, choose manual or auction-linked teams, and optionally set up an overlay.
-            </p>
-          </button>
-          <button
-            onClick={() => onJump("tournaments")}
-            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
-          >
-            <Trophy className="h-4 w-4 text-gold mb-2" />
-            <p className="text-white text-sm font-semibold">Tournaments</p>
-            <p className="text-gray-500 text-xs mt-1">
-              Create a tournament, then build its bracket — that's where a bracket slot gets connected to a match.
-            </p>
-          </button>
-          <button
-            onClick={() => onJump("playerBank")}
-            className="text-left bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md p-4 transition-colors"
-          >
-            <Users className="h-4 w-4 text-gold mb-2" />
-            <p className="text-white text-sm font-semibold">Player Bank</p>
-            <p className="text-gray-500 text-xs mt-1">
-              A reusable pool of players you can assign onto any team, in any match or tournament.
-            </p>
-          </button>
-        </div>
-      </Panel>
-    </div>
   )
 }
 
@@ -327,6 +275,7 @@ function MatchesTab({
   onCloseOverlay: () => void
 }) {
   const router = useRouter()
+  const { confirm, confirmAndRun, ConfirmDialogElement } = useConfirmDialog()
   const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
   const [auctions, setAuctions] = useState<AuctionOption[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -422,7 +371,8 @@ function MatchesTab({
       setCreateError("Couldn't create the match — please try again.")
       return
     }
-    router.push(`/match/${id}/edit`)
+    // After creating a match, redirect to overlay creation with match ID pre-populated
+    router.push(`/overlay?matchId=${id}`)
   }
 
   const handleCreateAuction = async () => {
@@ -445,18 +395,29 @@ function MatchesTab({
 
   const handleDelete = async (match: FriendlyMatchSummary) => {
     if (match.tournamentName) {
-      alert(
-        `"${match.team1Name} vs ${match.team2Name}" is connected to the ${match.tournamentName} bracket. Disconnect it from the bracket on the tournament's edit page before deleting it here.`
-      )
+      await confirm({
+        title: "Can't delete this match",
+        description: `"${match.team1Name} vs ${match.team2Name}" is connected to the ${match.tournamentName} bracket. Disconnect it from the bracket on the tournament's edit page before deleting it here.`,
+        confirmText: "Got it",
+        cancelText: "Close",
+        tone: "default",
+      })
       return
     }
-    if (!confirm(`Delete the match "${match.team1Name} vs ${match.team2Name}"? This can't be undone.`)) return
+    const ok = await confirm({
+      title: "Delete this match?",
+      description: `"${match.team1Name} vs ${match.team2Name}" will be permanently deleted. This can't be undone.`,
+      confirmText: "Delete match",
+      tone: "danger",
+    })
+    if (!ok) return
+
     setDeletingId(match.id)
     setDeleteError(null)
-    const ok = await deleteFriendlyMatch(match.id)
+    const result = await deleteFriendlyMatch(match.id)
     setDeletingId(null)
-    if (!ok) {
-      setDeleteError("Couldn't delete that match — please try again.")
+    if (!result.ok) {
+      setDeleteError(result.error ?? "Couldn't delete that match — please try again.")
       return
     }
     setMatches((prev) => prev.filter((m) => m.id !== match.id))
@@ -503,15 +464,26 @@ function MatchesTab({
 
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
-    if (!confirm(`Delete ${selected.size} match${selected.size === 1 ? "" : "es"}? This can't be undone.`)) return
+    const ok = await confirm({
+      title: `Delete ${selected.size} match${selected.size === 1 ? "" : "es"}?`,
+      description: "This can't be undone. Matches with recorded play data or an active bracket link will be skipped.",
+      confirmText: `Delete ${selected.size}`,
+      tone: "danger",
+    })
+    if (!ok) return
+
     setBulkDeleting(true)
     setDeleteError(null)
-    const { okIds, failedIds } = await deleteFriendlyMatches(Array.from(selected))
+    const { okIds, failed } = await deleteFriendlyMatches(Array.from(selected))
     setBulkDeleting(false)
     setMatches((prev) => prev.filter((m) => !okIds.includes(m.id)))
     setSelected(new Set())
-    if (failedIds.length > 0) {
-      setDeleteError(`${failedIds.length} match${failedIds.length === 1 ? "" : "es"} couldn't be deleted — please try again.`)
+    if (failed.length > 0) {
+      setDeleteError(
+        `${failed.length} match${failed.length === 1 ? "" : "es"} couldn't be deleted: ${failed[0].error}${
+          failed.length > 1 ? ` (and ${failed.length - 1} more)` : ""
+        }`
+      )
     }
   }
 
@@ -613,7 +585,9 @@ function MatchesTab({
                   This auction doesn't have two teams yet.{" "}
                   <Link href="/auction/admin" className="text-gold underline hover:no-underline">
                     Set up teams in the auction admin panel →
-                  </Link>
+                  </Link>{" "}
+                  or add some from the{" "}
+                  <span className="text-gold">Team Pool</span> tab.
                 </p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -797,6 +771,8 @@ function MatchesTab({
       {overlayMatchId && (
         <OverlayModal matchId={overlayMatchId} onClose={onCloseOverlay} />
       )}
+
+      {ConfirmDialogElement}
     </div>
   )
 }
@@ -945,6 +921,7 @@ function OverlayModal({ matchId, onClose }: { matchId: string; onClose: () => vo
 
 function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const router = useRouter()
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([])
   const [loaded, setLoaded] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -1004,13 +981,14 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
   }
 
   const handleDelete = async (t: TournamentSummary) => {
-    if (
-      !confirm(
-        `Delete the tournament "${t.name}"? This can't be undone, and will fail if it still has auctions, teams, or bracket matches attached.`
-      )
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: "Delete this tournament?",
+      description: `"${t.name}" will be permanently deleted. This fails if it still has auctions, teams, or bracket matches attached.`,
+      confirmText: "Delete tournament",
+      tone: "danger",
+    })
+    if (!ok) return
+
     setDeletingId(t.id)
     setDeleteError(null)
     const result = await deleteTournament(t.id)
@@ -1056,12 +1034,14 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
 
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
-    if (
-      !confirm(
-        `Delete ${selected.size} tournament${selected.size === 1 ? "" : "s"}? This can't be undone, and will skip any that still have auctions, teams, or matches attached.`
-      )
-    )
-      return
+    const ok = await confirm({
+      title: `Delete ${selected.size} tournament${selected.size === 1 ? "" : "s"}?`,
+      description: "This can't be undone, and will skip any that still have auctions, teams, or matches attached.",
+      confirmText: `Delete ${selected.size}`,
+      tone: "danger",
+    })
+    if (!ok) return
+
     setBulkDeleting(true)
     setDeleteError(null)
     const { okIds, failedIds } = await deleteTournaments(Array.from(selected))
@@ -1229,15 +1209,269 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
           </div>
         )}
       </Panel>
+
+      {ConfirmDialogElement}
     </div>
   )
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  PLAYER BANK — unchanged                                             */
+/*  TEAM POOL — mirrors Player Bank: add reusable team templates,      */
+/*  assign one into a specific auction's team list                     */
+/* ────────────────────────────────────────────────────────────────── */
+
+function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }) {
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
+  const [teams, setTeams] = useState<PoolTeam[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  const [name, setName] = useState("")
+  const [code, setCode] = useState("")
+  const [owner, setOwner] = useState("")
+  const [tier, setTier] = useState<PoolTeam["tier"]>("Pro")
+  const [color, setColor] = useState("#e45d35")
+  const [isAdding, setIsAdding] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+
+  const [assignTarget, setAssignTarget] = useState<PoolTeam | null>(null)
+
+  const reload = () => getTeamPool(org.id).then((t) => setTeams(t))
+
+  useEffect(() => {
+    reload().then(() => setLoaded(true))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.id])
+
+  const handleAdd = async () => {
+    if (!name.trim() || !code.trim()) return
+    setIsAdding(true)
+    setAddError(null)
+    const team = await addPoolTeam(org.id, userId, { name: name.trim(), code: code.trim().toUpperCase(), owner, tier, color })
+    setIsAdding(false)
+    if (!team) {
+      setAddError("Couldn't add that team — please try again.")
+      return
+    }
+    setTeams((prev) => [...prev, team].sort((a, b) => a.name.localeCompare(b.name)))
+    setName("")
+    setCode("")
+    setOwner("")
+  }
+
+  const handleDelete = async (team: PoolTeam) => {
+    const ok = await confirm({
+      title: "Remove this team?",
+      description: `"${team.name}" will be removed from the team pool. This doesn't affect any auction it's already been assigned to.`,
+      confirmText: "Remove team",
+      tone: "danger",
+    })
+    if (!ok) return
+    const success = await deletePoolTeam(team.id)
+    if (success) setTeams((prev) => prev.filter((t) => t.id !== team.id))
+  }
+
+  return (
+    <div className="space-y-6">
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
+          <Shield className="h-4 w-4 text-gold" /> Add a Team to the Pool
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
+          <div className="sm:col-span-2">
+            <FieldLabel>Team Name</FieldLabel>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Emberfall Paladins" className="bg-black/50 border-gold/30 text-white" />
+          </div>
+          <div>
+            <FieldLabel>Code</FieldLabel>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="EFP" maxLength={4} className="bg-black/50 border-gold/30 text-white uppercase" />
+          </div>
+          <div>
+            <FieldLabel>Tier</FieldLabel>
+            <select value={tier} onChange={(e) => setTier(e.target.value as PoolTeam["tier"])} className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5">
+              {TIER_OPTIONS.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <FieldLabel>Owner (optional)</FieldLabel>
+            <Input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="e.g. Team owner name" className="bg-black/50 border-gold/30 text-white" />
+          </div>
+          <div>
+            <FieldLabel>Color</FieldLabel>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="h-10 w-14 rounded-md border border-gold/30 bg-black/50 cursor-pointer"
+              />
+              <Input value={color} onChange={(e) => setColor(e.target.value)} className="bg-black/50 border-gold/30 text-white flex-1" />
+            </div>
+          </div>
+        </div>
+        {addError && (
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
+            <AlertCircle className="h-4 w-4" /> {addError}
+          </p>
+        )}
+        <Button onClick={handleAdd} disabled={!name.trim() || !code.trim() || isAdding} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
+          <Plus className="mr-2 h-4 w-4" />
+          {isAdding ? "Adding…" : "Add to Pool"}
+        </Button>
+      </Panel>
+
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Team Pool</h2>
+        <p className="text-gray-500 text-xs mb-4">
+          Add your teams once and reuse them across auctions — assigning a pool team copies it into that auction's
+          team list, the same way an assigned bank player is copied onto a roster.
+        </p>
+        {!loaded ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        ) : teams.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No teams in the pool yet — add one above.</p>
+        ) : (
+          <div className="space-y-2">
+            {teams.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10"
+                    style={{ backgroundColor: t.color || "#e45d35" }}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-semibold truncate">{t.name}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                      {t.code} · {t.tier}
+                      {t.owner ? ` · ${t.owner}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setAssignTarget(t)}
+                    className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gold border border-gold/30 hover:bg-gold/10 rounded-md px-3 py-1.5"
+                  >
+                    <Link2 className="h-3 w-3" /> Assign
+                  </button>
+                  <button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-400 p-1.5">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {assignTarget && (
+        <AssignTeamModal org={org} poolTeam={assignTarget} onClose={() => setAssignTarget(null)} />
+      )}
+
+      {ConfirmDialogElement}
+    </div>
+  )
+}
+
+function AssignTeamModal({ org, poolTeam, onClose }: { org: OrgSummary; poolTeam: PoolTeam; onClose: () => void }) {
+  const [auctions, setAuctions] = useState<AuctionSummary[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [selectedAuctionId, setSelectedAuctionId] = useState("")
+  const [isAssigning, setIsAssigning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
+
+  useEffect(() => {
+    getAssignableAuctionsForOrg(org.id).then((a) => {
+      setAuctions(a)
+      setLoaded(true)
+    })
+  }, [org.id])
+
+  const handleAssign = async () => {
+    const auction = auctions.find((a) => a.id === selectedAuctionId)
+    if (!auction) return
+    setIsAssigning(true)
+    setError(null)
+    const result = await assignPoolTeamToAuction(poolTeam, auction)
+    setIsAssigning(false)
+    if (!result.ok) {
+      setError(result.error ?? "Couldn't assign this team.")
+      return
+    }
+    setSuccess(true)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
+      <div className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-white font-cinzel mb-1">Assign {poolTeam.name}</h3>
+        <p className="text-gray-400 text-sm mb-4">Copies this team into an auction's team list. The pool entry stays untouched.</p>
+
+        {success ? (
+          <div className="flex items-center gap-2 text-green-400 text-sm mb-4">
+            <CheckCircle2 className="h-4 w-4" /> Assigned successfully.
+          </div>
+        ) : !loaded ? (
+          <p className="text-gray-500 text-sm mb-4 flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading auctions…
+          </p>
+        ) : auctions.length === 0 ? (
+          <p className="text-gray-500 text-sm mb-4">No auctions found yet — create one from the Matches or Tournaments tab first.</p>
+        ) : (
+          <>
+            <FieldLabel>Auction</FieldLabel>
+            <select
+              value={selectedAuctionId}
+              onChange={(e) => setSelectedAuctionId(e.target.value)}
+              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 mb-4"
+            >
+              <option value="">Select an auction…</option>
+              {auctions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}{a.tournamentName ? ` — ${a.tournamentName}` : ""}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {error && (
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <Button onClick={onClose} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20">
+            {success ? "Close" : "Cancel"}
+          </Button>
+          {!success && (
+            <Button
+              onClick={handleAssign}
+              disabled={!selectedAuctionId || isAssigning}
+              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+            >
+              {isAssigning ? "Assigning…" : "Assign"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  PLAYER BANK                                                        */
 /* ────────────────────────────────────────────────────────────────── */
 
 function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const [players, setPlayers] = useState<BankPlayer[]>([])
   const [loaded, setLoaded] = useState(false)
 
@@ -1273,9 +1507,15 @@ function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
   }
 
   const handleDelete = async (player: BankPlayer) => {
-    if (!confirm(`Remove ${player.name} from the player bank? This doesn't affect any team they're already on.`)) return
-    const ok = await deleteBankPlayer(player.id)
-    if (ok) setPlayers((prev) => prev.filter((p) => p.id !== player.id))
+    const ok = await confirm({
+      title: "Remove this player?",
+      description: `${player.name} will be removed from the player bank. This doesn't affect any team they're already on.`,
+      confirmText: "Remove player",
+      tone: "danger",
+    })
+    if (!ok) return
+    const success = await deleteBankPlayer(player.id)
+    if (success) setPlayers((prev) => prev.filter((p) => p.id !== player.id))
   }
 
   return (
@@ -1359,6 +1599,8 @@ function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
       {assignTarget && (
         <AssignPlayerModal org={org} player={assignTarget} onClose={() => setAssignTarget(null)} />
       )}
+
+      {ConfirmDialogElement}
     </div>
   )
 }
