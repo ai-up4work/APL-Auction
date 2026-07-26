@@ -1079,20 +1079,6 @@ function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
             </select>
           </div>
         </div>
-        <div className="mb-4">
-          <FieldLabel>Category (optional)</FieldLabel>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
-          >
-            <option value="">Not set</option>
-            <option value="Auction">Auction</option>
-            <option value="Bracket">Bracket</option>
-            <option value="Overlay">Overlay</option>
-            <option value="League">League</option>
-          </select>
-        </div>
         {createError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
             <AlertCircle className="h-4 w-4" /> {createError}
@@ -1544,10 +1530,6 @@ function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
               <option value="Overseas">Overseas</option>
             </select>
           </div>
-        </div>
-        <div className="mb-4">
-          <FieldLabel>Country (optional)</FieldLabel>
-          <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Sri Lanka" className="bg-black/50 border-gold/30 text-white sm:w-64" />
         </div>
         {addError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
