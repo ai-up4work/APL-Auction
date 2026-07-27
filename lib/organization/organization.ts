@@ -197,16 +197,24 @@ export interface AuctionSummary {
 
 export type AuctionOption = AuctionSummary;
 
-/** Real, user-facing auctions only. Rosters (see ROSTERS section below) are
- *  stored as auction rows with status="roster" purely so they can reuse the
- *  teams/players plumbing — they must never show up here, in the Matches
- *  tab's auction picker, or in the assignable-auctions list. */
+/** Real, user-facing auctions only. Squad Boards (see SQUAD BOARDS section
+ *  below) are stored as auction rows with `is_synthetic = true` purely so
+ *  they can reuse the teams/players plumbing — they must never show up
+ *  here, in the Matches tab's auction picker, or in the assignable-auctions
+ *  list.
+ *
+ *  NOTE: this filters on `is_synthetic`, not `status`. The `auctions.status`
+ *  column has a DB-level CHECK constraint that only allows
+ *  'setup' | 'live' | 'paused' | 'completed' — there is no synthetic-only
+ *  status value, so a Squad Board row's `status` is a normal, valid value
+ *  (defaults to 'setup'). `is_synthetic` is the actual real-vs-synthetic
+ *  marker. */
 export async function getAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
   const { data, error } = await supabase
     .from("auctions")
     .select("id, name, status, created_at, tournaments(name)")
     .eq("org_id", orgId)
-    .neq("status", "roster")
+    .eq("is_synthetic", false)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -240,6 +248,7 @@ export async function createAuction(
       created_by: userId,
       tournament_id: input.tournamentId ?? null,
       status: "setup",
+      is_synthetic: false,
     })
     .select("id")
     .single();
@@ -528,7 +537,7 @@ function shortCode(name: string): string {
 /*  org_id column, so these subscriptions can't be filtered server-side  */
 /*  by org today — every org's dashboard will refetch on any org's       */
 /*  change to those tables. Fine at small scale; worth adding an org_id  */
-/*  column (denormalized via the parent match/tournament) if this ever   */
+/*  column (denormalized via the parent match/tournament) if this ever  */
 /*  shows up as real traffic.                                            */
 /* ────────────────────────────────────────────────────────────────── */
 
@@ -724,9 +733,10 @@ export interface TeamRosterPlayer {
   isCaptain: boolean;
 }
 
-/** Roster for a single real team row, for display inside the Auctions tab.
- *  `isCaptain` is inferred the same way assignBankPlayerToTeam sets it: a
- *  non-null owner_team_code on the player row. */
+/** Roster (i.e. current player list) for a single real team row, for
+ *  display inside the Auctions tab / Squad Board team card. `isCaptain` is
+ *  inferred the same way assignBankPlayerToTeam sets it: a non-null
+ *  owner_team_code on the player row. */
 export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]> {
   const { data, error } = await supabase
     .from("players")
@@ -746,11 +756,49 @@ export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]>
   }));
 }
 
+/** Assigns a Player Bank player onto a team.
+ *
+ *  SCOPE RULE: a given bank player may be assigned to any number of teams
+ *  ACROSS different auctions / Squad Boards — that many-to-many spread is
+ *  intentional (mock drafts, planning across several boards, etc). What is
+ *  NOT allowed is the same bank player ending up on more than one team
+ *  WITHIN the same auction/Squad Board — that would mean one real person
+ *  playing for two teams in the same tournament/board, which doesn't make
+ *  sense. This is enforced here with a pre-insert lookup against
+ *  `player_bank_assignments` joined to `players.auction_id`, rather than a
+ *  DB constraint, since `player_bank_assignments` has no unique index today.
+ *  (If you want this enforced at the DB level too, add a partial unique
+ *  index on `players(auction_id, ...)` keyed to bank_player_id via a view,
+ *  or add a `bank_player_id` + `auction_id` composite unique constraint to
+ *  `player_bank_assignments` directly — happy to draft that migration.) */
 export async function assignBankPlayerToTeam(
   bankPlayer: BankPlayer,
   team: AssignableTeam,
   isCaptain: boolean
 ): Promise<AssignResult> {
+  // Guard: is this bank player already assigned to ANY team within this
+  // same auction/Squad Board? Different auctions/boards are always fine.
+  const { data: existingAssignments, error: existingErr } = await supabase
+    .from("player_bank_assignments")
+    .select("id, players_row_id, players!inner(auction_id, sold_to_team_id, name)")
+    .eq("bank_player_id", bankPlayer.id);
+
+  if (existingErr) {
+    console.error("assignBankPlayerToTeam(duplicate check) failed:", existingErr.message);
+    return { ok: false, error: "Couldn't verify this player's existing assignments — please try again." };
+  }
+
+  const alreadyOnThisBoard = (existingAssignments ?? []).some(
+    (row: any) => row.players?.auction_id === team.auctionId
+  );
+
+  if (alreadyOnThisBoard) {
+    return {
+      ok: false,
+      error: `${bankPlayer.name} is already assigned to a team on this board/auction — a player can't be on two teams in the same one.`,
+    };
+  }
+
   const { data: inserted, error } = await supabase
     .from("players")
     .insert({
@@ -880,8 +928,9 @@ export async function deletePoolTeam(poolTeamId: string): Promise<boolean> {
 /* ── Assignment: pool team -> a real auction's team list ── */
 
 /** Auctions in the org that a pool team can be dropped into. Reuses
- *  getAuctionsForOrg's shape; "completed" auctions are excluded since
- *  adding a team there wouldn't do anything useful. */
+ *  getAuctionsForOrg's shape (which already excludes synthetic Squad Board
+ *  rows); "completed" auctions are excluded since adding a team there
+ *  wouldn't do anything useful. */
 export async function getAssignableAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
   const auctions = await getAuctionsForOrg(orgId);
   return auctions.filter((a) => a.status !== "completed");
@@ -1010,98 +1059,119 @@ export async function saveOverlayWeatherCoords(matchId: string, lat: number, lng
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  ROSTERS                                                             */
+/*  SQUAD BOARDS  (formerly "Rosters")                                  */
 /*                                                                       */
-/*  A Roster is a named container for many-to-many player/team           */
-/*  assignments — the same Team Pool team can sit in several rosters,     */
-/*  and the same Player Bank player can be assigned onto several teams     */
-/*  (in the same roster or different ones). There's no dedicated schema   */
-/*  for this: a Roster IS an `auctions` row with status="roster" — a      */
-/*  synthetic auction that's never shown as a real auction (see the       */
-/*  status filter in getAuctionsForOrg above). This lets a roster reuse   */
-/*  the exact same `teams` / `players` tables and the exact same          */
-/*  assignBankPlayerToTeam / assignPoolTeamToAuction insert logic as a     */
-/*  real auction, with zero schema changes.                               */
+/*  A Squad Board is a named container for many-to-many player/team      */
+/*  assignments — the same Team Pool team can sit on several Squad         */
+/*  Boards, and the same Player Bank player can be assigned onto teams      */
+/*  on DIFFERENT Squad Boards (see the duplicate guard inside               */
+/*  assignBankPlayerToTeam above, which blocks it only WITHIN the same      */
+/*  board/auction). There's no dedicated schema for this: a Squad Board     */
+/*  IS an `auctions` row with `is_synthetic = true` — a synthetic auction   */
+/*  that's never shown as a real auction (see the `is_synthetic` filter     */
+/*  in getAuctionsForOrg above). This lets a Squad Board reuse the exact    */
+/*  same `teams` / `players` tables and the exact same                     */
+/*  assignBankPlayerToTeam / assignPoolTeamToAuction insert logic as a      */
+/*  real auction, with zero schema changes.                                */
+/*                                                                          */
+/*  IMPORTANT: `auctions.status` has a DB CHECK constraint that only        */
+/*  allows 'setup' | 'live' | 'paused' | 'completed'. Squad Board rows      */
+/*  must leave `status` at a normal value (default 'setup') and rely        */
+/*  solely on `is_synthetic` to distinguish themselves from real auctions.  */
+/*                                                                          */
+/*  ALSO IMPORTANT: `auctions.created_by` has a FOREIGN KEY to              */
+/*  `auth.users(id)`. Every create call below must be given the actual      */
+/*  signed-in user's id — passing an org id (or any other non-user id)      */
+/*  here will throw a 23503 foreign-key violation                           */
+/*  ("auctions_created_by_fkey").                                           */
 /* ────────────────────────────────────────────────────────────────── */
 
-export interface Roster {
+export interface SquadBoard {
   id: string;
   name: string;
   createdAt: string;
 }
 
-export async function getRostersForOrg(orgId: string): Promise<Roster[]> {
+export async function getSquadBoardsForOrg(orgId: string): Promise<SquadBoard[]> {
   const { data, error } = await supabase
     .from("auctions")
     .select("id, name, created_at")
     .eq("org_id", orgId)
-    .eq("status", "roster")
+    .eq("is_synthetic", true)
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("getRostersForOrg failed:", error.message);
+    console.error("getSquadBoardsForOrg failed:", error.message);
     return [];
   }
   return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
 }
 
-export async function createRoster(orgId: string, userId: string, name: string): Promise<string | null> {
+/** Creates a new Squad Board. `userId` MUST be a real `auth.users.id` (the
+ *  signed-in user), not the org id — `created_by` has a foreign key to
+ *  `auth.users`, so anything else throws a 23503. */
+export async function createSquadBoard(orgId: string, userId: string, name: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("auctions")
     .insert({
       org_id: orgId,
       name: name.trim(),
       created_by: userId,
-      status: "roster",
+      is_synthetic: true,
+      // status intentionally omitted — defaults to 'setup', a value the
+      // CHECK constraint actually allows.
     })
     .select("id")
     .single();
 
   if (error || !data) {
-    console.error("createRoster failed:", error?.message);
+    console.error("createSquadBoard failed:", error?.message);
     return null;
   }
   return data.id;
 }
 
 /** Same FK caveat as deleteAuction — fails if teams/players are still
- *  attached, which for a roster means "it still has teams or players in
- *  it," so the message is phrased for that case instead. */
-export async function deleteRoster(rosterId: string): Promise<UpdateOrgResult> {
-  const { error } = await supabase.from("auctions").delete().eq("id", rosterId);
+ *  attached, which for a Squad Board means "it still has teams or players
+ *  on it," so the message is phrased for that case instead. */
+export async function deleteSquadBoard(boardId: string): Promise<UpdateOrgResult> {
+  const { error } = await supabase.from("auctions").delete().eq("id", boardId);
   if (error) {
-    console.error("deleteRoster failed:", error.message);
+    console.error("deleteSquadBoard failed:", error.message);
     if (error.code === "23503") {
-      return { ok: false, error: "This roster still has teams or players in it and can't be deleted yet." };
+      return { ok: false, error: "This Squad Board still has teams or players on it and can't be deleted yet." };
     }
-    return { ok: false, error: "Couldn't delete that roster — please try again." };
+    return { ok: false, error: "Couldn't delete that Squad Board — please try again." };
   }
   return { ok: true };
 }
 
-/** Thin wrapper around assignPoolTeamToAuction so callers in the Roster UI
- *  don't need to hand-build an AuctionSummary — a Roster and an
- *  AuctionSummary share the one field (`id`) that insert actually uses. */
-export async function assignPoolTeamToRoster(poolTeam: PoolTeam, roster: Roster): Promise<AssignResult> {
+/** Thin wrapper around assignPoolTeamToAuction so callers in the Squad
+ *  Board UI don't need to hand-build an AuctionSummary — a SquadBoard and
+ *  an AuctionSummary share the one field (`id`) that insert actually uses.
+ *  `status: "setup"` here is just a display placeholder to satisfy the
+ *  AuctionSummary shape — assignPoolTeamToAuction never reads it, only
+ *  `.id`. */
+export async function assignPoolTeamToSquadBoard(poolTeam: PoolTeam, board: SquadBoard): Promise<AssignResult> {
   return assignPoolTeamToAuction(poolTeam, {
-    id: roster.id,
-    name: roster.name,
-    status: "roster",
+    id: board.id,
+    name: board.name,
+    status: "setup",
     tournamentName: null,
-    createdAt: roster.createdAt,
+    createdAt: board.createdAt,
   });
 }
 
-/** Thin wrapper around assignBankPlayerToTeam for a team that lives inside
- *  a specific roster — `team` here is one of the AuctionTeamOption rows
- *  returned by getTeamsForAuction(roster.id), which doesn't carry
+/** Thin wrapper around assignBankPlayerToTeam for a team that lives on a
+ *  specific Squad Board — `team` here is one of the AuctionTeamOption rows
+ *  returned by getTeamsForAuction(board.id), which doesn't carry
  *  auctionId/auctionName/tournamentName, so this fills those in from the
- *  roster itself before delegating to the same insert logic used
- *  everywhere else. */
-export async function assignBankPlayerToRosterTeam(
+ *  board itself before delegating to the same insert logic used
+ *  everywhere else (including the same-board duplicate-player guard). */
+export async function assignBankPlayerToSquadBoardTeam(
   bankPlayer: BankPlayer,
   team: AuctionTeamOption,
-  roster: Roster,
+  board: SquadBoard,
   isCaptain: boolean
 ): Promise<AssignResult> {
   return assignBankPlayerToTeam(
@@ -1110,8 +1180,8 @@ export async function assignBankPlayerToRosterTeam(
       teamId: team.id,
       teamName: team.name,
       teamCode: team.code,
-      auctionId: roster.id,
-      auctionName: roster.name,
+      auctionId: board.id,
+      auctionName: board.name,
       tournamentName: null,
     },
     isCaptain

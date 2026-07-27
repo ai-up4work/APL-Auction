@@ -19,17 +19,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
-  getRostersForOrg,
-  createRoster,
-  deleteRoster,
+  getSquadBoardsForOrg,
+  createSquadBoard,
+  deleteSquadBoard,
   getTeamPool,
-  assignPoolTeamToRoster,
+  assignPoolTeamToSquadBoard,
   getTeamsForAuction,
   getPlayerBank,
-  assignBankPlayerToRosterTeam,
+  assignBankPlayerToSquadBoardTeam,
   getTeamRoster,
   type OrgSummary,
-  type Roster,
+  type SquadBoard,
   type PoolTeam,
   type AuctionTeamOption,
   type BankPlayer,
@@ -47,28 +47,36 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  ROSTER — a named container backed by a synthetic auction. Lets you   */
-/*  assign the same Team Pool team into many rosters, and the same        */
-/*  Player Bank player onto many teams (same roster or different ones)    */
-/*  — a genuine many-to-many, since every assignment is a fresh insert    */
-/*  rather than a single-slot relationship.                              */
+/*  SQUAD BOARD — a named container backed by a synthetic auction. Lets   */
+/*  you assign the same Team Pool team into many Squad Boards, and the    */
+/*  same Player Bank player onto many teams (same board or different       */
+/*  ones) — a genuine many-to-many, since every assignment is a fresh      */
+/*  insert rather than a single-slot relationship.                        */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function RosterTab({ org }: { org: OrgSummary; userId: string }) {
-  const [selectedRoster, setSelectedRoster] = useState<Roster | null>(null)
+export function SquadBoardTab({ org, userId }: { org: OrgSummary; userId: string }) {
+  const [selectedBoard, setSelectedBoard] = useState<SquadBoard | null>(null)
 
-  if (selectedRoster) {
-    return <RosterDetail org={org} roster={selectedRoster} onBack={() => setSelectedRoster(null)} />
+  if (selectedBoard) {
+    return <SquadBoardDetail org={org} board={selectedBoard} onBack={() => setSelectedBoard(null)} />
   }
 
-  return <RosterListPanel org={org} onSelect={setSelectedRoster} />
+  return <SquadBoardListPanel org={org} userId={userId} onSelect={setSelectedBoard} />
 }
 
-/* ── Step 1: list / create rosters ── */
+/* ── Step 1: list / create Squad Boards ── */
 
-function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Roster) => void }) {
+function SquadBoardListPanel({
+  org,
+  userId,
+  onSelect,
+}: {
+  org: OrgSummary
+  userId: string
+  onSelect: (b: SquadBoard) => void
+}) {
   const { confirm, ConfirmDialogElement } = useConfirmDialog()
-  const [rosters, setRosters] = useState<Roster[]>([])
+  const [boards, setBoards] = useState<SquadBoard[]>([])
   const [loaded, setLoaded] = useState(false)
 
   const [name, setName] = useState("")
@@ -78,7 +86,7 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const reload = () => getRostersForOrg(org.id).then((r) => setRosters(r))
+  const reload = () => getSquadBoardsForOrg(org.id).then((b) => setBoards(b))
 
   useEffect(() => {
     reload().then(() => setLoaded(true))
@@ -89,45 +97,49 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
     if (!name.trim()) return
     setIsCreating(true)
     setCreateError(null)
-    const id = await createRoster(org.id, org.id, name.trim())
+    // NOTE: the second argument MUST be the signed-in user's id (userId),
+    // not org.id — auctions.created_by has a foreign key to auth.users,
+    // so passing org.id here throws a 23503 "auctions_created_by_fkey"
+    // violation.
+    const id = await createSquadBoard(org.id, userId, name.trim())
     setIsCreating(false)
     if (!id) {
-      setCreateError("Couldn't create the roster — please try again.")
+      setCreateError("Couldn't create the Squad Board — please try again.")
       return
     }
     setName("")
     await reload()
   }
 
-  const handleDelete = async (roster: Roster) => {
+  const handleDelete = async (board: SquadBoard) => {
     const ok = await confirm({
-      title: "Delete this roster?",
-      description: `"${roster.name}" will be permanently deleted. This fails if it still has teams or players assigned to it — remove those first.`,
-      confirmText: "Delete roster",
+      title: "Delete this Squad Board?",
+      description: `"${board.name}" will be permanently deleted. This fails if it still has teams or players on it — remove those first.`,
+      confirmText: "Delete Squad Board",
       tone: "danger",
     })
     if (!ok) return
 
-    setDeletingId(roster.id)
+    setDeletingId(board.id)
     setDeleteError(null)
-    const result = await deleteRoster(roster.id)
+    const result = await deleteSquadBoard(board.id)
     setDeletingId(null)
     if (!result.ok) {
-      setDeleteError(result.error ?? "Couldn't delete that roster — please try again.")
+      setDeleteError(result.error ?? "Couldn't delete that Squad Board — please try again.")
       return
     }
-    setRosters((prev) => prev.filter((r) => r.id !== roster.id))
+    setBoards((prev) => prev.filter((b) => b.id !== board.id))
   }
 
   return (
     <div className="space-y-6">
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
-          <Plus className="h-4 w-4 text-gold" /> Create a Roster
+          <Plus className="h-4 w-4 text-gold" /> Create a Squad Board
         </h2>
         <p className="text-gray-500 text-xs mb-4">
-          A roster is its own space for assigning teams and players — the same Team Pool team or Player Bank player
-          can be added to as many rosters (and as many teams within a roster) as you like.
+          A Squad Board is its own space for assigning teams and players — the same Team Pool team or Player Bank
+          player can be added to as many Squad Boards (and as many teams within a board) as you like.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input
@@ -142,7 +154,7 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
             className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
           >
             <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating…" : "Create Roster"}
+            {isCreating ? "Creating…" : "Create Squad Board"}
           </Button>
         </div>
         {createError && (
@@ -153,7 +165,7 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
       </Panel>
 
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Rosters</h2>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Squad Boards</h2>
         {deleteError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
             <AlertCircle className="h-4 w-4" /> {deleteError}
@@ -163,34 +175,34 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
-        ) : rosters.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No rosters yet — create one above.</p>
+        ) : boards.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No Squad Boards yet — create one above.</p>
         ) : (
           <div className="space-y-2">
-            {rosters.map((r) => (
+            {boards.map((b) => (
               <div
-                key={r.id}
+                key={b.id}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
               >
-                <button onClick={() => onSelect(r)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+                <button onClick={() => onSelect(b)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
                   <div className="bg-gold/20 p-2 rounded-lg shrink-0">
                     <Users className="h-4 w-4 text-gold" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-white text-sm font-semibold truncate">{r.name}</p>
+                    <p className="text-white text-sm font-semibold truncate">{b.name}</p>
                     <p className="text-gray-500 text-xs mt-0.5">Open to assign teams &amp; players</p>
                   </div>
                 </button>
                 <div className="flex items-center gap-3 shrink-0">
-                  <button onClick={() => onSelect(r)} className="text-gray-500 hover:text-gold transition-colors">
+                  <button onClick={() => onSelect(b)} className="text-gray-500 hover:text-gold transition-colors">
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                   <button
-                    onClick={() => handleDelete(r)}
-                    disabled={deletingId === r.id}
+                    onClick={() => handleDelete(b)}
+                    disabled={deletingId === b.id}
                     className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
                   >
-                    {deletingId === r.id ? (
+                    {deletingId === b.id ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="h-3.5 w-3.5" />
@@ -208,18 +220,18 @@ function RosterListPanel({ org, onSelect }: { org: OrgSummary; onSelect: (r: Ros
   )
 }
 
-/* ── Step 2: inside a roster — assign teams, then assign players onto them ── */
+/* ── Step 2: inside a Squad Board — assign teams, then assign players onto them ── */
 
-function RosterDetail({ org, roster, onBack }: { org: OrgSummary; roster: Roster; onBack: () => void }) {
+function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: SquadBoard; onBack: () => void }) {
   const [teams, setTeams] = useState<AuctionTeamOption[]>([])
   const [teamsLoaded, setTeamsLoaded] = useState(false)
 
-  const reloadTeams = () => getTeamsForAuction(roster.id).then((t) => setTeams(t))
+  const reloadTeams = () => getTeamsForAuction(board.id).then((t) => setTeams(t))
 
   useEffect(() => {
     reloadTeams().then(() => setTeamsLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster.id])
+  }, [board.id])
 
   return (
     <div className="space-y-6">
@@ -227,36 +239,36 @@ function RosterDetail({ org, roster, onBack }: { org: OrgSummary; roster: Roster
         onClick={onBack}
         className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
       >
-        <ArrowLeft className="h-3.5 w-3.5" /> All Rosters
+        <ArrowLeft className="h-3.5 w-3.5" /> All Squad Boards
       </button>
 
       <div className="flex items-center gap-3">
         <div className="bg-gold/20 p-2.5 rounded-lg">
           <Users className="h-5 w-5 text-gold" />
         </div>
-        <h2 className="text-xl font-bold text-white font-cinzel">{roster.name}</h2>
+        <h2 className="text-xl font-bold text-white font-cinzel">{board.name}</h2>
       </div>
 
-      <AssignTeamPanel org={org} roster={roster} onAssigned={reloadTeams} />
+      <AssignTeamPanel org={org} board={board} onAssigned={reloadTeams} />
 
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
-          <Shield className="h-4 w-4 text-gold" /> Teams in this Roster
+          <Shield className="h-4 w-4 text-gold" /> Teams on this Squad Board
         </h2>
         <p className="text-gray-500 text-xs mb-4">
-          Assign Player Bank players onto any team below. A player can be assigned to more than one team, here or in
-          another roster.
+          Assign Player Bank players onto any team below. A player can be assigned to more than one team, here or on
+          another Squad Board.
         </p>
         {!teamsLoaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : teams.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No teams assigned to this roster yet — add one above.</p>
+          <p className="text-gray-500 text-sm italic">No teams assigned to this Squad Board yet — add one above.</p>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {teams.map((t) => (
-              <RosterTeamCard key={t.id} org={org} roster={roster} team={t} />
+              <SquadBoardTeamCard key={t.id} org={org} board={board} team={t} />
             ))}
           </div>
         )}
@@ -265,15 +277,15 @@ function RosterDetail({ org, roster, onBack }: { org: OrgSummary; roster: Roster
   )
 }
 
-/* ── Assign a Team Pool entry into the current roster ── */
+/* ── Assign a Team Pool entry onto the current Squad Board ── */
 
 function AssignTeamPanel({
   org,
-  roster,
+  board,
   onAssigned,
 }: {
   org: OrgSummary
-  roster: Roster
+  board: SquadBoard
   onAssigned: () => void
 }) {
   const [poolTeams, setPoolTeams] = useState<PoolTeam[]>([])
@@ -297,13 +309,13 @@ function AssignTeamPanel({
     setIsAssigning(true)
     setError(null)
     setSuccess(null)
-    const result = await assignPoolTeamToRoster(poolTeam, roster)
+    const result = await assignPoolTeamToSquadBoard(poolTeam, board)
     setIsAssigning(false)
     if (!result.ok) {
       setError(result.error ?? "Couldn't assign this team.")
       return
     }
-    setSuccess(`${poolTeam.name} was added to this roster.`)
+    setSuccess(`${poolTeam.name} was added to this Squad Board.`)
     setPoolTeamId("")
     onAssigned()
   }
@@ -314,8 +326,8 @@ function AssignTeamPanel({
         <Link2 className="h-4 w-4 text-gold" /> Assign a Team Pool Team
       </h2>
       <p className="text-gray-500 text-xs mb-4">
-        Copies a Team Pool team into this roster. The pool entry itself stays untouched, so it can also be assigned
-        into other rosters or real auctions.
+        Copies a Team Pool team onto this Squad Board. The pool entry itself stays untouched, so it can also be
+        assigned onto other Squad Boards or real auctions.
       </p>
 
       {!loaded ? (
@@ -365,10 +377,10 @@ function AssignTeamPanel({
   )
 }
 
-/* ── One team's card inside a roster: its current players + an inline    */
-/*    "assign a bank player onto this team" control                      */
+/* ── One team's card on a Squad Board: its current players + an inline    */
+/*    "assign a bank player onto this team" control                       */
 
-function RosterTeamCard({ org, roster, team }: { org: OrgSummary; roster: Roster; team: AuctionTeamOption }) {
+function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: SquadBoard; team: AuctionTeamOption }) {
   const [players, setPlayers] = useState<TeamRosterPlayer[]>([])
   const [playersLoaded, setPlayersLoaded] = useState(false)
 
@@ -396,7 +408,7 @@ function RosterTeamCard({ org, roster, team }: { org: OrgSummary; roster: Roster
     if (!bankPlayer) return
     setIsAssigning(true)
     setError(null)
-    const result = await assignBankPlayerToRosterTeam(bankPlayer, team, roster, isCaptain)
+    const result = await assignBankPlayerToSquadBoardTeam(bankPlayer, team, board, isCaptain)
     setIsAssigning(false)
     if (!result.ok) {
       setError(result.error ?? "Couldn't assign this player.")

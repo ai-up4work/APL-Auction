@@ -9,13 +9,13 @@ import { AppHeader } from "@/components/app-header"
 import { OverviewTab } from "@/components/organization/OverviewTab"
 import { MatchesTab } from "@/components/organization/MatchesTab"
 import { TournamentsTab, TeamPoolTab, PlayerBankTab } from "@/components/organization/TournamentsPoolsTab"
-import { RosterTab } from "@/components/organization/RosterTab"
+import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
 import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 
-type Tab = "overview" | "matches" | "tournaments" | "teamPool" | "playerBank" | "roster"
+type Tab = "overview" | "matches" | "tournaments" | "teamPool" | "playerBank" | "squadBoard"
 type GateState = "checking" | "denied" | "allowed"
 
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -24,7 +24,7 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
   { key: "tournaments", label: "Tournaments", icon: Trophy },
   { key: "teamPool", label: "Team Pool", icon: Shield },
   { key: "playerBank", label: "Player Bank", icon: Users },
-  { key: "roster", label: "Roster", icon: Link2 },
+  { key: "squadBoard", label: "Squad Board", icon: Link2 },
 ]
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -139,7 +139,7 @@ export default function OrganizationClient() {
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
               {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
-              {tab === "roster" && <RosterTab org={org} userId={user!.id} />}
+              {tab === "squadBoard" && <SquadBoardTab org={org} userId={user!.id} />}
             </>
           )}
         </div>
