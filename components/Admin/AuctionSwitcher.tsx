@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { useAuction } from "@/context/AuctionContext";
 import type { AuctionSummary } from "@/lib/auctionDb";
@@ -20,9 +21,10 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function AuctionSwitcher() {
+  const router = useRouter();
   const {
     auction, auctionList, isLoadingList, links,
-    createNew, switchAuction, cloneFromPrevious, refreshAuctionList,
+    createNew, cloneFromPrevious, refreshAuctionList,
   } = useAuction();
 
   const [open, setOpen]           = useState(false);
@@ -41,12 +43,28 @@ export default function AuctionSwitcher() {
     setTimeout(() => setCopied(null), 1500);
   }
 
+  function onCreate() {
+    const id = createNew(newName.trim() || "");
+    setNewName("");
+    setOpen(false);
+    router.push(`/auction/admin/${id}`);
+  }
+
+  function onSwitch(id: string) {
+    setOpen(false);
+    router.push(`/auction/admin/${id}`);
+  }
+
   async function onClone(sourceId: string) {
     if (!cloneName.trim()) return;
-    await cloneFromPrevious(sourceId, cloneName.trim());
+    const newId = await cloneFromPrevious(sourceId, cloneName.trim());
     setCloning(null);
     setCloneName("");
     setOpen(false);
+    // If cloneFromPrevious doesn't yet return the new id, this silently
+    // no-ops and the user stays on the current auction — update
+    // cloneFromPrevious to return the new record's id to fix that.
+    if (newId) router.push(`/auction/admin/${newId}`);
   }
 
   function pill(label: string, color: string) {
@@ -160,12 +178,7 @@ export default function AuctionSwitcher() {
                   <input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        createNew(newName.trim() || "");
-                        setNewName(""); setOpen(false);
-                      }
-                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter") onCreate(); }}
                     placeholder="e.g. APL Season 2"
                     className="flex-1 min-w-[140px] px-3 py-2 rounded-lg text-[13px] outline-none"
                     style={{
@@ -176,7 +189,7 @@ export default function AuctionSwitcher() {
                     }}
                   />
                   <button
-                    onClick={() => { createNew(newName.trim() || ""); setNewName(""); setOpen(false); }}
+                    onClick={onCreate}
                     className="shrink-0 px-4.5 py-2 rounded-lg text-[13px] font-bold"
                     style={{
                       border: "none",
@@ -237,7 +250,7 @@ export default function AuctionSwitcher() {
                     cloning={cloning}
                     cloneName={cloneName}
                     copied={copied}
-                    onSwitch={() => { switchAuction(a.id); setOpen(false); }}
+                    onSwitch={() => onSwitch(a.id)}
                     onCopyId={() => copy(a.id, `id-${a.id}`)}
                     onStartClone={() => { setCloning(a.id); setCloneName(`${a.name} (Clone)`); }}
                     onCancelClone={() => setCloning(null)}

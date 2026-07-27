@@ -1,96 +1,22 @@
-// app/auction/admin/page.tsx
 "use client";
 
-import { useState } from "react";
-import AdminHeader   from "@/components/Admin/AdminHeader";
+import { useRouter } from "next/navigation";
 import AuctionPicker from "@/components/Admin/AuctionPicker";
-import TeamsTab      from "@/components/Admin/TeamsTab";
-import PlayersTab    from "@/components/Admin/PlayersTab";
-import RulesTab      from "@/components/Admin/RulesTab";
-import SessionTab    from "@/components/Admin/SessionTab";
-import LaunchTab     from "@/components/Admin/LaunchTab";
-import TournamentPromptModal from "@/components/Admin/TournamentPromptModal";
 import { useAuction } from "@/context/AuctionContext";
 
-const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
-
-export default function AdminPage() {
-  const [activeStep, setActiveStep] = useState("teams");
-
-  // The admin page always opens on the picker. There is no auto-skip based
-  // on a restored auctionId — the user explicitly chooses (or creates) an
-  // auction every time they land on /admin. This is intentional: it's what
-  // prevents the "always shows the last/default auction" behavior. Once
-  // they pick something, `entered` flips true for the rest of this visit.
-  const [entered, setEntered] = useState(false);
-
-  const {
-    auction,
-    isSaving,
-    saveError,
-    shuffleReady,
-    isHydrated,
-    links,
-    tournaments,
-    isLoadingTournaments,
-    tournamentPromptOpen,
-    loadTournaments,
-    linkTournament,
-    createAndLinkTournament,
-    skipTournamentLink,
-    createNew,
-    addTeam,
-    editTeam,
-    deleteTeam,
-    addPlayer,
-    editPlayer,
-    deletePlayer,
-    updateRules,
-    updateSession,
-    handleLaunch,
-    handlePause,
-    handleResume,
-    handleStop,
-    handleReauction,
-    handleShuffle,
-  } = useAuction();
-
-  const { auctionId, status: auctionStatus, teams, players, rules, session } = auction;
-  const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
+export default function AdminPickerPage() {
+  const router = useRouter();
+  const { createNew, isHydrated } = useAuction();
 
   function handleCreateNew(name?: string) {
-    createNew(name || "");
-    setEntered(true);
+    const id = createNew(name || ""); // assumes createNew returns the new auctionId
+    router.push(`/auction/admin/${id}`);
   }
 
-  // Fired by AuctionPicker after switchAuction() resolves successfully —
-  // i.e. an existing auction was loaded into context and it's safe to
-  // leave the picker and render the dashboard for it.
-  function handleSelectAuction(_id: string) {
-    setEntered(true);
+  function handleSelectAuction(id: string) {
+    router.push(`/auction/admin/${id}`);
   }
 
-  function handleStepChange(step: string) {
-    if (auctionLocked && CONFIG_STEPS.includes(step as any)) return;
-    setActiveStep(step);
-  }
-
-  async function onLaunch() {
-    await handleLaunch();
-  }
-
-  async function onStop() {
-    await handleStop();
-    setActiveStep("launch");
-  }
-
-  async function onReauction() {
-    await handleReauction();
-    setActiveStep("teams");
-  }
-
-  // ── Waiting on rehydration (so localStorage / DB state is settled
-  // before we decide what to render) ──────────────────────────────────────
   if (!isHydrated) {
     return (
       <div
@@ -104,154 +30,10 @@ export default function AdminPage() {
     );
   }
 
-  // ── No auction chosen yet this visit — always show the picker first ─────
-  if (!entered) {
-    return (
-      <AuctionPicker
-        onCreateNew={handleCreateNew}
-        onSelectAuction={handleSelectAuction}
-      />
-    );
-  }
-
   return (
-    <div
-      className="min-h-screen w-full flex flex-col overflow-x-hidden selection:bg-orange-500/30"
-      style={{
-        background: "var(--color-background)",
-        color: "var(--color-on-background)",
-        fontFamily: "var(--font-body-md)",
-        position: "relative",
-        maxWidth: "100%",
-      }}
-    >
-
-      {/* Tournament link prompt — appears automatically once teams.length > 2
-          and the auction hasn't been linked or explicitly opted out. Purely
-          advisory; nothing blocks team creation while it's open. */}
-      {tournamentPromptOpen && (
-        <TournamentPromptModal
-          teamCount={teams.length}
-          tournaments={tournaments}
-          isLoadingTournaments={isLoadingTournaments}
-          onLoadTournaments={loadTournaments}
-          onLink={linkTournament}
-          onCreateAndLink={createAndLinkTournament}
-          onSkip={skipTournamentLink}
-        />
-      )}
-
-      {/* Saving indicator */}
-      {isSaving && (
-        <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
-          style={{
-            background: "var(--color-surface-container)",
-            border: "1px solid rgba(201,151,31,0.3)",
-            color: "var(--color-theme-orange)",
-            fontFamily: "var(--font-label-mono)",
-            backdropFilter: "blur(12px)",
-          }}
-        >
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--color-theme-orange)" }} />
-          Saving…
-        </div>
-      )}
-
-      {/* Save error banner */}
-      {saveError && (
-        <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
-          style={{
-            background: "var(--color-error-container)",
-            border: "1px solid rgba(255,180,171,0.4)",
-            color: "var(--color-error)",
-            fontFamily: "var(--font-label-mono)",
-            backdropFilter: "blur(12px)",
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>error</span>
-          Save failed: {saveError}
-        </div>
-      )}
-
-      <AdminHeader
-        activeStep={activeStep}
-        onStepChange={handleStepChange}
-        auctionStatus={auctionStatus}
-        onPause={handlePause}
-        onResume={handleResume}
-        onStop={onStop}
-        onReauction={onReauction}
-        onAllAuctions={() => setEntered(false)}
-      />
-
-      <main
-        className="flex-1 w-full min-w-0 max-w-screen-2xl mx-auto pt-36 pb-20 px-10"
-        style={{ position: "relative", zIndex: 1 }}
-      >
-        {activeStep === "teams" && (
-          <TeamsTab
-            locked={auctionLocked}
-            teams={teams}
-            auctionId={auctionId!}
-            onAddTeam={addTeam}
-            onEditTeam={editTeam}
-            onDeleteTeam={deleteTeam}
-          />
-        )}
-        {activeStep === "players" && (
-          <PlayersTab
-            locked={auctionLocked}
-            players={players}
-            teams={teams}
-            auctionId={auctionId!}
-            onAddPlayer={addPlayer}
-            onEditPlayer={editPlayer}
-            onDeletePlayer={deletePlayer}
-          />
-        )}
-        {activeStep === "rules" && (
-          <RulesTab
-            locked={auctionLocked}
-            rules={rules}
-            onRulesChange={updateRules}
-          />
-        )}
-        {activeStep === "session" && (
-          <SessionTab
-            locked={auctionLocked}
-            session={session}
-            onSessionChange={updateSession}
-            auctionId={auctionId!}
-          />
-        )}
-        {activeStep === "launch" && (
-          <LaunchTab
-            auctionStatus={auctionStatus}
-            onLaunch={onLaunch}
-            teamCount={teams.length}
-            playerCount={players.length}
-            auctionName={session.auctionName}
-            allPinsSet={teams.every((t) => !!t.pin)}
-            targetPlayerCount={rules.targetPlayerCount}
-            links={links}
-            shuffleReady={shuffleReady}
-            onShuffle={handleShuffle}
-          />
-        )}
-      </main>
-
-      <style>{`
-        html, body {
-          overflow-x: hidden;
-          max-width: 100%;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-        html::-webkit-scrollbar,
-        body::-webkit-scrollbar { display: none; }
-      `}</style>
-    </div>
+    <AuctionPicker
+      onCreateNew={handleCreateNew}
+      onSelectAuction={handleSelectAuction}
+    />
   );
 }

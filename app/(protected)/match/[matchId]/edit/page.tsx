@@ -372,6 +372,7 @@ interface SyncResult {
   auctionId: string
   teamsUpserted: number
   playersUpserted: number
+  skippedSquads: string[] // human-readable reasons any squad was skipped
 }
 
 interface SyncOutcome {
@@ -385,6 +386,9 @@ async function resolveAuctionId(matchId: string, matchNameHint: string): Promise
     .select("auction_id, org_id")
     .eq("id", matchId)
     .maybeSingle()
+
+  console.log("[sync] matchRow:", matchRow, "error:", matchErr)
+
   if (matchErr) throw new Error(`Couldn't read match: ${matchErr.message}`)
   if (!matchRow?.org_id) {
     throw new Error("This match has no org_id set — can't provision an auction record for it.")
@@ -392,22 +396,34 @@ async function resolveAuctionId(matchId: string, matchNameHint: string): Promise
 
   const candidate = matchRow.auction_id?.trim()
   if (candidate) {
-    const { data: existingAuction } = await supabase.from("auctions").select("id").eq("id", candidate).maybeSingle()
-    if (existingAuction) return candidate // already points at a real auction (or Squad Board) — reuse it
+    const { data: existingAuction, error: lookupErr } = await supabase
+      .from("auctions")
+      .select("id")
+      .eq("id", candidate)
+      .maybeSingle()
+
+    console.log("[sync] existingAuction lookup:", existingAuction, "error:", lookupErr)
+
+    if (lookupErr) {
+      throw new Error(`Couldn't verify existing auction link (${candidate}): ${lookupErr.message}`)
+    }
+    if (existingAuction) {
+      console.log("[sync] reusing existing auction:", candidate)
+      return candidate
+    }
+    // candidate was set but doesn't resolve to a real row — fall through
+    // and provision fresh below, using the SAME candidate id if it's a
+    // valid uuid, so we don't orphan it further.
   }
 
-  // The auctions RLS policy requires the row to be tied to a real org
-  // and a real signed-in user — omitting either is exactly what a
-  // "new row violates row-level security policy" error looks like.
   const { data: userData, error: userErr } = await supabase.auth.getUser()
   if (userErr || !userData?.user) {
     throw new Error("Couldn't verify the signed-in user — please sign in again before saving.")
   }
 
-  // No real auction backs this match — provision one keyed to the
-  // match's own id, flagged as synthetic, then link matches.auction_id
-  // to it so this only has to happen once.
-  const auctionId = matchId
+  const auctionId = candidate || matchId
+  console.log("[sync] provisioning new synthetic auction:", auctionId)
+
   const { error: auctionErr } = await supabase.from("auctions").upsert(
     {
       id: auctionId,
@@ -420,39 +436,59 @@ async function resolveAuctionId(matchId: string, matchNameHint: string): Promise
     },
     { onConflict: "id" }
   )
-  if (auctionErr) throw new Error(`Couldn't provision auction record: ${auctionErr.message}`)
+  if (auctionErr) {
+    console.error("[sync] auction provisioning failed:", auctionErr)
+    throw new Error(`Couldn't provision auction record: ${auctionErr.message}`)
+  }
 
   const { error: linkErr } = await supabase.from("matches").update({ auction_id: auctionId }).eq("id", matchId)
-  if (linkErr) throw new Error(`Couldn't link match to auction: ${linkErr.message}`)
+  if (linkErr) {
+    console.error("[sync] linking match to auction failed:", linkErr)
+    throw new Error(`Couldn't link match to auction: ${linkErr.message}`)
+  }
 
+  console.log("[sync] auction resolved/provisioned:", auctionId)
   return auctionId
 }
 
 async function upsertTeam(auctionId: string, code: string, name: string, owner: string): Promise<string | null> {
   if (!code.trim()) return null
-  const { data: existing } = await supabase
+  const { data: existing, error: findErr } = await supabase
     .from("teams")
     .select("id")
     .eq("auction_id", auctionId)
     .eq("code", code)
     .maybeSingle()
+
+  if (findErr) {
+    console.error("[sync] upsertTeam lookup failed:", findErr)
+    throw new Error(`Couldn't look up team "${name}" (${code}): ${findErr.message}`)
+  }
+
   if (existing) {
-    await supabase.from("teams").update({ name, owner: owner || "Unknown" }).eq("id", existing.id)
+    const { error } = await supabase.from("teams").update({ name, owner: owner || "Unknown" }).eq("id", existing.id)
+    if (error) {
+      console.error("[sync] upsertTeam update failed:", error)
+      throw new Error(`Couldn't update team "${name}": ${error.message}`)
+    }
+    console.log("[sync] team updated:", name, code, existing.id)
     return existing.id
   }
+
   const { data: inserted, error } = await supabase
     .from("teams")
     .insert({ auction_id: auctionId, code, name, owner: owner || "Unknown" })
     .select("id")
     .single()
-  if (error) throw new Error(`Couldn't create team "${name}": ${error.message}`)
+
+  if (error) {
+    console.error("[sync] upsertTeam insert failed:", error)
+    throw new Error(`Couldn't create team "${name}": ${error.message}`)
+  }
+  console.log("[sync] team created:", name, code, inserted.id)
   return inserted.id
 }
 
-// Returns the id of the players row this squad entry now corresponds
-// to — either the existing row it matched/updated, or a freshly
-// inserted one. Callers use this to write the id back into
-// match_setup so future syncs skip name-matching entirely.
 async function upsertPlayer(
   auctionId: string,
   player: SquadPlayer,
@@ -472,47 +508,61 @@ async function upsertPlayer(
     status: "sold" as const,
   }
 
-  // Prefer matching by id — this is what prevents a rename from
-  // forking a duplicate players row, and keeps any balls rows already
-  // referencing this player's id correctly anchored.
   if (player.playerId) {
-    const { data: existingById } = await supabase
+    const { data: existingById, error: byIdErr } = await supabase
       .from("players")
       .select("id")
       .eq("id", player.playerId)
       .maybeSingle()
+
+    if (byIdErr) {
+      console.error("[sync] upsertPlayer id-lookup failed:", byIdErr)
+      throw new Error(`Couldn't verify player "${name}" by id: ${byIdErr.message}`)
+    }
+
     if (existingById) {
       const { error } = await supabase.from("players").update(payload).eq("id", player.playerId)
-      if (error) throw new Error(`Couldn't update player "${name}": ${error.message}`)
+      if (error) {
+        console.error("[sync] upsertPlayer update-by-id failed:", error)
+        throw new Error(`Couldn't update player "${name}": ${error.message}`)
+      }
+      console.log("[sync] player updated by id:", name, player.playerId)
       return player.playerId
     }
-    // playerId was set but no longer resolves (row deleted elsewhere)
-    // — fall through to name-matching / insert rather than erroring.
+    // playerId set but no longer resolves — fall through to name-match/insert.
   }
 
-  const { data: existingByName } = await supabase
+  const { data: existingByName, error: byNameErr } = await supabase
     .from("players")
     .select("id")
     .eq("auction_id", auctionId)
     .ilike("name", name)
     .maybeSingle()
 
+  if (byNameErr) {
+    console.error("[sync] upsertPlayer name-lookup failed:", byNameErr)
+    throw new Error(`Couldn't look up player "${name}" by name: ${byNameErr.message}`)
+  }
+
   if (existingByName) {
     const { error } = await supabase.from("players").update(payload).eq("id", existingByName.id)
-    if (error) throw new Error(`Couldn't update player "${name}": ${error.message}`)
+    if (error) {
+      console.error("[sync] upsertPlayer update-by-name failed:", error)
+      throw new Error(`Couldn't update player "${name}": ${error.message}`)
+    }
+    console.log("[sync] player updated by name match:", name, existingByName.id)
     return existingByName.id
   }
 
   const { data: inserted, error } = await supabase.from("players").insert(payload).select("id").single()
-  if (error) throw new Error(`Couldn't create player "${name}": ${error.message}`)
+  if (error) {
+    console.error("[sync] upsertPlayer insert failed:", error)
+    throw new Error(`Couldn't create player "${name}": ${error.message}`)
+  }
+  console.log("[sync] player created:", name, inserted.id)
   return inserted.id
 }
 
-// Syncs every squad's team + players into the relational tables, and
-// returns an updated copy of the squads with each player's `playerId`
-// filled in from the sync — callers should fold this back into both
-// local form state and match_setup so subsequent saves reuse the ids
-// instead of re-matching by name.
 async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promise<SyncOutcome> {
   const matchNameHint = `${form.team1Name || "Team 1"} vs ${form.team2Name || "Team 2"}`
   const auctionId = await resolveAuctionId(matchId, matchNameHint)
@@ -520,15 +570,23 @@ async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promis
   let teamsUpserted = 0
   let playersUpserted = 0
   const updatedSquads: Squad[] = []
+  const skippedSquads: string[] = []
 
   for (const squad of form.squads) {
     const teamName = squad.teamId === "team1" ? form.team1Name : form.team2Name
     const teamCode = squad.teamId === "team1" ? form.team1Short : form.team2Short
+    const hasPlayers = squad.players.some((p) => p.name.trim())
+
+    console.log(`[sync] squad ${squad.teamId}: code="${teamCode}" players=${squad.players.length}`)
 
     if (!teamCode.trim()) {
-      // No short code yet — can't key a team row without one. Leave
-      // this squad's players untouched (no ids assigned) rather than
-      // failing the whole sync.
+      if (hasPlayers) {
+        // This is almost certainly why players never show up in the DB —
+        // surface it loudly instead of silently skipping.
+        skippedSquads.push(
+          `${teamName || squad.teamId}: no short code set — fill in "Short" above to sync this roster`
+        )
+      }
       updatedSquads.push(squad)
       continue
     }
@@ -550,8 +608,11 @@ async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promis
     updatedSquads.push({ ...squad, players: updatedPlayers })
   }
 
-  return { result: { auctionId, teamsUpserted, playersUpserted }, updatedSquads }
+  console.log("[sync] done:", { auctionId, teamsUpserted, playersUpserted, skippedSquads })
+
+  return { result: { auctionId, teamsUpserted, playersUpserted, skippedSquads }, updatedSquads }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // SHARED UI PRIMITIVES — same shell/tokens as the rest of the app
@@ -737,16 +798,12 @@ export default function EditMatchPage() {
     // duplicate team code, or an RLS rule blocking the write), the
     // match_setup save has already succeeded and shouldn't be reported
     // as an error too.
-    try {
+  try 
+    {
       const { result, updatedSquads } = await syncSquadsToPlayers(matchId, savedForm)
 
-      // Fold the resolved playerIds back into local state so future
-      // saves reuse them instead of re-matching by name every time.
       setForm((prev) => ({ ...prev, squads: updatedSquads }))
 
-      // Also write the ids back into match_setup itself — otherwise a
-      // page refresh would reload squads without playerId and we'd be
-      // back to name-matching on the very next save.
       const withIds = {
         ...(rawSetupRef.current ?? {}),
         squads: updatedSquads.map((s) => ({
@@ -764,17 +821,18 @@ export default function EditMatchPage() {
       if (!idLinkErr) {
         rawSetupRef.current = withIds
       }
-      // If idLinkErr fires, the players/teams sync itself still
-      // succeeded — only the id-linkage write-back failed. The next
-      // save will just re-match any missing-id players by name again,
-      // so this is a soft failure and not worth surfacing as an error.
+
+      const baseMsg = `Synced to players table (auction ${result.auctionId.slice(0, 8)}…): ${result.teamsUpserted} team${
+        result.teamsUpserted === 1 ? "" : "s"
+      }, ${result.playersUpserted} player${result.playersUpserted === 1 ? "" : "s"}.`
 
       setSyncMsg(
-        `Synced to players table (auction ${result.auctionId.slice(0, 8)}…): ${result.teamsUpserted} team${
-          result.teamsUpserted === 1 ? "" : "s"
-        }, ${result.playersUpserted} player${result.playersUpserted === 1 ? "" : "s"}.`
+        result.skippedSquads.length > 0
+          ? `${baseMsg} Skipped — ${result.skippedSquads.join("; ")}`
+          : baseMsg
       )
     } catch (err) {
+      console.error("[sync] top-level failure:", err)
       setSyncErrorMsg(err instanceof Error ? err.message : "Failed to sync squads to the players table.")
     }
   }
@@ -1269,10 +1327,10 @@ export default function EditMatchPage() {
                 <Link href={`/match/${matchId}`} className="text-gold hover:underline text-sm font-cinzel">
                   ← Back to Match
                 </Link>
-                <span className="text-gray-700">|</span>
+                {/* <span className="text-gray-700">|</span>
                 <Link href={`/match/${matchId}/simulate`} className="text-gold hover:underline text-sm font-cinzel">
                   Go to Simulator →
-                </Link>
+                </Link> */}
               </div>
             </>
           )}

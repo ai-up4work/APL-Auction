@@ -391,70 +391,6 @@ export interface FriendlyMatchSummary {
   time: string | null;
 }
 
-export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
-  const { data, error } = await supabase
-    .from("matches")
-    .select("id, match_setup, created_at")
-    .eq("org_id", orgId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("getFriendlyMatchesForOrg failed:", error.message);
-    return [];
-  }
-
-  const matches = data ?? [];
-  const matchIds = matches.map((m) => m.id);
-  if (matchIds.length === 0) return [];
-
-  const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }] = await Promise.all([
-    supabase
-      .from("bracket_matches")
-      .select("overlay_match_id, tournaments(name)")
-      .in("overlay_match_id", matchIds),
-    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
-    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
-  ]);
-
-  if (bracketsErr) {
-    console.error("getFriendlyMatchesForOrg(brackets) failed:", bracketsErr.message);
-  }
-
-  const tournamentByMatch = new Map<string, string>();
-  (brackets ?? []).forEach((b: any) => {
-    if (b.overlay_match_id && b.tournaments?.name) {
-      tournamentByMatch.set(b.overlay_match_id, b.tournaments.name);
-    }
-  });
-
-  const overlaySet = new Set<string>();
-  (channelRows ?? []).forEach((c: any) => {
-    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
-  });
-  (weatherRows ?? []).forEach((w: any) => {
-    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
-    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
-  });
-
-  return matches.map((m) => {
-    const setup = (m.match_setup ?? {}) as Record<string, any>;
-    return {
-      id: m.id,
-      team1Name: setup.team1?.name ?? "Team 1",
-      team2Name: setup.team2?.name ?? "Team 2",
-      team1Logo: setup.team1?.logo || null,
-      team2Logo: setup.team2?.logo || null,
-      round: setup.round ?? "Friendly",
-      createdAt: m.created_at,
-      tournamentName: tournamentByMatch.get(m.id) ?? null,
-      overlayConfigured: overlaySet.has(m.id),
-      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
-      venue: setup.venue || null,
-      date: setup.date || null,
-      time: setup.time || null,
-    };
-  });
-}
 
 export type CreateFriendlyMatchInput =
   | { teamSource: "manual"; team1Name: string; team2Name: string; team1Logo?: string; team2Logo?: string; round?: string }
@@ -471,18 +407,17 @@ export async function createFriendlyMatch(
   let squads: { name: string; role: string; team: string; captain?: boolean }[] = [];
   // True only when the source is a REAL bidding auction (not a Squad
   // Board, and not a standalone/manual match). Computed once, here, and
-  // baked into match_setup.rosterLocked below — it can't be derived
-  // later from matches.auction_id, because that column is always set to
-  // this match's OWN generated id (`newId`, see the insert at the bottom
-  // of this function), never to input.auctionId. Once this match is
-  // created, the only record of "did this come from a real auction" is
-  // this flag in match_setup — nothing else persists it.
+  // baked into match_setup.rosterLocked below.
   let rosterLocked = false;
+  let sourceAuctionId: string | null = null;
 
   if (input.teamSource === "manual") {
     team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name), logo: input.team1Logo?.trim() || "" };
     team2 = { name: input.team2Name.trim(), short: shortCode(input.team2Name), logo: input.team2Logo?.trim() || "" };
   } else {
+    // Store reference to the source auction/squad board
+    sourceAuctionId = input.auctionId;
+
     const { data: teamRows, error: teamErr } = await supabase
       .from("teams")
       .select("id, name, code, logo")
@@ -549,7 +484,7 @@ export async function createFriendlyMatch(
     .from("matches")
     .insert({
       id: newId,
-      auction_id: newId,
+      auction_id: sourceAuctionId,
       org_id: orgId,
       match_setup: matchSetup,
     })
@@ -1209,7 +1144,7 @@ export async function saveOverlayWeatherCoords(matchId: string, lat: number, lng
 /*  signed-in user's id — passing an org id (or any other non-user id)      */
 /*  here will throw a 23503 foreign-key violation                           */
 /*  ("auctions_created_by_fkey").                                           */
-/* ────────────────────────────────────────────────────────────────── */
+/* ───────────────────��────────────────────────────────────────────── */
 
 export interface SquadBoard {
   id: string;
@@ -1384,4 +1319,97 @@ export async function assignBankPlayerToSquadBoardTeam(
     },
     isCaptain
   );
+}
+
+
+export interface FriendlyMatchSummary {
+  id: string;
+  /** The id used to resolve this match's Overlay Control Room route
+   *  (`/overlay/[auctionId]/admin`). For an auction-sourced match this is
+   *  the real auction's id (`matches.auction_id`). For a manual/standalone
+   *  match, `matches.auction_id` is NULL in the DB (see createFriendlyMatch
+   *  below), so this falls back to the match's own `id` — a synthetic
+   *  "auction id" that matchPersistence.ts's getOrCreateMatch must also
+   *  know how to resolve when there's no real auctions row behind it.
+   *  Always use this field for the overlay link — never `id` directly and
+   *  never assume the two are the same for every match. */
+  auctionId: string;
+  team1Name: string;
+  team2Name: string;
+  team1Logo: string | null;
+  team2Logo: string | null;
+  round: string;
+  createdAt: string;
+  tournamentName: string | null;
+  overlayConfigured: boolean;
+  auctionLinked: boolean;
+  venue: string | null;
+  date: string | null;
+  time: string | null;
+}
+
+export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("id, auction_id, match_setup, created_at")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getFriendlyMatchesForOrg failed:", error.message);
+    return [];
+  }
+
+  const matches = data ?? [];
+  const matchIds = matches.map((m) => m.id);
+  if (matchIds.length === 0) return [];
+
+  const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }] = await Promise.all([
+    supabase
+      .from("bracket_matches")
+      .select("overlay_match_id, tournaments(name)")
+      .in("overlay_match_id", matchIds),
+    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+  ]);
+
+  if (bracketsErr) {
+    console.error("getFriendlyMatchesForOrg(brackets) failed:", bracketsErr.message);
+  }
+
+  const tournamentByMatch = new Map<string, string>();
+  (brackets ?? []).forEach((b: any) => {
+    if (b.overlay_match_id && b.tournaments?.name) {
+      tournamentByMatch.set(b.overlay_match_id, b.tournaments.name);
+    }
+  });
+
+  const overlaySet = new Set<string>();
+  (channelRows ?? []).forEach((c: any) => {
+    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
+  });
+  (weatherRows ?? []).forEach((w: any) => {
+    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
+    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
+  });
+
+  return matches.map((m: any) => {
+    const setup = (m.match_setup ?? {}) as Record<string, any>;
+    return {
+      id: m.id,
+      auctionId: m.auction_id ?? m.id,
+      team1Name: setup.team1?.name ?? "Team 1",
+      team2Name: setup.team2?.name ?? "Team 2",
+      team1Logo: setup.team1?.logo || null,
+      team2Logo: setup.team2?.logo || null,
+      round: setup.round ?? "Friendly",
+      createdAt: m.created_at,
+      tournamentName: tournamentByMatch.get(m.id) ?? null,
+      overlayConfigured: overlaySet.has(m.id),
+      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
+      venue: setup.venue || null,
+      date: setup.date || null,
+      time: setup.time || null,
+    };
+  });
 }

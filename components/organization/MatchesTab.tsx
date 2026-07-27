@@ -854,7 +854,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
                   match={m}
                   selected={selected.has(m.id)}
                   onToggleSelect={() => toggleSelectOne(m.id)}
-                  onSetupOverlay={() => router.push(`/overlay/${m.id}/admin`)}
+                  onSetupOverlay={() => router.push(`/overlay/${m.auctionId}/admin`)}
                   onDelete={() => handleDelete(m)}
                   deleting={deletingId === m.id}
                 />

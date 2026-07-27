@@ -273,6 +273,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [showMoments, setShowMoments] = useState(false);
 
   const [setupPushCount, setSetupPushCount] = useState(0);
+  const [sourceAuctionId, setSourceAuctionId] = useState<string | null>(null);
+
+// inside the hydration effect, alongside the other setState calls:
 
 
   const [showMatchWonForm, setShowMatchWonForm] = useState(false);
@@ -309,6 +312,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   // ── SOLE hydration path — Supabase only. ──────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    
 
     (async () => {
       const match = await getOrCreateMatch(auctionId);
@@ -336,6 +340,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       // last, alongside the rest, guarantees the first mount already has
       // the real data.
       setMatchId(match.id);
+      setSourceAuctionId(match.auction_id);
       setMatchSetup(match.match_setup); // already normalized by getOrCreateMatch
       setLiveState(live ? sanitizeLiveState(live) : emptyLiveState);
       setEngineSyncState(engine ? sanitizeEngineState(engine) : null);
@@ -759,7 +764,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         <div className="flex flex-col lg:flex-row gap-8 items-start">
           <div className="flex-1 min-w-0 flex flex-col gap-6">
             <MatchSetupPanel
-              auctionId={auctionId}
+              auctionId={sourceAuctionId ?? ""}   // used for roster/teams lookups
               matchSetup={matchSetup}
               setMatchSetup={setMatchSetup}
               onPush={pushMatchSetup}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -84,7 +85,7 @@ function AuctionCard({
 
       <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-white/5">
         <Link
-          href="/auction/admin"
+          href={`/auction/admin/${auction.id}`}
           className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
         >
           Open in admin <ArrowRight className="h-3 w-3" />
@@ -106,6 +107,7 @@ function AuctionCard({
 /* ────────────────────────────────────────────────────────────────── */
 
 export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }) {
+  const router = useRouter()
   const { confirm, ConfirmDialogElement } = useConfirmDialog()
 
   const [auctions, setAuctions] = useState<AuctionSummary[]>([])
@@ -144,7 +146,10 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
     }
     setName("")
     setTournamentId("")
-    await reload()
+    // Jumps straight into the admin dashboard for the new auction.
+    // Swap for `await reload()` instead if you'd rather stay on this
+    // page and create several auctions before configuring any of them.
+    router.push(`/auction/admin/${id}`)
   }
 
   const handleDelete = async (auction: AuctionSummary) => {
@@ -174,11 +179,11 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
           <Plus className="h-4 w-4 text-gold" /> Create an Auction
         </h2>
         <p className="text-gray-500 text-xs mb-4">
-          Creates the auction record — head to{" "}
+          Creates the auction record, then opens it directly in{" "}
           <Link href="/auction/admin" className="text-gold hover:underline">
             /auction/admin
           </Link>{" "}
-          afterward and pick it from there to configure teams, players, and rules.
+          to configure teams, players, and rules.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input

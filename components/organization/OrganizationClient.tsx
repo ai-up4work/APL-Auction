@@ -35,7 +35,7 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
   { key: "tournaments", label: "Tournaments", icon: Trophy },
   { key: "auctions", label: "Auctions", icon: Landmark },
   { key: "teamPool", label: "Team Pool", icon: Shield },
-  { key: "playerBank", label: "Player Bank", icon: Users },
+  { key: "playerBank", label: "Player Pool", icon: Users },
   { key: "squadBoard", label: "Squad Board", icon: Link2 },
 ]
 
