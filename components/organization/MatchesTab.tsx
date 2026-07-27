@@ -16,6 +16,9 @@ import {
   Square,
   Radio,
   Swords,
+  MapPin,
+  Calendar,
+  Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -83,18 +86,131 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
   )
 }
 
-/** Small avatar used inside the overlapping team-logo pair on a match
- *  card. Falls back to a generic crossed-swords glyph when the team has
- *  no logo on file. */
-function TeamAvatar({ logo }: { logo: string | null }) {
+/* ────────────────────────────────────────────────────────────────── */
+/*  MATCH CARD                                                         */
+/*                                                                       */
+/*  Replaces the old flat row + tiny overlapping-dot avatars. Shows big  */
+/*  team art either side of a centered "vs", the status badges, and —    */
+/*  only once the match has actually been through its edit panel — a     */
+/*  venue/date/time strip pulled straight from match_setup. A brand-new  */
+/*  standalone match (blank venue/date/time) just omits that section     */
+/*  entirely rather than showing empty placeholders.                     */
+/* ────────────────────────────────────────────────────────────────── */
+
+function MatchCard({
+  match,
+  selected,
+  onToggleSelect,
+  onSetupOverlay,
+  onDelete,
+  deleting,
+}: {
+  match: FriendlyMatchSummary
+  selected: boolean
+  onToggleSelect: () => void
+  onSetupOverlay: () => void
+  onDelete: () => void
+  deleting: boolean
+}) {
+  const hasDetails = Boolean(match.venue || match.date || match.time)
+
   return (
-    <div className="h-8 w-8 rounded-full overflow-hidden border-2 border-black bg-black/70 flex items-center justify-center">
-      {logo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={logo} alt="" className="h-full w-full object-cover" />
-      ) : (
-        <Swords className="h-3.5 w-3.5 text-gray-500" />
+    <div className="group relative bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-lg overflow-hidden transition-colors flex flex-col">
+      {!match.tournamentName && (
+        <button
+          onClick={onToggleSelect}
+          className="absolute top-3 left-3 z-20 text-gray-300 hover:text-gold bg-black/60 rounded p-1"
+          aria-label="Select match"
+        >
+          {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+        </button>
       )}
+
+      <Link href={`/match/${match.id}`} className="block">
+        {/* Banner: big team art either side of a centered "vs" */}
+        <div className="relative h-28 bg-gradient-to-br from-black/60 via-black/30 to-black/60 flex items-center justify-center gap-5 px-6">
+          <div className="h-16 w-16 rounded-full overflow-hidden border-2 border-gold/30 bg-black/70 flex items-center justify-center shrink-0 shadow-lg shadow-black/50">
+            {match.team1Logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={match.team1Logo} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <Swords className="h-6 w-6 text-gray-500" />
+            )}
+          </div>
+          <span className="text-gold/60 font-cinzel text-[10px] uppercase tracking-widest shrink-0">vs</span>
+          <div className="h-16 w-16 rounded-full overflow-hidden border-2 border-gold/30 bg-black/70 flex items-center justify-center shrink-0 shadow-lg shadow-black/50">
+            {match.team2Logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={match.team2Logo} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <Swords className="h-6 w-6 text-gray-500" />
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 pb-2">
+          <p className="text-white text-sm font-semibold text-center truncate">
+            {match.team1Name} <span className="text-gray-500 font-normal">vs</span> {match.team2Name}
+          </p>
+
+          <div className="flex items-center justify-center gap-1.5 flex-wrap mt-2">
+            {match.tournamentName ? (
+              <StatusBadge tone="linked">
+                {match.tournamentName}
+                {match.round ? ` · ${match.round}` : ""}
+              </StatusBadge>
+            ) : (
+              <StatusBadge tone="none">Standalone{match.round ? ` · ${match.round}` : ""}</StatusBadge>
+            )}
+            {match.overlayConfigured ? (
+              <StatusBadge tone="linked">Overlay</StatusBadge>
+            ) : (
+              <StatusBadge tone="warn">Overlay not set</StatusBadge>
+            )}
+            {match.auctionLinked && <StatusBadge tone="neutral">From auction</StatusBadge>}
+          </div>
+
+          {hasDetails && (
+            <div className="mt-3 pt-3 border-t border-white/5 space-y-1">
+              {match.venue && (
+                <p className="flex items-center gap-1.5 text-xs text-gray-400 truncate">
+                  <MapPin className="h-3 w-3 text-gold/50 shrink-0" /> {match.venue}
+                </p>
+              )}
+              {(match.date || match.time) && (
+                <p className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
+                  {match.date && (
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3 text-gold/50 shrink-0" /> {match.date}
+                    </span>
+                  )}
+                  {match.time && (
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="h-3 w-3 text-gold/50 shrink-0" /> {match.time}
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </Link>
+
+      <div className="mt-auto flex items-center justify-end gap-3 px-4 py-3">
+        <button onClick={onSetupOverlay} title="Set up overlay" className="text-gray-500 hover:text-gold transition-colors">
+          <Radio className="h-3.5 w-3.5" />
+        </button>
+        <Link href={`/match/${match.id}/edit`} className="text-gray-500 hover:text-gold transition-colors outline-none">
+          <Pencil className="h-3.5 w-3.5" />
+        </Link>
+        <button
+          onClick={onDelete}
+          disabled={deleting}
+          className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        </button>
+      </div>
     </div>
   )
 }
@@ -579,7 +695,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
         ) : filtered.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No matches match "{query}".</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-4">
             {deleteError && (
               <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
                 <AlertCircle className="h-4 w-4" /> {deleteError}
@@ -608,74 +724,19 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
               </div>
             )}
 
-            {filtered.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  {!m.tournamentName && (
-                    <button
-                      onClick={() => toggleSelectOne(m.id)}
-                      className="text-gray-500 hover:text-gold shrink-0"
-                      aria-label="Select match"
-                    >
-                      {selected.has(m.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                    </button>
-                  )}
-                  <div className="flex items-center -space-x-2.5 shrink-0">
-                    <div className="z-10">
-                      <TeamAvatar logo={m.team1Logo} />
-                    </div>
-                    <TeamAvatar logo={m.team2Logo} />
-                  </div>
-                  <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
-                    <p className="text-white text-sm font-semibold truncate">
-                      {m.team1Name} vs {m.team2Name}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {m.tournamentName ? (
-                        <StatusBadge tone="linked">{m.tournamentName}{m.round ? ` · ${m.round}` : ""}</StatusBadge>
-                      ) : (
-                        <StatusBadge tone="none">Standalone</StatusBadge>
-                      )}
-                      {m.overlayConfigured ? (
-                        <StatusBadge tone="linked">Overlay</StatusBadge>
-                      ) : (
-                        <StatusBadge tone="warn">Overlay not set</StatusBadge>
-                      )}
-                      {m.auctionLinked && <StatusBadge tone="neutral">From auction</StatusBadge>}
-                    </div>
-                  </Link>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <button
-                    onClick={() => router.push(`/overlay/${m.id}/admin`)}
-                    title="Set up overlay"
-                    className="text-gray-500 hover:text-gold transition-colors"
-                  >
-                    <Radio className="h-3.5 w-3.5" />
-                  </button>
-                  <Link
-                    href={`/match/${m.id}/edit`}
-                    className="text-gray-500 hover:text-gold transition-colors outline-none"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(m)}
-                    disabled={deletingId === m.id}
-                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {deletingId === m.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filtered.map((m) => (
+                <MatchCard
+                  key={m.id}
+                  match={m}
+                  selected={selected.has(m.id)}
+                  onToggleSelect={() => toggleSelectOne(m.id)}
+                  onSetupOverlay={() => router.push(`/overlay/${m.id}/admin`)}
+                  onDelete={() => handleDelete(m)}
+                  deleting={deletingId === m.id}
+                />
+              ))}
+            </div>
           </div>
         )}
       </Panel>

@@ -8,15 +8,13 @@ import {
   Trash2,
   Pencil,
   Loader2,
-  CheckCircle2,
   AlertCircle,
-  UserPlus,
-  Link2,
   Search,
   CheckSquare,
   Square,
   Shield,
   Trophy,
+  UserPlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,21 +27,15 @@ import {
   getPlayerBank,
   addBankPlayer,
   deleteBankPlayer,
-  getAssignableTeamsForOrg,
-  assignBankPlayerToTeam,
   getTeamPool,
   addPoolTeam,
   deletePoolTeam,
-  getAssignableAuctionsForOrg,
-  assignPoolTeamToAuction,
   subscribeToOrgTournaments,
   unsubscribe,
   type OrgSummary,
   type TournamentSummary,
   type BankPlayer,
   type PoolTeam,
-  type AssignableTeam,
-  type AuctionSummary,
 } from "@/lib/organization/organization"
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
@@ -392,8 +384,9 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  TEAM POOL — mirrors Player Bank: add reusable team templates,      */
-/*  assign one into a specific auction's team list                     */
+/*  TEAM POOL — reusable team templates. Assigning a pool team into an  */
+/*  auction now happens from the auction admin panel itself, not here —  */
+/*  this tab is purely add / browse / remove for the org's Team Pool.    */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -408,8 +401,6 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
   const [color, setColor] = useState("#e45d35")
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
-
-  const [assignTarget, setAssignTarget] = useState<PoolTeam | null>(null)
 
   const reload = () => getTeamPool(org.id).then((t) => setTeams(t))
 
@@ -502,8 +493,8 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-4">Team Pool</h2>
         <p className="text-gray-500 text-xs mb-4">
-          Add your teams once and reuse them across auctions and matches — assigning a pool team into an auction
-          copies it into that auction's team list, the same way an assigned bank player is copied onto a roster.
+          Add your teams once and reuse them across auctions and matches — pick a pool team directly when creating a
+          match from the Matches tab, or from the auction admin panel when setting up an auction.
         </p>
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
@@ -534,12 +525,6 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => setAssignTarget(t)}
-                    className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gold border border-gold/30 hover:bg-gold/10 rounded-md px-3 py-1.5"
-                  >
-                    <Link2 className="h-3 w-3" /> Assign
-                  </button>
                   <button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-400 p-1.5">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -550,105 +535,15 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
         )}
       </Panel>
 
-      {assignTarget && (
-        <AssignTeamModal org={org} poolTeam={assignTarget} onClose={() => setAssignTarget(null)} />
-      )}
-
       {ConfirmDialogElement}
     </div>
   )
 }
 
-function AssignTeamModal({ org, poolTeam, onClose }: { org: OrgSummary; poolTeam: PoolTeam; onClose: () => void }) {
-  const [auctions, setAuctions] = useState<AuctionSummary[]>([])
-  const [loaded, setLoaded] = useState(false)
-  const [selectedAuctionId, setSelectedAuctionId] = useState("")
-  const [isAssigning, setIsAssigning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-
-  useEffect(() => {
-    getAssignableAuctionsForOrg(org.id).then((a) => {
-      setAuctions(a)
-      setLoaded(true)
-    })
-  }, [org.id])
-
-  const handleAssign = async () => {
-    const auction = auctions.find((a) => a.id === selectedAuctionId)
-    if (!auction) return
-    setIsAssigning(true)
-    setError(null)
-    const result = await assignPoolTeamToAuction(poolTeam, auction)
-    setIsAssigning(false)
-    if (!result.ok) {
-      setError(result.error ?? "Couldn't assign this team.")
-      return
-    }
-    setSuccess(true)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
-      <div className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white font-cinzel mb-1">Assign {poolTeam.name}</h3>
-        <p className="text-gray-400 text-sm mb-4">Copies this team into an auction's team list. The pool entry stays untouched.</p>
-
-        {success ? (
-          <div className="flex items-center gap-2 text-green-400 text-sm mb-4">
-            <CheckCircle2 className="h-4 w-4" /> Assigned successfully.
-          </div>
-        ) : !loaded ? (
-          <p className="text-gray-500 text-sm mb-4 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading auctions…
-          </p>
-        ) : auctions.length === 0 ? (
-          <p className="text-gray-500 text-sm mb-4">No auctions found yet — create one from the Matches or Tournaments tab first.</p>
-        ) : (
-          <>
-            <FieldLabel>Auction</FieldLabel>
-            <select
-              value={selectedAuctionId}
-              onChange={(e) => setSelectedAuctionId(e.target.value)}
-              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 mb-4"
-            >
-              <option value="">Select an auction…</option>
-              {auctions.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}{a.tournamentName ? ` — ${a.tournamentName}` : ""}
-                </option>
-              ))}
-            </select>
-          </>
-        )}
-
-        {error && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
-            <AlertCircle className="h-4 w-4" /> {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-3">
-          <Button onClick={onClose} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20">
-            {success ? "Close" : "Cancel"}
-          </Button>
-          {!success && (
-            <Button
-              onClick={handleAssign}
-              disabled={!selectedAuctionId || isAssigning}
-              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-            >
-              {isAssigning ? "Assigning…" : "Assign"}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ────────────────────────────────────────────────────────────────── */
-/*  PLAYER BANK                                                        */
+/*  PLAYER BANK — assigning a bank player onto a team's roster now       */
+/*  happens elsewhere (the team/auction roster view), not here — this   */
+/*  tab is purely add / browse / remove for the org's Player Bank.      */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -662,8 +557,6 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [country, setCountry] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
-
-  const [assignTarget, setAssignTarget] = useState<BankPlayer | null>(null)
 
   const reload = () => getPlayerBank(org.id).then((p) => setPlayers(p))
 
@@ -757,12 +650,6 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => setAssignTarget(p)}
-                    className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gold border border-gold/30 hover:bg-gold/10 rounded-md px-3 py-1.5"
-                  >
-                    <Link2 className="h-3 w-3" /> Assign
-                  </button>
                   <button onClick={() => handleDelete(p)} className="text-gray-500 hover:text-red-400 p-1.5">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -773,109 +660,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
         )}
       </Panel>
 
-      {assignTarget && (
-        <AssignPlayerModal org={org} player={assignTarget} onClose={() => setAssignTarget(null)} />
-      )}
-
       {ConfirmDialogElement}
-    </div>
-  )
-}
-
-function AssignPlayerModal({ org, player, onClose }: { org: OrgSummary; player: BankPlayer; onClose: () => void }) {
-  const [teams, setTeams] = useState<AssignableTeam[]>([])
-  const [loaded, setLoaded] = useState(false)
-  const [selectedTeamId, setSelectedTeamId] = useState("")
-  const [isCaptain, setIsCaptain] = useState(false)
-  const [isAssigning, setIsAssigning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-
-  useEffect(() => {
-    getAssignableTeamsForOrg(org.id).then((t) => {
-      setTeams(t)
-      setLoaded(true)
-    })
-  }, [org.id])
-
-  const handleAssign = async () => {
-    const team = teams.find((t) => t.teamId === selectedTeamId)
-    if (!team) return
-    setIsAssigning(true)
-    setError(null)
-    const result = await assignBankPlayerToTeam(player, team, isCaptain)
-    setIsAssigning(false)
-    if (!result.ok) {
-      setError(result.error ?? "Couldn't assign this player.")
-      return
-    }
-    setSuccess(true)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
-      <div className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white font-cinzel mb-1">Assign {player.name}</h3>
-        <p className="text-gray-400 text-sm mb-4">
-          Copies this player onto a Team Pool team's roster. The bank entry stays untouched.
-        </p>
-
-        {success ? (
-          <div className="flex items-center gap-2 text-green-400 text-sm mb-4">
-            <CheckCircle2 className="h-4 w-4" /> Assigned successfully.
-          </div>
-        ) : !loaded ? (
-          <p className="text-gray-500 text-sm mb-4 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
-          </p>
-        ) : teams.length === 0 ? (
-          <p className="text-gray-500 text-sm mb-4">
-            No Team Pool teams found yet — assign one from the{" "}
-            <span className="text-gold">Team Pool</span> tab into an auction first.
-          </p>
-        ) : (
-          <>
-            <FieldLabel>Team</FieldLabel>
-            <select
-              value={selectedTeamId}
-              onChange={(e) => setSelectedTeamId(e.target.value)}
-              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 mb-3"
-            >
-              <option value="">Select a team…</option>
-              {teams.map((t) => (
-                <option key={t.teamId} value={t.teamId}>
-                  {t.teamName} ({t.teamCode}) — {t.tournamentName ?? t.auctionName}
-                </option>
-              ))}
-            </select>
-            <label className="flex items-center gap-2 text-sm text-gray-300 mb-4">
-              <input type="checkbox" checked={isCaptain} onChange={(e) => setIsCaptain(e.target.checked)} />
-              Make captain of this team
-            </label>
-          </>
-        )}
-
-        {error && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
-            <AlertCircle className="h-4 w-4" /> {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-3">
-          <Button onClick={onClose} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/20">
-            {success ? "Close" : "Cancel"}
-          </Button>
-          {!success && (
-            <Button
-              onClick={handleAssign}
-              disabled={!selectedTeamId || isAssigning}
-              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-            >
-              {isAssigning ? "Assigning…" : "Assign"}
-            </Button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

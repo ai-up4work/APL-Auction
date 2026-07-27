@@ -197,11 +197,16 @@ export interface AuctionSummary {
 
 export type AuctionOption = AuctionSummary;
 
+/** Real, user-facing auctions only. Rosters (see ROSTERS section below) are
+ *  stored as auction rows with status="roster" purely so they can reuse the
+ *  teams/players plumbing — they must never show up here, in the Matches
+ *  tab's auction picker, or in the assignable-auctions list. */
 export async function getAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
   const { data, error } = await supabase
     .from("auctions")
     .select("id, name, status, created_at, tournaments(name)")
     .eq("org_id", orgId)
+    .neq("status", "roster")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -306,6 +311,12 @@ export interface FriendlyMatchSummary {
    *  Used purely for the "linked to auction" status badge — there is no
    *  separate FK for this, so it's inferred from the presence of squads. */
   auctionLinked: boolean;
+  /** Venue / date / time filled in from the match's edit panel. Blank/null
+   *  for a freshly-created standalone match that hasn't been edited yet —
+   *  the UI only shows these once they're populated. */
+  venue: string | null;
+  date: string | null;
+  time: string | null;
 }
 
 export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
@@ -366,6 +377,9 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       tournamentName: tournamentByMatch.get(m.id) ?? null,
       overlayConfigured: overlaySet.has(m.id),
       auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
+      venue: setup.venue || null,
+      date: setup.date || null,
+      time: setup.time || null,
     };
   });
 }
@@ -703,6 +717,35 @@ export interface AssignResult {
   error?: string;
 }
 
+export interface TeamRosterPlayer {
+  id: string;
+  name: string;
+  role: string;
+  isCaptain: boolean;
+}
+
+/** Roster for a single real team row, for display inside the Auctions tab.
+ *  `isCaptain` is inferred the same way assignBankPlayerToTeam sets it: a
+ *  non-null owner_team_code on the player row. */
+export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]> {
+  const { data, error } = await supabase
+    .from("players")
+    .select("id, name, role, owner_team_code")
+    .eq("sold_to_team_id", teamId)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("getTeamRoster failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    role: p.role,
+    isCaptain: !!p.owner_team_code,
+  }));
+}
+
 export async function assignBankPlayerToTeam(
   bankPlayer: BankPlayer,
   team: AssignableTeam,
@@ -964,4 +1007,113 @@ export async function saveOverlayWeatherCoords(matchId: string, lat: number, lng
     return false;
   }
   return true;
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  ROSTERS                                                             */
+/*                                                                       */
+/*  A Roster is a named container for many-to-many player/team           */
+/*  assignments — the same Team Pool team can sit in several rosters,     */
+/*  and the same Player Bank player can be assigned onto several teams     */
+/*  (in the same roster or different ones). There's no dedicated schema   */
+/*  for this: a Roster IS an `auctions` row with status="roster" — a      */
+/*  synthetic auction that's never shown as a real auction (see the       */
+/*  status filter in getAuctionsForOrg above). This lets a roster reuse   */
+/*  the exact same `teams` / `players` tables and the exact same          */
+/*  assignBankPlayerToTeam / assignPoolTeamToAuction insert logic as a     */
+/*  real auction, with zero schema changes.                               */
+/* ────────────────────────────────────────────────────────────────── */
+
+export interface Roster {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export async function getRostersForOrg(orgId: string): Promise<Roster[]> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .select("id, name, created_at")
+    .eq("org_id", orgId)
+    .eq("status", "roster")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getRostersForOrg failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
+}
+
+export async function createRoster(orgId: string, userId: string, name: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("auctions")
+    .insert({
+      org_id: orgId,
+      name: name.trim(),
+      created_by: userId,
+      status: "roster",
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("createRoster failed:", error?.message);
+    return null;
+  }
+  return data.id;
+}
+
+/** Same FK caveat as deleteAuction — fails if teams/players are still
+ *  attached, which for a roster means "it still has teams or players in
+ *  it," so the message is phrased for that case instead. */
+export async function deleteRoster(rosterId: string): Promise<UpdateOrgResult> {
+  const { error } = await supabase.from("auctions").delete().eq("id", rosterId);
+  if (error) {
+    console.error("deleteRoster failed:", error.message);
+    if (error.code === "23503") {
+      return { ok: false, error: "This roster still has teams or players in it and can't be deleted yet." };
+    }
+    return { ok: false, error: "Couldn't delete that roster — please try again." };
+  }
+  return { ok: true };
+}
+
+/** Thin wrapper around assignPoolTeamToAuction so callers in the Roster UI
+ *  don't need to hand-build an AuctionSummary — a Roster and an
+ *  AuctionSummary share the one field (`id`) that insert actually uses. */
+export async function assignPoolTeamToRoster(poolTeam: PoolTeam, roster: Roster): Promise<AssignResult> {
+  return assignPoolTeamToAuction(poolTeam, {
+    id: roster.id,
+    name: roster.name,
+    status: "roster",
+    tournamentName: null,
+    createdAt: roster.createdAt,
+  });
+}
+
+/** Thin wrapper around assignBankPlayerToTeam for a team that lives inside
+ *  a specific roster — `team` here is one of the AuctionTeamOption rows
+ *  returned by getTeamsForAuction(roster.id), which doesn't carry
+ *  auctionId/auctionName/tournamentName, so this fills those in from the
+ *  roster itself before delegating to the same insert logic used
+ *  everywhere else. */
+export async function assignBankPlayerToRosterTeam(
+  bankPlayer: BankPlayer,
+  team: AuctionTeamOption,
+  roster: Roster,
+  isCaptain: boolean
+): Promise<AssignResult> {
+  return assignBankPlayerToTeam(
+    bankPlayer,
+    {
+      teamId: team.id,
+      teamName: team.name,
+      teamCode: team.code,
+      auctionId: roster.id,
+      auctionName: roster.name,
+      tournamentName: null,
+    },
+    isCaptain
+  );
 }
