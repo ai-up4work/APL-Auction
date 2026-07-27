@@ -404,8 +404,7 @@ export async function createFriendlyMatch(
 
   let team1: { name: string; short: string; logo: string };
   let team2: { name: string; short: string; logo: string };
-  let squads: { name: string; role: string; team: string; captain?: boolean }[] = [];
-  // True only when the source is a REAL bidding auction (not a Squad
+  let squads: { name: string; role: string; team: string; captain?: boolean; imageUrl?: string }[] = [];  // True only when the source is a REAL bidding auction (not a Squad
   // Board, and not a standalone/manual match). Computed once, here, and
   // baked into match_setup.rosterLocked below.
   let rosterLocked = false;
@@ -434,7 +433,7 @@ export async function createFriendlyMatch(
 
     const { data: playerRows, error: playersErr } = await supabase
       .from("players")
-      .select("name, role, sold_to_team_id, owner_team_code")
+      .select("name, role, img, sold_to_team_id, owner_team_code")   // add img
       .in("sold_to_team_id", [input.team1Id, input.team2Id]);
 
     if (playersErr) {
@@ -446,6 +445,7 @@ export async function createFriendlyMatch(
       role: p.role,
       team: p.sold_to_team_id === input.team1Id ? team1.short : team2.short,
       captain: !!p.owner_team_code,
+      imageUrl: p.img || undefined,   // add this
     }));
 
     // Was this pulled from a real bidding auction, or a Squad Board
@@ -642,7 +642,7 @@ export interface BankPlayerInput {
 export async function getPlayerBank(orgId: string): Promise<BankPlayer[]> {
   const { data, error } = await supabase
     .from("player_bank")
-    .select("id, name, role, origin, country, img, capped, notes")
+    .select("id, name, role, origin, country, img, capped, notes, img")
     .eq("org_id", orgId)
     .order("name", { ascending: true });
 

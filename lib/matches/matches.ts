@@ -45,8 +45,8 @@ export interface SquadPlayer {
   id: string
   name: string
   role: string
-  /** Whether this player is in the starting XI vs. on the bench. */
   xi: boolean
+  imageUrl?: string
 }
 
 export interface ManualMatchTeam {

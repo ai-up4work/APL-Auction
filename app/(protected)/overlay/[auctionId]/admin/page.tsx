@@ -764,13 +764,19 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         <div className="flex flex-col lg:flex-row gap-8 items-start">
           <div className="flex-1 min-w-0 flex flex-col gap-6">
             <MatchSetupPanel
-              auctionId={sourceAuctionId ?? ""}   // used for roster/teams lookups
+              auctionId={sourceAuctionId}   // not matchId, not `${sourceAuctionId}`, not stringified
               matchSetup={matchSetup}
               setMatchSetup={setMatchSetup}
               onPush={pushMatchSetup}
               pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
               completed={matchSetupCompleted}
-              onVenueSelect={(match: GeocodeMatch, displayName: string | undefined) => weatherPanelRef.current?.scheduleFetch(match, displayName)}
+              onVenueSelect={async (match, displayName) => {
+                try {
+                  // your geocode/weather logic here, using `match` (GeocodeMatch)
+                } catch (err) {
+                  console.error("[v0] Geocoding failed:", err);
+                }
+              }}
             />
 
             {matchSetupCompleted ? (

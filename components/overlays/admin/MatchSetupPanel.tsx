@@ -24,10 +24,24 @@ type RosterState =
   | { status: "empty" }
   | { status: "ready"; byTeamId: Map<string, RosterRow[]> };
 
-function useAuctionRoster(auctionId: string): RosterState {
+// Guards against undefined / null / the literal string "null" — any of
+// these reaching supabase.eq("auction_id", ...) blows up with
+// `invalid input syntax for type uuid` since PostgREST sends it as text.
+function isValidAuctionId(id: unknown): id is string {
+  return typeof id === "string" && id.length > 0 && id !== "null" && id !== "undefined";
+}
+
+function useAuctionRoster(auctionId: string | null | undefined): RosterState {
   const [state, setState] = useState<RosterState>({ status: "loading" });
 
   useEffect(() => {
+    if (!isValidAuctionId(auctionId)) {
+      // Nothing to query yet (e.g. still hydrating upstream) — don't
+      // fire a request that Postgres will reject.
+      setState({ status: "empty" });
+      return;
+    }
+
     let cancelled = false;
     setState({ status: "loading" });
 
@@ -40,7 +54,7 @@ function useAuctionRoster(auctionId: string): RosterState {
         if (cancelled) return;
         if (error || !data) {
           // eslint-disable-next-line no-console
-          console.error("[useAuctionRoster] players query failed:", error);
+          console.error("[useAuctionRoster] players query failed:", JSON.stringify(error, null, 2));
           setState({ status: "error" });
           return;
         }
@@ -48,6 +62,7 @@ function useAuctionRoster(auctionId: string): RosterState {
           setState({ status: "empty" });
           return;
         }
+        // console.log("[useAuctionRoster] got", JSON.stringify(data, null, 2));
         const byTeamId = new Map<string, RosterRow[]>();
         for (const row of data as any[]) {
           const key = row.sold_to_team_id ?? "unassigned";
@@ -58,8 +73,7 @@ function useAuctionRoster(auctionId: string): RosterState {
             image_url: row.img || null,
             role: row.role,
             team_id: row.sold_to_team_id,
-          });
-        }
+          });        }
         setState({ status: "ready", byTeamId });
       });
 
@@ -89,10 +103,15 @@ type TeamsDbState =
   | { status: "empty" }
   | { status: "ready"; teams: DbTeamRow[] };
 
-function useAuctionTeams(auctionId: string): TeamsDbState {
+function useAuctionTeams(auctionId: string | null | undefined): TeamsDbState {
   const [state, setState] = useState<TeamsDbState>({ status: "loading" });
 
   useEffect(() => {
+    if (!isValidAuctionId(auctionId)) {
+      setState({ status: "empty" });
+      return;
+    }
+
     let cancelled = false;
     setState({ status: "loading" });
 
@@ -105,7 +124,7 @@ function useAuctionTeams(auctionId: string): TeamsDbState {
         if (cancelled) return;
         if (error || !data) {
           // eslint-disable-next-line no-console
-          console.error("[useAuctionTeams] teams query failed:", error);
+          console.error("[useAuctionTeams] teams query failed:", JSON.stringify(error, null, 2));
           setState({ status: "error" });
           return;
         }
@@ -178,11 +197,17 @@ function TeamDbSelect({
     <select
       className="select-input select-input-compact"
       defaultValue=""
-      onChange={(e) => {
-        const team = teamsState.teams.find((t) => t.id === e.target.value);
-        if (!team) return;
-        const squadPlayers = rosterPlayersForTeamId(roster, team.id);
-        onApply({
+        onChange={(e) => {
+          const team = teamsState.teams.find((t) => t.id === e.target.value);
+          if (!team) return;
+
+          // DEBUG — remove after diagnosing
+          console.log("[team select] picked team.id =", team.id,
+            "roster status =", roster.status,
+            "roster keys =", roster.status === "ready" ? Array.from(roster.byTeamId.keys()) : "n/a");
+
+          const squadPlayers = rosterPlayersForTeamId(roster, team.id);
+          onApply({
           teamId: team.id,
           name: team.name,
           shortCode: team.code,
@@ -223,6 +248,12 @@ function TeamRosterPicker({
     if (roster.status !== "ready" || !team.teamId) return [];
     return roster.byTeamId.get(team.teamId) ?? [];
   }, [roster, team.teamId]);
+
+  // DEBUG — remove after diagnosing
+  console.log("[roster lookup] team.teamId =", team.teamId,
+    "found rows =", teamRosterRows.length,
+    "roster status =", roster.status,
+    "all roster keys =", roster.status === "ready" ? Array.from(roster.byTeamId.keys()) : "n/a");
 
   const manualPlayers = (team.squadPlayers ?? []).filter((p) => p.id.startsWith("manual:"));
 
@@ -409,7 +440,7 @@ export default function MatchSetupPanel({
   completed,
   onVenueSelect,
 }: {
-  auctionId: string;
+  auctionId: string | null | undefined;
   matchSetup: MatchSetup;
   setMatchSetup: React.Dispatch<React.SetStateAction<MatchSetup>>;
   onPush: () => void;
@@ -473,6 +504,14 @@ export default function MatchSetupPanel({
       <DrawerSection
         step="1" title="Match Setup" description="Teams & session — set once, then push"
         done={completed} open={drawerOpen} onOpenChange={setDrawerOpen} >
+        {!isValidAuctionId(auctionId) && (
+          <p
+            className="text-[10px] uppercase tracking-widest"
+            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-warning)" }}
+          >
+            No auction linked yet — team/roster lookups are disabled until this match has a valid auction_id.
+          </p>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <TextField
           label="Tournament"
@@ -487,7 +526,7 @@ export default function MatchSetupPanel({
           placeholder="e.g. 2026"
         />
         <ImageUploader
-          auctionId={auctionId}
+          auctionId={auctionId ?? ""}
           kind="team"
           value={matchSetup.tournamentLogoUrl}
           onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
@@ -571,7 +610,7 @@ export default function MatchSetupPanel({
                     placeholder="e.g. CSK"
                   />
                   <ColorField label="Color" value={team.color} onChange={(v) => updateTeam(teamKey, { color: v })} />
-                  <ImageUploader auctionId={auctionId} kind="team" value={team.logoUrl} onChange={(url) => updateTeam(teamKey, { logoUrl: url })} label="Logo" />
+                  <ImageUploader auctionId={auctionId ?? ""} kind="team" value={team.logoUrl} onChange={(url) => updateTeam(teamKey, { logoUrl: url })} label="Logo" />
                 </div>
 
                 <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />

@@ -387,22 +387,21 @@ function makePlayerId(): string {
 /** Compact squad-builder: add a player (name + role, optional XI flag),
  *  see them listed, remove them. Keeps the team's squadPlayers array in
  *  the parent's state — this component is just the input + list UI. */
-function SquadEditor({
-  team,
-  onChange,
-}: {
-  team: ManualMatchTeam
-  onChange: (players: SquadPlayer[]) => void
-}) {
+function SquadEditor({ team, onChange }: { team: ManualMatchTeam; onChange: (players: SquadPlayer[]) => void }) {
   const [name, setName] = useState("")
   const [role, setRole] = useState("")
+  const [imageUrl, setImageUrl] = useState("")
   const [xi, setXi] = useState(true)
 
   const addPlayer = () => {
     if (!name.trim()) return
-    onChange([...team.squadPlayers, { id: makePlayerId(), name: name.trim(), role: role.trim(), xi }])
+    onChange([
+      ...team.squadPlayers,
+      { id: makePlayerId(), name: name.trim(), role: role.trim(), xi, imageUrl: imageUrl.trim() || undefined },
+    ])
     setName("")
     setRole("")
+    setImageUrl("")
   }
 
   const removePlayer = (id: string) => {
@@ -424,6 +423,13 @@ function SquadEditor({
           onChange={(e) => setRole(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPlayer())}
           placeholder="Role (e.g. Batter)"
+          className="bg-black/50 border-gold/30 text-white text-sm"
+        />
+        <Input
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPlayer())}
+          placeholder="Image URL (optional)"
           className="bg-black/50 border-gold/30 text-white text-sm"
         />
         <label className="flex items-center gap-1.5 text-xs text-gray-400 whitespace-nowrap px-1">

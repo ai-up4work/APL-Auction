@@ -698,6 +698,7 @@ function SquadBoardTeamCard({
   useEffect(() => {
     reloadRoster().then(() => setPlayersLoaded(true))
     getPlayerBank(org.id).then((p) => {
+      console.log("bank players", p)
       setBankPlayers(p)
       setBankLoaded(true)
     })
