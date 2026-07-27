@@ -15,6 +15,7 @@ import {
   CheckSquare,
   Square,
   Radio,
+  Swords,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -79,6 +80,22 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
       {glyph[tone] && <span>{glyph[tone]}</span>}
       {children}
     </span>
+  )
+}
+
+/** Small avatar used inside the overlapping team-logo pair on a match
+ *  card. Falls back to a generic crossed-swords glyph when the team has
+ *  no logo on file. */
+function TeamAvatar({ logo }: { logo: string | null }) {
+  return (
+    <div className="h-8 w-8 rounded-full overflow-hidden border-2 border-black bg-black/70 flex items-center justify-center">
+      {logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <Swords className="h-3.5 w-3.5 text-gray-500" />
+      )}
+    </div>
   )
 }
 
@@ -206,6 +223,8 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
         teamSource: "manual",
         team1Name: t1.name,
         team2Name: t2.name,
+        team1Logo: t1.logo,
+        team2Logo: t2.logo,
         round,
       })
     } else {
@@ -604,6 +623,12 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
                       {selected.has(m.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
                   )}
+                  <div className="flex items-center -space-x-2.5 shrink-0">
+                    <div className="z-10">
+                      <TeamAvatar logo={m.team1Logo} />
+                    </div>
+                    <TeamAvatar logo={m.team2Logo} />
+                  </div>
                   <Link href={`/match/${m.id}`} className="min-w-0 flex-1">
                     <p className="text-white text-sm font-semibold truncate">
                       {m.team1Name} vs {m.team2Name}

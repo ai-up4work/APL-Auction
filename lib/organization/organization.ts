@@ -92,12 +92,16 @@ export interface TournamentSummary {
   status: string;
   category: string | null;
   createdAt: string;
+  /** Cover image for the tournament card. Falls back to `logoUrl`, then to
+   *  a placeholder in the UI when both are empty. */
+  imageUrl: string | null;
+  logoUrl: string | null;
 }
 
 export async function getTournamentsForOrg(orgId: string): Promise<TournamentSummary[]> {
   const { data, error } = await supabase
     .from("tournaments")
-    .select("id, name, format, status, category, created_at")
+    .select("id, name, format, status, category, created_at, image_url, logo_url")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
 
@@ -112,6 +116,8 @@ export async function getTournamentsForOrg(orgId: string): Promise<TournamentSum
     status: t.status,
     category: t.category,
     createdAt: t.created_at,
+    imageUrl: t.image_url,
+    logoUrl: t.logo_url,
   }));
 }
 
@@ -256,12 +262,13 @@ export interface AuctionTeamOption {
   id: string;
   name: string;
   code: string;
+  logo: string;
 }
 
 export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeamOption[]> {
   const { data, error } = await supabase
     .from("teams")
-    .select("id, name, code")
+    .select("id, name, code, logo")
     .eq("auction_id", auctionId)
     .order("name", { ascending: true });
 
@@ -269,7 +276,12 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
     console.error("getTeamsForAuction failed:", error.message);
     return [];
   }
-  return data ?? [];
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    name: t.name,
+    code: t.code,
+    logo: t.logo ?? "",
+  }));
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -280,6 +292,11 @@ export interface FriendlyMatchSummary {
   id: string;
   team1Name: string;
   team2Name: string;
+  /** Team logo URLs pulled from match_setup at creation time (copied from
+   *  whichever Team Pool / auction team the match's teams came from). Null
+   *  when the source team had no logo set — the UI shows a placeholder. */
+  team1Logo: string | null;
+  team2Logo: string | null;
   round: string;
   createdAt: string;
   tournamentName: string | null;
@@ -342,6 +359,8 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       id: m.id,
       team1Name: setup.team1?.name ?? "Team 1",
       team2Name: setup.team2?.name ?? "Team 2",
+      team1Logo: setup.team1?.logo || null,
+      team2Logo: setup.team2?.logo || null,
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
       tournamentName: tournamentByMatch.get(m.id) ?? null,
@@ -352,7 +371,7 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
 }
 
 export type CreateFriendlyMatchInput =
-  | { teamSource: "manual"; team1Name: string; team2Name: string; round?: string }
+  | { teamSource: "manual"; team1Name: string; team2Name: string; team1Logo?: string; team2Logo?: string; round?: string }
   | { teamSource: "auction"; auctionId: string; team1Id: string; team2Id: string; round?: string };
 
 export async function createFriendlyMatch(
@@ -361,17 +380,17 @@ export async function createFriendlyMatch(
 ): Promise<string | null> {
   const newId = crypto.randomUUID();
 
-  let team1: { name: string; short: string };
-  let team2: { name: string; short: string };
+  let team1: { name: string; short: string; logo: string };
+  let team2: { name: string; short: string; logo: string };
   let squads: { name: string; role: string; team: string }[] = [];
 
   if (input.teamSource === "manual") {
-    team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name) };
-    team2 = { name: input.team2Name.trim(), short: shortCode(input.team2Name) };
+    team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name), logo: input.team1Logo?.trim() || "" };
+    team2 = { name: input.team2Name.trim(), short: shortCode(input.team2Name), logo: input.team2Logo?.trim() || "" };
   } else {
     const { data: teamRows, error: teamErr } = await supabase
       .from("teams")
-      .select("id, name, code")
+      .select("id, name, code, logo")
       .in("id", [input.team1Id, input.team2Id]);
 
     if (teamErr || !teamRows || teamRows.length !== 2) {
@@ -380,8 +399,8 @@ export async function createFriendlyMatch(
     }
     const t1 = teamRows.find((t) => t.id === input.team1Id)!;
     const t2 = teamRows.find((t) => t.id === input.team2Id)!;
-    team1 = { name: t1.name, short: t1.code };
-    team2 = { name: t2.name, short: t2.code };
+    team1 = { name: t1.name, short: t1.code, logo: t1.logo || "" };
+    team2 = { name: t2.name, short: t2.code, logo: t2.logo || "" };
 
     const { data: playerRows, error: playersErr } = await supabase
       .from("players")
@@ -643,28 +662,40 @@ export interface AssignableTeam {
   tournamentName: string | null;
 }
 
+/** Teams a bank player can be assigned onto.
+ *
+ *  This intentionally does NOT list every `teams` row sitting under one of
+ *  the org's auctions — that would include teams typed directly into an
+ *  auction admin panel, which have nothing to do with the org's Team Pool.
+ *  Instead it walks `team_pool_assignments`, so only teams that started
+ *  life as a Team Pool entry (and were then assigned into a real auction
+ *  via the Team Pool tab's "Assign" flow) show up here. The name/code shown
+ *  is the pool team's own name/code, not whatever the copied `teams` row
+ *  happens to currently say — this is what a person picking "which pool
+ *  team" expects to see, even if the real team row was later renamed. */
 export async function getAssignableTeamsForOrg(orgId: string): Promise<AssignableTeam[]> {
   const { data, error } = await supabase
-    .from("teams")
+    .from("team_pool_assignments")
     .select(
-      "id, name, code, auction_id, auctions!inner(id, name, org_id, tournament_id, tournaments(name))"
+      "teams_row_id, auction_id, team_pool!inner(id, name, code, org_id), auctions!inner(id, name, tournament_id, tournaments(name))"
     )
-    .eq("auctions.org_id", orgId)
-    .order("name", { ascending: true });
+    .eq("team_pool.org_id", orgId);
 
   if (error) {
     console.error("getAssignableTeamsForOrg failed:", error.message);
     return [];
   }
 
-  return (data ?? []).map((row: any) => ({
-    teamId: row.id,
-    teamName: row.name,
-    teamCode: row.code,
-    auctionId: row.auction_id,
-    auctionName: row.auctions?.name ?? "Auction",
-    tournamentName: row.auctions?.tournaments?.name ?? null,
-  }));
+  return (data ?? [])
+    .filter((row: any) => row.teams_row_id && row.auction_id)
+    .map((row: any) => ({
+      teamId: row.teams_row_id,
+      teamName: row.team_pool?.name ?? "Team",
+      teamCode: row.team_pool?.code ?? "",
+      auctionId: row.auction_id,
+      auctionName: row.auctions?.name ?? "Auction",
+      tournamentName: row.auctions?.tournaments?.name ?? null,
+    }));
 }
 
 export interface AssignResult {

@@ -16,6 +16,7 @@ import {
   CheckSquare,
   Square,
   Shield,
+  Trophy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,6 +85,22 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
       {glyph[tone] && <span>{glyph[tone]}</span>}
       {children}
     </span>
+  )
+}
+
+/** Cover thumbnail for a tournament card. Falls back to `logoUrl`, then to
+ *  a plain trophy placeholder when the tournament has no image at all. */
+function TournamentThumb({ tournament }: { tournament: TournamentSummary }) {
+  const src = tournament.imageUrl || tournament.logoUrl
+  return (
+    <div className="h-12 w-12 rounded-md overflow-hidden border border-gold/20 bg-black/60 flex items-center justify-center shrink-0">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <Trophy className="h-5 w-5 text-gold/30" />
+      )}
+    </div>
   )
 }
 
@@ -334,6 +351,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
                   >
                     {selected.has(t.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                   </button>
+                  <TournamentThumb tournament={t} />
                   <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
                     <p className="text-white text-sm font-semibold truncate">{t.name}</p>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -499,9 +517,14 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
               <div key={t.id} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10"
+                    className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center"
                     style={{ backgroundColor: t.color || "#e45d35" }}
-                  />
+                  >
+                    {t.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.logo} alt="" className="h-full w-full object-cover" />
+                    ) : null}
+                  </div>
                   <div className="min-w-0">
                     <p className="text-white text-sm font-semibold truncate">{t.name}</p>
                     <p className="text-gray-500 text-xs mt-0.5">
@@ -793,7 +816,9 @@ function AssignPlayerModal({ org, player, onClose }: { org: OrgSummary; player: 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={onClose}>
       <div className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-6 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-white font-cinzel mb-1">Assign {player.name}</h3>
-        <p className="text-gray-400 text-sm mb-4">Copies this player onto a team's roster. The bank entry stays untouched.</p>
+        <p className="text-gray-400 text-sm mb-4">
+          Copies this player onto a Team Pool team's roster. The bank entry stays untouched.
+        </p>
 
         {success ? (
           <div className="flex items-center gap-2 text-green-400 text-sm mb-4">
@@ -804,7 +829,10 @@ function AssignPlayerModal({ org, player, onClose }: { org: OrgSummary; player: 
             <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
           </p>
         ) : teams.length === 0 ? (
-          <p className="text-gray-500 text-sm mb-4">No teams found yet — create a tournament or match with teams first.</p>
+          <p className="text-gray-500 text-sm mb-4">
+            No Team Pool teams found yet — assign one from the{" "}
+            <span className="text-gold">Team Pool</span> tab into an auction first.
+          </p>
         ) : (
           <>
             <FieldLabel>Team</FieldLabel>
