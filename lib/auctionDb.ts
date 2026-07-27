@@ -681,7 +681,9 @@ export async function listAuctions(): Promise<AuctionSummary[]> {
       teams:teams(count),
       players:players(count),
       session_config(auction_logo)
-    `);
+    `)
+     .eq("is_synthetic", false);    
+    ;
 
   // In an org: only that org's auctions. Not in an org: only this user's
   // own org_id-less (personal) auctions — never someone else's, and never

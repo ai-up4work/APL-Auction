@@ -381,6 +381,7 @@ export async function getLinkableAuctionsForOrg(orgId: string): Promise<Linkable
     .from("auctions")
     .select("id, name, status")
     .eq("org_id", orgId)
+    .eq("is_synthetic", false)
     .is("tournament_id", null)
     .order("created_at", { ascending: false });
 

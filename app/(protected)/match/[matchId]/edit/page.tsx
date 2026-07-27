@@ -2,14 +2,12 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import Link from "next/link"
-import { Pencil, Save, Plus, Trash2, Users, MapPin, Gavel, Loader2, CheckCircle2, AlertTriangle } from "lucide-react"
+import { Pencil, Save, Plus, Trash2, Users, MapPin, Gavel, Loader2, CheckCircle2, AlertTriangle, Sparkles, Shield, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
-import { SiteHeader } from "@/components/landing/site-header"
-import { SiteFooter } from "@/components/landing/site-footer"
+import { AppHeader } from "@/components/app-header"
 import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 
@@ -30,6 +28,16 @@ import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 // successful sync (see syncSquadsToPlayers) and round-tripped on every
 // subsequent load/save so renames update the existing `players` row
 // instead of creating a duplicate via name-matching.
+//
+// `rosterLocked` mirrors `match_setup.rosterLocked`, set once at
+// creation time by createFriendlyMatch (organization.ts) — true only
+// when this match's teams came from a REAL bidding auction (not a
+// Squad Board, and not a standalone/manual match). It can't be derived
+// here by looking up `matches.auction_id`, because that column is
+// always set to the match's OWN generated id (see resolveAuctionId
+// below and createFriendlyMatch) — never to the original source
+// auction's id — so the "was this real bidding data" fact has to be
+// captured at creation time and just read back here.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -57,8 +65,10 @@ interface EditableSetup {
   round: string
   team1Name: string
   team1Short: string
+  team1Logo: string
   team2Name: string
   team2Short: string
+  team2Logo: string
   venue: string
   date: string
   time: string
@@ -66,6 +76,7 @@ interface EditableSetup {
   overs: number
   officials: Officials
   squads: Squad[]
+  rosterLocked: boolean
 }
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter"]
@@ -82,8 +93,10 @@ function emptySetup(): EditableSetup {
     round: "",
     team1Name: "",
     team1Short: "",
+    team1Logo: "",
     team2Name: "",
     team2Short: "",
+    team2Logo: "",
     venue: "",
     date: "",
     time: "",
@@ -91,40 +104,115 @@ function emptySetup(): EditableSetup {
     overs: 20,
     officials: { ...emptyOfficials },
     squads: [emptySquad("team1"), emptySquad("team2")],
+    rosterLocked: false,
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SQUADS NORMALIZATION
+//
+// match_setup.squads shows up in TWO different shapes depending on how
+// this match was created:
+//
+//  1. GROUPED shape — what this editor itself writes on save:
+//     [{ teamId: "team1", captain: "...", players: [{ name, role, xi, playerId }] }]
+//
+//  2. FLAT shape — what createFriendlyMatch (organization.ts) writes
+//     when a match is created from a Squad Board or a real auction:
+//     [{ name, role, team: "<short code>", captain?: boolean }]
+//     (Squad Boards are just synthetic auctions under the hood, so
+//     both sources produce this exact same flat shape — there's
+//     nothing source-specific to branch on here; source-specific
+//     behavior is instead driven entirely by `rosterLocked`, see below.)
+//
+// normalizeRawSquads() detects which shape is present and always
+// returns shape #1, so the rest of the page never has to care where
+// the data came from.
+// ─────────────────────────────────────────────────────────────
+
+function isGroupedShape(rawSquads: any[]): boolean {
+  return rawSquads.some((s) => s && typeof s === "object" && "teamId" in s)
+}
+
+function normalizeRawSquads(raw: Record<string, any> | null): Squad[] {
+  const team1Short = (raw?.team1?.short ?? "").toString().toUpperCase()
+  const team2Short = (raw?.team2?.short ?? "").toString().toUpperCase()
+  const rawSquads: any[] = raw && Array.isArray(raw.squads) ? raw.squads : []
+
+  if (rawSquads.length === 0) {
+    return [emptySquad("team1"), emptySquad("team2")]
+  }
+
+  if (isGroupedShape(rawSquads)) {
+    const squadFor = (teamId: "team1" | "team2"): Squad => {
+      const found = rawSquads.find((s) => s?.teamId === teamId)
+      if (!found) return emptySquad(teamId)
+      return {
+        teamId,
+        captain: found.captain ?? "",
+        players: Array.isArray(found.players)
+          ? found.players.map((p: any) => ({
+              name: p?.name ?? "",
+              role: p?.role ?? "Batter",
+              xi: !!p?.xi,
+              playerId: typeof p?.playerId === "string" && p.playerId.trim() ? p.playerId : undefined,
+            }))
+          : [],
+      }
+    }
+    return [squadFor("team1"), squadFor("team2")]
+  }
+
+  // Flat shape from createFriendlyMatch — bucket by short code, falling
+  // back to team1 for anything that doesn't clearly match team2's code.
+  const team1Players: SquadPlayer[] = []
+  const team2Players: SquadPlayer[] = []
+  let team1Captain = ""
+  let team2Captain = ""
+
+  rawSquads.forEach((p: any) => {
+    if (!p) return
+    const code = (p.team ?? "").toString().toUpperCase()
+    const isTeam2 = !!code && code === team2Short && code !== team1Short
+    const name = p.name ?? ""
+    const player: SquadPlayer = { name, role: p.role ?? "Batter", xi: false }
+    if (isTeam2) {
+      team2Players.push(player)
+      if (p.captain) team2Captain = name
+    } else {
+      team1Players.push(player)
+      if (p.captain) team1Captain = name
+    }
+  })
+
+  // Default the first 11 (by original order) on each side into the
+  // Playing XI so a freshly-imported roster is immediately usable
+  // rather than showing "0/11" until someone manually ticks each box.
+  team1Players.slice(0, 11).forEach((p) => (p.xi = true))
+  team2Players.slice(0, 11).forEach((p) => (p.xi = true))
+
+  return [
+    { teamId: "team1", captain: team1Captain, players: team1Players },
+    { teamId: "team2", captain: team2Captain, players: team2Players },
+  ]
 }
 
 // Reads whatever shape currently exists in match_setup and maps it onto
 // the editable form fields, filling in blanks rather than erroring —
 // this page needs to work on a match_setup that's missing squads
-// entirely just as well as one that's fully populated.
+// entirely just as well as one that's fully populated from a board or
+// auction, or already-edited by hand.
 function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
   if (!raw) return emptySetup()
-  const rawSquads: any[] = Array.isArray(raw.squads) ? raw.squads : []
-  const squadFor = (teamId: "team1" | "team2"): Squad => {
-    const found = rawSquads.find((s) => s?.teamId === teamId)
-    if (!found) return emptySquad(teamId)
-    return {
-      teamId,
-      captain: found.captain ?? "",
-      players: Array.isArray(found.players)
-        ? found.players.map((p: any) => ({
-            name: p?.name ?? "",
-            role: p?.role ?? "Batter",
-            xi: !!p?.xi,
-            playerId: typeof p?.playerId === "string" && p.playerId.trim() ? p.playerId : undefined,
-          }))
-        : [],
-    }
-  }
-
   return {
     tournamentName: raw.tournamentName ?? "",
     round: raw.round ?? "",
     team1Name: raw.team1?.name ?? "",
     team1Short: raw.team1?.short ?? "",
+    team1Logo: raw.team1?.logo ?? "",
     team2Name: raw.team2?.name ?? "",
     team2Short: raw.team2?.short ?? "",
+    team2Logo: raw.team2?.logo ?? "",
     venue: raw.venue ?? "",
     date: raw.date ?? "",
     time: raw.time ?? "",
@@ -136,22 +224,35 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
       thirdUmpire: raw.officials?.thirdUmpire ?? "",
       referee: raw.officials?.referee ?? "",
     },
-    squads: [squadFor("team1"), squadFor("team2")],
+    squads: normalizeRawSquads(raw),
+    rosterLocked: !!raw.rosterLocked,
   }
+}
+
+// True if match_setup.squads was in the flat (auction/board-import)
+// shape on load — used purely to show a one-time "imported from your
+// auction/board" hint banner, not stored anywhere.
+function hadFlatSquads(raw: Record<string, any> | null): boolean {
+  const rawSquads: any[] = raw && Array.isArray(raw.squads) ? raw.squads : []
+  return rawSquads.length > 0 && !isGroupedShape(rawSquads)
 }
 
 // Merges the edited fields back into whatever the raw match_setup blob
 // already contained, so runtime-only keys the simulator owns (target,
 // currentInnings) survive a save untouched instead of being wiped.
 // `playerId` is included on every player entry (as undefined if absent)
-// so it round-trips through JSON without extra bookkeeping.
+// so it round-trips through JSON without extra bookkeeping. Once saved
+// once, squads are always written back in the GROUPED shape — the flat
+// shape only ever exists on the very first load right after creation.
+// `rosterLocked` is passed straight through from what was loaded — this
+// page never changes it, only createFriendlyMatch sets it.
 function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Record<string, any> {
   return {
     ...(raw ?? {}),
     tournamentName: form.tournamentName,
     round: form.round,
-    team1: { name: form.team1Name, short: form.team1Short },
-    team2: { name: form.team2Name, short: form.team2Short },
+    team1: { name: form.team1Name, short: form.team1Short, logo: form.team1Logo },
+    team2: { name: form.team2Name, short: form.team2Short, logo: form.team2Logo },
     venue: form.venue,
     date: form.date,
     time: form.time,
@@ -168,6 +269,7 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
         playerId: p.playerId,
       })),
     })),
+    rosterLocked: form.rosterLocked,
   }
 }
 
@@ -184,9 +286,10 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
 // there too) before those FKs can ever be populated.
 //
 // Two cases:
-//  1. This match is genuinely tied to a real auction — `matches.auction_id`
+//  1. This match is genuinely tied to a real auction (or a Squad Board,
+//     which is just a synthetic auction row) — `matches.auction_id`
 //     already matches a row in `auctions`. Reuse that auction_id as-is,
-//     so squads land alongside whatever auction data already exists.
+//     so squads land alongside whatever data already exists there.
 //  2. This is a manual / simulated match with no backing auction.
 //     `matches.auction_id` is either missing or doesn't resolve to a
 //     real `auctions` row. In that case we provision a minimal
@@ -197,6 +300,12 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
 //     over `auctions`, then point matches.auction_id at it. Every
 //     future save reuses the same auction_id since it's now real.
 //
+// The provisioned row MUST carry a real org_id and created_by (a real
+// auth.users id) — the auctions RLS policy requires both, the same way
+// createSquadBoard's created_by has to be a real signed-in user rather
+// than an org id. Omitting either throws exactly the RLS violation this
+// used to hit.
+//
 // PLAYER IDENTITY — matched by id first, name only as a fallback:
 // Each SquadPlayer may carry a `playerId` once it's been synced once.
 // upsertPlayer() prefers that id for matching/updating; it only falls
@@ -205,6 +314,12 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
 // elsewhere). This stops a rename in the editor from forking a
 // duplicate `players` row, and keeps any `balls` rows already pointing
 // at that player's id correctly anchored across edits.
+//
+// ROSTER-LOCKED matches (form.rosterLocked === true) never reach the
+// "insert a brand new player" path in practice, because the UI disables
+// adding/renaming/removing players for those squads — see the SQUADS
+// section of the page component. This function itself stays generic;
+// the lock is purely a UI-level guard, not something enforced here.
 // ─────────────────────────────────────────────────────────────
 
 interface SyncResult {
@@ -221,15 +336,26 @@ interface SyncOutcome {
 async function resolveAuctionId(matchId: string, matchNameHint: string): Promise<string> {
   const { data: matchRow, error: matchErr } = await supabase
     .from("matches")
-    .select("auction_id")
+    .select("auction_id, org_id")
     .eq("id", matchId)
     .maybeSingle()
   if (matchErr) throw new Error(`Couldn't read match: ${matchErr.message}`)
+  if (!matchRow?.org_id) {
+    throw new Error("This match has no org_id set — can't provision an auction record for it.")
+  }
 
-  const candidate = matchRow?.auction_id?.trim()
+  const candidate = matchRow.auction_id?.trim()
   if (candidate) {
     const { data: existingAuction } = await supabase.from("auctions").select("id").eq("id", candidate).maybeSingle()
-    if (existingAuction) return candidate // already points at a real auction — reuse it
+    if (existingAuction) return candidate // already points at a real auction (or Squad Board) — reuse it
+  }
+
+  // The auctions RLS policy requires the row to be tied to a real org
+  // and a real signed-in user — omitting either is exactly what a
+  // "new row violates row-level security policy" error looks like.
+  const { data: userData, error: userErr } = await supabase.auth.getUser()
+  if (userErr || !userData?.user) {
+    throw new Error("Couldn't verify the signed-in user — please sign in again before saving.")
   }
 
   // No real auction backs this match — provision one keyed to the
@@ -241,6 +367,8 @@ async function resolveAuctionId(matchId: string, matchNameHint: string): Promise
       id: auctionId,
       name: matchNameHint || "Manual Match",
       status: "completed",
+      org_id: matchRow.org_id,
+      created_by: userData.user.id,
       tournament_opt_out: true,
       is_synthetic: true,
     },
@@ -379,11 +507,16 @@ async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promis
   return { result: { auctionId, teamsUpserted, playersUpserted }, updatedSquads }
 }
 
-// Same card shell used on the simulate page and throughout the site.
+// ─────────────────────────────────────────────────────────────
+// SHARED UI PRIMITIVES — same shell/tokens as the rest of the app
+// (OrganizationClient / MatchesTab / TeamsManager / SquadBoardTab), so
+// this page reads as part of the same dashboard.
+// ─────────────────────────────────────────────────────────────
+
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div
-      className={`bg-black/50 border border-gold/20 shine hover:border-gold/40 transition-all duration-300 rounded-lg p-6 md:p-10 shadow-lg shadow-black/40 ${className}`}
+      className={`bg-black/50 border border-gold/20 shine hover:border-gold/40 transition-all duration-300 rounded-lg p-6 md:p-8 shadow-lg shadow-black/40 ${className}`}
     >
       {children}
     </div>
@@ -399,7 +532,7 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...rest}
-      className={`w-full bg-black/60 border border-gold/20 rounded-md px-3 py-2.5 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-gold/60 transition-colors ${className}`}
+      className={`w-full bg-black/60 border border-gold/20 rounded-md px-3 py-2.5 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-gold/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
     />
   )
 }
@@ -408,30 +541,33 @@ function NumberInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <TextInput type="number" {...props} />
 }
 
+function TeamAvatar({ logo }: { logo: string }) {
+  return (
+    <div className="h-9 w-9 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
+      {logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <Shield className="h-4 w-4 text-gray-500" />
+      )}
+    </div>
+  )
+}
+
 type SaveState = "idle" | "loading" | "saving" | "saved" | "error"
 
 export default function EditMatchPage() {
   useScrollTop()
-  const router = useRouter()
   const params = useParams<{ matchId: string }>()
   const matchId = params?.matchId ?? ""
 
-  const [isNavOpen, setIsNavOpen] = useState(false)
   const [state, setState] = useState<SaveState>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
   const [form, setForm] = useState<EditableSetup>(emptySetup())
+  const [showImportedHint, setShowImportedHint] = useState(false)
   const rawSetupRef = useRef<Record<string, any> | null>(null)
-
-  const handleNavigation = (path: string) => {
-    router.push(path)
-    window.scrollTo(0, 0)
-  }
-  const scrollToSection = (sectionId: string) => {
-    router.push(`/#${sectionId}`)
-    setIsNavOpen(false)
-  }
 
   // ── load existing match_setup ──
   useEffect(() => {
@@ -453,8 +589,10 @@ export default function EditMatchPage() {
         setState("error")
         return
       }
-      rawSetupRef.current = (data.match_setup as Record<string, any>) ?? null
-      setForm(fromRawSetup(rawSetupRef.current))
+      const raw = (data.match_setup as Record<string, any>) ?? null
+      rawSetupRef.current = raw
+      setForm(fromRawSetup(raw))
+      setShowImportedHint(hadFlatSquads(raw))
       setState("idle")
     }
 
@@ -481,6 +619,7 @@ export default function EditMatchPage() {
   }
 
   function addPlayer(squadIndex: number) {
+    if (form.rosterLocked) return // belt-and-braces — button is disabled/hidden anyway
     setForm((prev) => {
       const squads = [...prev.squads]
       squads[squadIndex] = {
@@ -502,6 +641,7 @@ export default function EditMatchPage() {
   }
 
   function removePlayer(squadIndex: number, playerIndex: number) {
+    if (form.rosterLocked) return // belt-and-braces — button is disabled/hidden anyway
     setForm((prev) => {
       const squads = [...prev.squads]
       squads[squadIndex] = {
@@ -519,13 +659,14 @@ export default function EditMatchPage() {
     setSyncMsg(null)
     setSyncErrorMsg(null)
 
-    let savedForm = form
+    const savedForm = form
 
     try {
       const updated = toRawSetup(rawSetupRef.current, form)
       const { error } = await supabase.from("matches").update({ match_setup: updated }).eq("id", matchId)
       if (error) throw new Error(error.message)
       rawSetupRef.current = updated
+      setShowImportedHint(false) // once saved, squads are in the grouped shape from here on
       setState("saved")
       setTimeout(() => setState((s) => (s === "saved" ? "idle" : s)), 2500)
     } catch (err) {
@@ -588,54 +729,38 @@ export default function EditMatchPage() {
       <style
         dangerouslySetInnerHTML={{
           __html: `${pageStyles}
-          html, body {
-            overflow-x: hidden;
-            max-width: 100%;
-          }`,
+          html, body { overflow-x: hidden; max-width: 100%; }`,
         }}
       />
 
-      <SiteHeader
-        activeSection="tournament"
-        isNavOpen={isNavOpen}
-        setIsNavOpen={setIsNavOpen}
-        scrollToSection={scrollToSection}
-        handleNavigation={handleNavigation}
-      />
+      <AppHeader title="Match Editor" />
 
-      {/* ═══════════════════════════════════════════
-          HEADER
-      ═══════════════════════════════════════════ */}
-      <section className="relative pt-28 pb-12 section-pattern bg-black border-b border-gold/10">
+      <section className="pt-28 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 text-center fade-in">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-md mb-6 bg-gold/10 border border-gold shrink-0">
-            <Pencil className="w-6 h-6 text-gold" />
+        <div className="container mx-auto px-4 relative z-10 max-w-4xl space-y-6">
+          <div>
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+              <Pencil className="w-3.5 h-3.5" />
+              Match Editor
+            </span>
+            <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel mb-2">
+              {form.team1Name || "Team 1"} <span className="text-gray-500 font-normal">vs</span> {form.team2Name || "Team 2"}
+            </h1>
+            <p className="text-gray-400 text-sm">
+              Everything here writes directly into <code className="text-gold">match_setup</code> — the same field
+              the simulator and live match page both read from.
+            </p>
           </div>
-          <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider section-title inline-block">
-            <TypeText text="Match " speed={45} />
-            <TypeText text="Editor" speed={45} delay={220} className="text-gold" />
-          </h1>
-          <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
-            Set teams, venue, officials, format, and squads for this match. Everything here writes directly into{" "}
-            <code className="text-gold">match_setup</code> — the same field the simulator and live match page both
-            read from.
-          </p>
-        </div>
-      </section>
 
-      <section className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 max-w-4xl space-y-8">
           {state === "loading" && (
-            <Panel className="fade-in flex items-center justify-center gap-3 text-gray-400">
+            <Panel className="flex items-center justify-center gap-3 text-gray-400">
               <Loader2 className="h-5 w-5 animate-spin text-gold" />
               Loading match data…
             </Panel>
           )}
 
           {state === "error" && errorMsg && (
-            <Panel className="fade-in border-red-500/40">
+            <Panel className="border-red-500/40">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
                 <div>
@@ -648,8 +773,30 @@ export default function EditMatchPage() {
 
           {state !== "loading" && (
             <>
+              {showImportedHint && (
+                <div className="flex items-start gap-3 bg-gold/[0.05] border border-gold/25 rounded-lg p-4">
+                  <Sparkles className="h-4 w-4 text-gold shrink-0 mt-0.5" />
+                  <p className="text-gray-300 text-xs">
+                    Squads below were imported from the source this match was created from (auction or Squad Board) —
+                    the first 11 players on each side were defaulted into the Playing XI. Review and hit{" "}
+                    <span className="text-gold">Save Changes</span> to lock them in.
+                  </p>
+                </div>
+              )}
+
+              {form.rosterLocked && (
+                <div className="flex items-start gap-3 bg-white/[0.02] border border-gold/20 rounded-lg p-4">
+                  <Lock className="h-4 w-4 text-gold shrink-0 mt-0.5" />
+                  <p className="text-gray-300 text-xs">
+                    These squads came from a live auction, so rosters are locked here — add, rename, or remove players
+                    from the <span className="text-gold">Auctions</span> tab instead. You can still set today's{" "}
+                    <span className="text-gold">Playing XI</span> and <span className="text-gold">captain</span> below.
+                  </p>
+                </div>
+              )}
+
               {/* ── MATCH DETAILS ── */}
-              <Panel className="fade-in-up stagger-1">
+              <Panel>
                 <div className="flex items-center gap-2 mb-6">
                   <MapPin className="h-4 w-4 text-gold" />
                   <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Match Details</h2>
@@ -675,40 +822,46 @@ export default function EditMatchPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="grid grid-cols-[1fr_5.5rem] gap-2">
-                    <div>
-                      <FieldLabel>Team 1 Name</FieldLabel>
-                      <TextInput
-                        value={form.team1Name}
-                        onChange={(e) => update("team1Name", e.target.value)}
-                        placeholder="Emberfall Paladins"
-                      />
-                    </div>
-                    <div>
-                      <FieldLabel>Short</FieldLabel>
-                      <TextInput
-                        value={form.team1Short}
-                        onChange={(e) => update("team1Short", e.target.value.toUpperCase().slice(0, 4))}
-                        placeholder="EMB"
-                      />
+                  <div className="flex items-end gap-2">
+                    <TeamAvatar logo={form.team1Logo} />
+                    <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
+                      <div>
+                        <FieldLabel>Team 1 Name</FieldLabel>
+                        <TextInput
+                          value={form.team1Name}
+                          onChange={(e) => update("team1Name", e.target.value)}
+                          placeholder="Emberfall Paladins"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Short</FieldLabel>
+                        <TextInput
+                          value={form.team1Short}
+                          onChange={(e) => update("team1Short", e.target.value.toUpperCase().slice(0, 4))}
+                          placeholder="EMB"
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-[1fr_5.5rem] gap-2">
-                    <div>
-                      <FieldLabel>Team 2 Name</FieldLabel>
-                      <TextInput
-                        value={form.team2Name}
-                        onChange={(e) => update("team2Name", e.target.value)}
-                        placeholder="Duskmere Reapers"
-                      />
-                    </div>
-                    <div>
-                      <FieldLabel>Short</FieldLabel>
-                      <TextInput
-                        value={form.team2Short}
-                        onChange={(e) => update("team2Short", e.target.value.toUpperCase().slice(0, 4))}
-                        placeholder="DUS"
-                      />
+                  <div className="flex items-end gap-2">
+                    <TeamAvatar logo={form.team2Logo} />
+                    <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
+                      <div>
+                        <FieldLabel>Team 2 Name</FieldLabel>
+                        <TextInput
+                          value={form.team2Name}
+                          onChange={(e) => update("team2Name", e.target.value)}
+                          placeholder="Duskmere Reapers"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Short</FieldLabel>
+                        <TextInput
+                          value={form.team2Short}
+                          onChange={(e) => update("team2Short", e.target.value.toUpperCase().slice(0, 4))}
+                          placeholder="DUS"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -752,7 +905,7 @@ export default function EditMatchPage() {
               </Panel>
 
               {/* ── OFFICIALS & FORMAT ── */}
-              <Panel className="fade-in-up stagger-2">
+              <Panel>
                 <div className="flex items-center gap-2 mb-6">
                   <Gavel className="h-4 w-4 text-gold" />
                   <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Officials &amp; Format</h2>
@@ -794,17 +947,20 @@ export default function EditMatchPage() {
               </Panel>
 
               {/* ── SQUADS ── */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {form.squads.map((squad, squadIndex) => {
                   const teamName = squadIndex === 0 ? form.team1Name || "Team 1" : form.team2Name || "Team 2"
+                  const teamLogo = squadIndex === 0 ? form.team1Logo : form.team2Logo
                   const count = squad.players.length
                   const xi = xiCount(squadIndex)
+                  const locked = form.rosterLocked
                   return (
-                    <Panel key={squad.teamId} className={`fade-in-up stagger-${squadIndex + 3}`}>
+                    <Panel key={squad.teamId}>
                       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                         <div className="flex items-center gap-2 min-w-0">
-                          <Users className="h-4 w-4 text-gold shrink-0" />
+                          <TeamAvatar logo={teamLogo} />
                           <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel truncate">{teamName} Squad</h2>
+                          {locked && <Lock className="h-3 w-3 text-gold/60 shrink-0" />}
                         </div>
                         <span
                           className={`text-[10px] font-mono uppercase tracking-widest px-2.5 py-1 rounded-full border ${
@@ -823,7 +979,11 @@ export default function EditMatchPage() {
                           value={squad.captain}
                           onChange={(e) => updateSquad(squadIndex, { captain: e.target.value })}
                           placeholder="Captain name"
+                          list={`${squad.teamId}-players`}
                         />
+                        <datalist id={`${squad.teamId}-players`}>
+                          {squad.players.map((p, i) => (p.name ? <option key={i} value={p.name} /> : null))}
+                        </datalist>
                       </div>
 
                       <div className="space-y-2 mb-4">
@@ -841,11 +1001,15 @@ export default function EditMatchPage() {
                               value={player.name}
                               onChange={(e) => updatePlayer(squadIndex, playerIndex, { name: e.target.value })}
                               placeholder={`Player ${playerIndex + 1}`}
-                              className="bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none min-w-0"
+                              disabled={locked}
+                              title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
+                              className="bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none min-w-0 disabled:opacity-60 disabled:cursor-not-allowed"
                             />
                             <select
-                              className="select-input select-input-compact"
+                              className="select-input select-input-compact disabled:opacity-60 disabled:cursor-not-allowed"
                               value={player.role}
+                              disabled={locked}
+                              title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
                               onChange={(e) => updatePlayer(squadIndex, playerIndex, { role: e.target.value })}
                             >
                               {ROLE_OPTIONS.map((r) => (
@@ -868,9 +1032,10 @@ export default function EditMatchPage() {
                             </button>
                             <button
                               type="button"
-                              title="Remove player"
+                              title={locked ? "Roster locked — remove players from the Auctions tab" : "Remove player"}
                               onClick={() => removePlayer(squadIndex, playerIndex)}
-                              className="h-8 w-8 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center justify-center transition-colors"
+                              disabled={locked}
+                              className="h-8 w-8 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/5"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -878,22 +1043,28 @@ export default function EditMatchPage() {
                         ))}
                       </div>
 
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => addPlayer(squadIndex)}
-                        className="w-full border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold font-cinzel uppercase tracking-wide text-xs"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Player
-                      </Button>
+                      {locked ? (
+                        <p className="text-gray-500 text-[11px] text-center py-2 border border-dashed border-gold/10 rounded-md">
+                          Roster comes from a live auction — manage players on the Auctions tab.
+                        </p>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => addPlayer(squadIndex)}
+                          className="w-full border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold font-cinzel uppercase tracking-wide text-xs"
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add Player
+                        </Button>
+                      )}
                     </Panel>
                   )
                 })}
               </div>
 
               {/* ── SAVE BAR ── */}
-              <div className="sticky bottom-4 z-20 fade-in-up stagger-5">
+              <div className="sticky bottom-4 z-20">
                 <Panel className="p-4 md:p-5 flex items-center justify-between flex-wrap gap-3 shadow-2xl shadow-black/60">
                   <div className="flex flex-col gap-1.5 text-sm">
                     <div className="flex items-center gap-2">
@@ -945,7 +1116,7 @@ export default function EditMatchPage() {
                 </Panel>
               </div>
 
-              <div className="flex items-center justify-center gap-4 pt-4 fade-in">
+              <div className="flex items-center justify-center gap-4 pt-2 pb-4">
                 <Link href={`/match/${matchId}`} className="text-gold hover:underline text-sm font-cinzel">
                   ← Back to Match
                 </Link>

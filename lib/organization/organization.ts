@@ -468,7 +468,16 @@ export async function createFriendlyMatch(
 
   let team1: { name: string; short: string; logo: string };
   let team2: { name: string; short: string; logo: string };
-  let squads: { name: string; role: string; team: string }[] = [];
+  let squads: { name: string; role: string; team: string; captain?: boolean }[] = [];
+  // True only when the source is a REAL bidding auction (not a Squad
+  // Board, and not a standalone/manual match). Computed once, here, and
+  // baked into match_setup.rosterLocked below — it can't be derived
+  // later from matches.auction_id, because that column is always set to
+  // this match's OWN generated id (`newId`, see the insert at the bottom
+  // of this function), never to input.auctionId. Once this match is
+  // created, the only record of "did this come from a real auction" is
+  // this flag in match_setup — nothing else persists it.
+  let rosterLocked = false;
 
   if (input.teamSource === "manual") {
     team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name), logo: input.team1Logo?.trim() || "" };
@@ -490,7 +499,7 @@ export async function createFriendlyMatch(
 
     const { data: playerRows, error: playersErr } = await supabase
       .from("players")
-      .select("name, role, sold_to_team_id")
+      .select("name, role, sold_to_team_id, owner_team_code")
       .in("sold_to_team_id", [input.team1Id, input.team2Id]);
 
     if (playersErr) {
@@ -501,7 +510,24 @@ export async function createFriendlyMatch(
       name: p.name,
       role: p.role,
       team: p.sold_to_team_id === input.team1Id ? team1.short : team2.short,
+      captain: !!p.owner_team_code,
     }));
+
+    // Was this pulled from a real bidding auction, or a Squad Board
+    // (which is just a synthetic auction row reusing the same tables)?
+    // Checked once, here, while input.auctionId (the real source id) is
+    // still in scope — this is the only point in the app where that
+    // distinction can still be made for this match.
+    const { data: sourceAuction, error: sourceErr } = await supabase
+      .from("auctions")
+      .select("is_synthetic")
+      .eq("id", input.auctionId)
+      .maybeSingle();
+
+    if (sourceErr) {
+      console.error("createFriendlyMatch(source auction lookup) failed:", sourceErr.message);
+    }
+    rosterLocked = sourceAuction ? !sourceAuction.is_synthetic : false;
   }
 
   const matchSetup = {
@@ -516,6 +542,7 @@ export async function createFriendlyMatch(
     overs: 20,
     officials: { format: "", umpires: "", thirdUmpire: "", referee: "" },
     squads,
+    rosterLocked,
   };
 
   const { data, error } = await supabase

@@ -2,14 +2,12 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import Link from "next/link"
 import { Gavel, Play, Pause, Square, RotateCcw, Radio, Zap, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
-import { SiteHeader } from "@/components/landing/site-header"
-import { SiteFooter } from "@/components/landing/site-footer"
+import { AppHeader } from "@/components/app-header"
 import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { parseMatchSetup, type MatchSetup } from "@/lib/matches/cricket-engine"
@@ -30,18 +28,84 @@ interface LogLine {
   emphasis?: boolean
 }
 
-function poolFromSetup(setup: MatchSetup, side: "team1" | "team2"): SimPlayerPool | null {
-  if (!setup.squads || setup.squads.length === 0) return null
+// ─────────────────────────────────────────────────────────────
+// SQUAD RESOLUTION
+//
+// setup.squads can show up in two shapes by the time this page runs:
+//
+//  1. GROUPED — written by the match editor once someone's saved there:
+//     [{ teamId: "team1"|"team2", captain, players: [{name, role, xi}] }]
+//
+//  2. FLAT — written directly by createFriendlyMatch (organization.ts)
+//     when a match is created from an auction or Squad Board, and never
+//     touched in the editor since:
+//     [{ name, role, team: "<short code>", captain?: boolean }]
+//
+// Previously poolFromSetup only understood shape #1, so simulating a
+// match straight after creation (before ever opening /edit) silently
+// fell back to made-up placeholder names instead of the real roster
+// that was right there in match_setup. resolveSquad() below normalizes
+// either shape into the same { players, xi } view before poolFromSetup
+// builds the actual batting/bowling pools from it.
+// ─────────────────────────────────────────────────────────────
+
+interface ResolvedSquadPlayer {
+  name: string
+  role: string
+  xi: boolean
+}
+
+function isGroupedSquads(rawSquads: any[]): boolean {
+  return rawSquads.some((s) => s && typeof s === "object" && "teamId" in s)
+}
+
+function resolveSquad(setup: MatchSetup, side: "team1" | "team2"): ResolvedSquadPlayer[] | null {
+  const rawSquads: any[] = Array.isArray((setup as any).squads) ? (setup as any).squads : []
+  if (rawSquads.length === 0) return null
+
   const teamMeta = side === "team1" ? setup.team1 : setup.team2
-  const squad = setup.squads.find((s) => {
-    const tag = s.teamId?.toLowerCase?.() ?? ""
-    return tag === side || tag === teamMeta.short.toLowerCase() || tag === teamMeta.name.toLowerCase()
+
+  if (isGroupedSquads(rawSquads)) {
+    const squad = rawSquads.find((s) => {
+      const tag = s.teamId?.toLowerCase?.() ?? ""
+      return tag === side || tag === teamMeta.short?.toLowerCase() || tag === teamMeta.name?.toLowerCase()
+    })
+    if (!squad || !Array.isArray(squad.players)) return null
+    return squad.players.map((p: any) => ({ name: p?.name ?? "", role: p?.role ?? "Batter", xi: !!p?.xi }))
+  }
+
+  // Flat shape — bucket by short code. Anything that doesn't clearly
+  // match team2's code falls to team1, same rule the editor uses.
+  const team1Short = (setup.team1?.short ?? "").toUpperCase()
+  const team2Short = (setup.team2?.short ?? "").toUpperCase()
+  const wantTeam2 = side === "team2"
+
+  const matched = rawSquads.filter((p: any) => {
+    const code = (p?.team ?? "").toString().toUpperCase()
+    const isTeam2 = !!code && code === team2Short && code !== team1Short
+    return wantTeam2 ? isTeam2 : !isTeam2
   })
-  if (!squad) return null
-  const xi = squad.players.filter((p) => p.xi).map((p) => p.name)
+
+  // No players ended up on this side at all (e.g. codes didn't resolve) —
+  // treat as "no squad data" rather than an empty XI.
+  if (matched.length === 0) return null
+
+  return matched.map((p: any, idx: number) => ({
+    name: p?.name ?? "",
+    role: p?.role ?? "Batter",
+    xi: idx < 11, // flat shape carries no xi flag — default first 11 in order
+  }))
+}
+
+function poolFromSetup(setup: MatchSetup, side: "team1" | "team2"): SimPlayerPool | null {
+  const players = resolveSquad(setup, side)
+  if (!players) return null
+  const teamMeta = side === "team1" ? setup.team1 : setup.team2
+
+  const xi = players.filter((p) => p.xi && p.name.trim()).map((p) => p.name)
   if (xi.length < 2) return null
-  const bowlers = squad.players
-    .filter((p) => p.xi && (p.role === "Bowler" || p.role === "All-rounder" || p.role === "WK-Batter" || true))
+  const bowlers = players
+    .filter((p) => p.xi && p.name.trim())
     .map((p) => p.name)
   return {
     teamName: teamMeta.name,
@@ -79,9 +143,6 @@ function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
   }
 }
 
-// Same "badge chip" language used in the Core Modules section on the
-// homepage (h-7 px-3 border rounded, font-mono tracking-[2px] label) so
-// the run status reads as part of the same design system.
 const statusMeta: Record<RunState, { label: string; accent: string }> = {
   idle: { label: "IDLE", accent: "#9CA3AF" },
   running: { label: "LIVE", accent: "#F5A623" },
@@ -90,10 +151,10 @@ const statusMeta: Record<RunState, { label: string; accent: string }> = {
   error: { label: "ERROR", accent: "#F87171" },
 }
 
-// Same card shell used throughout the site (testimonials, contact,
-// match-detail tabs): black/50 base, gold/20 border, gold/40 on hover —
-// so this page reads as part of the same product instead of a
-// bolted-on admin tool.
+// Same card shell used across the admin dashboard (OrganizationClient,
+// MatchesTab, TeamsManager, the match editor) — kept consistent here
+// since this page is only ever reached from the editor's "Go to
+// Simulator" link, not from the public site.
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div
@@ -106,17 +167,16 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 
 export default function SimulateMatchPage() {
   useScrollTop()
-  const router = useRouter()
   const params = useParams<{ matchId: string }>()
   const matchIdFromRoute = params?.matchId ?? ""
 
-  const [isNavOpen, setIsNavOpen] = useState(false)
   const [matchIdInput, setMatchIdInput] = useState(matchIdFromRoute)
   const [runState, setRunState] = useState<RunState>("idle")
   const [speedMs, setSpeedMs] = useState(1200)
   const [log, setLog] = useState<LogLine[]>([])
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [scoreLine, setScoreLine] = useState<string>("")
+  const [usedRealSquads, setUsedRealSquads] = useState<{ team1: boolean; team2: boolean } | null>(null)
 
   const runStateRef = useRef<RunState>("idle")
   const speedRef = useRef(speedMs)
@@ -129,15 +189,6 @@ export default function SimulateMatchPage() {
   // that loop knows a newer run (or a Clear) has since started and exits
   // immediately instead of racing new inserts / deletes.
   const runTokenRef = useRef(0)
-
-  const handleNavigation = (path: string) => {
-    router.push(path)
-    window.scrollTo(0, 0)
-  }
-  const scrollToSection = (sectionId: string) => {
-    router.push(`/#${sectionId}`)
-    setIsNavOpen(false)
-  }
 
   const setRun = (s: RunState) => {
     runStateRef.current = s
@@ -202,6 +253,7 @@ export default function SimulateMatchPage() {
   async function handleStart(reset: boolean) {
     setErrorMsg(null)
     setLog([])
+    setUsedRealSquads(null)
     const myToken = ++runTokenRef.current // invalidates any previous in-flight run
     const matchId = matchIdInput.trim()
     if (!matchId) {
@@ -274,10 +326,20 @@ export default function SimulateMatchPage() {
       }
 
       const oversLimit = setup.overs ?? 20
-      const teamAPool = poolFromSetup(setup, "team1") ?? generatePlaceholderPool(setup.team1.name, setup.team1.short)
-      const teamBPool = poolFromSetup(setup, "team2") ?? generatePlaceholderPool(setup.team2.name, setup.team2.short)
+      const realTeamAPool = poolFromSetup(setup, "team1")
+      const realTeamBPool = poolFromSetup(setup, "team2")
+      const teamAPool = realTeamAPool ?? generatePlaceholderPool(setup.team1.name, setup.team1.short)
+      const teamBPool = realTeamBPool ?? generatePlaceholderPool(setup.team2.name, setup.team2.short)
+      setUsedRealSquads({ team1: !!realTeamAPool, team2: !!realTeamBPool })
 
       pushLog(`Starting simulation: ${teamAPool.teamName} vs ${teamBPool.teamName}, ${oversLimit} overs a side.`, true)
+      if (!realTeamAPool || !realTeamBPool) {
+        pushLog(
+          `Note: ${!realTeamAPool && !realTeamBPool ? "both squads" : !realTeamAPool ? teamAPool.teamName : teamBPool.teamName} had no usable roster in match_setup — using placeholder players for ${
+            !realTeamAPool && !realTeamBPool ? "them" : "this side"
+          }.`
+        )
+      }
       pushLog(`1st innings: ${teamAPool.teamName} batting.`, true)
 
       let innings1 = createInningsState({
@@ -366,6 +428,7 @@ export default function SimulateMatchPage() {
     setErrorMsg(null)
     setLog([])
     setScoreLine("")
+    setUsedRealSquads(null)
 
     try {
       await supabase.from("balls").delete().eq("match_id", matchId)
@@ -417,29 +480,17 @@ export default function SimulateMatchPage() {
         }}
       />
 
-      <SiteHeader
-        activeSection="tournament"
-        isNavOpen={isNavOpen}
-        setIsNavOpen={setIsNavOpen}
-        scrollToSection={scrollToSection}
-        handleNavigation={handleNavigation}
-      />
+      <AppHeader title="Match Simulator" />
 
-      {/* ═══════════════════════════════════════════
-          HEADER — same section-pattern + gold-gradient
-          title treatment as every other section on site.
-      ═══════════════════════════════════════════ */}
-      <section className="relative pt-28 pb-12 section-pattern bg-black border-b border-gold/10">
+      <section className="pt-28 sm:pt-40 pb-8 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 text-center fade-in">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-md mb-6 bg-gold/10 border border-gold shrink-0">
-            <Gavel className="w-6 h-6 text-gold" />
-          </div>
-          <h1 className="text-3xl md:text-5xl font-bold text-white mb-6 font-cinzel tracking-wider section-title inline-block">
-            <TypeText text="Match " speed={45} />
-            <TypeText text="Simulator" speed={45} delay={220} className="text-gold" />
-          </h1>
-          <p className="text-lg text-gray-300 max-w-2xl mx-auto mt-4">
+        <div className="container mx-auto px-4 relative z-10 max-w-3xl">
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+            <Gavel className="w-3.5 h-3.5" />
+            Match Simulator
+          </span>
+          <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel mb-2">Simulate this Match</h1>
+          <p className="text-gray-400 text-sm">
             Generates a full match, ball by ball, writing directly into <code className="text-gold">balls</code> and
             updating <code className="text-gold">matches</code> / <code className="text-gold">bracket_matches</code>{" "}
             as it goes. Open the live match page in another tab to watch it update in real time.
@@ -447,11 +498,11 @@ export default function SimulateMatchPage() {
         </div>
       </section>
 
-      <section className="py-16 relative section-pattern">
+      <section className="pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10 max-w-3xl">
           {/* ── Control panel ── */}
-          <Panel className="mb-8 space-y-8 fade-in-up stagger-1">
+          <Panel className="mb-8 space-y-8">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div
                 className="flex items-center gap-2 h-7 px-3 border rounded w-fit"
@@ -464,6 +515,19 @@ export default function SimulateMatchPage() {
               </div>
               {scoreLine && <span className="font-cinzel font-bold text-sm text-gold">{scoreLine}</span>}
             </div>
+
+            {usedRealSquads && (
+              <p className="text-xs text-gray-400 -mt-4">
+                Squads used:{" "}
+                <span className={usedRealSquads.team1 ? "text-green-400" : "text-amber-400"}>
+                  Team 1 {usedRealSquads.team1 ? "(from match_setup)" : "(placeholder)"}
+                </span>
+                {" · "}
+                <span className={usedRealSquads.team2 ? "text-green-400" : "text-amber-400"}>
+                  Team 2 {usedRealSquads.team2 ? "(from match_setup)" : "(placeholder)"}
+                </span>
+              </p>
+            )}
 
             <div>
               <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel">
@@ -548,7 +612,7 @@ export default function SimulateMatchPage() {
           </Panel>
 
           {/* ── Log panel ── */}
-          <Panel className="fade-in-up stagger-2">
+          <Panel>
             <div className="flex items-center justify-between mb-4">
               <span className="font-cinzel text-xs text-gold uppercase tracking-widest">Delivery Log</span>
               <span className="font-mono text-[10px] text-gray-500 tracking-widest">{log.length} EVENTS</span>
@@ -572,7 +636,7 @@ export default function SimulateMatchPage() {
             </div>
           </Panel>
 
-          <div className="text-center mt-10 fade-in-up stagger-3">
+          <div className="text-center mt-10">
             {matchIdFromRoute ? (
               <Link href={`/match/${matchIdFromRoute}`}>
                 <Button
