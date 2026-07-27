@@ -37,6 +37,7 @@ import {
   type BankPlayer,
   type PoolTeam,
 } from "@/lib/organization/organization"
+import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
 const TIER_OPTIONS = ["A", "B", "C", "Pro", "Elite", "Legend"]
@@ -143,6 +144,13 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     return () => unsubscribe(channel)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
+
+  // Catches "created a tournament, got redirected to its edit page, came
+  // back here and it's missing until I refresh" — the mount effect above
+  // only fires once, and coming back from the edit page often restores
+  // this component from Next's router cache rather than remounting it.
+  // Refocusing the tab/window is a reliable second signal to refetch.
+  useRefetchOnFocus(reload)
 
   const handleCreate = async () => {
     if (!name.trim()) return
@@ -399,6 +407,8 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
   const [owner, setOwner] = useState("")
   const [tier, setTier] = useState<PoolTeam["tier"]>("Pro")
   const [color, setColor] = useState("#e45d35")
+  const [logo, setLogo] = useState("")
+  const [notes, setNotes] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
@@ -409,11 +419,24 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
+  // Same fix as the Tournaments tab: keeps this list fresh if you tab away
+  // (e.g. to another dashboard tab or a different browser tab) and back,
+  // a case the one-time mount effect above doesn't cover.
+  useRefetchOnFocus(reload)
+
   const handleAdd = async () => {
     if (!name.trim() || !code.trim()) return
     setIsAdding(true)
     setAddError(null)
-    const team = await addPoolTeam(org.id, userId, { name: name.trim(), code: code.trim().toUpperCase(), owner, tier, color })
+    const team = await addPoolTeam(org.id, userId, {
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      owner,
+      tier,
+      color,
+      logo: logo.trim(),
+      notes: notes.trim() || undefined,
+    })
     setIsAdding(false)
     if (!team) {
       setAddError("Couldn't add that team — please try again.")
@@ -423,6 +446,8 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
     setName("")
     setCode("")
     setOwner("")
+    setLogo("")
+    setNotes("")
   }
 
   const handleDelete = async (team: PoolTeam) => {
@@ -479,6 +504,39 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
             </div>
           </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <FieldLabel>Logo / Image URL (optional)</FieldLabel>
+            <div className="flex items-center gap-2">
+              <div
+                className="h-10 w-10 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60"
+                style={{ backgroundColor: logo ? undefined : color || "#e45d35" }}
+              >
+                {logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={logo} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <Shield className="h-4 w-4 text-white/60" />
+                )}
+              </div>
+              <Input
+                value={logo}
+                onChange={(e) => setLogo(e.target.value)}
+                placeholder="https://…"
+                className="bg-black/50 border-gold/30 text-white flex-1"
+              />
+            </div>
+          </div>
+          <div>
+            <FieldLabel>Notes (optional)</FieldLabel>
+            <Input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. contact info, sponsorship deal…"
+              className="bg-black/50 border-gold/30 text-white"
+            />
+          </div>
+        </div>
         {addError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
             <AlertCircle className="h-4 w-4" /> {addError}
@@ -522,6 +580,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
                       {t.code} · {t.tier}
                       {t.owner ? ` · ${t.owner}` : ""}
                     </p>
+                    {t.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{t.notes}</p>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -555,6 +614,9 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [role, setRole] = useState<BankPlayer["role"]>("Batter")
   const [origin, setOrigin] = useState("Local")
   const [country, setCountry] = useState("")
+  const [img, setImg] = useState("")
+  const [capped, setCapped] = useState(false)
+  const [notes, setNotes] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
@@ -565,11 +627,23 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
+  // Same fix as the other tabs — refetches on refocus so the bank stays
+  // current after navigating elsewhere and back.
+  useRefetchOnFocus(reload)
+
   const handleAdd = async () => {
     if (!name.trim()) return
     setIsAdding(true)
     setAddError(null)
-    const player = await addBankPlayer(org.id, userId, { name: name.trim(), role, origin, country })
+    const player = await addBankPlayer(org.id, userId, {
+      name: name.trim(),
+      role,
+      origin,
+      country,
+      img: img.trim(),
+      capped,
+      notes: notes.trim() || undefined,
+    })
     setIsAdding(false)
     if (!player) {
       setAddError("Couldn't add that player — please try again.")
@@ -578,6 +652,9 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     setPlayers((prev) => [...prev, player].sort((a, b) => a.name.localeCompare(b.name)))
     setName("")
     setCountry("")
+    setImg("")
+    setCapped(false)
+    setNotes("")
   }
 
   const handleDelete = async (player: BankPlayer) => {
@@ -618,6 +695,41 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
               <option value="Overseas">Overseas</option>
             </select>
           </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div>
+            <FieldLabel>Country (optional)</FieldLabel>
+            <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Sri Lanka" className="bg-black/50 border-gold/30 text-white" />
+          </div>
+          <div>
+            <FieldLabel>Photo URL (optional)</FieldLabel>
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
+                {img ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <UserPlus className="h-4 w-4 text-white/40" />
+                )}
+              </div>
+              <Input value={img} onChange={(e) => setImg(e.target.value)} placeholder="https://…" className="bg-black/50 border-gold/30 text-white flex-1" />
+            </div>
+          </div>
+          <div className="flex items-end pb-2.5">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
+              <input type="checkbox" checked={capped} onChange={(e) => setCapped(e.target.checked)} />
+              Capped (international) player
+            </label>
+          </div>
+        </div>
+        <div className="mb-4">
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <Input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. injury history, preferred batting position…"
+            className="bg-black/50 border-gold/30 text-white"
+          />
         </div>
         {addError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">

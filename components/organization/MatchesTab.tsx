@@ -42,6 +42,7 @@ import {
   type AuctionTeamOption,
   type SquadBoard,
 } from "@/lib/organization/organization"
+import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
 
 // "board" = pull two rostered teams from one of the org's Squad Boards —
 // these teams already have players assigned (via the Squad Board tab), so
@@ -340,6 +341,13 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     return () => unsubscribe(channel)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
+
+  // Catches the "created a match, got redirected to its edit page, came
+  // back here and it's missing until I refresh" case — the mount effect
+  // above only fires once, and coming back from the edit page often
+  // restores this component from Next's router cache rather than actually
+  // remounting it. Refocusing the tab/window is a reliable second signal.
+  useRefetchOnFocus(reload)
 
   // Load the org's Squad Boards once, up front — this is the source of
   // teams for the "board" path.
