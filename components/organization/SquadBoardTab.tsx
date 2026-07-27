@@ -8,19 +8,18 @@ import {
   AlertCircle,
   CheckCircle2,
   ArrowLeft,
-  ArrowRight,
   UserPlus,
   Shield,
   Link2,
   Users,
   Crown,
-  ChevronDown,
+  FolderOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
-  getSquadBoardsForOrg,
+  getSquadBoardsWithPreviewForOrg,
   createSquadBoard,
   deleteSquadBoard,
   getTeamPool,
@@ -33,6 +32,7 @@ import {
   getAssignedPoolTeamIdsForBoard,
   type OrgSummary,
   type SquadBoard,
+  type SquadBoardPreview,
   type PoolTeam,
   type AuctionTeamOption,
   type BankPlayer,
@@ -49,61 +49,282 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   )
 }
 
-/** Shared select styling so every dropdown on this tab looks and behaves
- *  the same: gold border, custom chevron (native <select> arrows are
- *  inconsistent across browsers), and a clear disabled state for when
- *  there's genuinely nothing left to pick. */
-function StyledSelect({
-  value,
-  onChange,
-  disabled,
-  placeholder,
-  children,
-  size = "md",
-  className = "",
-}: {
-  value: string
-  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
-  disabled?: boolean
-  placeholder: string
-  children: React.ReactNode
-  size?: "md" | "sm"
-  className?: string
-}) {
-  const sizing = size === "sm" ? "text-xs px-2.5 py-2 pr-8" : "text-sm px-3 py-2.5 pr-9"
-  return (
-    <div className={`relative ${className}`}>
-      <select
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        className={`w-full appearance-none bg-black/50 border border-gold/30 rounded-md text-white ${sizing} outline-none focus:border-gold/70 focus:ring-1 focus:ring-gold/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
-      >
-        <option value="">{placeholder}</option>
-        {children}
-      </select>
-      <ChevronDown className={`${size === "sm" ? "h-3 w-3 right-2.5" : "h-3.5 w-3.5 right-3"} text-gold/50 absolute top-1/2 -translate-y-1/2 pointer-events-none`} />
-    </div>
-  )
-}
-
 function AvailabilityHint({ count, noun }: { count: number; noun: string }) {
   if (count > 0) return null
   return <p className="text-gray-500 text-xs italic">All {noun} on this board are already assigned.</p>
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  SQUAD BOARD — a named container backed by a synthetic auction. Lets   */
-/*  you assign the same Team Pool team into many Squad Boards, and the    */
-/*  same Player Bank player onto many teams (same board or different       */
-/*  ones) — a genuine many-to-many, since every assignment is a fresh      */
-/*  insert rather than a single-slot relationship.                        */
-/*                                                                          */
-/*  WITHIN one board, both dropdowns exclude what's already used there:    */
-/*  a pool team already assigned to this board won't show up again in the  */
-/*  "assign a team" picker, and a bank player already on ANY team on this   */
-/*  board won't show up in any team's "add a player" picker. That's the    */
-/*  UI-side mirror of the backend guard in assignBankPlayerToTeam.         */
+/*  EYEBROW — small catalog-style label used above section headings,     */
+/*  reinforcing the "ledger / dossier" language established below.       */
+/* ────────────────────────────────────────────────────────────────── */
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[10px] uppercase tracking-[0.2em] font-cinzel text-gold/60 mb-2 flex items-center gap-1.5">
+      <span className="text-gold/40">◆</span> {children}
+    </p>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  PICKER CARDS (unchanged from before — team pool / bank player        */
+/*  assignment inside a board still uses these small selectable tiles)   */
+/* ────────────────────────────────────────────────────────────────── */
+
+function PoolTeamPickerCard({
+  team,
+  selected,
+  onSelect,
+}: {
+  team: PoolTeam
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`flex items-center gap-2.5 text-left rounded-md border px-2.5 py-2 transition-colors ${
+        selected ? "border-gold bg-gold/10" : "border-white/10 bg-black/40 hover:border-gold/40"
+      }`}
+    >
+      <div
+        className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center"
+        style={{ backgroundColor: team.color || "#e45d35" }}
+      >
+        {team.logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={team.logo} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <Shield className="h-3.5 w-3.5 text-white/70" />
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-xs font-semibold truncate ${selected ? "text-gold" : "text-white"}`}>{team.name}</p>
+        <p className="text-gray-500 text-[10px]">{team.code}</p>
+      </div>
+    </button>
+  )
+}
+
+function BankPlayerPickerCard({
+  player,
+  selected,
+  onSelect,
+}: {
+  player: BankPlayer
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`flex items-center gap-2.5 text-left rounded-md border px-2.5 py-2 transition-colors ${
+        selected ? "border-gold bg-gold/10" : "border-white/10 bg-black/40 hover:border-gold/40"
+      }`}
+    >
+      <div className="relative h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
+        {player.img ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={player.img} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <UserPlus className="h-3.5 w-3.5 text-white/40" />
+        )}
+        {player.capped && (
+          <span className="absolute -bottom-0.5 -right-0.5 bg-gold rounded-full p-[1px] border border-black/60">
+            <Crown className="h-2 w-2 text-black" />
+          </span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-xs font-semibold truncate ${selected ? "text-gold" : "text-white"}`}>{player.name}</p>
+        <p className="text-gray-500 text-[10px] truncate">{player.role}</p>
+      </div>
+    </button>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  LOGO FAN — the "peeking out of the folder" stack of team logos on    */
+/*  each board's folder card. Each tile overlaps the previous one and     */
+/*  carries a slight alternating rotation so it reads as a loose stack    */
+/*  of cards rather than a rigid grid. Caps at 4 tiles; an empty board    */
+/*  gets a dashed placeholder circle instead of an empty fan.             */
+/* ────────────────────────────────────────────────────────────────── */
+
+const LOGO_FAN_MAX = 4
+const LOGO_FAN_ROTATIONS = [-9, -3, 4, 10]
+const LOGO_FAN_LIFTS = [0, -3, 0, -3]
+
+function LogoFan({ logos }: { logos: string[] }) {
+  if (logos.length === 0) {
+    return (
+      <div className="relative h-12 w-12 rounded-full border-2 border-dashed border-gold/20 flex items-center justify-center bg-black/30 shrink-0">
+        <div className="absolute inset-1 rounded-full border border-dashed border-gold/10" />
+        <Users className="h-4 w-4 text-gold/25" />
+      </div>
+    )
+  }
+
+  const visible = logos.slice(0, LOGO_FAN_MAX)
+  const overflow = logos.length - visible.length
+
+  return (
+    <div className="flex items-center h-12 shrink-0">
+      {visible.map((logo, i) => (
+        <div
+          key={i}
+          className="h-10 w-10 rounded-full border-2 border-black/80 bg-black/70 overflow-hidden shadow-md shadow-black/60 first:ml-0"
+          style={{
+            marginLeft: i === 0 ? 0 : -14,
+            transform: `rotate(${LOGO_FAN_ROTATIONS[i] ?? 0}deg) translateY(${LOGO_FAN_LIFTS[i] ?? 0}px)`,
+            zIndex: visible.length - i,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logo} alt="" className="h-full w-full object-cover" />
+        </div>
+      ))}
+      {overflow > 0 && (
+        <div
+          className="h-10 w-10 rounded-full border-2 border-black/80 bg-gold/10 flex items-center justify-center shrink-0"
+          style={{ marginLeft: -14, zIndex: 0 }}
+        >
+          <span className="text-[10px] font-cinzel font-bold text-gold/80">+{overflow}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  SEAL BADGE — a small stamped medallion that stands in for the        */
+/*  plain "open folder" icon on each dossier card. Warms up on hover      */
+/*  to suggest a seal catching the light.                                 */
+/* ────────────────────────────────────────────────────────────────── */
+
+function SealBadge({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`relative h-9 w-9 rounded-full border-2 border-gold/40 bg-gradient-to-br from-gold/20 via-gold/5 to-transparent flex items-center justify-center shadow-inner shrink-0 transition-colors duration-300 ${className}`}
+    >
+      <div className="absolute inset-[3px] rounded-full border border-gold/25" />
+      <Shield className="h-4 w-4 text-gold/70" />
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  STAT CHIP — insignia-style pill for team/player counts.               */
+/* ────────────────────────────────────────────────────────────────── */
+
+function StatChip({ icon, label, muted = false }: { icon: React.ReactNode; label: string; muted?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-1 rounded-full border ${
+        muted ? "border-white/15 text-gray-400 bg-white/[0.02]" : "border-gold/30 text-gold/80 bg-gold/[0.06]"
+      }`}
+    >
+      {icon}
+      {label}
+    </span>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  RIBBON TAB — replaces the flat gold tab with a die-cut ribbon         */
+/*  bearing a catalog number, so each board reads as an entry in a        */
+/*  numbered ledger rather than an arbitrary folder.                      */
+/* ────────────────────────────────────────────────────────────────── */
+
+function RibbonTab({ index }: { index: number }) {
+  return (
+    <div
+      className="absolute -top-3 left-5 h-6 min-w-[3rem] px-2.5 bg-gradient-to-b from-gold/95 to-gold/70 flex items-center justify-center shadow-md shadow-black/50 z-10"
+      style={{ clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)" }}
+    >
+      <span className="text-[9px] font-cinzel font-bold tracking-widest text-black/70">
+        №{String(index).padStart(2, "0")}
+      </span>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  FOLDER CARD — the Squad Board list item, restyled as a numbered       */
+/*  dossier: a ribbon tag replaces the flat tab, a wax-seal medallion      */
+/*  replaces the plain folder icon, and stat pills read as insignia.      */
+/* ────────────────────────────────────────────────────────────────── */
+
+function FolderCard({
+  board,
+  index,
+  onOpen,
+  onDelete,
+  deleting,
+}: {
+  board: SquadBoardPreview
+  index: number
+  onOpen: () => void
+  onDelete: () => void
+  deleting: boolean
+}) {
+  return (
+    <div className="relative group">
+      <RibbonTab index={index} />
+
+      <div className="relative bg-black/50 border border-gold/20 group-hover:border-gold/50 transition-all duration-300 rounded-lg rounded-tl-none p-5 shadow-lg shadow-black/40 group-hover:shadow-gold/10 group-hover:-translate-y-0.5">
+        <button onClick={onOpen} className="w-full text-left">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <LogoFan logos={board.teamLogos} />
+            <SealBadge className="group-hover:border-gold/70 group-hover:from-gold/35" />
+          </div>
+
+          <p className="text-white text-sm font-bold font-cinzel truncate mb-2">{board.name}</p>
+          <div className="h-px w-10 bg-gold/30 mb-2.5" />
+
+          {board.teamCount === 0 ? (
+            <p className="text-gray-500 text-xs italic">Empty — assign teams to get started</p>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatChip
+                icon={<Shield className="h-2.5 w-2.5" />}
+                label={`${board.teamCount} team${board.teamCount === 1 ? "" : "s"}`}
+              />
+              <StatChip
+                icon={<UserPlus className="h-2.5 w-2.5" />}
+                label={`${board.playerCount} player${board.playerCount === 1 ? "" : "s"}`}
+                muted
+              />
+            </div>
+          )}
+        </button>
+
+        <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-double border-gold/15">
+          <button
+            onClick={onOpen}
+            className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+          >
+            Open <FolderOpen className="h-3 w-3" />
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
+          >
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  SQUAD BOARD — a named container backed by a synthetic auction.        */
+/*  See detail-view components below for the assignment logic.            */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function SquadBoardTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -128,7 +349,7 @@ function SquadBoardListPanel({
   onSelect: (b: SquadBoard) => void
 }) {
   const { confirm, ConfirmDialogElement } = useConfirmDialog()
-  const [boards, setBoards] = useState<SquadBoard[]>([])
+  const [boards, setBoards] = useState<SquadBoardPreview[]>([])
   const [loaded, setLoaded] = useState(false)
 
   const [name, setName] = useState("")
@@ -138,7 +359,7 @@ function SquadBoardListPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const reload = () => getSquadBoardsForOrg(org.id).then((b) => setBoards(b))
+  const reload = () => getSquadBoardsWithPreviewForOrg(org.id).then((b) => setBoards(b))
 
   useEffect(() => {
     reload().then(() => setLoaded(true))
@@ -163,7 +384,7 @@ function SquadBoardListPanel({
     await reload()
   }
 
-  const handleDelete = async (board: SquadBoard) => {
+  const handleDelete = async (board: SquadBoardPreview) => {
     const ok = await confirm({
       title: "Delete this Squad Board?",
       description: `"${board.name}" will be permanently deleted. This fails if it still has teams or players on it — remove those first.`,
@@ -186,6 +407,7 @@ function SquadBoardListPanel({
   return (
     <div className="space-y-6">
       <Panel>
+        <Eyebrow>New Dossier</Eyebrow>
         <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
           <Plus className="h-4 w-4 text-gold" /> Create a Squad Board
         </h2>
@@ -198,7 +420,7 @@ function SquadBoardListPanel({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Season 2 — Squad Planning"
-            className="bg-black/50 border-gold/30 text-white flex-1"
+            className="bg-black/50 border-gold/30 text-white flex-1 focus-visible:ring-gold/40"
           />
           <Button
             onClick={handleCreate}
@@ -216,56 +438,47 @@ function SquadBoardListPanel({
         )}
       </Panel>
 
-      <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Your Squad Boards</h2>
+      <div>
+        <div className="flex items-baseline justify-between gap-3 mb-4 px-1">
+          <h2 className="text-lg font-bold text-white font-cinzel">Your Squad Boards</h2>
+          {loaded && boards.length > 0 && (
+            <span className="text-[10px] uppercase tracking-widest font-cinzel text-gold/50">
+              {boards.length} catalogued
+            </span>
+          )}
+        </div>
         {deleteError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3 px-1">
             <AlertCircle className="h-4 w-4" /> {deleteError}
           </p>
         )}
         {!loaded ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2">
+          <p className="text-gray-500 text-sm flex items-center gap-2 px-1">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : boards.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No Squad Boards yet — create one above.</p>
+          <Panel>
+            <div className="flex flex-col items-center text-center py-4">
+              <SealBadge className="h-12 w-12 mb-3 opacity-60" />
+              <p className="text-gray-400 text-sm font-cinzel">No Squad Boards yet</p>
+              <p className="text-gray-600 text-xs italic mt-1">Create one above to start a new dossier.</p>
+            </div>
+          </Panel>
         ) : (
-          <div className="space-y-2">
-            {boards.map((b) => (
-              <div
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-2.5">
+            {boards.map((b, i) => (
+              <FolderCard
                 key={b.id}
-                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
-              >
-                <button onClick={() => onSelect(b)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                  <div className="bg-gold/20 p-2 rounded-lg shrink-0">
-                    <Users className="h-4 w-4 text-gold" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-semibold truncate">{b.name}</p>
-                    <p className="text-gray-500 text-xs mt-0.5">Open to assign teams &amp; players</p>
-                  </div>
-                </button>
-                <div className="flex items-center gap-3 shrink-0">
-                  <button onClick={() => onSelect(b)} className="text-gray-500 hover:text-gold transition-colors">
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(b)}
-                    disabled={deletingId === b.id}
-                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
-                  >
-                    {deletingId === b.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
+                board={b}
+                index={i + 1}
+                onOpen={() => onSelect(b)}
+                onDelete={() => handleDelete(b)}
+                deleting={deletingId === b.id}
+              />
             ))}
           </div>
         )}
-      </Panel>
+      </div>
 
       {ConfirmDialogElement}
     </div>
@@ -278,8 +491,6 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
   const [teams, setTeams] = useState<AuctionTeamOption[]>([])
   const [teamsLoaded, setTeamsLoaded] = useState(false)
 
-  // Board-wide "already used" sets — shared across every dropdown on this
-  // board so nothing already assigned here can be picked again.
   const [assignedPoolTeamIds, setAssignedPoolTeamIds] = useState<string[]>([])
   const [assignedBankPlayerIds, setAssignedBankPlayerIds] = useState<string[]>([])
 
@@ -287,9 +498,6 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
   const reloadAssignedPoolTeamIds = () => getAssignedPoolTeamIdsForBoard(board.id).then(setAssignedPoolTeamIds)
   const reloadAssignedBankPlayerIds = () => getAssignedBankPlayerIdsForBoard(board.id).then(setAssignedBankPlayerIds)
 
-  // Called after ANY assignment on this board (a team added to the board,
-  // or a player added to one of its teams) — refreshes everything that
-  // feeds the dropdowns, so every card reflects the change immediately.
   const reloadAll = () =>
     Promise.all([reloadTeams(), reloadAssignedPoolTeamIds(), reloadAssignedBankPlayerIds()])
 
@@ -308,9 +516,7 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
       </button>
 
       <div className="flex items-center gap-3">
-        <div className="bg-gold/20 p-2.5 rounded-lg">
-          <Users className="h-5 w-5 text-gold" />
-        </div>
+        <SealBadge className="h-11 w-11" />
         <h2 className="text-xl font-bold text-white font-cinzel">{board.name}</h2>
       </div>
 
@@ -377,7 +583,6 @@ function AssignTeamPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Only pool teams NOT already sitting on this board are pickable.
   const availableTeams = useMemo(
     () => poolTeams.filter((t) => !assignedPoolTeamIds.includes(t.id)),
     [poolTeams, assignedPoolTeamIds]
@@ -427,36 +632,31 @@ function AssignTeamPanel({
         </p>
       ) : (
         <>
-          <div className="flex flex-col sm:flex-row gap-2 mb-3">
-            <StyledSelect
-              value={poolTeamId}
-              onChange={(e) => setPoolTeamId(e.target.value)}
-              placeholder="Select a team…"
-              disabled={availableTeams.length === 0}
-              className="w-full sm:flex-1"
-            >
-              {availableTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.code})
-                </option>
-              ))}
-            </StyledSelect>
-            <Button
-              onClick={handleAssign}
-              disabled={!poolTeamId || isAssigning}
-              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
-            >
-              {isAssigning ? "Assigning…" : "Assign Team"}
-            </Button>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-3 max-h-64 overflow-y-auto pr-1">
+            {availableTeams.map((t) => (
+              <PoolTeamPickerCard
+                key={t.id}
+                team={t}
+                selected={poolTeamId === t.id}
+                onSelect={() => setPoolTeamId(poolTeamId === t.id ? "" : t.id)}
+              />
+            ))}
           </div>
           <AvailabilityHint count={availableTeams.length} noun="pool teams" />
+          <Button
+            onClick={handleAssign}
+            disabled={!poolTeamId || isAssigning}
+            className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap mt-1"
+          >
+            {isAssigning ? "Assigning…" : "Assign Team"}
+          </Button>
           {error && (
-            <p className="flex items-center gap-1.5 text-red-500 text-sm">
+            <p className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
               <AlertCircle className="h-4 w-4" /> {error}
             </p>
           )}
           {success && (
-            <p className="flex items-center gap-1.5 text-green-400 text-sm">
+            <p className="flex items-center gap-1.5 text-green-400 text-sm mt-3">
               <CheckCircle2 className="h-4 w-4" /> {success}
             </p>
           )}
@@ -504,9 +704,6 @@ function SquadBoardTeamCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team.id, org.id])
 
-  // Only bank players not already used ANYWHERE on this board are
-  // pickable — this mirrors the backend's same-board duplicate guard, so
-  // the dropdown never even offers a choice the server would reject.
   const availablePlayers = useMemo(
     () => bankPlayers.filter((p) => !assignedBankPlayerIds.includes(p.id)),
     [bankPlayers, assignedBankPlayerIds]
@@ -553,12 +750,29 @@ function SquadBoardTeamCard({
       ) : players.length === 0 ? (
         <p className="text-gray-500 text-xs italic mb-3">No players assigned yet.</p>
       ) : (
-        <div className="space-y-1 mb-3">
+        <div className="grid grid-cols-2 gap-2 mb-3">
           {players.map((p) => (
-            <div key={p.id} className="flex items-center gap-1.5 text-xs text-gray-300">
-              {p.isCaptain && <Crown className="h-3 w-3 text-gold shrink-0" />}
-              <span className="truncate">{p.name}</span>
-              <span className="text-gray-600">· {p.role}</span>
+            <div
+              key={p.id}
+              className="flex items-center gap-2 bg-black/30 border border-white/5 rounded-md px-2 py-1.5"
+            >
+              <div className="relative h-6 w-6 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
+                {p.img ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.img} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <UserPlus className="h-2.5 w-2.5 text-white/40" />
+                )}
+                {p.isCaptain && (
+                  <span className="absolute -bottom-0.5 -right-0.5 bg-gold rounded-full p-[1px] border border-black/60">
+                    <Crown className="h-2 w-2 text-black" />
+                  </span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-gray-200 truncate">{p.name}</p>
+                <p className="text-[10px] text-gray-600 truncate">{p.role}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -583,35 +797,29 @@ function SquadBoardTeamCard({
           </p>
         ) : (
           <>
-            <div className="flex flex-col sm:flex-row gap-2 mb-2">
-              <StyledSelect
-                value={bankPlayerId}
-                onChange={(e) => setBankPlayerId(e.target.value)}
-                placeholder="Select a player…"
-                disabled={availablePlayers.length === 0}
-                size="sm"
-                className="w-full sm:flex-1"
-              >
-                {availablePlayers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.role}
-                  </option>
-                ))}
-              </StyledSelect>
-              <Button
-                onClick={handleAssign}
-                disabled={!bankPlayerId || isAssigning}
-                className="bg-gold hover:bg-gold/90 text-black text-xs font-bold disabled:opacity-50 whitespace-nowrap h-9 px-3"
-              >
-                <UserPlus className="mr-1.5 h-3 w-3" />
-                {isAssigning ? "Adding…" : "Add"}
-              </Button>
+            <div className="grid grid-cols-2 gap-1.5 mb-2 max-h-40 overflow-y-auto pr-1">
+              {availablePlayers.map((p) => (
+                <BankPlayerPickerCard
+                  key={p.id}
+                  player={p}
+                  selected={bankPlayerId === p.id}
+                  onSelect={() => setBankPlayerId(bankPlayerId === p.id ? "" : p.id)}
+                />
+              ))}
             </div>
             <AvailabilityHint count={availablePlayers.length} noun="players" />
-            <label className="flex items-center gap-2 text-xs text-gray-400 mt-2">
+            <label className="flex items-center gap-2 text-xs text-gray-400 mt-2 mb-2">
               <input type="checkbox" checked={isCaptain} onChange={(e) => setIsCaptain(e.target.checked)} />
               Make captain
             </label>
+            <Button
+              onClick={handleAssign}
+              disabled={!bankPlayerId || isAssigning}
+              className="bg-gold hover:bg-gold/90 text-black text-xs font-bold disabled:opacity-50 whitespace-nowrap h-9 px-3 w-full"
+            >
+              <UserPlus className="mr-1.5 h-3 w-3" />
+              {isAssigning ? "Adding…" : "Add Player"}
+            </Button>
             {error && (
               <p className="flex items-center gap-1.5 text-red-500 text-xs mt-2">
                 <AlertCircle className="h-3.5 w-3.5" /> {error}

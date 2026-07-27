@@ -125,6 +125,10 @@ export interface CreateTournamentInput {
   name: string;
   format: "single_elimination" | "double_elimination" | "round_robin";
   category?: "Auction" | "Bracket" | "Overlay" | "League";
+  /** Optional logo URL set at creation time — shown on the tournament's
+   *  card via TournamentSummary.logoUrl (imageUrl still takes priority if
+   *  it's ever set separately, e.g. from the tournament's edit page). */
+  logoUrl?: string;
 }
 
 /** Creates a bare tournament row — the resulting id is where the caller
@@ -143,6 +147,7 @@ export async function createTournament(
       category: input.category ?? null,
       created_by: userId,
       status: "setup",
+      logo_url: input.logoUrl?.trim() || null,
     })
     .select("id")
     .single();
@@ -279,6 +284,59 @@ export interface AuctionTeamOption {
   logo: string;
 }
 
+/** Given team ids whose own `logo` column is empty, looks up each team's
+ *  Team Pool source (via team_pool_assignments) and returns a Map of
+ *  teamId -> pool logo, for whichever ones actually have one set.
+ *
+ *  WHY THIS EXISTS: assignPoolTeamToAuction copies `poolTeam.logo` into
+ *  the new `teams` row ONCE, at insert time. If a team was assigned onto
+ *  an auction/Squad Board before its Team Pool entry had a logo, the
+ *  copied `teams.logo` stays "" forever — adding a logo to Team Pool
+ *  later does NOT retroactively update rows that were already copied.
+ *  Both getTeamsForAuction and getSquadBoardsWithPreviewForOrg call this
+ *  to fall back to the live Team Pool logo whenever `teams.logo` is
+ *  empty, so the UI self-heals without needing a manual re-assign.
+ *
+ *  Two flat queries, no embedded-join guessing (same defensive pattern
+ *  used elsewhere in this file). Safe to call with an empty array. */
+async function backfillLogosFromPool(missingLogoTeamIds: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (missingLogoTeamIds.length === 0) return result;
+
+  const { data: assignmentRows, error: assignErr } = await supabase
+    .from("team_pool_assignments")
+    .select("teams_row_id, pool_team_id")
+    .in("teams_row_id", missingLogoTeamIds);
+
+  if (assignErr) {
+    console.error("backfillLogosFromPool(assignments) failed:", assignErr.message);
+    return result;
+  }
+
+  const poolTeamIds = Array.from(
+    new Set((assignmentRows ?? []).map((r: any) => r.pool_team_id).filter(Boolean))
+  );
+  if (poolTeamIds.length === 0) return result;
+
+  const { data: poolRows, error: poolErr } = await supabase
+    .from("team_pool")
+    .select("id, logo")
+    .in("id", poolTeamIds);
+
+  if (poolErr) {
+    console.error("backfillLogosFromPool(pool) failed:", poolErr.message);
+    return result;
+  }
+
+  const logoByPoolId = new Map((poolRows ?? []).map((p: any) => [p.id, p.logo || ""]));
+  (assignmentRows ?? []).forEach((r: any) => {
+    const logo = logoByPoolId.get(r.pool_team_id);
+    if (logo) result.set(r.teams_row_id, logo);
+  });
+
+  return result;
+}
+
 export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeamOption[]> {
   const { data, error } = await supabase
     .from("teams")
@@ -290,11 +348,16 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
     console.error("getTeamsForAuction failed:", error.message);
     return [];
   }
-  return (data ?? []).map((t: any) => ({
+  const teams = data ?? [];
+
+  const missingLogoIds = teams.filter((t: any) => !t.logo).map((t: any) => t.id);
+  const poolLogoByTeamId = await backfillLogosFromPool(missingLogoIds);
+
+  return teams.map((t: any) => ({
     id: t.id,
     name: t.name,
     code: t.code,
-    logo: t.logo ?? "",
+    logo: t.logo || poolLogoByTeamId.get(t.id) || "",
   }));
 }
 
@@ -731,6 +794,10 @@ export interface TeamRosterPlayer {
   name: string;
   role: string;
   isCaptain: boolean;
+  /** Player photo URL, pulled straight from the `players` row (copied in
+   *  from the bank player at assignment time). Empty string when unset —
+   *  the UI falls back to a placeholder icon. */
+  img: string;
 }
 
 /** Roster (i.e. current player list) for a single real team row, for
@@ -740,7 +807,7 @@ export interface TeamRosterPlayer {
 export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]> {
   const { data, error } = await supabase
     .from("players")
-    .select("id, name, role, owner_team_code")
+    .select("id, name, role, owner_team_code, img")
     .eq("sold_to_team_id", teamId)
     .order("name", { ascending: true });
 
@@ -753,11 +820,12 @@ export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]>
     name: p.name,
     role: p.role,
     isCaptain: !!p.owner_team_code,
+    img: p.img ?? "",
   }));
 }
 
 /** Bank player ids already assigned to ANY team on this board — used to
- *  both (a) filter the dropdown so a person can't even pick an
+ *  both (a) filter the picker so a person can't even pick an
  *  already-used player, and (b) as data for the backend guard below. */
 export async function getAssignedBankPlayerIdsForBoard(boardId: string): Promise<string[]> {
   const boardTeams = await getTeamsForAuction(boardId);
@@ -777,7 +845,7 @@ export async function getAssignedBankPlayerIdsForBoard(boardId: string): Promise
 }
 
 /** Pool team ids already assigned to this board — same idea, for the
- *  "Assign a Team Pool Team" dropdown. */
+ *  "Assign a Team Pool Team" picker. */
 export async function getAssignedPoolTeamIdsForBoard(boardId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from("team_pool_assignments")
@@ -1135,6 +1203,79 @@ export async function getSquadBoardsForOrg(orgId: string): Promise<SquadBoard[]>
     return [];
   }
   return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
+}
+
+export interface SquadBoardPreview extends SquadBoard {
+  teamCount: number;
+  playerCount: number;
+  /** Up to 4 team logo URLs for the folder-stack preview card — empty
+   *  strings filtered out, so a board with unlogo'd teams just shows fewer
+   *  tiles in the fan rather than blank ones. */
+  teamLogos: string[];
+}
+
+/** Same boards as getSquadBoardsForOrg, enriched with just enough data to
+ *  render the folder-stack preview card on the Squad Board tab's list
+ *  view: how many teams/players are on each board, and up to 4 team logos
+ *  to fan out. Two extra queries total (not per-board) — teams filtered by
+ *  auction_id IN (...boardIds), players filtered by sold_to_team_id IN
+ *  (...teamIds) — so this stays cheap even with a lot of boards.
+ *
+ *  Also backfills any missing team logos from their Team Pool source (see
+ *  backfillLogosFromPool above) — otherwise a team assigned before its
+ *  pool entry had a logo would show up in every board's fan as a stale
+ *  blank tile forever, even after the pool entry gets a logo. */
+export async function getSquadBoardsWithPreviewForOrg(orgId: string): Promise<SquadBoardPreview[]> {
+  const boards = await getSquadBoardsForOrg(orgId);
+  if (boards.length === 0) return [];
+  const boardIds = boards.map((b) => b.id);
+
+  const { data: teamRows, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, auction_id, logo")
+    .in("auction_id", boardIds);
+
+  if (teamsErr) {
+    console.error("getSquadBoardsWithPreviewForOrg(teams) failed:", teamsErr.message);
+  }
+  const teams = teamRows ?? [];
+  const teamIds = teams.map((t: any) => t.id);
+
+  const missingLogoIds = teams.filter((t: any) => !t.logo).map((t: any) => t.id);
+  const poolLogoByTeamId = await backfillLogosFromPool(missingLogoIds);
+
+  const playerCounts: Record<string, number> = {};
+  if (teamIds.length > 0) {
+    const { data: playerRows, error: playersErr } = await supabase
+      .from("players")
+      .select("sold_to_team_id")
+      .in("sold_to_team_id", teamIds);
+    if (playersErr) {
+      console.error("getSquadBoardsWithPreviewForOrg(players) failed:", playersErr.message);
+    }
+    (playerRows ?? []).forEach((p: any) => {
+      if (!p.sold_to_team_id) return;
+      playerCounts[p.sold_to_team_id] = (playerCounts[p.sold_to_team_id] ?? 0) + 1;
+    });
+  }
+
+  const teamsByBoard = new Map<string, { id: string; logo: string }[]>();
+  teams.forEach((t: any) => {
+    const list = teamsByBoard.get(t.auction_id) ?? [];
+    list.push({ id: t.id, logo: t.logo || poolLogoByTeamId.get(t.id) || "" });
+    teamsByBoard.set(t.auction_id, list);
+  });
+
+  return boards.map((b) => {
+    const boardTeams = teamsByBoard.get(b.id) ?? [];
+    const playerCount = boardTeams.reduce((sum, t) => sum + (playerCounts[t.id] ?? 0), 0);
+    return {
+      ...b,
+      teamCount: boardTeams.length,
+      playerCount,
+      teamLogos: boardTeams.map((t) => t.logo).filter(Boolean).slice(0, 4),
+    };
+  });
 }
 
 /** Creates a new Squad Board. `userId` MUST be a real `auth.users.id` (the

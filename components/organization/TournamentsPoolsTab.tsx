@@ -15,6 +15,8 @@ import {
   Shield,
   Trophy,
   UserPlus,
+  Crown,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,9 +28,11 @@ import {
   deleteTournaments,
   getPlayerBank,
   addBankPlayer,
+  updateBankPlayer,
   deleteBankPlayer,
   getTeamPool,
   addPoolTeam,
+  updatePoolTeam,
   deletePoolTeam,
   subscribeToOrgTournaments,
   unsubscribe,
@@ -113,6 +117,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     "single_elimination"
   )
   const [category, setCategory] = useState("")
+  const [logoUrl, setLogoUrl] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -145,11 +150,6 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Catches "created a tournament, got redirected to its edit page, came
-  // back here and it's missing until I refresh" — the mount effect above
-  // only fires once, and coming back from the edit page often restores
-  // this component from Next's router cache rather than remounting it.
-  // Refocusing the tab/window is a reliable second signal to refetch.
   useRefetchOnFocus(reload)
 
   const handleCreate = async () => {
@@ -160,6 +160,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
       name: name.trim(),
       format,
       category: category ? (category as any) : undefined,
+      logoUrl: logoUrl.trim() || undefined,
     })
     setIsCreating(false)
     if (!id) {
@@ -268,6 +269,28 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
             </select>
           </div>
         </div>
+
+        <div className="mb-4">
+          <FieldLabel>Tournament Logo (optional)</FieldLabel>
+          <div className="flex items-center gap-3">
+            <div className="h-14 w-14 rounded-md overflow-hidden border border-gold/20 bg-black/60 flex items-center justify-center shrink-0">
+              {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Trophy className="h-5 w-5 text-gold/30" />
+              )}
+            </div>
+            <Input
+              value={logoUrl}
+              onChange={(e) => setLogoUrl(e.target.value)}
+              placeholder="https://…"
+              className="bg-black/50 border-gold/30 text-white flex-1"
+            />
+          </div>
+          <p className="text-gray-500 text-xs mt-1.5">Shown on this tournament's card below, and anywhere else its logo appears.</p>
+        </div>
+
         {createError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
             <AlertCircle className="h-4 w-4" /> {createError}
@@ -392,9 +415,10 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  TEAM POOL — reusable team templates. Assigning a pool team into an  */
-/*  auction now happens from the auction admin panel itself, not here —  */
-/*  this tab is purely add / browse / remove for the org's Team Pool.    */
+/*  TEAM POOL — the add form doubles as the edit form: clicking the      */
+/*  pencil icon on a row loads that team's data into the fields above     */
+/*  and swaps the submit button into "Save Changes". Assigning a pool    */
+/*  team into an auction happens from the auction admin panel, not here. */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -402,6 +426,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
   const [teams, setTeams] = useState<PoolTeam[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [code, setCode] = useState("")
   const [owner, setOwner] = useState("")
@@ -409,8 +434,8 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
   const [color, setColor] = useState("#e45d35")
   const [logo, setLogo] = useState("")
   const [notes, setNotes] = useState("")
-  const [isAdding, setIsAdding] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const reload = () => getTeamPool(org.id).then((t) => setTeams(t))
 
@@ -419,16 +444,38 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Same fix as the Tournaments tab: keeps this list fresh if you tab away
-  // (e.g. to another dashboard tab or a different browser tab) and back,
-  // a case the one-time mount effect above doesn't cover.
   useRefetchOnFocus(reload)
 
-  const handleAdd = async () => {
+  const resetForm = () => {
+    setEditingId(null)
+    setName("")
+    setCode("")
+    setOwner("")
+    setTier("Pro")
+    setColor("#e45d35")
+    setLogo("")
+    setNotes("")
+    setSaveError(null)
+  }
+
+  const startEdit = (team: PoolTeam) => {
+    setEditingId(team.id)
+    setName(team.name)
+    setCode(team.code)
+    setOwner(team.owner)
+    setTier(team.tier as PoolTeam["tier"])
+    setColor(team.color)
+    setLogo(team.logo)
+    setNotes(team.notes ?? "")
+    setSaveError(null)
+  }
+
+  const handleSubmit = async () => {
     if (!name.trim() || !code.trim()) return
-    setIsAdding(true)
-    setAddError(null)
-    const team = await addPoolTeam(org.id, userId, {
+    setIsSaving(true)
+    setSaveError(null)
+
+    const patch = {
       name: name.trim(),
       code: code.trim().toUpperCase(),
       owner,
@@ -436,18 +483,31 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
       color,
       logo: logo.trim(),
       notes: notes.trim() || undefined,
-    })
-    setIsAdding(false)
-    if (!team) {
-      setAddError("Couldn't add that team — please try again.")
-      return
     }
-    setTeams((prev) => [...prev, team].sort((a, b) => a.name.localeCompare(b.name)))
-    setName("")
-    setCode("")
-    setOwner("")
-    setLogo("")
-    setNotes("")
+
+    if (editingId) {
+      const success = await updatePoolTeam(editingId, patch)
+      setIsSaving(false)
+      if (!success) {
+        setSaveError("Couldn't save changes — please try again.")
+        return
+      }
+      setTeams((prev) =>
+        prev
+          .map((t) => (t.id === editingId ? { ...t, ...patch, notes: patch.notes ?? null } : t))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      )
+      resetForm()
+    } else {
+      const team = await addPoolTeam(org.id, userId, patch)
+      setIsSaving(false)
+      if (!team) {
+        setSaveError("Couldn't add that team — please try again.")
+        return
+      }
+      setTeams((prev) => [...prev, team].sort((a, b) => a.name.localeCompare(b.name)))
+      resetForm()
+    }
   }
 
   const handleDelete = async (team: PoolTeam) => {
@@ -459,15 +519,28 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
     })
     if (!ok) return
     const success = await deletePoolTeam(team.id)
-    if (success) setTeams((prev) => prev.filter((t) => t.id !== team.id))
+    if (success) {
+      setTeams((prev) => prev.filter((t) => t.id !== team.id))
+      if (editingId === team.id) resetForm()
+    }
   }
 
   return (
     <div className="space-y-6">
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
-          <Shield className="h-4 w-4 text-gold" /> Add a Team to the Pool
-        </h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+            <Shield className="h-4 w-4 text-gold" /> {editingId ? "Edit Team" : "Add a Team to the Pool"}
+          </h2>
+          {editingId && (
+            <button
+              onClick={resetForm}
+              className="flex items-center gap-1 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+            >
+              <X className="h-3.5 w-3.5" /> Cancel
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
           <div className="sm:col-span-2">
             <FieldLabel>Team Name</FieldLabel>
@@ -537,15 +610,22 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
             />
           </div>
         </div>
-        {addError && (
+        {saveError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
-            <AlertCircle className="h-4 w-4" /> {addError}
+            <AlertCircle className="h-4 w-4" /> {saveError}
           </p>
         )}
-        <Button onClick={handleAdd} disabled={!name.trim() || !code.trim() || isAdding} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
-          <Plus className="mr-2 h-4 w-4" />
-          {isAdding ? "Adding…" : "Add to Pool"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button onClick={handleSubmit} disabled={!name.trim() || !code.trim() || isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
+            <Plus className="mr-2 h-4 w-4" />
+            {isSaving ? (editingId ? "Saving…" : "Adding…") : editingId ? "Save Changes" : "Add to Pool"}
+          </Button>
+          {editingId && (
+            <Button onClick={resetForm} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/15 font-bold">
+              Cancel
+            </Button>
+          )}
+        </div>
       </Panel>
 
       <Panel>
@@ -561,18 +641,25 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
         ) : teams.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No teams in the pool yet — add one above.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {teams.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-3">
+              <div
+                key={t.id}
+                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
+                  editingId === t.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
+                }`}
+              >
                 <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center"
+                    className="h-12 w-12 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center shadow-md shadow-black/40"
                     style={{ backgroundColor: t.color || "#e45d35" }}
                   >
                     {t.logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={t.logo} alt="" className="h-full w-full object-cover" />
-                    ) : null}
+                    ) : (
+                      <Shield className="h-5 w-5 text-white/70" />
+                    )}
                   </div>
                   <div className="min-w-0">
                     <p className="text-white text-sm font-semibold truncate">{t.name}</p>
@@ -583,7 +670,10 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
                     {t.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{t.notes}</p>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => startEdit(t)} className="text-gray-500 hover:text-gold p-1.5">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
                   <button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-400 p-1.5">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -600,9 +690,9 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  PLAYER BANK — assigning a bank player onto a team's roster now       */
-/*  happens elsewhere (the team/auction roster view), not here — this   */
-/*  tab is purely add / browse / remove for the org's Player Bank.      */
+/*  PLAYER BANK — same edit-in-place pattern as Team Pool above.        */
+/*  Assigning a bank player onto a team's roster happens elsewhere      */
+/*  (the team/auction roster view), not here.                          */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -610,6 +700,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [players, setPlayers] = useState<BankPlayer[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [role, setRole] = useState<BankPlayer["role"]>("Batter")
   const [origin, setOrigin] = useState("Local")
@@ -617,8 +708,8 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [img, setImg] = useState("")
   const [capped, setCapped] = useState(false)
   const [notes, setNotes] = useState("")
-  const [isAdding, setIsAdding] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const reload = () => getPlayerBank(org.id).then((p) => setPlayers(p))
 
@@ -627,15 +718,38 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Same fix as the other tabs — refetches on refocus so the bank stays
-  // current after navigating elsewhere and back.
   useRefetchOnFocus(reload)
 
-  const handleAdd = async () => {
+  const resetForm = () => {
+    setEditingId(null)
+    setName("")
+    setRole("Batter")
+    setOrigin("Local")
+    setCountry("")
+    setImg("")
+    setCapped(false)
+    setNotes("")
+    setSaveError(null)
+  }
+
+  const startEdit = (player: BankPlayer) => {
+    setEditingId(player.id)
+    setName(player.name)
+    setRole(player.role as BankPlayer["role"])
+    setOrigin(player.origin)
+    setCountry(player.country)
+    setImg(player.img)
+    setCapped(player.capped)
+    setNotes(player.notes ?? "")
+    setSaveError(null)
+  }
+
+  const handleSubmit = async () => {
     if (!name.trim()) return
-    setIsAdding(true)
-    setAddError(null)
-    const player = await addBankPlayer(org.id, userId, {
+    setIsSaving(true)
+    setSaveError(null)
+
+    const patch = {
       name: name.trim(),
       role,
       origin,
@@ -643,18 +757,31 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
       img: img.trim(),
       capped,
       notes: notes.trim() || undefined,
-    })
-    setIsAdding(false)
-    if (!player) {
-      setAddError("Couldn't add that player — please try again.")
-      return
     }
-    setPlayers((prev) => [...prev, player].sort((a, b) => a.name.localeCompare(b.name)))
-    setName("")
-    setCountry("")
-    setImg("")
-    setCapped(false)
-    setNotes("")
+
+    if (editingId) {
+      const success = await updateBankPlayer(editingId, patch)
+      setIsSaving(false)
+      if (!success) {
+        setSaveError("Couldn't save changes — please try again.")
+        return
+      }
+      setPlayers((prev) =>
+        prev
+          .map((p) => (p.id === editingId ? { ...p, ...patch, notes: patch.notes ?? null } : p))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      )
+      resetForm()
+    } else {
+      const player = await addBankPlayer(org.id, userId, patch)
+      setIsSaving(false)
+      if (!player) {
+        setSaveError("Couldn't add that player — please try again.")
+        return
+      }
+      setPlayers((prev) => [...prev, player].sort((a, b) => a.name.localeCompare(b.name)))
+      resetForm()
+    }
   }
 
   const handleDelete = async (player: BankPlayer) => {
@@ -666,15 +793,28 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     })
     if (!ok) return
     const success = await deleteBankPlayer(player.id)
-    if (success) setPlayers((prev) => prev.filter((p) => p.id !== player.id))
+    if (success) {
+      setPlayers((prev) => prev.filter((p) => p.id !== player.id))
+      if (editingId === player.id) resetForm()
+    }
   }
 
   return (
     <div className="space-y-6">
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
-          <UserPlus className="h-4 w-4 text-gold" /> Add a Player to the Bank
-        </h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+            <UserPlus className="h-4 w-4 text-gold" /> {editingId ? "Edit Player" : "Add a Player to the Bank"}
+          </h2>
+          {editingId && (
+            <button
+              onClick={resetForm}
+              className="flex items-center gap-1 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+            >
+              <X className="h-3.5 w-3.5" /> Cancel
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
           <div className="sm:col-span-2">
             <FieldLabel>Name</FieldLabel>
@@ -731,15 +871,22 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             className="bg-black/50 border-gold/30 text-white"
           />
         </div>
-        {addError && (
+        {saveError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
-            <AlertCircle className="h-4 w-4" /> {addError}
+            <AlertCircle className="h-4 w-4" /> {saveError}
           </p>
         )}
-        <Button onClick={handleAdd} disabled={!name.trim() || isAdding} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
-          <Plus className="mr-2 h-4 w-4" />
-          {isAdding ? "Adding…" : "Add to Bank"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button onClick={handleSubmit} disabled={!name.trim() || isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50">
+            <Plus className="mr-2 h-4 w-4" />
+            {isSaving ? (editingId ? "Saving…" : "Adding…") : editingId ? "Save Changes" : "Add to Bank"}
+          </Button>
+          {editingId && (
+            <Button onClick={resetForm} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/15 font-bold">
+              Cancel
+            </Button>
+          )}
+        </div>
       </Panel>
 
       <Panel>
@@ -751,17 +898,41 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
         ) : players.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No players in the bank yet — add one above.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {players.map((p) => (
-              <div key={p.id} className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 rounded-md px-4 py-3">
-                <div className="min-w-0">
-                  <p className="text-white text-sm font-semibold truncate">{p.name}</p>
-                  <p className="text-gray-500 text-xs mt-0.5">
-                    {p.role} · {p.origin}
-                    {p.country ? ` · ${p.country}` : ""}
-                  </p>
+              <div
+                key={p.id}
+                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
+                  editingId === p.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative h-12 w-12 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
+                    {p.img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.img} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <UserPlus className="h-5 w-5 text-white/40" />
+                    )}
+                    {p.capped && (
+                      <span className="absolute -bottom-0.5 -right-0.5 bg-gold rounded-full p-0.5 border border-black/60">
+                        <Crown className="h-2.5 w-2.5 text-black" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-semibold truncate">{p.name}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                      {p.role} · {p.origin}
+                      {p.country ? ` · ${p.country}` : ""}
+                    </p>
+                    {p.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{p.notes}</p>}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => startEdit(p)} className="text-gray-500 hover:text-gold p-1.5">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
                   <button onClick={() => handleDelete(p)} className="text-gray-500 hover:text-red-400 p-1.5">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
