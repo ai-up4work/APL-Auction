@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Plus,
   Trash2,
@@ -14,6 +14,7 @@ import {
   Link2,
   Users,
   Crown,
+  ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,6 +29,8 @@ import {
   getPlayerBank,
   assignBankPlayerToSquadBoardTeam,
   getTeamRoster,
+  getAssignedBankPlayerIdsForBoard,
+  getAssignedPoolTeamIdsForBoard,
   type OrgSummary,
   type SquadBoard,
   type PoolTeam,
@@ -46,12 +49,61 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   )
 }
 
+/** Shared select styling so every dropdown on this tab looks and behaves
+ *  the same: gold border, custom chevron (native <select> arrows are
+ *  inconsistent across browsers), and a clear disabled state for when
+ *  there's genuinely nothing left to pick. */
+function StyledSelect({
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  children,
+  size = "md",
+  className = "",
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  disabled?: boolean
+  placeholder: string
+  children: React.ReactNode
+  size?: "md" | "sm"
+  className?: string
+}) {
+  const sizing = size === "sm" ? "text-xs px-2.5 py-2 pr-8" : "text-sm px-3 py-2.5 pr-9"
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className={`w-full appearance-none bg-black/50 border border-gold/30 rounded-md text-white ${sizing} outline-none focus:border-gold/70 focus:ring-1 focus:ring-gold/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
+      >
+        <option value="">{placeholder}</option>
+        {children}
+      </select>
+      <ChevronDown className={`${size === "sm" ? "h-3 w-3 right-2.5" : "h-3.5 w-3.5 right-3"} text-gold/50 absolute top-1/2 -translate-y-1/2 pointer-events-none`} />
+    </div>
+  )
+}
+
+function AvailabilityHint({ count, noun }: { count: number; noun: string }) {
+  if (count > 0) return null
+  return <p className="text-gray-500 text-xs italic">All {noun} on this board are already assigned.</p>
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /*  SQUAD BOARD — a named container backed by a synthetic auction. Lets   */
 /*  you assign the same Team Pool team into many Squad Boards, and the    */
 /*  same Player Bank player onto many teams (same board or different       */
 /*  ones) — a genuine many-to-many, since every assignment is a fresh      */
 /*  insert rather than a single-slot relationship.                        */
+/*                                                                          */
+/*  WITHIN one board, both dropdowns exclude what's already used there:    */
+/*  a pool team already assigned to this board won't show up again in the  */
+/*  "assign a team" picker, and a bank player already on ANY team on this   */
+/*  board won't show up in any team's "add a player" picker. That's the    */
+/*  UI-side mirror of the backend guard in assignBankPlayerToTeam.         */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function SquadBoardTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -226,10 +278,23 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
   const [teams, setTeams] = useState<AuctionTeamOption[]>([])
   const [teamsLoaded, setTeamsLoaded] = useState(false)
 
+  // Board-wide "already used" sets — shared across every dropdown on this
+  // board so nothing already assigned here can be picked again.
+  const [assignedPoolTeamIds, setAssignedPoolTeamIds] = useState<string[]>([])
+  const [assignedBankPlayerIds, setAssignedBankPlayerIds] = useState<string[]>([])
+
   const reloadTeams = () => getTeamsForAuction(board.id).then((t) => setTeams(t))
+  const reloadAssignedPoolTeamIds = () => getAssignedPoolTeamIdsForBoard(board.id).then(setAssignedPoolTeamIds)
+  const reloadAssignedBankPlayerIds = () => getAssignedBankPlayerIdsForBoard(board.id).then(setAssignedBankPlayerIds)
+
+  // Called after ANY assignment on this board (a team added to the board,
+  // or a player added to one of its teams) — refreshes everything that
+  // feeds the dropdowns, so every card reflects the change immediately.
+  const reloadAll = () =>
+    Promise.all([reloadTeams(), reloadAssignedPoolTeamIds(), reloadAssignedBankPlayerIds()])
 
   useEffect(() => {
-    reloadTeams().then(() => setTeamsLoaded(true))
+    reloadAll().then(() => setTeamsLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id])
 
@@ -249,15 +314,15 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
         <h2 className="text-xl font-bold text-white font-cinzel">{board.name}</h2>
       </div>
 
-      <AssignTeamPanel org={org} board={board} onAssigned={reloadTeams} />
+      <AssignTeamPanel org={org} board={board} assignedPoolTeamIds={assignedPoolTeamIds} onAssigned={reloadAll} />
 
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
           <Shield className="h-4 w-4 text-gold" /> Teams on this Squad Board
         </h2>
         <p className="text-gray-500 text-xs mb-4">
-          Assign Player Bank players onto any team below. A player can be assigned to more than one team, here or on
-          another Squad Board.
+          Assign Player Bank players onto any team below. A player already assigned somewhere on this board won't
+          show up again in any team's picker — they can still go on another Squad Board, though.
         </p>
         {!teamsLoaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
@@ -268,7 +333,14 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {teams.map((t) => (
-              <SquadBoardTeamCard key={t.id} org={org} board={board} team={t} />
+              <SquadBoardTeamCard
+                key={t.id}
+                org={org}
+                board={board}
+                team={t}
+                assignedBankPlayerIds={assignedBankPlayerIds}
+                onAssigned={reloadAll}
+              />
             ))}
           </div>
         )}
@@ -282,10 +354,12 @@ function SquadBoardDetail({ org, board, onBack }: { org: OrgSummary; board: Squa
 function AssignTeamPanel({
   org,
   board,
+  assignedPoolTeamIds,
   onAssigned,
 }: {
   org: OrgSummary
   board: SquadBoard
+  assignedPoolTeamIds: string[]
   onAssigned: () => void
 }) {
   const [poolTeams, setPoolTeams] = useState<PoolTeam[]>([])
@@ -303,8 +377,14 @@ function AssignTeamPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
+  // Only pool teams NOT already sitting on this board are pickable.
+  const availableTeams = useMemo(
+    () => poolTeams.filter((t) => !assignedPoolTeamIds.includes(t.id)),
+    [poolTeams, assignedPoolTeamIds]
+  )
+
   const handleAssign = async () => {
-    const poolTeam = poolTeams.find((t) => t.id === poolTeamId)
+    const poolTeam = availableTeams.find((t) => t.id === poolTeamId)
     if (!poolTeam) return
     setIsAssigning(true)
     setError(null)
@@ -322,12 +402,19 @@ function AssignTeamPanel({
 
   return (
     <Panel>
-      <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
-        <Link2 className="h-4 w-4 text-gold" /> Assign a Team Pool Team
-      </h2>
+      <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+        <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-gold" /> Assign a Team Pool Team
+        </h2>
+        {loaded && poolTeams.length > 0 && (
+          <span className="text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border border-white/15 text-gray-400">
+            {availableTeams.length} available
+          </span>
+        )}
+      </div>
       <p className="text-gray-500 text-xs mb-4">
         Copies a Team Pool team onto this Squad Board. The pool entry itself stays untouched, so it can also be
-        assigned onto other Squad Boards or real auctions.
+        assigned onto other Squad Boards or real auctions. A team already on this board won't show up here again.
       </p>
 
       {!loaded ? (
@@ -341,18 +428,19 @@ function AssignTeamPanel({
       ) : (
         <>
           <div className="flex flex-col sm:flex-row gap-2 mb-3">
-            <select
+            <StyledSelect
               value={poolTeamId}
               onChange={(e) => setPoolTeamId(e.target.value)}
-              className="w-full sm:flex-1 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+              placeholder="Select a team…"
+              disabled={availableTeams.length === 0}
+              className="w-full sm:flex-1"
             >
-              <option value="">Select a team…</option>
-              {poolTeams.map((t) => (
+              {availableTeams.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name} ({t.code})
                 </option>
               ))}
-            </select>
+            </StyledSelect>
             <Button
               onClick={handleAssign}
               disabled={!poolTeamId || isAssigning}
@@ -361,6 +449,7 @@ function AssignTeamPanel({
               {isAssigning ? "Assigning…" : "Assign Team"}
             </Button>
           </div>
+          <AvailabilityHint count={availableTeams.length} noun="pool teams" />
           {error && (
             <p className="flex items-center gap-1.5 text-red-500 text-sm">
               <AlertCircle className="h-4 w-4" /> {error}
@@ -380,7 +469,19 @@ function AssignTeamPanel({
 /* ── One team's card on a Squad Board: its current players + an inline    */
 /*    "assign a bank player onto this team" control                       */
 
-function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: SquadBoard; team: AuctionTeamOption }) {
+function SquadBoardTeamCard({
+  org,
+  board,
+  team,
+  assignedBankPlayerIds,
+  onAssigned,
+}: {
+  org: OrgSummary
+  board: SquadBoard
+  team: AuctionTeamOption
+  assignedBankPlayerIds: string[]
+  onAssigned: () => void
+}) {
   const [players, setPlayers] = useState<TeamRosterPlayer[]>([])
   const [playersLoaded, setPlayersLoaded] = useState(false)
 
@@ -403,8 +504,16 @@ function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: Squa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team.id, org.id])
 
+  // Only bank players not already used ANYWHERE on this board are
+  // pickable — this mirrors the backend's same-board duplicate guard, so
+  // the dropdown never even offers a choice the server would reject.
+  const availablePlayers = useMemo(
+    () => bankPlayers.filter((p) => !assignedBankPlayerIds.includes(p.id)),
+    [bankPlayers, assignedBankPlayerIds]
+  )
+
   const handleAssign = async () => {
-    const bankPlayer = bankPlayers.find((p) => p.id === bankPlayerId)
+    const bankPlayer = availablePlayers.find((p) => p.id === bankPlayerId)
     if (!bankPlayer) return
     setIsAssigning(true)
     setError(null)
@@ -417,6 +526,7 @@ function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: Squa
     setBankPlayerId("")
     setIsCaptain(false)
     await reloadRoster()
+    onAssigned()
   }
 
   return (
@@ -455,6 +565,14 @@ function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: Squa
       )}
 
       <div className="pt-3 border-t border-white/5">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <p className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel">Add a Bank Player</p>
+          {bankLoaded && bankPlayers.length > 0 && (
+            <span className="text-[10px] uppercase tracking-widest font-cinzel px-1.5 py-0.5 rounded border border-white/15 text-gray-500">
+              {availablePlayers.length} available
+            </span>
+          )}
+        </div>
         {!bankLoaded ? (
           <p className="text-gray-500 text-xs flex items-center gap-2">
             <Loader2 className="h-3 w-3 animate-spin" /> Loading player bank…
@@ -466,18 +584,20 @@ function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: Squa
         ) : (
           <>
             <div className="flex flex-col sm:flex-row gap-2 mb-2">
-              <select
+              <StyledSelect
                 value={bankPlayerId}
                 onChange={(e) => setBankPlayerId(e.target.value)}
-                className="w-full sm:flex-1 bg-black/50 border border-gold/30 rounded-md text-white text-xs px-2.5 py-2"
+                placeholder="Select a player…"
+                disabled={availablePlayers.length === 0}
+                size="sm"
+                className="w-full sm:flex-1"
               >
-                <option value="">Select a player…</option>
-                {bankPlayers.map((p) => (
+                {availablePlayers.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} — {p.role}
                   </option>
                 ))}
-              </select>
+              </StyledSelect>
               <Button
                 onClick={handleAssign}
                 disabled={!bankPlayerId || isAssigning}
@@ -487,7 +607,8 @@ function SquadBoardTeamCard({ org, board, team }: { org: OrgSummary; board: Squa
                 {isAssigning ? "Adding…" : "Add"}
               </Button>
             </div>
-            <label className="flex items-center gap-2 text-xs text-gray-400">
+            <AvailabilityHint count={availablePlayers.length} noun="players" />
+            <label className="flex items-center gap-2 text-xs text-gray-400 mt-2">
               <input type="checkbox" checked={isCaptain} onChange={(e) => setIsCaptain(e.target.checked)} />
               Make captain
             </label>

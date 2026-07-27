@@ -756,21 +756,42 @@ export async function getTeamRoster(teamId: string): Promise<TeamRosterPlayer[]>
   }));
 }
 
-/** Assigns a Player Bank player onto a team.
- *
- *  SCOPE RULE: a given bank player may be assigned to any number of teams
- *  ACROSS different auctions / Squad Boards — that many-to-many spread is
- *  intentional (mock drafts, planning across several boards, etc). What is
- *  NOT allowed is the same bank player ending up on more than one team
- *  WITHIN the same auction/Squad Board — that would mean one real person
- *  playing for two teams in the same tournament/board, which doesn't make
- *  sense. This is enforced here with a pre-insert lookup against
- *  `player_bank_assignments` joined to `players.auction_id`, rather than a
- *  DB constraint, since `player_bank_assignments` has no unique index today.
- *  (If you want this enforced at the DB level too, add a partial unique
- *  index on `players(auction_id, ...)` keyed to bank_player_id via a view,
- *  or add a `bank_player_id` + `auction_id` composite unique constraint to
- *  `player_bank_assignments` directly — happy to draft that migration.) */
+/** Bank player ids already assigned to ANY team on this board — used to
+ *  both (a) filter the dropdown so a person can't even pick an
+ *  already-used player, and (b) as data for the backend guard below. */
+export async function getAssignedBankPlayerIdsForBoard(boardId: string): Promise<string[]> {
+  const boardTeams = await getTeamsForAuction(boardId);
+  const teamIds = boardTeams.map((t) => t.id);
+  if (teamIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("player_bank_assignments")
+    .select("bank_player_id")
+    .in("team_id", teamIds);
+
+  if (error) {
+    console.error("getAssignedBankPlayerIdsForBoard failed:", error.message);
+    return [];
+  }
+  return Array.from(new Set((data ?? []).map((r: any) => r.bank_player_id).filter(Boolean)));
+}
+
+/** Pool team ids already assigned to this board — same idea, for the
+ *  "Assign a Team Pool Team" dropdown. */
+export async function getAssignedPoolTeamIdsForBoard(boardId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("team_pool_assignments")
+    .select("pool_team_id")
+    .eq("auction_id", boardId);
+
+  if (error) {
+    console.error("getAssignedPoolTeamIdsForBoard failed:", error.message);
+    return [];
+  }
+  return Array.from(new Set((data ?? []).map((r: any) => r.pool_team_id).filter(Boolean)));
+}
+
+
 export async function assignBankPlayerToTeam(
   bankPlayer: BankPlayer,
   team: AssignableTeam,
@@ -778,25 +799,34 @@ export async function assignBankPlayerToTeam(
 ): Promise<AssignResult> {
   // Guard: is this bank player already assigned to ANY team within this
   // same auction/Squad Board? Different auctions/boards are always fine.
-  const { data: existingAssignments, error: existingErr } = await supabase
-    .from("player_bank_assignments")
-    .select("id, players_row_id, players!inner(auction_id, sold_to_team_id, name)")
-    .eq("bank_player_id", bankPlayer.id);
+  //
+  // NOTE: this checks `team_id` on player_bank_assignments directly against
+  // every team_id that belongs to this board — not an embedded join through
+  // `players`. The embedded-join version depended on Supabase auto-detecting
+  // a FK relationship between player_bank_assignments and players, which is
+  // fragile; querying team_id (a column we already write on every insert
+  // below) is a flat, reliable check with no relationship guessing.
+  const boardTeams = await getTeamsForAuction(team.auctionId);
+  const boardTeamIds = boardTeams.map((t) => t.id);
 
-  if (existingErr) {
-    console.error("assignBankPlayerToTeam(duplicate check) failed:", existingErr.message);
-    return { ok: false, error: "Couldn't verify this player's existing assignments — please try again." };
-  }
+  if (boardTeamIds.length > 0) {
+    const { data: existingAssignments, error: existingErr } = await supabase
+      .from("player_bank_assignments")
+      .select("id")
+      .eq("bank_player_id", bankPlayer.id)
+      .in("team_id", boardTeamIds);
 
-  const alreadyOnThisBoard = (existingAssignments ?? []).some(
-    (row: any) => row.players?.auction_id === team.auctionId
-  );
+    if (existingErr) {
+      console.error("assignBankPlayerToTeam(duplicate check) failed:", existingErr.message);
+      return { ok: false, error: "Couldn't verify this player's existing assignments — please try again." };
+    }
 
-  if (alreadyOnThisBoard) {
-    return {
-      ok: false,
-      error: `${bankPlayer.name} is already assigned to a team on this board/auction — a player can't be on two teams in the same one.`,
-    };
+    if ((existingAssignments ?? []).length > 0) {
+      return {
+        ok: false,
+        error: `${bankPlayer.name} is already assigned to a team on this board/auction — a player can't be on two teams in the same one.`,
+      };
+    }
   }
 
   const { data: inserted, error } = await supabase
