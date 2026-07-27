@@ -562,6 +562,14 @@ async function getBracketChartDataForTournament(
  * bought each player, and `players.owner_team_code` (already used to
  * derive `isCaptain` in loadAuction) tells us who the captain is.
  *
+ * TEAM SUBSET: if the tournament has an explicit team selection saved in
+ * `tournament_teams` (see saveTournamentTeamSelection in
+ * lib/tournament/manualTeams.ts), only those teams are shown here — this
+ * is what lets a tournament include just some of a linked auction's or
+ * Squad Board's teams instead of all of them. No rows saved yet means
+ * "every team under the linked auction", same as before this table
+ * existed, so tournaments that never touch the team picker are unaffected.
+ *
  * ASSUMPTION: one auction per tournament. `auctions.tournament_id` is a
  * direct FK (set via linkAuctionTournament in lib/auctionDb.ts). If a
  * tournament can have multiple linked auctions (re-auctions, etc.), this
@@ -601,6 +609,7 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
     { data: teams, error: teamsErr },
     { data: players, error: playersErr },
     { data: rules, error: rulesErr },
+    { data: selectionRows, error: selectionErr },
   ] = await Promise.all([
     // owner, logo, remaining_purse added for the squads page (owner name,
     // team badge, purse spent) — pin is intentionally NOT selected here,
@@ -620,12 +629,20 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
     // teams.remaining_purse alone doesn't tell us how much was spent
     // without knowing what they started with.
     supabase.from("rules").select("total_points").eq("auction_id", auction.id).maybeSingle(),
+    // Explicit team-selection subset for this tournament, if any has been
+    // saved (see the TEAM SUBSET note above).
+    supabase.from("tournament_teams").select("team_id").eq("tournament_id", tournamentId),
   ]);
 
   if (teamsErr) console.error("getSquadsForTournament(teams) failed:", teamsErr.message);
   if (playersErr) console.error("getSquadsForTournament(players) failed:", playersErr.message);
   if (rulesErr) console.error("getSquadsForTournament(rules) failed:", rulesErr.message);
+  if (selectionErr) console.error("getSquadsForTournament(selection) failed:", selectionErr.message);
   if (!teams || !players) return [];
+
+  const selectedIds =
+    selectionRows && selectionRows.length > 0 ? new Set(selectionRows.map((r) => r.team_id)) : null;
+  const includedTeams = selectedIds ? teams.filter((t) => selectedIds.has(t.id)) : teams;
 
   // Falls back to 50000 (the teams.remaining_purse column default) if
   // rules is missing entirely, so purseSpent still computes to something
@@ -636,7 +653,7 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
   // at the end, which hid every team until the auction had actually sold
   // players to it. That's removed — teams should show up as soon as they
   // exist, with an empty roster until players are sold.
-  return teams.map((t) => {
+  return includedTeams.map((t) => {
     const roster = players.filter((p) => p.sold_to_team_id === t.id);
     const captain = roster.find((p) => p.owner_team_code === t.code);
     const remaining = t.remaining_purse ?? totalPurse;
@@ -690,7 +707,8 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
  *   - squads: mapped ✅ — derived from the linked auction's results
  *     (players.sold_to_team_id / owner_team_code), see
  *     getSquadsForTournament above. NOT a hand-edited table. Teams show
- *     even before any players are sold (see note in that function).
+ *     even before any players are sold (see note in that function), and
+ *     respect the tournament's saved team selection subset if one exists.
  *   - liveMatch, runsLeaderboard, wicketsLeaderboard: NOT mapped. These
  *     come from matches/balls/match_team_stats (live scoring + per-player
  *     aggregation) — real but more involved queries, left as a later pass.

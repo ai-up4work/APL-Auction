@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { Pencil, Save, Plus, Trash2, Users, MapPin, Gavel, Loader2, CheckCircle2, AlertTriangle, Sparkles, Shield, Lock } from "lucide-react"
+import { Pencil, Save, Plus, Trash2, Users, MapPin, Gavel, Loader2, CheckCircle2, AlertTriangle, Sparkles, Shield, Lock, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { AppHeader } from "@/components/app-header"
@@ -38,6 +38,15 @@ import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 // below and createFriendlyMatch) — never to the original source
 // auction's id — so the "was this real bidding data" fact has to be
 // captured at creation time and just read back here.
+//
+// ── ADDED FIELDS ──
+// `team1Color`/`team2Color`, `matchTitle`, `matchNumber`, `matchMeta`,
+// `tossWinner`/`tossDecision`, `tournament`, `tournamentLogoUrl` are
+// purely additive: they're new optional keys on match_setup, read with
+// blank/default fallbacks and written straight through on save. They
+// don't replace `toss` (kept as-is, still free text) or the
+// tournamentName/round fields already here — anything that only knows
+// the old shape keeps working untouched.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -66,9 +75,11 @@ interface EditableSetup {
   team1Name: string
   team1Short: string
   team1Logo: string
+  team1Color: string
   team2Name: string
   team2Short: string
   team2Logo: string
+  team2Color: string
   venue: string
   date: string
   time: string
@@ -77,11 +88,21 @@ interface EditableSetup {
   officials: Officials
   squads: Squad[]
   rosterLocked: boolean
+  // ── added fields ──
+  matchTitle: string
+  matchNumber: string
+  matchMeta: string
+  tossWinner: string
+  tossDecision: string
+  tournament: string
+  tournamentLogoUrl: string
 }
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter"]
 
 const emptyOfficials: Officials = { format: "", umpires: "", thirdUmpire: "", referee: "" }
+
+const DEFAULT_TEAM_COLOR = "#c9971f"
 
 function emptySquad(teamId: "team1" | "team2"): Squad {
   return { teamId, captain: "", players: [] }
@@ -94,9 +115,11 @@ function emptySetup(): EditableSetup {
     team1Name: "",
     team1Short: "",
     team1Logo: "",
+    team1Color: DEFAULT_TEAM_COLOR,
     team2Name: "",
     team2Short: "",
     team2Logo: "",
+    team2Color: DEFAULT_TEAM_COLOR,
     venue: "",
     date: "",
     time: "",
@@ -105,6 +128,13 @@ function emptySetup(): EditableSetup {
     officials: { ...emptyOfficials },
     squads: [emptySquad("team1"), emptySquad("team2")],
     rosterLocked: false,
+    matchTitle: "",
+    matchNumber: "",
+    matchMeta: "",
+    tossWinner: "",
+    tossDecision: "",
+    tournament: "",
+    tournamentLogoUrl: "",
   }
 }
 
@@ -210,9 +240,11 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
     team1Name: raw.team1?.name ?? "",
     team1Short: raw.team1?.short ?? "",
     team1Logo: raw.team1?.logo ?? "",
+    team1Color: raw.team1?.color ?? DEFAULT_TEAM_COLOR,
     team2Name: raw.team2?.name ?? "",
     team2Short: raw.team2?.short ?? "",
     team2Logo: raw.team2?.logo ?? "",
+    team2Color: raw.team2?.color ?? DEFAULT_TEAM_COLOR,
     venue: raw.venue ?? "",
     date: raw.date ?? "",
     time: raw.time ?? "",
@@ -226,6 +258,13 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
     },
     squads: normalizeRawSquads(raw),
     rosterLocked: !!raw.rosterLocked,
+    matchTitle: raw.matchTitle ?? "",
+    matchNumber: raw.matchNumber ?? "",
+    matchMeta: raw.matchMeta ?? "",
+    tossWinner: raw.tossWinner ?? "",
+    tossDecision: raw.tossDecision ?? "",
+    tournament: raw.tournament ?? "",
+    tournamentLogoUrl: raw.tournamentLogoUrl ?? "",
   }
 }
 
@@ -251,8 +290,8 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
     ...(raw ?? {}),
     tournamentName: form.tournamentName,
     round: form.round,
-    team1: { name: form.team1Name, short: form.team1Short, logo: form.team1Logo },
-    team2: { name: form.team2Name, short: form.team2Short, logo: form.team2Logo },
+    team1: { name: form.team1Name, short: form.team1Short, logo: form.team1Logo, color: form.team1Color },
+    team2: { name: form.team2Name, short: form.team2Short, logo: form.team2Logo, color: form.team2Color },
     venue: form.venue,
     date: form.date,
     time: form.time,
@@ -270,6 +309,13 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
       })),
     })),
     rosterLocked: form.rosterLocked,
+    matchTitle: form.matchTitle,
+    matchNumber: form.matchNumber,
+    matchMeta: form.matchMeta,
+    tossWinner: form.tossWinner,
+    tossDecision: form.tossDecision,
+    tournament: form.tournament,
+    tournamentLogoUrl: form.tournamentLogoUrl,
   }
 }
 
@@ -539,6 +585,17 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 
 function NumberInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <TextInput type="number" {...props} />
+}
+
+function ColorInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const { className = "", ...rest } = props
+  return (
+    <input
+      type="color"
+      {...rest}
+      className={`h-[42px] w-12 rounded-md border border-gold/20 bg-black/60 shrink-0 cursor-pointer ${className}`}
+    />
+  )
 }
 
 function TeamAvatar({ logo }: { logo: string }) {
@@ -824,6 +881,11 @@ export default function EditMatchPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div className="flex items-end gap-2">
                     <TeamAvatar logo={form.team1Logo} />
+                    <ColorInput
+                      value={form.team1Color}
+                      onChange={(e) => update("team1Color", e.target.value)}
+                      title="Team 1 color"
+                    />
                     <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
                       <div>
                         <FieldLabel>Team 1 Name</FieldLabel>
@@ -845,6 +907,11 @@ export default function EditMatchPage() {
                   </div>
                   <div className="flex items-end gap-2">
                     <TeamAvatar logo={form.team2Logo} />
+                    <ColorInput
+                      value={form.team2Color}
+                      onChange={(e) => update("team2Color", e.target.value)}
+                      title="Team 2 color"
+                    />
                     <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
                       <div>
                         <FieldLabel>Team 2 Name</FieldLabel>
@@ -899,6 +966,88 @@ export default function EditMatchPage() {
                       max={50}
                       value={form.overs}
                       onChange={(e) => update("overs", Number(e.target.value) || 20)}
+                    />
+                  </div>
+                </div>
+              </Panel>
+
+              {/* ── ADDITIONAL DETAILS (new fields) ── */}
+              <Panel>
+                <div className="flex items-center gap-2 mb-6">
+                  <Info className="h-4 w-4 text-gold" />
+                  <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Additional Details</h2>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <FieldLabel>Match Title</FieldLabel>
+                    <TextInput
+                      value={form.matchTitle}
+                      onChange={(e) => update("matchTitle", e.target.value)}
+                      placeholder="The Grand Rematch"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Match Number</FieldLabel>
+                    <TextInput
+                      value={form.matchNumber}
+                      onChange={(e) => update("matchNumber", e.target.value)}
+                      placeholder="Match 14"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <FieldLabel>Match Meta / Notes</FieldLabel>
+                  <TextInput
+                    value={form.matchMeta}
+                    onChange={(e) => update("matchMeta", e.target.value)}
+                    placeholder="Day/night fixture, rain delay expected, etc."
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <FieldLabel>Toss Winner</FieldLabel>
+                    <select
+                      className="select-input w-full"
+                      value={form.tossWinner}
+                      onChange={(e) => update("tossWinner", e.target.value)}
+                    >
+                      <option value="">Select team…</option>
+                      {form.team1Name && <option value={form.team1Name}>{form.team1Name}</option>}
+                      {form.team2Name && <option value={form.team2Name}>{form.team2Name}</option>}
+                    </select>
+                  </div>
+                  <div>
+                    <FieldLabel>Toss Decision</FieldLabel>
+                    <select
+                      className="select-input w-full"
+                      value={form.tossDecision}
+                      onChange={(e) => update("tossDecision", e.target.value)}
+                    >
+                      <option value="">Elected to…</option>
+                      <option value="bat">Bat</option>
+                      <option value="bowl">Bowl</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Tournament (ref / slug)</FieldLabel>
+                    <TextInput
+                      value={form.tournament}
+                      onChange={(e) => update("tournament", e.target.value)}
+                      placeholder="valiant-league-s1"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Tournament Logo URL</FieldLabel>
+                    <TextInput
+                      value={form.tournamentLogoUrl}
+                      onChange={(e) => update("tournamentLogoUrl", e.target.value)}
+                      placeholder="https://…"
                     />
                   </div>
                 </div>

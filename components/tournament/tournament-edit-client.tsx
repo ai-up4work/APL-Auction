@@ -409,7 +409,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-gray-400 text-sm block mb-1">Format</label>
                       <select
@@ -426,21 +426,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           Saving will delete the existing bracket's matches and results.
                         </p>
                       )}
-                    </div>
-
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Category</label>
-                      <select
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                      >
-                        <option value="">Not set</option>
-                        <option value="Auction">Auction</option>
-                        <option value="Bracket">Bracket</option>
-                        <option value="Overlay">Overlay</option>
-                        <option value="League">League</option>
-                      </select>
                     </div>
 
                     <div>

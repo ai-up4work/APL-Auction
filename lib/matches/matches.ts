@@ -6,7 +6,8 @@
 // `matches.auction_id` is a `text` column that is NOT NULL and UNIQUE — it
 // is NOT a foreign key to `auctions.id` in this table. In practice it's
 // used as a free-text session code (the live-scoring room code). Manual
-// matches created here get a generated code like "manual-abc123-lz9f2q".
+// matches created here get a generated UUID-shaped code (see
+// generateSessionCode for why it has to look like a real UUID).
 //
 // `matches` also has no `tournament_id` column. To know which tournament a
 // manual match belongs to (for both fixture-linked and fully standalone
@@ -16,36 +17,88 @@
 // and swap the `match_setup->>tournamentId` filters below for a plain
 // `.eq("tournament_id", tournamentId)` — the rest of this file doesn't
 // need to change.
+//
+// MATCH_SETUP SHAPE:
+// This mirrors the JSON shape used elsewhere in the app (e.g. the
+// auction/live-match setup flow) so a match created here plugs into the
+// same downstream consumers without translation:
+//
+//   {
+//     teamA: { name, color, squad, squadPlayers, logoUrl, shortCode },
+//     teamB: { ...same },
+//     venue, format, season, matchMeta, matchTitle,
+//     tossWinner, tossDecision, tournament, kickoffTime,
+//     matchNumber, tournamentName, tournamentLogoUrl
+//   }
+//
+// `tournamentId` and `overs` are NOT part of that public shape but are
+// still tracked internally: `tournamentId` for the tournament-filter query
+// above, and `overs` because match-detail rendering (over limits, CRR/RRR)
+// needs a numeric ball count that `format` alone doesn't give you. Both
+// are optional extra keys on the stored jsonb and are simply ignored by
+// any other consumer that only knows about the public shape.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/lib/supabase"
 
+export interface SquadPlayer {
+  id: string
+  name: string
+  role: string
+  /** Whether this player is in the starting XI vs. on the bench. */
+  xi: boolean
+}
+
 export interface ManualMatchTeam {
   name: string
-  short: string
+  color: string
+  /** Quick-reference list of player names/ids on the squad. Kept in sync
+   *  with squadPlayers — derived automatically, not edited directly. */
+  squad: string[]
+  squadPlayers: SquadPlayer[]
+  logoUrl: string
+  shortCode: string
 }
 
 export interface MatchSetup {
-  tournamentId: string | null
-  team1: ManualMatchTeam
-  team2: ManualMatchTeam
+  teamA: ManualMatchTeam
+  teamB: ManualMatchTeam
   venue: string
+  format: string
+  season: string
+  matchMeta: string
+  matchTitle: string
+  tossWinner: string
+  tossDecision: string
+  tournament: string
+  kickoffTime: string
+  matchNumber: string
+  tournamentName: string
+  tournamentLogoUrl: string
+  // ── internal-only, not part of the shared public shape ──
+  tournamentId: string | null
   overs: number
-  date: string
-  time: string
-  toss: string | null
 }
 
 export interface MatchSummary {
   id: string
   sessionCode: string
   tournamentId: string | null
-  team1: ManualMatchTeam
-  team2: ManualMatchTeam
+  teamA: ManualMatchTeam
+  teamB: ManualMatchTeam
   venue: string
+  format: string
+  season: string
+  matchMeta: string
+  matchTitle: string
+  tossWinner: string
+  tossDecision: string
+  tournament: string
+  kickoffTime: string
+  matchNumber: string
+  tournamentName: string
+  tournamentLogoUrl: string
   overs: number
-  date: string
-  time: string
   matchSetupCompleted: boolean
   createdAt: string
 }
@@ -70,6 +123,17 @@ export interface FixtureRow {
 
 type Result<T> = { ok: true } & T | { ok: false; error: string }
 
+function emptyTeam(name = "", shortCode = "", color = "#c9971f"): ManualMatchTeam {
+  return {
+    name,
+    color,
+    squad: [],
+    squadPlayers: [],
+    logoUrl: "",
+    shortCode,
+  }
+}
+
 function generateSessionCode(): string {
   // `matches.auction_id` is typed `text`, but a DB trigger
   // (trg_check_auction_destination_on_matches) casts it to `uuid` before
@@ -88,18 +152,33 @@ function generateSessionCode(): string {
   })
 }
 
+/** Keeps `squad` (names) in lockstep with `squadPlayers` (full detail) so
+ *  callers only ever need to manage one list. */
+function withDerivedSquad(team: ManualMatchTeam): ManualMatchTeam {
+  return { ...team, squad: team.squadPlayers.map((p) => p.name) }
+}
+
 function rowToSummary(row: any): MatchSummary {
   const setup = (row.match_setup ?? {}) as Partial<MatchSetup>
   return {
     id: row.id,
     sessionCode: row.auction_id,
     tournamentId: setup.tournamentId ?? null,
-    team1: setup.team1 ?? { name: "Team A", short: "TBA" },
-    team2: setup.team2 ?? { name: "Team B", short: "TBB" },
+    teamA: setup.teamA ?? emptyTeam("Team A", "TBA"),
+    teamB: setup.teamB ?? emptyTeam("Team B", "TBB"),
     venue: setup.venue ?? "",
+    format: setup.format ?? "T20",
+    season: setup.season ?? "",
+    matchMeta: setup.matchMeta ?? "",
+    matchTitle: setup.matchTitle ?? "",
+    tossWinner: setup.tossWinner ?? "",
+    tossDecision: setup.tossDecision ?? "",
+    tournament: setup.tournament ?? "",
+    kickoffTime: setup.kickoffTime ?? "",
+    matchNumber: setup.matchNumber ?? "",
+    tournamentName: setup.tournamentName ?? "",
+    tournamentLogoUrl: setup.tournamentLogoUrl ?? "",
     overs: setup.overs ?? 20,
-    date: setup.date ?? "",
-    time: setup.time ?? "",
     matchSetupCompleted: !!row.match_setup_completed,
     createdAt: row.created_at,
   }
@@ -109,22 +188,39 @@ function rowToSummary(row: any): MatchSummary {
 async function insertMatch(params: {
   orgId: string
   tournamentId: string | null
-  team1: ManualMatchTeam
-  team2: ManualMatchTeam
+  teamA: ManualMatchTeam
+  teamB: ManualMatchTeam
   venue?: string
+  format?: string
+  season?: string
+  matchMeta?: string
+  matchTitle?: string
+  tossWinner?: string
+  tossDecision?: string
+  tournament?: string
+  kickoffTime?: string
+  matchNumber?: string
+  tournamentName?: string
+  tournamentLogoUrl?: string
   overs?: number
-  matchDate?: string
-  matchTime?: string
 }): Promise<Result<{ matchId: string; sessionCode: string }>> {
   const setup: MatchSetup = {
-    tournamentId: params.tournamentId,
-    team1: params.team1,
-    team2: params.team2,
+    teamA: withDerivedSquad(params.teamA),
+    teamB: withDerivedSquad(params.teamB),
     venue: params.venue ?? "",
+    format: params.format ?? "T20",
+    season: params.season ?? "",
+    matchMeta: params.matchMeta ?? "",
+    matchTitle: params.matchTitle ?? "",
+    tossWinner: params.tossWinner ?? "",
+    tossDecision: params.tossDecision ?? "",
+    tournament: params.tournament ?? "",
+    kickoffTime: params.kickoffTime ?? "",
+    matchNumber: params.matchNumber ?? "",
+    tournamentName: params.tournamentName ?? "",
+    tournamentLogoUrl: params.tournamentLogoUrl ?? "",
+    tournamentId: params.tournamentId,
     overs: params.overs ?? 20,
-    date: params.matchDate ?? "",
-    time: params.matchTime ?? "",
-    toss: null,
   }
 
   const { data, error } = await supabase
@@ -149,14 +245,59 @@ async function insertMatch(params: {
 export async function createManualMatch(input: {
   orgId: string
   tournamentId: string | null
-  team1: ManualMatchTeam
-  team2: ManualMatchTeam
+  teamA: ManualMatchTeam
+  teamB: ManualMatchTeam
   venue?: string
+  format?: string
+  season?: string
+  matchMeta?: string
+  matchTitle?: string
+  tossWinner?: string
+  tossDecision?: string
+  tournament?: string
+  kickoffTime?: string
+  matchNumber?: string
+  tournamentName?: string
+  tournamentLogoUrl?: string
   overs?: number
-  matchDate?: string
-  matchTime?: string
 }): Promise<Result<{ matchId: string; sessionCode: string }>> {
   return insertMatch(input)
+}
+
+// ── Update an existing manual match's setup fields ──────────────────────
+// Merges the given partial fields into the existing match_setup so an
+// edit form can be a simple "patch" rather than needing to resend the
+// entire setup blob every time.
+export async function updateManualMatch(
+  matchId: string,
+  patch: Partial<Omit<MatchSetup, "tournamentId">>
+): Promise<Result<{}>> {
+  const { data: existing, error: fetchError } = await supabase
+    .from("matches")
+    .select("match_setup")
+    .eq("id", matchId)
+    .single()
+
+  if (fetchError || !existing) {
+    return { ok: false, error: fetchError?.message ?? "Match not found." }
+  }
+
+  const current = (existing.match_setup ?? {}) as MatchSetup
+
+  const merged: MatchSetup = {
+    ...current,
+    ...patch,
+    teamA: patch.teamA ? withDerivedSquad({ ...current.teamA, ...patch.teamA }) : current.teamA,
+    teamB: patch.teamB ? withDerivedSquad({ ...current.teamB, ...patch.teamB }) : current.teamB,
+  }
+
+  const { error } = await supabase
+    .from("matches")
+    .update({ match_setup: merged })
+    .eq("id", matchId)
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }
 
 export async function deleteStandaloneMatch(matchId: string): Promise<Result<{}>> {
@@ -244,10 +385,17 @@ export async function createMatchForFixture(
   const created = await insertMatch({
     orgId,
     tournamentId,
-    team1: { name: fixture.teamAName ?? "Team A", short: (fixture.teamAName ?? "TBA").slice(0, 3).toUpperCase() },
-    team2: { name: fixture.teamBName ?? "Team B", short: (fixture.teamBName ?? "TBB").slice(0, 3).toUpperCase() },
+    teamA: emptyTeam(
+      fixture.teamAName ?? "Team A",
+      (fixture.teamAName ?? "TBA").slice(0, 3).toUpperCase()
+    ),
+    teamB: emptyTeam(
+      fixture.teamBName ?? "Team B",
+      (fixture.teamBName ?? "TBB").slice(0, 3).toUpperCase()
+    ),
     venue: fixture.venue ?? "",
-    matchDate: fixture.scheduledAt ?? "",
+    kickoffTime: fixture.scheduledAt ?? "",
+    matchMeta: `Round ${fixture.round}`,
   })
 
   if (!created.ok) return created

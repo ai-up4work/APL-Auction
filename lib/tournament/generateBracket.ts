@@ -65,6 +65,13 @@ export async function deleteBracketForTournament(tournamentId: string): Promise<
  * teams. Refuses if a bracket already exists — call
  * deleteBracketForTournament first if the caller wants to regenerate.
  *
+ * SEEDING SET: if the tournament has an explicit team selection saved
+ * (tournament_teams has rows for it — see saveTournamentTeamSelection in
+ * manualTeams.ts), only those teams are seeded into the bracket. If no
+ * selection has ever been saved, every team under the linked auction is
+ * seeded — same as before this table existed, so nothing changes for
+ * tournaments that never touch the new team picker.
+ *
  * Inserts are sequential (one row at a time, round by round) rather than
  * batched, so each row's real DB uuid is known before later rounds need
  * to reference it as a feeder_match_a_id/feeder_match_b_id — batching
@@ -105,11 +112,32 @@ export async function generateBracketForTournament(
     .eq("auction_id", auction.id)
     .order("created_at", { ascending: true });
   if (teamsErr) return { ok: false, error: teamsErr.message };
-  if (!teamsRaw || teamsRaw.length < 2) {
+  if (!teamsRaw || teamsRaw.length === 0) {
     return { ok: false, error: "Need at least 2 teams to generate a bracket." };
   }
 
-  const teams: AdminTeam[] = teamsRaw.map((t) => ({
+  // Narrow down to the tournament's selected subset, if one has been
+  // explicitly saved. No rows in tournament_teams for this tournament
+  // means "use everything under the linked auction" (the default).
+  const { data: selectionRows, error: selErr } = await supabase
+    .from("tournament_teams")
+    .select("team_id")
+    .eq("tournament_id", tournamentId);
+  if (selErr) return { ok: false, error: selErr.message };
+
+  const selectedIds = selectionRows && selectionRows.length > 0 ? new Set(selectionRows.map((r) => r.team_id)) : null;
+  const eligibleTeams = selectedIds ? teamsRaw.filter((t) => selectedIds.has(t.id)) : teamsRaw;
+
+  if (eligibleTeams.length < 2) {
+    return {
+      ok: false,
+      error: selectedIds
+        ? "Need at least 2 selected teams to generate a bracket — adjust your team selection above."
+        : "Need at least 2 teams to generate a bracket.",
+    };
+  }
+
+  const teams: AdminTeam[] = eligibleTeams.map((t) => ({
     id: t.id,
     code: t.code,
     name: t.name,

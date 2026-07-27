@@ -3,25 +3,37 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Building2, Trophy, Swords, Users, Lock, Shield, Link2 } from "lucide-react"
+import { Building2, Trophy, Swords, Users, Lock, Shield, Link2, Landmark, Tv } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppHeader } from "@/components/app-header"
 import { OverviewTab } from "@/components/organization/OverviewTab"
 import { MatchesTab } from "@/components/organization/MatchesTab"
 import { TournamentsTab, TeamPoolTab, PlayerBankTab } from "@/components/organization/TournamentsPoolsTab"
 import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
+import { AuctionsTab } from "@/components/organization/AuctionsTab"
+import { OverlaysTab } from "@/components/organization/Overlaystab"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
 import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 
-type Tab = "overview" | "matches" | "tournaments" | "teamPool" | "playerBank" | "squadBoard"
+type Tab =
+  | "overview"
+  | "matches"
+  | "overlays"
+  | "tournaments"
+  | "auctions"
+  | "teamPool"
+  | "playerBank"
+  | "squadBoard"
 type GateState = "checking" | "denied" | "allowed"
 
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "overview", label: "Overview", icon: Building2 },
   { key: "matches", label: "Matches", icon: Swords },
+  { key: "overlays", label: "Overlays", icon: Tv },
   { key: "tournaments", label: "Tournaments", icon: Trophy },
+  { key: "auctions", label: "Auctions", icon: Landmark },
   { key: "teamPool", label: "Team Pool", icon: Shield },
   { key: "playerBank", label: "Player Bank", icon: Users },
   { key: "squadBoard", label: "Squad Board", icon: Link2 },
@@ -125,7 +137,7 @@ export default function OrganizationClient() {
                     org={org}
                     onSelectPath={(path) => {
                       if (path === "auction") {
-                        setTab("tournaments")
+                        setTab("auctions")
                       } else if (path === "manual") {
                         setTab("tournaments")
                       } else {
@@ -136,7 +148,9 @@ export default function OrganizationClient() {
                 </div>
               )}
               {tab === "matches" && <MatchesTab org={org} userId={user!.id} />}
+              {tab === "overlays" && <OverlaysTab org={org} userId={user!.id} />}
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
+              {tab === "auctions" && <AuctionsTab org={org} userId={user!.id} />}
               {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
               {tab === "squadBoard" && <SquadBoardTab org={org} userId={user!.id} />}
