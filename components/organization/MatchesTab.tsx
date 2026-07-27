@@ -10,7 +10,7 @@ import {
   Loader2,
   AlertCircle,
   Gamepad2,
-  Shield,
+  Users,
   Search,
   CheckSquare,
   Square,
@@ -19,6 +19,7 @@ import {
   MapPin,
   Calendar,
   Clock,
+  ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,21 +32,25 @@ import {
   getAuctionsForOrg,
   createAuction,
   getTeamsForAuction,
-  getTeamPool,
+  getSquadBoardsForOrg,
+  createSquadBoard,
   subscribeToOrgMatches,
   unsubscribe,
   type OrgSummary,
   type FriendlyMatchSummary,
   type AuctionOption,
   type AuctionTeamOption,
-  type PoolTeam,
+  type SquadBoard,
 } from "@/lib/organization/organization"
 
-// "pool" = pick two teams that already exist in the org's Team Pool.
-// "auction" = pull team names from a specific auction's sold teams.
-// Free-typed team names are intentionally not supported here anymore —
-// every match's teams must trace back to a real pool or auction team.
-type TeamSource = "pool" | "auction"
+// "board" = pull two rostered teams from one of the org's Squad Boards —
+// these teams already have players assigned (via the Squad Board tab), so
+// a match created this way is immediately playable.
+// "auction" = pull team names from a specific REAL auction's sold teams.
+// Free-typed team names, and picking bare Team Pool teams with no roster,
+// are intentionally not supported here — every match's teams must trace
+// back to something that already has (or can have) real players on it.
+type TeamSource = "board" | "auction"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -59,6 +64,39 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel block mb-1.5">{children}</label>
+}
+
+/** Shared select styling — gold border, custom chevron, disabled state —
+ *  kept consistent with the pickers on the Squad Board tab. */
+function StyledSelect({
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  children,
+  className = "",
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  disabled?: boolean
+  placeholder: string
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className="w-full appearance-none bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 pr-9 outline-none focus:border-gold/70 focus:ring-1 focus:ring-gold/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        <option value="">{placeholder}</option>
+        {children}
+      </select>
+      <ChevronDown className="h-3.5 w-3.5 text-gold/50 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    </div>
+  )
 }
 
 type BadgeTone = "linked" | "none" | "warn" | "neutral"
@@ -229,13 +267,25 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
   const [syncing, setSyncing] = useState(false)
 
   // Creation form
-  const [teamSource, setTeamSource] = useState<TeamSource>("pool")
+  const [teamSource, setTeamSource] = useState<TeamSource>("board")
 
-  // Team Pool selection
-  const [poolTeams, setPoolTeams] = useState<PoolTeam[]>([])
-  const [poolTeamsLoaded, setPoolTeamsLoaded] = useState(false)
-  const [poolTeam1Id, setPoolTeam1Id] = useState("")
-  const [poolTeam2Id, setPoolTeam2Id] = useState("")
+  // Squad Board selection — teams here already have a roster, since
+  // they're assigned via the Squad Board tab before a match ever gets
+  // created from them.
+  const [boards, setBoards] = useState<SquadBoard[]>([])
+  const [boardsLoaded, setBoardsLoaded] = useState(false)
+  const [boardId, setBoardId] = useState("")
+  const [boardTeams, setBoardTeams] = useState<AuctionTeamOption[]>([])
+  const [boardTeamsLoaded, setBoardTeamsLoaded] = useState(false)
+  const [boardTeam1Id, setBoardTeam1Id] = useState("")
+  const [boardTeam2Id, setBoardTeam2Id] = useState("")
+
+  // Creating a new Squad Board inline, without leaving the dashboard — it
+  // starts with zero teams, so head over to the Squad Board tab afterward
+  // to assign teams and players onto it.
+  const [newBoardName, setNewBoardName] = useState("")
+  const [isCreatingBoard, setIsCreatingBoard] = useState(false)
+  const [createBoardError, setCreateBoardError] = useState<string | null>(null)
 
   // Auction selection
   const [auctionId, setAuctionId] = useState("")
@@ -291,16 +341,30 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
 
-  // Load the org's Team Pool once, up front — this is the only source of
-  // teams for the "pool" path.
+  // Load the org's Squad Boards once, up front — this is the source of
+  // teams for the "board" path.
   useEffect(() => {
-    setPoolTeamsLoaded(false)
-    getTeamPool(org.id).then((t) => {
-      setPoolTeams(t)
-      setPoolTeamsLoaded(true)
+    setBoardsLoaded(false)
+    getSquadBoardsForOrg(org.id).then((b) => {
+      setBoards(b)
+      setBoardsLoaded(true)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
+
+  useEffect(() => {
+    setBoardTeam1Id("")
+    setBoardTeam2Id("")
+    if (!boardId) {
+      setBoardTeams([])
+      return
+    }
+    setBoardTeamsLoaded(false)
+    getTeamsForAuction(boardId).then((t) => {
+      setBoardTeams(t)
+      setBoardTeamsLoaded(true)
+    })
+  }, [boardId])
 
   useEffect(() => {
     setAuctionTeam1Id("")
@@ -317,8 +381,8 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
   }, [auctionId])
 
   const canCreate =
-    teamSource === "pool"
-      ? Boolean(poolTeam1Id && poolTeam2Id && poolTeam1Id !== poolTeam2Id)
+    teamSource === "board"
+      ? Boolean(boardTeam1Id && boardTeam2Id && boardTeam1Id !== boardTeam2Id)
       : Boolean(auctionTeam1Id && auctionTeam2Id && auctionTeam1Id !== auctionTeam2Id)
 
   const handleCreate = async () => {
@@ -326,32 +390,17 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     setIsCreating(true)
     setCreateError(null)
 
-    let id: string | null = null
-    if (teamSource === "pool") {
-      const t1 = poolTeams.find((t) => t.id === poolTeam1Id)
-      const t2 = poolTeams.find((t) => t.id === poolTeam2Id)
-      if (!t1 || !t2) {
-        setIsCreating(false)
-        setCreateError("Couldn't find those teams — please reselect and try again.")
-        return
-      }
-      id = await createFriendlyMatch(org.id, {
-        teamSource: "manual",
-        team1Name: t1.name,
-        team2Name: t2.name,
-        team1Logo: t1.logo,
-        team2Logo: t2.logo,
-        round,
-      })
-    } else {
-      id = await createFriendlyMatch(org.id, {
-        teamSource: "auction",
-        auctionId,
-        team1Id: auctionTeam1Id,
-        team2Id: auctionTeam2Id,
-        round,
-      })
-    }
+    // A Squad Board is stored as a synthetic auction row under the hood, so
+    // its teams/players live in the exact same tables a real auction's do —
+    // createFriendlyMatch's "auction" path works unchanged for either one,
+    // it just needs the right container id.
+    const id = await createFriendlyMatch(org.id, {
+      teamSource: "auction",
+      auctionId: teamSource === "board" ? boardId : auctionId,
+      team1Id: teamSource === "board" ? boardTeam1Id : auctionTeam1Id,
+      team2Id: teamSource === "board" ? boardTeam2Id : auctionTeam2Id,
+      round,
+    })
 
     setIsCreating(false)
     if (!id) {
@@ -364,6 +413,21 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     // createFriendlyMatch in organization.ts), so `id` here is exactly what
     // that route expects.
     router.push(`/match/${id}/edit`)
+  }
+
+  const handleCreateBoard = async () => {
+    if (!newBoardName.trim()) return
+    setIsCreatingBoard(true)
+    setCreateBoardError(null)
+    const id = await createSquadBoard(org.id, userId, newBoardName.trim())
+    setIsCreatingBoard(false)
+    if (!id) {
+      setCreateBoardError("Couldn't create the Squad Board — please try again.")
+      return
+    }
+    setBoards((prev) => [{ id, name: newBoardName.trim(), createdAt: new Date().toISOString() }, ...prev])
+    setBoardId(id)
+    setNewBoardName("")
   }
 
   const handleCreateAuction = async () => {
@@ -486,19 +550,19 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
         </h2>
         <p className="text-gray-500 text-xs mb-4">
           Every match created here is standalone. A match only becomes part of a tournament when a bracket slot on
-          that tournament's page is connected to it. Teams must come from your Team Pool or an auction — there's no
-          free-typed team name option, so every match's teams stay tied to something real.
+          that tournament's page is connected to it. Teams come from a Squad Board (already rostered with players) or
+          a real auction — there's no free-typed team name option, so every match's teams stay tied to something real.
         </p>
 
         <FieldLabel>Team source</FieldLabel>
         <div className="flex gap-2 mb-4">
           <button
-            onClick={() => setTeamSource("pool")}
+            onClick={() => setTeamSource("board")}
             className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide px-3 py-2 rounded-md border transition-colors ${
-              teamSource === "pool" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+              teamSource === "board" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
             }`}
           >
-            <Shield className="h-3.5 w-3.5" /> Team Pool
+            <Users className="h-3.5 w-3.5" /> Squad Board
           </button>
           <button
             onClick={() => setTeamSource("auction")}
@@ -510,81 +574,131 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
           </button>
         </div>
 
-        {teamSource === "pool" ? (
-          <div className="mb-4">
-            {!poolTeamsLoaded ? (
-              <p className="text-gray-500 text-sm flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading team pool…
-              </p>
-            ) : poolTeams.length < 2 ? (
-              <p className="text-gray-500 text-sm italic">
-                You need at least two teams in the pool first.{" "}
-                <span className="text-gold">Add some from the Team Pool tab →</span>
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel>Team 1</FieldLabel>
-                  <select
-                    value={poolTeam1Id}
-                    onChange={(e) => setPoolTeam1Id(e.target.value)}
-                    className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+        {teamSource === "board" ? (
+          <div className="mb-4 space-y-4">
+            <div>
+              <FieldLabel>Squad Board</FieldLabel>
+              <div className="flex flex-col sm:flex-row gap-2">
+                {!boardsLoaded ? (
+                  <p className="text-gray-500 text-sm flex items-center gap-2 sm:flex-1">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading Squad Boards…
+                  </p>
+                ) : boards.length === 0 ? (
+                  <p className="text-gray-500 text-sm italic sm:flex-1 sm:self-center">No Squad Boards in this org yet.</p>
+                ) : (
+                  <StyledSelect
+                    value={boardId}
+                    onChange={(e) => setBoardId(e.target.value)}
+                    placeholder="Select a Squad Board…"
+                    className="sm:flex-1 sm:min-w-0"
                   >
-                    <option value="">Select a team…</option>
-                    {poolTeams.map((t) => (
-                      <option key={t.id} value={t.id} disabled={t.id === poolTeam2Id}>
-                        {t.name} ({t.code})
-                      </option>
+                    {boards.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <FieldLabel>Team 2</FieldLabel>
-                  <select
-                    value={poolTeam2Id}
-                    onChange={(e) => setPoolTeam2Id(e.target.value)}
-                    className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
-                  >
-                    <option value="">Select a team…</option>
-                    {poolTeams.map((t) => (
-                      <option key={t.id} value={t.id} disabled={t.id === poolTeam1Id}>
-                        {t.name} ({t.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  </StyledSelect>
+                )}
+
+                {/* Create a new Squad Board right here, same row as the
+                    picker — no need to leave the dashboard just to get a
+                    container to build a roster in. It starts empty; teams
+                    and players get assigned afterward from the Squad Board
+                    tab. */}
+                <Input
+                  value={newBoardName}
+                  onChange={(e) => setNewBoardName(e.target.value)}
+                  placeholder="New Squad Board name"
+                  className="bg-black/50 border-gold/30 text-white sm:w-56 text-sm"
+                />
+                <Button
+                  onClick={handleCreateBoard}
+                  disabled={!newBoardName.trim() || isCreatingBoard}
+                  className="bg-transparent hover:bg-gold/10 text-gold border border-gold/40 font-bold disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  {isCreatingBoard ? "Creating…" : "Create"}
+                </Button>
               </div>
+              {createBoardError && (
+                <p className="flex items-center gap-1.5 text-red-500 text-sm mt-2">
+                  <AlertCircle className="h-4 w-4" /> {createBoardError}
+                </p>
+              )}
+            </div>
+
+            {boardId && (
+              !boardTeamsLoaded ? (
+                <p className="text-gray-500 text-sm flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
+                </p>
+              ) : boardTeams.length < 2 ? (
+                <p className="text-gray-500 text-sm italic">
+                  This Squad Board doesn't have two teams yet.{" "}
+                  <span className="text-gold">Assign teams and players from the Squad Board tab →</span>
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Team 1</FieldLabel>
+                    <StyledSelect
+                      value={boardTeam1Id}
+                      onChange={(e) => setBoardTeam1Id(e.target.value)}
+                      placeholder="Select a team…"
+                    >
+                      {boardTeams.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.id === boardTeam2Id}>
+                          {t.name} ({t.code})
+                        </option>
+                      ))}
+                    </StyledSelect>
+                  </div>
+                  <div>
+                    <FieldLabel>Team 2</FieldLabel>
+                    <StyledSelect
+                      value={boardTeam2Id}
+                      onChange={(e) => setBoardTeam2Id(e.target.value)}
+                      placeholder="Select a team…"
+                    >
+                      {boardTeams.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.id === boardTeam1Id}>
+                          {t.name} ({t.code})
+                        </option>
+                      ))}
+                    </StyledSelect>
+                  </div>
+                </div>
+              )
             )}
+            <p className="text-gray-500 text-xs">Each team's already-assigned roster comes along automatically.</p>
           </div>
         ) : (
           <div className="mb-4 space-y-4">
             <div>
               <FieldLabel>Auction</FieldLabel>
-              {auctions.length === 0 ? (
-                <p className="text-gray-500 text-sm italic mb-2">No auctions in this org yet.</p>
-              ) : (
-                <select
-                  value={auctionId}
-                  onChange={(e) => setAuctionId(e.target.value)}
-                  className="w-full sm:w-80 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 mb-2"
-                >
-                  <option value="">Select an auction…</option>
-                  {auctions.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              )}
-
-              {/* Create a new auction right here — no need to leave the
-                  dashboard just to get an auction that a match can pull
-                  teams from. It starts empty; teams get added afterward
-                  from the auction admin panel. */}
               <div className="flex flex-col sm:flex-row gap-2">
+                {auctions.length === 0 ? (
+                  <p className="text-gray-500 text-sm italic sm:flex-1 sm:self-center">No auctions in this org yet.</p>
+                ) : (
+                  <StyledSelect
+                    value={auctionId}
+                    onChange={(e) => setAuctionId(e.target.value)}
+                    placeholder="Select an auction…"
+                    className="sm:flex-1 sm:min-w-0"
+                  >
+                    {auctions.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </StyledSelect>
+                )}
+
+                {/* Create a new auction right here, same row as the picker —
+                    no need to leave the dashboard just to get an auction
+                    that a match can pull teams from. It starts empty; teams
+                    get added afterward from the auction admin panel. */}
                 <Input
                   value={newAuctionName}
                   onChange={(e) => setNewAuctionName(e.target.value)}
                   placeholder="New auction name"
-                  className="bg-black/50 border-gold/30 text-white sm:w-64 text-sm"
+                  className="bg-black/50 border-gold/30 text-white sm:w-56 text-sm"
                 />
                 <Button
                   onClick={handleCreateAuction}
@@ -592,7 +706,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
                   className="bg-transparent hover:bg-gold/10 text-gold border border-gold/40 font-bold disabled:opacity-50 whitespace-nowrap"
                 >
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  {isCreatingAuction ? "Creating…" : "Create Auction"}
+                  {isCreatingAuction ? "Creating…" : "Create"}
                 </Button>
               </div>
               {createAuctionError && (
@@ -612,41 +726,37 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
                   This auction doesn't have two teams yet.{" "}
                   <Link href="/auction/admin" className="text-gold underline hover:no-underline">
                     Set up teams in the auction admin panel →
-                  </Link>{" "}
-                  or add some from the{" "}
-                  <span className="text-gold">Team Pool</span> tab.
+                  </Link>
                 </p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <FieldLabel>Team 1</FieldLabel>
-                    <select
+                    <StyledSelect
                       value={auctionTeam1Id}
                       onChange={(e) => setAuctionTeam1Id(e.target.value)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                      placeholder="Select a team…"
                     >
-                      <option value="">Select a team…</option>
                       {auctionTeams.map((t) => (
                         <option key={t.id} value={t.id} disabled={t.id === auctionTeam2Id}>
                           {t.name} ({t.code})
                         </option>
                       ))}
-                    </select>
+                    </StyledSelect>
                   </div>
                   <div>
                     <FieldLabel>Team 2</FieldLabel>
-                    <select
+                    <StyledSelect
                       value={auctionTeam2Id}
                       onChange={(e) => setAuctionTeam2Id(e.target.value)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
+                      placeholder="Select a team…"
                     >
-                      <option value="">Select a team…</option>
                       {auctionTeams.map((t) => (
                         <option key={t.id} value={t.id} disabled={t.id === auctionTeam1Id}>
                           {t.name} ({t.code})
                         </option>
                       ))}
-                    </select>
+                    </StyledSelect>
                   </div>
                 </div>
               )
@@ -654,6 +764,11 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
             <p className="text-gray-500 text-xs">Each team's sold players are pulled in automatically.</p>
           </div>
         )}
+
+        <div className="mb-4 sm:w-64">
+          <FieldLabel>Round (optional)</FieldLabel>
+          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Friendly Match" className="bg-black/50 border-gold/30 text-white" />
+        </div>
 
         {createError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
