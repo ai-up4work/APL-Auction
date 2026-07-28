@@ -1,3 +1,4 @@
+// lib/tournament/bracketData.ts
 import { supabase } from "@/lib/supabase";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";

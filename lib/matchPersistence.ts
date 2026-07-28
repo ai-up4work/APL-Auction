@@ -299,44 +299,41 @@ function combineKickoffTime(raw: Record<string, any>): string {
 export function normalizeMatchSetup(raw: unknown): MatchSetup {
   if (isFriendlyMatchShape(raw)) {
     const r = raw as Record<string, any>;
+    const squads = Array.isArray(r.squads) ? r.squads : [];
+    const team1Short = r.team1?.short ?? "";
+    const team2Short = r.team2?.short ?? "";
+
+    const squadPlayersFor = (teamShort: string) =>
+      squads
+        .filter((p: any) => p.team === teamShort)
+        .map((p: any, i: number) => ({
+          id: `${teamShort}-${i}`,
+          name: p.name,
+          imageUrl: p.imageUrl || undefined,
+        }));
+
+    const teamAPlayers = squadPlayersFor(team1Short);
+    const teamBPlayers = squadPlayersFor(team2Short);
 
     return {
       ...EMPTY_MATCH_SETUP,
-      tournamentName: typeof r.tournamentName === "string" ? r.tournamentName : "",
-      tournament: typeof r.tournament === "string" ? r.tournament : "",
-      tournamentLogoUrl: typeof r.tournamentLogoUrl === "string" ? r.tournamentLogoUrl : "",
       venue: typeof r.venue === "string" ? r.venue : "",
-      // Prefer the dedicated matchTitle field (added later); fall back
-      // to `round` for older rows saved before matchTitle existed.
-      matchTitle:
-        typeof r.matchTitle === "string" && r.matchTitle.trim()
-          ? r.matchTitle
-          : typeof r.round === "string"
-          ? r.round
-          : "",
-      matchNumber: typeof r.matchNumber === "string" ? r.matchNumber : "",
-      matchMeta: typeof r.matchMeta === "string" ? r.matchMeta : "",
-      kickoffTime: combineKickoffTime(r),
-      format: guessFormatFromOvers(r.overs),
-      tossWinner: resolveTossWinnerLetter(r),
-      tossDecision: r.tossDecision === "bat" || r.tossDecision === "bowl" ? r.tossDecision : "",
+      matchTitle: typeof r.round === "string" ? r.round : "",
       teamA: {
         ...emptyOverlayTeam(),
         name: r.team1?.name ?? "",
-        shortCode: r.team1?.short ?? "",
-        color: typeof r.team1?.color === "string" && r.team1.color ? r.team1.color : emptyOverlayTeam().color,
+        shortCode: team1Short,
         logoUrl: r.team1?.logo ?? "",
-        squadPlayers: extractFriendlySquadPlayers(r, "team1", r.team1?.short ?? ""),
-        squad: extractFriendlySquadPlayers(r, "team1", r.team1?.short ?? "").map((p) => p.name),
+        squadPlayers: teamAPlayers,
+        squad: teamAPlayers.map((p) => p.name),
       },
       teamB: {
         ...emptyOverlayTeam(),
         name: r.team2?.name ?? "",
-        shortCode: r.team2?.short ?? "",
-        color: typeof r.team2?.color === "string" && r.team2.color ? r.team2.color : emptyOverlayTeam().color,
+        shortCode: team2Short,
         logoUrl: r.team2?.logo ?? "",
-        squadPlayers: extractFriendlySquadPlayers(r, "team2", r.team2?.short ?? ""),
-        squad: extractFriendlySquadPlayers(r, "team2", r.team2?.short ?? "").map((p) => p.name),
+        squadPlayers: teamBPlayers,
+        squad: teamBPlayers.map((p) => p.name),
       },
     };
   }

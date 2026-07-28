@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Loader2, Tv, Swords, ArrowRight, Info } from "lucide-react"
+import { Loader2, Tv, Swords, ArrowRight, Info, Trophy } from "lucide-react"
 import { getFriendlyMatchesForOrg, type OrgSummary, type FriendlyMatchSummary } from "@/lib/organization/organization"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -15,15 +15,29 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   )
 }
 
-/* ────────────────────────────────────────────────────────────────── */
-/*  MATCH REFERENCE — small helper turning a match into a consistent      */
-/*  "Team A vs Team B — Round" label, used on each card so the match       */
-/*  reference is never ambiguous.                                          */
-/* ────────────────────────────────────────────────────────────────── */
+type BadgeTone = "linked" | "none" | "warn" | "neutral"
 
-function matchLabel(m: FriendlyMatchSummary): string {
-  const teams = `${m.team1Name} vs ${m.team2Name}`
-  return m.round ? `${teams} — ${m.round}` : teams
+function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.ReactNode }) {
+  const styles: Record<BadgeTone, string> = {
+    linked: "border-gold/40 text-gold",
+    none: "border-white/15 text-gray-400",
+    warn: "border-yellow-500/40 text-yellow-400",
+    neutral: "border-white/15 text-gray-300",
+  }
+  const glyph: Record<BadgeTone, string> = {
+    linked: "✓",
+    none: "✗",
+    warn: "⚠",
+    neutral: "",
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border ${styles[tone]}`}
+    >
+      {glyph[tone] && <span>{glyph[tone]}</span>}
+      {children}
+    </span>
+  )
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -33,7 +47,13 @@ function matchLabel(m: FriendlyMatchSummary): string {
 /*  (see matchPersistence.ts's getOrCreateMatch). For a manual-entry        */
 /*  match, `auctionId` is a synthetic id equal to `id`; for an               */
 /*  auction-sourced match it's the real auction's id — never assume the      */
-/*  two are equal, always use `match.auctionId`. */
+/*  two are equal, always use `match.auctionId`.                            */
+/*                                                                           */
+/*  Now also carries the same "which tournament (if any) is this match      */
+/*  tied to" badge used on MatchCard, so a tournament match reads the        */
+/*  same way here as it does on the Tournaments tab — an overlay isn't a    */
+/*  different kind of match, just a different thing you're configuring      */
+/*  for it.                                                                  */
 /* ────────────────────────────────────────────────────────────────── */
 
 function OverlayCard({ match }: { match: FriendlyMatchSummary }) {
@@ -70,7 +90,17 @@ function OverlayCard({ match }: { match: FriendlyMatchSummary }) {
       <p className="text-white text-sm font-bold font-cinzel truncate mb-1">
         {match.team1Name} <span className="text-gray-500 font-normal">vs</span> {match.team2Name}
       </p>
-      <p className="text-gray-500 text-xs truncate mb-4">{match.round}</p>
+
+      <div className="flex items-center gap-1.5 flex-wrap mb-4">
+        {match.tournamentName ? (
+          <StatusBadge tone="linked">
+            {match.tournamentName}
+            {match.round ? ` · ${match.round}` : ""}
+          </StatusBadge>
+        ) : (
+          <StatusBadge tone="none">Standalone{match.round ? ` · ${match.round}` : ""}</StatusBadge>
+        )}
+      </div>
 
       <Link
         href={`/overlay/${match.auctionId}/admin`}
@@ -83,7 +113,46 @@ function OverlayCard({ match }: { match: FriendlyMatchSummary }) {
 }
 
 /* ────────────────────────────────────────────────────────────────── */
+/*  MATCH GROUP — a labeled section of OverlayCards. Only rendered when   */
+/*  it actually has matches, so an org with no tournament matches yet       */
+/*  (or none standalone) doesn't show an empty, pointless heading.          */
+/* ────────────────────────────────────────────────────────────────── */
+
+function MatchGroup({
+  title,
+  icon,
+  matches,
+}: {
+  title: string
+  icon: React.ReactNode
+  matches: FriendlyMatchSummary[]
+}) {
+  if (matches.length === 0) return null
+  return (
+    <div>
+      <h3 className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-widest text-gold/70 mb-3 px-1">
+        {icon} {title}
+        <span className="text-gray-600 normal-case tracking-normal">({matches.length})</span>
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {matches.map((m) => (
+          <OverlayCard key={m.id} match={m} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
 /*  OVERLAYS TAB                                                          */
+/*                                                                           */
+/*  Every match in the org can have an overlay, tournament-linked or not —  */
+/*  unlike the Matches tab (standalone only) and the Tournaments tab         */
+/*  (tournament-linked only), this tab intentionally shows both, since       */
+/*  overlay setup is orthogonal to that split. To keep the two kinds from    */
+/*  blurring together in one flat grid, they're separated into their own    */
+/*  labeled sections instead — same visual language (tournament/standalone  */
+/*  badge) as MatchCard, just grouped rather than mixed.                    */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
@@ -95,6 +164,9 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
       .then(setMatches)
       .finally(() => setLoaded(true))
   }, [org.id])
+
+  const tournamentMatches = useMemo(() => matches.filter((m) => m.tournamentName), [matches])
+  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentName), [matches])
 
   return (
     <div className="space-y-6">
@@ -108,13 +180,17 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
         </p>
         <p className="text-gray-600 text-xs italic flex items-start gap-1.5">
           <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-          Don't see the match you want? Create it first from the <span className="text-gold not-italic">Matches</span>{" "}
-          tab, then come back here to open its overlay.
+          Don't see the match you want? Create a standalone one from the{" "}
+          <span className="text-gold not-italic">Matches</span> tab, or connect a bracket slot from the{" "}
+          <span className="text-gold not-italic">Tournaments</span> tab, then come back here to open its overlay.
         </p>
       </Panel>
 
-      <div>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4 px-1">Your Overlays</h2>
+      <div className="space-y-8">
+        <div className="flex items-baseline justify-between gap-3 px-1">
+          <h2 className="text-lg font-bold text-white font-cinzel">Your Overlays</h2>
+        </div>
+
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2 px-1">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -122,15 +198,22 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
         ) : matches.length === 0 ? (
           <Panel>
             <p className="text-gray-500 text-sm italic text-center">
-              No matches yet — create one from the Matches tab first.
+              No matches yet — create one from the Matches tab, or connect one from a tournament bracket, first.
             </p>
           </Panel>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {matches.map((m) => (
-              <OverlayCard key={m.id} match={m} />
-            ))}
-          </div>
+          <>
+            <MatchGroup
+              title="Tournament Matches"
+              icon={<Trophy className="h-3 w-3 text-gold/50" />}
+              matches={tournamentMatches}
+            />
+            <MatchGroup
+              title="Standalone Matches"
+              icon={<Swords className="h-3 w-3 text-gold/50" />}
+              matches={standaloneMatches}
+            />
+          </>
         )}
       </div>
     </div>

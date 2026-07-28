@@ -1,4 +1,3 @@
-// File: lib/demo/tournament/bracketDemoModel.ts
 "use client";
 
 import type { Round, MatchNode } from "@/components/demo/TournamentBracket";
@@ -109,6 +108,7 @@ function buildBracket(format: FormatType, teams: AdminTeam[]): Pick<BracketDemoS
 class BracketDemoModel {
   private state: BracketDemoState;
   private listeners = new Set<() => void>();
+  private completionTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const teamCount = 16;
@@ -141,19 +141,47 @@ class BracketDemoModel {
     this.listeners.forEach((l) => l());
   }
 
+  /** Cancels any pending delayed completion (see `maybeComplete`'s
+   *  `delayMs` below). Called whenever the bracket is reset/reshuffled/
+   *  reconfigured so a stale timer can't flip `status` to "completed"
+   *  on top of a bracket the user has already moved on from. */
+  private cancelPendingCompletion() {
+    if (this.completionTimer !== null) {
+      clearTimeout(this.completionTimer);
+      this.completionTimer = null;
+    }
+  }
+
   /** Fires whenever a result is recorded, from EITHER the bot or a real
    *  click — the moment the bracket has a decided champion, the model
    *  flips itself to "completed" regardless of who made the winning
    *  click. This is what lets a person finish the bracket by hand and
-   *  still get the same completion overlay the bot gets. */
-  private maybeComplete() {
+   *  still get the same completion overlay the bot gets.
+   *
+   *  `delayMs` lets callers (namely `simulateAll`) hold off flipping to
+   *  "completed" for a bit so the fully-filled-in bracket is visible on
+   *  screen before the completion overlay covers it. Manual clicks keep
+   *  the default of 0 — a person who just clicked the final match should
+   *  see the result register immediately. */
+  private maybeComplete(delayMs = 0) {
     const champ = this.getChampionName();
-    if (champ && this.state.status !== "completed") {
+    if (!champ || this.state.status === "completed") return;
+
+    this.cancelPendingCompletion();
+
+    const finish = () => {
+      this.completionTimer = null;
       this.set({
         status: "completed",
         narratorText: `🏆 ${champ} wins the tournament!`,
         cursor: { ...this.state.cursor, visible: false },
       });
+    };
+
+    if (delayMs > 0) {
+      this.completionTimer = setTimeout(finish, delayMs);
+    } else {
+      finish();
     }
   }
 
@@ -186,6 +214,7 @@ class BracketDemoModel {
   }
 
   setTeamCount(n: number) {
+    this.cancelPendingCompletion();
     const baseTeams = getDemoTeams(n);
     const seededTeams = randomDraw(baseTeams);
     this.set({
@@ -199,6 +228,7 @@ class BracketDemoModel {
   }
 
   setFormat(format: FormatType) {
+    this.cancelPendingCompletion();
     this.set({
       format,
       ...buildBracket(format, this.state.seededTeams),
@@ -208,6 +238,7 @@ class BracketDemoModel {
   }
 
   reshuffleSeeding() {
+    this.cancelPendingCompletion();
     const seededTeams = randomDraw(this.state.baseTeams);
     this.set({
       seededTeams,
@@ -218,6 +249,7 @@ class BracketDemoModel {
   }
 
   resetResults() {
+    this.cancelPendingCompletion();
     this.set({ ...buildBracket(this.state.format, this.state.seededTeams), status: "live", narratorText: "" });
   }
 
@@ -235,6 +267,7 @@ class BracketDemoModel {
   }
 
   simulateAll() {
+    this.cancelPendingCompletion();
     if (this.state.format === "single_elimination" && this.state.singleRounds) {
       const next = cloneRounds(this.state.singleRounds);
       for (const round of next) {
@@ -265,12 +298,13 @@ class BracketDemoModel {
       }
       this.set({ doubleData: next });
     }
-    this.maybeComplete();
+    this.maybeComplete(10000);
   }
 
   /** Completion overlay's "Restart" — fresh seeding + a clean, unresolved
    *  bracket, same team count/format as before. */
   startNewCycle() {
+    this.cancelPendingCompletion();
     const seededTeams = randomDraw(this.state.baseTeams);
     this.set({
       seededTeams,

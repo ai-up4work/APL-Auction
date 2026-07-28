@@ -68,11 +68,12 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  PICKER CARDS (unchanged from before — team pool / bank player        */
-/*  assignment inside a board still uses these small selectable tiles)   */
+/*  PICKER CARDS — exported so other tabs (e.g. AuctionsTab's           */
+/*  "pre-fill teams & players" flow at auction-creation time) can reuse  */
+/*  the exact same selectable-tile UI instead of re-implementing it.     */
 /* ────────────────────────────────────────────────────────────────── */
 
-function PoolTeamPickerCard({
+export function PoolTeamPickerCard({
   team,
   selected,
   onSelect,
@@ -108,7 +109,7 @@ function PoolTeamPickerCard({
   )
 }
 
-function BankPlayerPickerCard({
+export function BankPlayerPickerCard({
   player,
   selected,
   onSelect,
@@ -698,7 +699,6 @@ function SquadBoardTeamCard({
   useEffect(() => {
     reloadRoster().then(() => setPlayersLoaded(true))
     getPlayerBank(org.id).then((p) => {
-      console.log("bank players", p)
       setBankPlayers(p)
       setBankLoaded(true)
     })

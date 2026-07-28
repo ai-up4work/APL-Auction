@@ -432,7 +432,10 @@ function BracketColumn({
         <div className="absolute left-0 right-0 top-1/2 -z-10 h-px bg-gradient-to-r from-transparent via-border-overlay to-transparent" />
       </div>
       {isLeaf ? (
-        <div ref={leafColumnRef} className="w-full flex flex-col gap-8 lg:gap-10 items-stretch">
+        <div
+          ref={leafColumnRef}
+          className="w-full min-h-0 flex flex-col items-stretch justify-between flex-1 gap-8 lg:gap-10"
+        >
           {matches.map((match) => (
             <div key={match.id} className="w-full px-2">
               <MatchCard
@@ -525,6 +528,19 @@ export default function TournamentBracket({
   // data that was passed in — no hard-coded team count anywhere.
   const teamCount = rounds.length > 0 ? rounds[0].matches.length * 2 : 0;
   const useMirroredLayout = teamCount >= 16;
+
+  // The bracket stage always claims the remaining viewport height (down
+  // to the bottom of the screen) rather than sizing to its own content.
+  // This is a real `height`, not a `min-height` — every round column is
+  // stretched (`items-stretch` + `h-full`) to fill it, and each leaf
+  // column spaces its matches out with `justify-between` so the first
+  // and last card sit at the very top/bottom edge and everything else
+  // is spread evenly between them. Because every parent-round match is
+  // still positioned at the measured midpoint of the two matches that
+  // feed it (see computeCentersFromLeaves/recomputeLayout below), this
+  // spacing cascades correctly: each next-level match is always
+  // centered on its two parent matches, all the way up to the Final.
+  const stageHeightStyle = { height: "calc(100vh - 260px)" };
 
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
@@ -797,23 +813,24 @@ export default function TournamentBracket({
         </div>
       </div>
 
-      <div className="hidden md:block max-w-[1600px] mx-auto relative">
-        <div className="w-full overflow-x-hidden">
+      <div className="hidden md:block max-w-[1600px] mx-auto relative" style={stageHeightStyle}>
+        <div className="w-full h-full overflow-x-hidden overflow-y-hidden">
           {useMirroredLayout ? (
-            <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+            <div ref={desktopContainerRef} className="relative flex items-stretch gap-0 w-full h-full pb-6">
               {finalCenter && logoSrc && (
                 <div
-                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  className="absolute pointer-events-none z-0 flex justify-center items-center overflow-hidden"
                   style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
                     transform: "translate(-50%, -50%)",
+                    maxHeight: "100%",
                   }}
                 >
                   <img
                     src={logoSrc}
                     alt=""
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-15"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none max-h-[85vh] h-auto object-contain opacity-15"
                   />
                 </div>
               )}
@@ -901,20 +918,21 @@ export default function TournamentBracket({
               </svg>
             </div>
           ) : (
-            <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+            <div ref={desktopContainerRef} className="relative flex items-stretch gap-0 w-full h-full pb-6">
               {finalCenter && logoSrc && (
                 <div
-                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  className="absolute pointer-events-none z-0 flex justify-center items-center overflow-hidden"
                   style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
                     transform: "translate(-50%, -50%)",
+                    maxHeight: "100%",
                   }}
                 >
                   <img
                     src={logoSrc}
                     alt=""
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
+                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none max-h-[85vh] h-auto object-contain opacity-10"
                   />
                 </div>
               )}

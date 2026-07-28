@@ -138,6 +138,7 @@ function TeamRow({
   rowRef,
   compact,
   scoreInput,
+  large,
 }: {
   team: TeamNode | null;
   status: MatchNode["status"];
@@ -160,6 +161,11 @@ function TeamRow({
     onChange: (v: string) => void;
     disabled: boolean;
   };
+  /** When true, renders this row with roomier padding, bigger avatar,
+   *  and larger type — used for brackets with only a few teams so the
+   *  cards grow to fill the extra vertical space instead of leaving it
+   *  empty. Purely cosmetic, driven by the parent's team count. */
+  large?: boolean;
 }) {
   const isTBD = !team;
   const isHovered = team && hoveredTeamCode === team.code;
@@ -170,7 +176,9 @@ function TeamRow({
       onMouseEnter={() => team && setHoveredTeamCode(team.code)}
       onMouseLeave={() => setHoveredTeamCode(null)}
       onClick={() => team && onTeamClick?.(team.code)}
-      className={`flex items-center justify-between gap-2 p-1 lg:p-1.5 rounded-lg relative transition-all duration-200 border ${
+      className={`flex items-center justify-between gap-2 ${
+        large ? "p-1.5 lg:p-2" : "p-1 lg:p-1.5"
+      } rounded-lg relative transition-all duration-200 border ${
         isTBD ? "bg-background/40 border-dashed border-border-overlay text-outline" : "bg-surface-container border-border-overlay"
       } ${
         isHovered
@@ -183,11 +191,13 @@ function TeamRow({
       } ${!isTBD && onTeamClick ? "cursor-pointer" : ""}`}
     >
       {!isTBD && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />}
-      <div className="flex items-center gap-2 lg:gap-3 pl-1.5 lg:pl-2 min-w-0">
+      <div className={`flex items-center ${large ? "gap-2.5 lg:gap-3" : "gap-2 lg:gap-3"} pl-1.5 lg:pl-2 min-w-0`}>
         <span
-          className={`w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px] lg:text-xs ${
-            isTBD ? "border border-dashed border-outline/40" : ""
-          }`}
+          className={`${
+            large ? "w-7 h-7 lg:w-9 lg:h-9" : "w-6 h-6 lg:w-8 lg:h-8"
+          } rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black ${
+            large ? "text-xs lg:text-sm" : "text-[10px] lg:text-xs"
+          } ${isTBD ? "border border-dashed border-outline/40" : ""}`}
         >
           {!isTBD ? (
             team.logo ? (
@@ -200,7 +210,11 @@ function TeamRow({
           )}
         </span>
         <div className="leading-none min-w-0">
-          <p className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate ${isTBD ? "text-outline font-medium" : "text-on-surface"}`}>
+          <p
+            className={`font-label-mono font-bold ${
+              large ? "text-sm" : "text-xs"
+            } uppercase tracking-wide truncate ${isTBD ? "text-outline font-medium" : "text-on-surface"}`}
+          >
             {isTBD ? "To Be Determined" : team.name}
           </p>
           {!compact && (isTBD || fromLabel) && (
@@ -211,7 +225,9 @@ function TeamRow({
                 onFromClick?.();
               }}
               disabled={!onFromClick}
-              className="text-[9px] font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1 disabled:cursor-default hover:text-theme-orange transition-colors"
+              className={`${
+                large ? "text-[10px]" : "text-[9px]"
+              } font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1 disabled:cursor-default hover:text-theme-orange transition-colors`}
             >
               {fromLabel ? (
                 <>
@@ -226,7 +242,7 @@ function TeamRow({
         </div>
       </div>
       {!isTBD && (
-        <div className="flex items-center gap-1.5 pr-1 shrink-0">
+        <div className={`flex items-center ${large ? "gap-2 pr-1.5" : "gap-1.5 pr-1"} shrink-0`}>
           {isPinned && (
             <span className="hidden lg:inline-block text-[8px] font-label-mono font-black uppercase tracking-widest text-theme-orange border border-theme-orange/40 rounded px-1 py-0.5">
               Pinned
@@ -246,12 +262,16 @@ function TeamRow({
                 // score can never even momentarily read negative.
                 if (e.key === "-") e.preventDefault();
               }}
-              className="w-12 shrink-0 text-center text-xs font-label-mono font-black rounded-md border border-border-overlay bg-background py-1 disabled:opacity-60"
+              className={`${
+                large ? "w-14 text-sm py-1" : "w-12 text-xs py-1"
+              } shrink-0 text-center font-label-mono font-black rounded-md border border-border-overlay bg-background disabled:opacity-60`}
             />
           ) : (
             status !== "scheduled" && (
-              <div className="flex items-center gap-2 font-label-mono font-black text-sm">
-                {team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange" strokeWidth={3} />}
+              <div className={`flex items-center gap-2 font-label-mono font-black ${large ? "text-base" : "text-sm"}`}>
+                {team.isWinner && (
+                  <CheckCircle2 className={large ? "w-4 h-4 text-theme-orange" : "w-3.5 h-3.5 text-theme-orange"} strokeWidth={3} />
+                )}
                 <span className={team.isWinner ? "text-theme-orange" : "text-outline"}>{team.score}</span>
               </div>
             )
@@ -273,6 +293,7 @@ function MatchCard({
   compact,
   editable,
   onRecordResult,
+  large,
 }: {
   match: MatchNode;
   hoveredTeamCode: string | null;
@@ -295,6 +316,10 @@ function MatchCard({
     scoreA: number,
     scoreB: number
   ) => void | Promise<void | { ok: boolean; error?: string }>;
+  /** When true, renders a roomier version of the card (more padding,
+   *  bigger avatars/text). Used for brackets with few teams so the
+   *  cards grow taller instead of leaving empty vertical space. */
+  large?: boolean;
 }) {
   const isBye = match.teamA?.code === "BYE" || match.teamB?.code === "BYE";
   const bothAssigned = !!match.teamA && !!match.teamB;
@@ -391,7 +416,7 @@ function MatchCard({
           <Loader2 className="w-4 h-4 text-theme-orange animate-spin" />
         </div>
       )}
-      <div className="relative flex flex-col gap-1 lg:gap-1.5 p-1.5 lg:p-2">
+      <div className={`relative flex flex-col ${large ? "gap-1.5 lg:gap-2 p-2 lg:p-2.5" : "gap-1 lg:gap-1.5 p-1.5 lg:p-2"}`}>
         <TeamRow
           team={match.teamA}
           status={match.status}
@@ -404,6 +429,7 @@ function MatchCard({
           rowRef={getRef ? getRef(`${match.id}:A`) : undefined}
           compact={compact}
           scoreInput={playable ? { value: scoreA, onChange: handleScoreAChange, disabled: saving } : undefined}
+          large={large}
         />
         <TeamRow
           team={match.teamB}
@@ -417,11 +443,12 @@ function MatchCard({
           rowRef={getRef ? getRef(`${match.id}:B`) : undefined}
           compact={compact}
           scoreInput={playable ? { value: scoreB, onChange: handleScoreBChange, disabled: saving } : undefined}
+          large={large}
         />
 
         {playable && isTie && (
           <div className="flex flex-col gap-1">
-            <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-status-live">
+            <p className={`text-center font-label-mono font-bold uppercase tracking-widest text-status-live ${large ? "text-[10px]" : "text-[9px]"}`}>
               Scores tied — who won?
             </p>
             <div className="flex gap-1.5">
@@ -429,7 +456,9 @@ function MatchCard({
                 type="button"
                 onClick={() => submitTieBreak("A")}
                 disabled={saving}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50"
+                className={`flex-1 font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50 ${
+                  large ? "text-[11px] py-2" : "text-[10px] py-1.5"
+                }`}
               >
                 {match.teamA?.code} wins
               </button>
@@ -437,7 +466,9 @@ function MatchCard({
                 type="button"
                 onClick={() => submitTieBreak("B")}
                 disabled={saving}
-                className="flex-1 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange py-1.5 hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50"
+                className={`flex-1 font-label-mono font-bold uppercase tracking-wider rounded-lg bg-surface-container-high border border-theme-orange/40 text-theme-orange hover:opacity-90 active:scale-[0.98] transition-all truncate disabled:opacity-50 ${
+                  large ? "text-[11px] py-2" : "text-[10px] py-1.5"
+                }`}
               >
                 {match.teamB?.code} wins
               </button>
@@ -450,7 +481,9 @@ function MatchCard({
             type="button"
             onClick={submitDecisive}
             disabled={!bothFilled || saving}
-            className="w-full flex items-center justify-center gap-1.5 text-[10px] font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary py-1.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`w-full flex items-center justify-center gap-1.5 font-label-mono font-bold uppercase tracking-wider rounded-lg bg-theme-orange text-on-primary hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              large ? "text-[11px] py-2" : "text-[10px] py-1.5"
+            }`}
           >
             {saving ? (
               <>
@@ -470,7 +503,11 @@ function MatchCard({
         )}
 
         {showFooter && !playable && (
-          <div className="flex items-center justify-between border-t border-border-overlay pt-1 lg:pt-1.5 mt-0 text-[9px] lg:text-[10px] font-label-mono font-bold uppercase tracking-wider text-outline">
+          <div
+            className={`flex items-center justify-between border-t border-border-overlay mt-0 font-label-mono font-bold uppercase tracking-wider text-outline ${
+              large ? "pt-1.5 text-[10px]" : "pt-1 lg:pt-1.5 text-[9px] lg:text-[10px]"
+            }`}
+          >
             <span className="hidden lg:flex items-center gap-1.5 max-w-[65%] truncate">
               <MapPin className="w-3 h-3 shrink-0" />
               <span className="truncate">{match.venue || "TBD"}</span>
@@ -517,6 +554,7 @@ function BracketColumn({
   innerBleedRight,
   editable,
   onRecordResult,
+  large,
 }: {
   roundName: string;
   matches: MatchNode[];
@@ -542,6 +580,9 @@ function BracketColumn({
     scoreA: number,
     scoreB: number
   ) => void | Promise<void | { ok: boolean; error?: string }>;
+  /** Forwarded to every MatchCard in this column — roomier cards for
+   *  small brackets so the column fills more of the available height. */
+  large?: boolean;
 }) {
   return (
     <div
@@ -555,7 +596,10 @@ function BracketColumn({
         <div className="absolute left-0 right-0 top-1/2 -z-10 h-px bg-gradient-to-r from-transparent via-border-overlay to-transparent" />
       </div>
       {isLeaf ? (
-        <div ref={leafColumnRef} className="w-full flex flex-col gap-8 lg:gap-10 items-stretch">
+        <div
+          ref={leafColumnRef}
+          className={`w-full min-h-0 flex flex-col items-stretch justify-between flex-1 ${large ? "gap-10 lg:gap-14" : "gap-8 lg:gap-10"}`}
+        >
           {matches.map((match) => (
             <div key={match.id} className="w-full px-2">
               <MatchCard
@@ -569,6 +613,7 @@ function BracketColumn({
                 compact={compact}
                 editable={editable}
                 onRecordResult={onRecordResult}
+                large={large}
               />
             </div>
           ))}
@@ -601,6 +646,7 @@ function BracketColumn({
                     compact={compact}
                     editable={editable}
                     onRecordResult={onRecordResult}
+                    large={large}
                   />
                 </div>
               </div>
@@ -655,6 +701,14 @@ export default function TournamentBracket({
   const teamCount = rounds.length > 0 ? rounds[0].matches.length * 2 : 0;
   const useMirroredLayout = teamCount >= 16;
 
+  // Small brackets (4 or 8 teams) leave a lot of empty vertical space
+  // once laid out, since card height is driven by content, not the
+  // container. Rather than stretch that whitespace awkwardly, we grow
+  // the cards themselves — bigger avatars, type, and padding — so a
+  // 2-round or 3-round bracket reads as an intentionally spacious
+  // layout instead of a small bracket floating in a big page.
+  const large = teamCount > 0 && teamCount <= 8;
+
   // Both mirrored (16+ team) and linear (smaller) brackets now share the
   // same 1600px stage — a 4-team or 8-team bracket used to get squeezed
   // into a narrow 760/1040px column, which crammed the columns close
@@ -663,6 +717,19 @@ export default function TournamentBracket({
   // do the work of spacing rounds out so it reads as spacious rather
   // than stretched.
   const desktopStageMaxWidth = 1600;
+
+  // The bracket stage always claims the remaining viewport height (down
+  // to the bottom of the screen) rather than sizing to its own content.
+  // This is a real `height`, not a `min-height` — every round column is
+  // stretched (`items-stretch` + `h-full`) to fill it, and each leaf
+  // column spaces its matches out with `justify-between` so the first
+  // and last card sit at the very top/bottom edge and everything else
+  // is spread evenly between them. Because every parent-round match is
+  // still positioned at the measured midpoint of the two matches that
+  // feed it (see computeCentersFromLeaves/recomputeLayout below), this
+  // spacing cascades correctly: each next-level match is always
+  // centered on its two parent matches, all the way up to the Final.
+  const stageHeightStyle = { height: "calc(100vh - 260px)" };
 
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
@@ -935,23 +1002,29 @@ export default function TournamentBracket({
         </div>
       </div>
 
-      <div className="hidden md:block mx-auto relative" style={{ maxWidth: desktopStageMaxWidth }}>
-        <div className="w-full overflow-x-hidden">
+      <div className="hidden md:block mx-auto relative" style={{ maxWidth: desktopStageMaxWidth, ...stageHeightStyle }}>
+        <div className="w-full h-full overflow-x-hidden overflow-y-hidden">
           {useMirroredLayout ? (
-            <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
+            <div
+              ref={desktopContainerRef}
+              className="relative flex items-stretch gap-0 w-full h-full pb-6"
+            >
               {finalCenter && logoSrc && (
                 <div
-                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  className="absolute pointer-events-none z-0 flex justify-center items-center overflow-hidden"
                   style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
                     transform: "translate(-50%, -50%)",
+                    maxHeight: "100%",
                   }}
                 >
                   <img
                     src={logoSrc}
                     alt=""
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-15"
+                    className={`${
+                      large ? "w-[220px] md:w-[320px] lg:w-[420px]" : "w-[280px] md:w-[450px] lg:w-[600px]"
+                    } max-w-none max-h-[85vh] h-auto object-contain opacity-15`}
                   />
                 </div>
               )}
@@ -980,6 +1053,7 @@ export default function TournamentBracket({
                     innerBleedLeft={innerBleedLeft}
                     editable={editable}
                     onRecordResult={onRecordResult}
+                    large={large}
                   />
                 );
               })}
@@ -995,6 +1069,7 @@ export default function TournamentBracket({
                 growWeight={getRoundGrowWeight(nonFinalRounds.length, "final")}
                 editable={editable}
                 onRecordResult={onRecordResult}
+                large={large}
               />
               {[...nonFinalRounds].reverse().map((round, revIdx) => {
                 const i = nonFinalRounds.length - 1 - revIdx;
@@ -1021,6 +1096,7 @@ export default function TournamentBracket({
                     innerBleedRight={innerBleedRight}
                     editable={editable}
                     onRecordResult={onRecordResult}
+                    large={large}
                   />
                 );
               })}
@@ -1045,20 +1121,26 @@ export default function TournamentBracket({
               </svg>
             </div>
           ) : (
-            <div ref={desktopContainerRef} className="relative flex items-start gap-8 lg:gap-14 w-full pb-6">
+            <div
+              ref={desktopContainerRef}
+              className="relative flex items-stretch gap-8 lg:gap-14 w-full h-full pb-6"
+            >
               {finalCenter && logoSrc && (
                 <div
-                  className="absolute pointer-events-none z-0 flex justify-center items-center"
+                  className="absolute pointer-events-none z-0 flex justify-center items-center overflow-hidden"
                   style={{
                     left: finalCenter.x,
                     top: finalCenter.y,
                     transform: "translate(-50%, -50%)",
+                    maxHeight: "100%",
                   }}
                 >
                   <img
                     src={logoSrc}
                     alt=""
-                    className="w-[280px] md:w-[450px] lg:w-[600px] max-w-none h-auto object-contain opacity-10"
+                    className={`${
+                      large ? "w-[220px] md:w-[320px] lg:w-[420px]" : "w-[280px] md:w-[450px] lg:w-[600px]"
+                    } max-w-none max-h-[85vh] h-auto object-contain opacity-10`}
                   />
                 </div>
               )}
@@ -1084,6 +1166,7 @@ export default function TournamentBracket({
                     compact={isCompact}
                     editable={editable}
                     onRecordResult={onRecordResult}
+                    large={large}
                   />
                 );
               })}
@@ -1195,6 +1278,7 @@ export default function TournamentBracket({
                         pinnedTeamCode={selectedTeamCode}
                         editable={editable}
                         onRecordResult={onRecordResult}
+                        large={large}
                       />
                     </div>
                   ))}

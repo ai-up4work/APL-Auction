@@ -36,7 +36,7 @@ const FORMAT_LABELS: Record<FormatType, string> = {
 const FONT_BODY = "var(--font-body, 'Inter', ui-sans-serif, system-ui, sans-serif)";
 const DEFAULT_LOGO_SRC = "/valiant-league-logo.png";
 
-const TEAM_COUNT_PRESETS = [4, 8, 16, 32] as const;
+const TEAM_COUNT_PRESETS = [8, 16, 32, 64] as const;
 const MIN_TEAMS = 2;
 const MAX_TEAMS = 64;
 

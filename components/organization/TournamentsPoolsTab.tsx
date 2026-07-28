@@ -15,8 +15,10 @@ import {
   Shield,
   Trophy,
   UserPlus,
+  Brackets,
   Crown,
   X,
+  Swords,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,13 +37,18 @@ import {
   updatePoolTeam,
   deletePoolTeam,
   subscribeToOrgTournaments,
+  subscribeToOrgMatches,
+  getFriendlyMatchesForOrg,
   unsubscribe,
   type OrgSummary,
   type TournamentSummary,
   type BankPlayer,
   type PoolTeam,
+  type FriendlyMatchSummary,
 } from "@/lib/organization/organization"
 import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
+import Image from "next/image"
+import { MatchCard } from "./MatchesTab"
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
 const TIER_OPTIONS = ["A", "B", "C", "Pro", "Elite", "Legend"]
@@ -88,12 +95,12 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
 /** Cover thumbnail for a tournament card. Falls back to `logoUrl`, then to
  *  a plain trophy placeholder when the tournament has no image at all. */
 function TournamentThumb({ tournament }: { tournament: TournamentSummary }) {
-  const src = tournament.imageUrl || tournament.logoUrl
+  const src = tournament.logoUrl|| tournament.imageUrl
   return (
     <div className="h-12 w-12 rounded-md overflow-hidden border border-gold/20 bg-black/60 flex items-center justify-center shrink-0">
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="h-full w-full object-cover" />
+        <Image src={src} alt="" className="h-full w-full object-cover" width={40} height={40} />
       ) : (
         <Trophy className="h-5 w-5 text-gold/30" />
       )}
@@ -102,7 +109,9 @@ function TournamentThumb({ tournament }: { tournament: TournamentSummary }) {
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  TOURNAMENTS — search, multi-select + bulk delete, realtime sync    */
+/*  TOURNAMENTS — search, multi-select + bulk delete, realtime sync,    */
+/*  and each tournament's own connected matches shown inline below it   */
+/*  using the same MatchCard used on the Matches tab.                   */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -111,6 +120,13 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([])
   const [loaded, setLoaded] = useState(false)
   const [syncing, setSyncing] = useState(false)
+
+  // Matches, grouped by the tournament they're linked to — this is what
+  // lets each tournament's row show its own bracket matches inline,
+  // right below it, instead of duplicating them in the Matches tab
+  // (which is scoped to standalone matches only).
+  const [matchesByTournament, setMatchesByTournament] = useState<Map<string, FriendlyMatchSummary[]>>(new Map())
+  const [expandedMatches, setExpandedMatches] = useState<Set<string>>(new Set())
 
   const [name, setName] = useState("")
   const [format, setFormat] = useState<"single_elimination" | "double_elimination" | "round_robin">(
@@ -130,8 +146,16 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
   const reload = () => {
     setSyncing(true)
-    return getTournamentsForOrg(org.id).then((t) => {
+    return Promise.all([getTournamentsForOrg(org.id), getFriendlyMatchesForOrg(org.id)]).then(([t, m]) => {
       setTournaments(t)
+      const grouped = new Map<string, FriendlyMatchSummary[]>()
+      m.forEach((match) => {
+        if (!match.tournamentId) return
+        const list = grouped.get(match.tournamentId) ?? []
+        list.push(match)
+        grouped.set(match.tournamentId, list)
+      })
+      setMatchesByTournament(grouped)
       setLoaded(true)
       setSyncing(false)
     })
@@ -144,6 +168,17 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
   useEffect(() => {
     const channel = subscribeToOrgTournaments(org.id, () => {
+      reload()
+    })
+    return () => unsubscribe(channel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.id])
+
+  // A tournament's match list, its overlay status, or its bracket link
+  // can all change from other panels (bracket page, overlay admin) — keep
+  // this tab's per-tournament match grid current without a manual refresh.
+  useEffect(() => {
+    const channel = subscribeToOrgMatches(org.id, () => {
       reload()
     })
     return () => unsubscribe(channel)
@@ -191,6 +226,31 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     setSelected((prev) => {
       const next = new Set(prev)
       next.delete(t.id)
+      return next
+    })
+  }
+
+  // Every match shown here is tournament-linked by definition (that's how
+  // it ended up in matchesByTournament), so it can never be deleted
+  // directly — same rule the Matches tab enforces: disconnect it from its
+  // bracket slot first.
+  const handleDeleteMatch = async (match: FriendlyMatchSummary) => {
+    await confirm({
+      title: "Can't delete this match",
+      description: `"${match.team1Name} vs ${match.team2Name}" is connected to the ${
+        match.tournamentName ?? "this tournament's"
+      } bracket. Disconnect it from the bracket on this tournament's edit page before deleting it here.`,
+      confirmText: "Got it",
+      cancelText: "Close",
+      tone: "default",
+    })
+  }
+
+  const toggleMatchesExpanded = (tournamentId: string) => {
+    setExpandedMatches((prev) => {
+      const next = new Set(prev)
+      if (next.has(tournamentId)) next.delete(tournamentId)
+      else next.add(tournamentId)
       return next
     })
   }
@@ -323,7 +383,8 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
         </div>
         <p className="text-gray-500 text-xs mb-4">
           Open a tournament's bracket to connect each slot to a match — that's where a bracket match becomes a real
-          match with its own teams and, optionally, an overlay.
+          match with its own teams and, optionally, an overlay. Matches already connected show up below their
+          tournament here.
         </p>
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
@@ -361,50 +422,96 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
               )}
             </div>
 
-            {filtered.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <button
-                    onClick={() => toggleSelectOne(t.id)}
-                    className="text-gray-500 hover:text-gold shrink-0"
-                    aria-label="Select tournament"
-                  >
-                    {selected.has(t.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                  </button>
-                  <TournamentThumb tournament={t} />
-                  <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
-                    <p className="text-white text-sm font-semibold truncate">{t.name}</p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <StatusBadge tone="neutral">{t.format.replace("_", " ")}</StatusBadge>
-                      <StatusBadge tone={t.status === "setup" ? "warn" : "linked"}>{t.status}</StatusBadge>
-                      {t.category && <StatusBadge tone="neutral">{t.category}</StatusBadge>}
+            {filtered.map((t) => {
+              const tMatches = matchesByTournament.get(t.id) ?? []
+              const isExpanded = expandedMatches.has(t.id)
+
+              return (
+                <div
+                  key={t.id}
+                  className="bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-md px-4 py-3 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <button
+                        onClick={() => toggleSelectOne(t.id)}
+                        className="text-gray-500 hover:text-gold shrink-0"
+                        aria-label="Select tournament"
+                      >
+                        {selected.has(t.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                      </button>
+                      <TournamentThumb tournament={t} />
+                      <Link href={`/tournaments/${t.id}`} className="min-w-0 flex-1">
+                        <p className="text-white text-sm font-semibold truncate">{t.name}</p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <StatusBadge tone="neutral">{t.format.replace("_", " ")}</StatusBadge>
+                          <StatusBadge tone={t.status === "setup" ? "warn" : "linked"}>{t.status}</StatusBadge>
+                          {t.category && <StatusBadge tone="neutral">{t.category}</StatusBadge>}
+                        </div>
+                      </Link>
                     </div>
-                  </Link>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Link
+                        href={`/tournaments/${t.id}/bracket`}
+                        className="text-gray-500 hover:text-gold transition-colors outline-none"
+                      >
+                        <Brackets className="h-3.5 w-3.5" />  
+                      </Link>
+                      <Link
+                        href={`/tournaments/${t.id}/edit`}
+                        className="text-gray-500 hover:text-gold transition-colors outline-none"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Link>
+                      <button
+                        onClick={() => handleDelete(t)}
+                        disabled={deletingId === t.id}
+                        className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {deletingId === t.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Matches connected to this tournament's bracket — the
+                      exact same MatchCard used on the Matches tab, so a
+                      match reads identically wherever it's shown.
+                      Collapsed by default to keep the tournament list
+                      scannable; only tournaments with matches get the
+                      toggle at all. */}
+                  {tMatches.length > 0 && (
+                    <div className="mt-3 pl-8">
+                      <button
+                        onClick={() => toggleMatchesExpanded(t.id)}
+                        className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+                      >
+                        <Swords className="h-3 w-3 text-gold/50" />
+                        {tMatches.length} match{tMatches.length === 1 ? "" : "es"}
+                        <span className="text-gold/40">{isExpanded ? "▴" : "▾"}</span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mt-3">
+                          {tMatches.map((m) => (
+                            <MatchCard
+                              key={m.id}
+                              match={m}
+                              onSetupOverlay={() => router.push(`/overlay/${m.auctionId}/admin`)}
+                              onDelete={() => handleDeleteMatch(m)}
+                              deleting={false}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <Link
-                    href={`/tournaments/${t.id}/edit`}
-                    className="text-gray-500 hover:text-gold transition-colors outline-none"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(t)}
-                    disabled={deletingId === t.id}
-                    className="bg-transparent border-none outline-none text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {deletingId === t.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </Panel>

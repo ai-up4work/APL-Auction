@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import Image from "next/image"
 import {
   Lock,
   Save,
@@ -516,11 +517,13 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                         <div className="w-12 h-12 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
                           {logoUrl && !logoBroken ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img
+                            <Image 
                               src={logoUrl}
                               alt=""
                               className="w-full h-full object-cover"
                               onError={() => setLogoBroken(true)}
+                              width={48}
+                              height={48}
                             />
                           ) : (
                             <ImageOff className="h-4 w-4 text-gray-600" />

@@ -16,6 +16,8 @@ import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
 import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
+import { RegistrationsTab } from "@/components/organization/Registrationstab"
+
 
 type Tab =
   | "overview"
@@ -26,6 +28,7 @@ type Tab =
   | "teamPool"
   | "playerBank"
   | "squadBoard"
+  | "registrations"
 type GateState = "checking" | "denied" | "allowed"
 
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -34,6 +37,7 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
   { key: "overlays", label: "Overlays", icon: Tv },
   { key: "tournaments", label: "Tournaments", icon: Trophy },
   { key: "auctions", label: "Auctions", icon: Landmark },
+  { key: "registrations", label: "Registrations", icon: Users },
   { key: "teamPool", label: "Team Pool", icon: Shield },
   { key: "playerBank", label: "Player Pool", icon: Users },
   { key: "squadBoard", label: "Squad Board", icon: Link2 },
@@ -151,6 +155,7 @@ export default function OrganizationClient() {
               {tab === "overlays" && <OverlaysTab org={org} userId={user!.id} />}
               {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
               {tab === "auctions" && <AuctionsTab org={org} userId={user!.id} />}
+              {tab === "registrations" && <RegistrationsTab org={org} userId={user!.id} />}
               {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
               {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
               {tab === "squadBoard" && <SquadBoardTab org={org} userId={user!.id} />}

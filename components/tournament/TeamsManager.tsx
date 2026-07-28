@@ -14,6 +14,10 @@ import {
   AlertCircle,
   Unlink,
   Pencil,
+  Gamepad2,
+  CheckSquare,
+  Square,
+  ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,15 +33,22 @@ import {
   getLinkedAuctionInfo,
   getAllLinkedAuctions,
   getLinkableAuctionsForOrg,
-  linkAuctionToTournament,
   unlinkAuctionFromTournament,
   switchManualToRealAuction,
+  linkAuctionWithSelectedTeams,
   type ManualTeam,
   type ManualPlayerInput,
   type LinkedAuctionInfo,
   type LinkableAuction,
 } from "@/lib/tournament/manualTeams"
-
+import {
+  getAuctionsForOrg,
+  getSquadBoardsForOrg,
+  getTeamsForAuction,
+  type AuctionOption,
+  type SquadBoard,
+  type AuctionTeamOption,
+} from "@/lib/organization/organization"
 
 interface TeamsManagerProps {
   tournamentId: string
@@ -45,7 +56,12 @@ interface TeamsManagerProps {
   tournamentName: string
 }
 
-type Phase = "loading" | "choose" | "linking" | "selectLinked" | "manage"
+type Phase = "loading" | "choose" | "pickTeams" | "selectLinked" | "manage"
+
+// "auction" = pick from one of the org's real (non-synthetic) auctions.
+// "board" = pick from one of the org's Squad Boards — same underlying
+// tables, different container. Mirrors the Matches tab's TeamSource idea.
+type PickerSourceType = "auction" | "board"
 
 const ROLE_OPTIONS: ManualPlayerInput["role"][] = [
   "Batter",
@@ -56,19 +72,62 @@ const ROLE_OPTIONS: ManualPlayerInput["role"][] = [
   "Wicket Keeper",
 ]
 
+/** Same styled select used on the Matches tab — kept local here so this
+ *  file doesn't need a cross-component import for one small piece of UI. */
+function StyledSelect({
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  children,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  disabled?: boolean
+  placeholder: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className="w-full appearance-none bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 pr-9 outline-none focus:border-gold/70 focus:ring-1 focus:ring-gold/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        <option value="">{placeholder}</option>
+        {children}
+      </select>
+      <ChevronDown className="h-3.5 w-3.5 text-gold/50 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    </div>
+  )
+}
+
 export default function TeamsManager({ tournamentId, orgId, tournamentName }: TeamsManagerProps) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [linkedAuction, setLinkedAuction] = useState<LinkedAuctionInfo | null>(null)
   const [teams, setTeams] = useState<ManualTeam[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // "Link an existing auction" picker
-  const [linkableAuctions, setLinkableAuctions] = useState<LinkableAuction[]>([])
-  const [selectedAuctionId, setSelectedAuctionId] = useState("")
-  const [isLinking, setIsLinking] = useState(false)
-  const [linkError, setLinkError] = useState<string | null>(null)
+  // True when the current team list came through the picker below
+  // (tournament_team_selections has rows) rather than the old "whole
+  // auction" link or manual add — locks out Add Player / Add Team.
+  const locked = teams.length > 0 && teams[0].locked
 
-  // Add-team form
+  // ── Team picker: pick a source (auction or Squad Board), then pick
+  // which of its teams actually participate — default is every team. ──
+  const [pickerSourceType, setPickerSourceType] = useState<PickerSourceType>("auction")
+  const [pickerAuctions, setPickerAuctions] = useState<AuctionOption[]>([])
+  const [pickerBoards, setPickerBoards] = useState<SquadBoard[]>([])
+  const [pickerSourcesLoaded, setPickerSourcesLoaded] = useState(false)
+  const [pickerSourceId, setPickerSourceId] = useState("")
+  const [pickerTeams, setPickerTeams] = useState<AuctionTeamOption[]>([])
+  const [pickerTeamsLoaded, setPickerTeamsLoaded] = useState(false)
+  const [pickerSelectedIds, setPickerSelectedIds] = useState<Set<string>>(new Set())
+  const [isConfirmingPicker, setIsConfirmingPicker] = useState(false)
+  const [pickerError, setPickerError] = useState<string | null>(null)
+
+  // Add-team form (manual mode only)
   const [newTeamCode, setNewTeamCode] = useState("")
   const [newTeamName, setNewTeamName] = useState("")
   const [newTeamColor, setNewTeamColor] = useState("#3B8BD4")
@@ -151,21 +210,72 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournamentId])
 
-  const openLinkPicker = async () => {
-    setPhase("linking")
-    setLinkError(null)
-    const options = await getLinkableAuctionsForOrg(orgId)
-    setLinkableAuctions(options)
+  // ── Team picker flow ────────────────────────────────────────────────
+
+  const openTeamPicker = async () => {
+    setPhase("pickTeams")
+    setPickerError(null)
+    setPickerSourceType("auction")
+    setPickerSourceId("")
+    setPickerTeams([])
+    setPickerTeamsLoaded(false)
+    setPickerSelectedIds(new Set())
+    setPickerSourcesLoaded(false)
+    const [auctions, boards] = await Promise.all([getAuctionsForOrg(orgId), getSquadBoardsForOrg(orgId)])
+    setPickerAuctions(auctions)
+    setPickerBoards(boards)
+    setPickerSourcesLoaded(true)
   }
 
-  const confirmLinkAuction = async () => {
-    if (!selectedAuctionId) return
-    setIsLinking(true)
-    setLinkError(null)
-    const ok = await linkAuctionToTournament(selectedAuctionId, tournamentId)
-    setIsLinking(false)
-    if (!ok) {
-      setLinkError("Couldn't link that auction — please try again.")
+  const switchPickerSourceType = (type: PickerSourceType) => {
+    setPickerSourceType(type)
+    setPickerSourceId("")
+    setPickerTeams([])
+    setPickerTeamsLoaded(false)
+    setPickerSelectedIds(new Set())
+    setPickerError(null)
+  }
+
+  const selectPickerSource = async (sourceId: string) => {
+    setPickerSourceId(sourceId)
+    setPickerError(null)
+    if (!sourceId) {
+      setPickerTeams([])
+      setPickerSelectedIds(new Set())
+      return
+    }
+    setPickerTeamsLoaded(false)
+    const t = await getTeamsForAuction(sourceId)
+    setPickerTeams(t)
+    // Default: every team participates — the person deselects any they
+    // don't want, rather than having to opt every team in one at a time.
+    setPickerSelectedIds(new Set(t.map((team) => team.id)))
+    setPickerTeamsLoaded(true)
+  }
+
+  const togglePickerTeam = (teamId: string) => {
+    setPickerSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(teamId)) next.delete(teamId)
+      else next.add(teamId)
+      return next
+    })
+  }
+
+  const togglePickerSelectAll = () => {
+    setPickerSelectedIds((prev) =>
+      prev.size === pickerTeams.length ? new Set() : new Set(pickerTeams.map((t) => t.id))
+    )
+  }
+
+  const confirmTeamPicker = async () => {
+    if (!pickerSourceId || pickerSelectedIds.size === 0) return
+    setIsConfirmingPicker(true)
+    setPickerError(null)
+    const result = await linkAuctionWithSelectedTeams(tournamentId, pickerSourceId, Array.from(pickerSelectedIds))
+    setIsConfirmingPicker(false)
+    if (!result.ok) {
+      setPickerError(result.error ?? "Couldn't save your team selection — please try again.")
       return
     }
     await loadEverything()
@@ -185,7 +295,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     if (!linkedAuction?.id) return
     const message = linkedAuction.isManual
       ? "Unlink these manually-entered teams? They stay saved and untouched — just detached from this tournament's public page until you link something again."
-      : "Unlink this auction? Its teams and players won't show on the tournament page anymore, but nothing gets deleted."
+      : "Unlink this auction/Squad Board? Its teams and players won't show on the tournament page anymore, but nothing gets deleted."
     if (!confirm(message)) return
     setIsUnlinking(true)
     const ok = await unlinkAuctionFromTournament(linkedAuction.id)
@@ -278,7 +388,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     const player = await addManualPlayer(team.auctionId, team.id, team.code, {
         name: form.name.trim(),
         role: form.role,
-        isCaptain: form.isCaptain,          // ← should be true if you checked the box
+        isCaptain: form.isCaptain,
     })
     setAddingPlayerFor(null)
 
@@ -336,7 +446,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     }
   }
 
-    const handleDeletePlayer = async (teamId: string, playerId: string) => {
+  const handleDeletePlayer = async (teamId: string, playerId: string) => {
     const ok = await deleteManualPlayer(playerId, teamId)
     if (ok) {
         setTeams((prev) =>
@@ -369,14 +479,15 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
         {loadError && <p className="text-red-500 text-sm mb-4">{loadError}</p>}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
-            onClick={openLinkPicker}
+            onClick={openTeamPicker}
             className="text-left bg-white/[0.02] border border-gold/20 hover:border-gold/60 rounded-lg p-5 transition-colors"
           >
             <Link2 className="h-5 w-5 text-gold mb-3" />
-            <p className="text-white font-bold font-cinzel mb-1">Link an existing auction</p>
+            <p className="text-white font-bold font-cinzel mb-1">Pick teams from an auction or Squad Board</p>
             <p className="text-gray-400 text-xs">
-              Already ran a live bidding auction for this tournament? Attach it here — teams and
-              their sold players will show up automatically, exactly as the auction settled.
+              Choose a real auction or one of your Squad Boards, then pick exactly which of its
+              teams take part in this tournament — every team is selected by default. Rosters come
+              along automatically and stay live if they change later.
             </p>
           </button>
           <button
@@ -386,8 +497,8 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
             <Sparkles className="h-5 w-5 text-gold mb-3" />
             <p className="text-white font-bold font-cinzel mb-1">Add teams manually</p>
             <p className="text-gray-400 text-xs">
-              No auction for this one — type in your teams and rosters directly. They'll show on
-              the tournament page's Squads tab just like an auction result would.
+              No auction or board for this one — type in your teams and rosters directly. They'll
+              show on the tournament page's Squads tab just like an auction result would.
             </p>
           </button>
         </div>
@@ -395,48 +506,119 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     )
   }
 
-  // ── LINKING: picking a real auction to attach ───────────────────────
-  if (phase === "linking") {
+  // ── PICK TEAMS: choose a source, then choose which of its teams ─────
+  if (phase === "pickTeams") {
+    const sourceOptions = pickerSourceType === "auction" ? pickerAuctions : pickerBoards
+    const allPickerChecked = pickerTeams.length > 0 && pickerSelectedIds.size === pickerTeams.length
+
     return (
       <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6">
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Link an Auction</h2>
-        {linkableAuctions.length === 0 ? (
-          <p className="text-gray-400 text-sm mb-4">
-            No unlinked auctions found in your organization. Create or finish setting up an
-            auction first, then come back here to attach it.
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Pick Teams</h2>
+
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => switchPickerSourceType("auction")}
+            className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide px-3 py-2 rounded-md border transition-colors ${
+              pickerSourceType === "auction" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            <Gamepad2 className="h-3.5 w-3.5" /> Auction
+          </button>
+          <button
+            onClick={() => switchPickerSourceType("board")}
+            className={`flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide px-3 py-2 rounded-md border transition-colors ${
+              pickerSourceType === "board" ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            <Users className="h-3.5 w-3.5" /> Squad Board
+          </button>
+        </div>
+
+        {!pickerSourcesLoaded ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2 mb-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        ) : sourceOptions.length === 0 ? (
+          <p className="text-gray-400 text-sm italic mb-4">
+            {pickerSourceType === "auction" ? "No auctions in this org yet." : "No Squad Boards in this org yet."}
           </p>
         ) : (
-          <>
-            <label className="text-gray-400 text-sm block mb-2">Choose an auction</label>
-            <select
-              value={selectedAuctionId}
-              onChange={(e) => setSelectedAuctionId(e.target.value)}
-              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2 mb-4"
+          <div className="mb-4">
+            <label className="text-gray-400 text-sm block mb-2">
+              {pickerSourceType === "auction" ? "Choose an auction" : "Choose a Squad Board"}
+            </label>
+            <StyledSelect
+              value={pickerSourceId}
+              onChange={(e) => selectPickerSource(e.target.value)}
+              placeholder={pickerSourceType === "auction" ? "Select an auction…" : "Select a Squad Board…"}
             >
-              <option value="">Select an auction…</option>
-              {linkableAuctions.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} — {a.status}
-                </option>
+              {sourceOptions.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
-          </>
+            </StyledSelect>
+          </div>
         )}
-        {linkError && (
+
+        {pickerSourceId && (
+          !pickerTeamsLoaded ? (
+            <p className="text-gray-500 text-sm flex items-center gap-2 mb-4">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading teams…
+            </p>
+          ) : pickerTeams.length === 0 ? (
+            <p className="text-gray-400 text-sm italic mb-4">This one doesn't have any teams yet.</p>
+          ) : (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-gray-400 text-sm">Which teams take part?</label>
+                <button
+                  onClick={togglePickerSelectAll}
+                  className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+                >
+                  {allPickerChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                  {allPickerChecked ? "Deselect all" : "Select all"}
+                </button>
+              </div>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                {pickerTeams.map((t) => (
+                  <label
+                    key={t.id}
+                    className="flex items-center gap-3 border border-gold/10 rounded-md p-2.5 bg-white/[0.02] cursor-pointer hover:border-gold/30 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={pickerSelectedIds.has(t.id)}
+                      onChange={() => togglePickerTeam(t.id)}
+                    />
+                    <span className="text-white text-sm">{t.name}</span>
+                    <span className="text-gray-500 text-xs">({t.code})</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-gray-500 text-xs mt-2">
+                All teams are selected by default — uncheck any that shouldn't be part of this
+                tournament.
+              </p>
+            </div>
+          )
+        )}
+
+        {pickerError && (
           <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
-            <AlertCircle className="h-4 w-4" /> {linkError}
+            <AlertCircle className="h-4 w-4" /> {pickerError}
           </p>
         )}
+
         <div className="flex items-center gap-3">
           <Button
-            onClick={confirmLinkAuction}
-            disabled={!selectedAuctionId || isLinking}
+            onClick={confirmTeamPicker}
+            disabled={!pickerSourceId || pickerSelectedIds.size === 0 || isConfirmingPicker}
             className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
           >
-            {isLinking ? "Linking…" : "Link Auction"}
+            {isConfirmingPicker ? "Saving…" : `Use ${pickerSelectedIds.size || ""} Team${pickerSelectedIds.size === 1 ? "" : "s"}`}
           </Button>
           <Button
             onClick={() => setPhase("choose")}
+            disabled={isConfirmingPicker}
             className="bg-transparent hover:bg-white/5 text-gray-300 border border-gold/20"
           >
             Back
@@ -498,7 +680,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
         {linkedAuction && (
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-widest font-cinzel px-2 py-1 rounded bg-gold/10 text-gold border border-gold/20">
-              {linkedAuction.isManual ? "Manual" : "Linked Auction"}
+              {linkedAuction.isManual ? "Manual" : locked ? "Selected Teams" : "Linked Auction"}
             </span>
             {linkedAuction.id && (
               <button
@@ -516,8 +698,27 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
       <p className="text-gray-400 text-sm mb-6">
         {linkedAuction?.isManual
           ? "Teams and players added here show up directly on the tournament page's Squads tab."
-          : `Reading from "${linkedAuction?.name}". Teams and their sold players are shown below exactly as the auction settled — add more manually if you need to.`}
+          : locked
+            ? `Reading the teams you selected from "${linkedAuction?.name}". These rosters are live — if a player changes on the source, it reflects here too.`
+            : `Reading from "${linkedAuction?.name}". Teams and their sold players are shown below exactly as the auction settled — add more manually if you need to.`}
       </p>
+
+      {/* Locked notice — teams came from the picker, so no manual add here */}
+      {locked && (
+        <div className="border border-gold/20 rounded-lg p-4 mb-6 bg-white/[0.02] flex items-start justify-between gap-3 flex-wrap">
+          <p className="text-gray-400 text-xs flex items-start gap-2 max-w-md">
+            <Link2 className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
+            These teams and rosters come from your selection — add or remove players over on the
+            source auction/Squad Board instead. You can change which teams are included any time.
+          </p>
+          <button
+            onClick={openTeamPicker}
+            className="text-xs font-cinzel uppercase tracking-wide text-gold hover:text-gold/80 whitespace-nowrap"
+          >
+            Change selected teams →
+          </button>
+        </div>
+      )}
 
       {/* Switch manual -> real auction */}
       {linkedAuction?.isManual && linkedAuction.id && !showSwitchPicker && (
@@ -681,42 +882,47 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
               ))}
             </div>
 
-            {/* Add player row */}
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-2 border-t border-gold/5">
-              <Input
-                value={getPlayerForm(team.id).name}
-                onChange={(e) => setPlayerForm(team.id, { name: e.target.value })}
-                placeholder="Player name"
-                className="bg-black/50 border-gold/30 text-white sm:flex-1"
-              />
-              <select
-                value={getPlayerForm(team.id).role}
-                onChange={(e) => setPlayerForm(team.id, { role: e.target.value as ManualPlayerInput["role"] })}
-                className="bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5 text-xs text-gray-400 px-1">
-                <input
-                  type="checkbox"
-                  checked={getPlayerForm(team.id).isCaptain}
-                  onChange={(e) => setPlayerForm(team.id, { isCaptain: e.target.checked })}
+            {/* Add player row — hidden when this team's roster came from
+                the picker (locked): the person already chose their teams,
+                so adding a player here would only exist on this tournament's
+                view, not on the source auction/board it's meant to mirror. */}
+            {!locked && (
+              <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-2 border-t border-gold/5">
+                <Input
+                  value={getPlayerForm(team.id).name}
+                  onChange={(e) => setPlayerForm(team.id, { name: e.target.value })}
+                  placeholder="Player name"
+                  className="bg-black/50 border-gold/30 text-white sm:flex-1"
                 />
-                Captain
-              </label>
-              <Button
-                onClick={() => handleAddPlayer(team)}
-                disabled={addingPlayerFor === team.id || !getPlayerForm(team.id).name.trim()}
-                className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                {addingPlayerFor === team.id ? "Adding…" : "Add Player"}
-              </Button>
-            </div>
+                <select
+                  value={getPlayerForm(team.id).role}
+                  onChange={(e) => setPlayerForm(team.id, { role: e.target.value as ManualPlayerInput["role"] })}
+                  className="bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-gray-400 px-1">
+                  <input
+                    type="checkbox"
+                    checked={getPlayerForm(team.id).isCaptain}
+                    onChange={(e) => setPlayerForm(team.id, { isCaptain: e.target.checked })}
+                  />
+                  Captain
+                </label>
+                <Button
+                  onClick={() => handleAddPlayer(team)}
+                  disabled={addingPlayerFor === team.id || !getPlayerForm(team.id).name.trim()}
+                  className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  {addingPlayerFor === team.id ? "Adding…" : "Add Player"}
+                </Button>
+              </div>
+            )}
             {playerErrors[team.id] && (
               <p className="flex items-center gap-1.5 text-red-500 text-xs mt-2">
                 <AlertCircle className="h-3.5 w-3.5" /> {playerErrors[team.id]}
@@ -726,47 +932,49 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
         ))}
       </div>
 
-      {/* Add team form */}
-      <div className="border-t border-gold/10 pt-4">
-        <p className="text-gray-400 text-sm mb-3 flex items-center gap-1.5">
-          <Users className="h-4 w-4 text-gold" /> Add a team
-        </p>
-        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-          <Input
-            value={newTeamCode}
-            onChange={(e) => setNewTeamCode(e.target.value)}
-            placeholder="Code, e.g. RCB"
-            maxLength={5}
-            className="bg-black/50 border-gold/30 text-white sm:w-32"
-          />
-          <Input
-            value={newTeamName}
-            onChange={(e) => setNewTeamName(e.target.value)}
-            placeholder="Team name"
-            className="bg-black/50 border-gold/30 text-white sm:flex-1"
-          />
-          <input
-            type="color"
-            value={newTeamColor}
-            onChange={(e) => setNewTeamColor(e.target.value)}
-            className="h-10 w-12 rounded-md border border-gold/30 bg-black/50 cursor-pointer"
-            title="Team color"
-          />
-          <Button
-            onClick={handleAddTeam}
-            disabled={isAddingTeam || !newTeamCode.trim() || !newTeamName.trim()}
-            className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            {isAddingTeam ? "Adding…" : "Add Team"}
-          </Button>
-        </div>
-        {addTeamError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
-            <AlertCircle className="h-4 w-4" /> {addTeamError}
+      {/* Add team form — hidden when locked, same reasoning as Add Player above */}
+      {!locked && (
+        <div className="border-t border-gold/10 pt-4">
+          <p className="text-gray-400 text-sm mb-3 flex items-center gap-1.5">
+            <Users className="h-4 w-4 text-gold" /> Add a team
           </p>
-        )}
-      </div>
+          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+            <Input
+              value={newTeamCode}
+              onChange={(e) => setNewTeamCode(e.target.value)}
+              placeholder="Code, e.g. RCB"
+              maxLength={5}
+              className="bg-black/50 border-gold/30 text-white sm:w-32"
+            />
+            <Input
+              value={newTeamName}
+              onChange={(e) => setNewTeamName(e.target.value)}
+              placeholder="Team name"
+              className="bg-black/50 border-gold/30 text-white sm:flex-1"
+            />
+            <input
+              type="color"
+              value={newTeamColor}
+              onChange={(e) => setNewTeamColor(e.target.value)}
+              className="h-10 w-12 rounded-md border border-gold/30 bg-black/50 cursor-pointer"
+              title="Team color"
+            />
+            <Button
+              onClick={handleAddTeam}
+              disabled={isAddingTeam || !newTeamCode.trim() || !newTeamName.trim()}
+              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              {isAddingTeam ? "Adding…" : "Add Team"}
+            </Button>
+          </div>
+          {addTeamError && (
+            <p className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+              <AlertCircle className="h-4 w-4" /> {addTeamError}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

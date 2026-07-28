@@ -1,6 +1,14 @@
 "use client";
-import { CheckCircle2, Radio } from "lucide-react";
+import { CheckCircle2, Radio, ChevronLeft } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
+
+/** Strips the "W:"/"L:" bracket-side prefix DoubleElimBoard uses on
+ *  aFrom/bFrom labels (e.g. "W:qf1" -> "qf1"), so a TBD row can show a
+ *  clean "Winner of qf1" hint the same way TournamentBracket's own
+ *  TeamRow does for single-elim brackets. */
+function stripPrefix(label: string | null | undefined): string | null {
+  return label ? label.replace(/^[WL]:/, "") : null;
+}
 
 /**
  * Read-only counterpart to MatchResultCard, for surfaces where nobody
@@ -9,8 +17,13 @@ import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBrac
  * tokens as MatchResultCard (and TournamentBracket's own MatchCard) so a
  * public page doesn't look visually inconsistent with the admin one, but
  * there is no score input, no Save button, and no tie-break UI anywhere
- * in this component. If a match hasn't been played yet it just says so;
- * if it's completed it shows the recorded score and a winner checkmark.
+ * in this component.
+ *
+ * Every match — filled, half-filled, empty, or a bye — renders the same
+ * card shell with two team rows. An empty slot just means both rows
+ * render in their dashed "To Be Determined" placeholder state (matching
+ * TournamentBracket's single-elim look) rather than collapsing into a
+ * one-line text-only box.
  */
 export default function MatchResultCardStatic({
   match,
@@ -27,38 +40,25 @@ export default function MatchResultCardStatic({
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
 }) {
-  const isBye = match.teamB?.code === "BYE" || match.teamA?.code === "BYE";
+  const aIsBye = match.teamA?.code === "BYE";
+  const bIsBye = match.teamB?.code === "BYE";
+  const isBye = aIsBye || bIsBye;
 
-  // Nothing assigned yet — empty slot.
-  if (!match.teamA && !match.teamB) {
-    return (
-      <div
-        ref={cardRef}
-        id={`match-card-${match.id}`}
-        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
-      >
-        <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
-        <p className="mt-1 text-[11px] font-label-mono text-outline">Waiting for teams</p>
-      </div>
-    );
-  }
+  // A "BYE" slot renders exactly like an empty slot (dashed placeholder
+  // row) rather than as a real team — just labeled "Bye" instead of "To
+  // Be Determined" — so the bye case doesn't need its own layout at all.
+  const teamA = aIsBye ? null : match.teamA;
+  const teamB = bIsBye ? null : match.teamB;
+  const bothRealAssigned = !!match.teamA && !!match.teamB && !isBye;
 
-  // One side was a bye — show plainly, nothing to score.
+  let footer: string | null = null;
   if (isBye) {
-    const realTeam = match.teamA?.code !== "BYE" ? match.teamA : match.teamB;
-    return (
-      <div
-        ref={cardRef}
-        id={`match-card-${match.id}`}
-        className="rounded-xl border border-dashed border-border-overlay bg-background/40 px-3 py-2.5"
-      >
-        <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
-        <p className="mt-1 text-[11px] font-label-mono text-outline">{realTeam?.name ?? "TBD"} — Bye</p>
-      </div>
-    );
+    footer = "Bye — advances automatically";
+  } else if (!match.teamA && !match.teamB) {
+    footer = "Waiting for teams";
+  } else if (!bothRealAssigned) {
+    footer = "Waiting for opponent";
   }
-
-  const bothAssigned = !!match.teamA && !!match.teamB;
 
   return (
     <div
@@ -86,25 +86,29 @@ export default function MatchResultCardStatic({
         </div>
 
         <StaticTeamRow
-          team={match.teamA}
+          team={teamA}
           status={match.status}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
+          placeholderLabel={aIsBye ? "Bye" : "To Be Determined"}
+          fromLabel={!teamA ? stripPrefix(match.aFrom) : null}
         />
         <StaticTeamRow
-          team={match.teamB}
+          team={teamB}
           status={match.status}
           hoveredTeamCode={hoveredTeamCode}
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
+          placeholderLabel={bIsBye ? "Bye" : "To Be Determined"}
+          fromLabel={!teamB ? stripPrefix(match.bFrom) : null}
         />
 
-        {!bothAssigned && (
+        {footer && (
           <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-outline mt-0.5">
-            Waiting for opponent
+            {footer}
           </p>
         )}
       </div>
@@ -119,6 +123,8 @@ function StaticTeamRow({
   onTeamHover,
   onTeamClick,
   pinnedTeamCode,
+  placeholderLabel = "To Be Determined",
+  fromLabel = null,
 }: {
   team: TeamNode | null;
   status: MatchNode["status"];
@@ -126,6 +132,13 @@ function StaticTeamRow({
   onTeamHover?: (code: string | null) => void;
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
+  /** Text shown in place of the team name when this slot is empty.
+   *  "To Be Determined" for a normal open slot, "Bye" for a bye slot. */
+  placeholderLabel?: string;
+  /** When the slot is empty and we know which match feeds it, shows a
+   *  small "Winner of X" hint under the placeholder — same as
+   *  TournamentBracket's single-elim TeamRow. Ignored for bye slots. */
+  fromLabel?: string | null;
 }) {
   const isTBD = !team;
   const isHovered = !!team && hoveredTeamCode === team.code;
@@ -164,13 +177,21 @@ function StaticTeamRow({
             ?
           </span>
         )}
-        <span
-          className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate ${
-            isTBD ? "text-outline font-medium" : team.isWinner ? "text-theme-orange" : "text-on-surface"
-          }`}
-        >
-          {isTBD ? "To Be Determined" : team.name}
-        </span>
+        <div className="leading-none min-w-0">
+          <span
+            className={`font-label-mono font-bold text-xs uppercase tracking-wide truncate block ${
+              isTBD ? "text-outline font-medium" : team.isWinner ? "text-theme-orange" : "text-on-surface"
+            }`}
+          >
+            {isTBD ? placeholderLabel : team.name}
+          </span>
+          {isTBD && fromLabel && (
+            <span className="text-[9px] font-label-mono tracking-wider text-outline mt-0.5 flex items-center gap-1">
+              <ChevronLeft className="w-2.5 h-2.5 text-theme-orange/70" />
+              {`Winner of ${fromLabel}`}
+            </span>
+          )}
+        </div>
         {!isTBD && team.isWinner && <CheckCircle2 className="w-3.5 h-3.5 text-theme-orange shrink-0" strokeWidth={3} />}
         {isPinned && (
           <span className="text-[8px] font-label-mono font-black uppercase tracking-widest text-theme-orange border border-theme-orange/40 rounded px-1 py-0.5 shrink-0">

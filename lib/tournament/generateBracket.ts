@@ -120,7 +120,7 @@ export async function generateBracketForTournament(
   // explicitly saved. No rows in tournament_teams for this tournament
   // means "use everything under the linked auction" (the default).
   const { data: selectionRows, error: selErr } = await supabase
-    .from("tournament_teams")
+    .from("tournament_team_selections")
     .select("team_id")
     .eq("tournament_id", tournamentId);
   if (selErr) return { ok: false, error: selErr.message };

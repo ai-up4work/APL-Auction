@@ -31,6 +31,11 @@ export interface ManualTeam {
   logo: string;
   auctionId: string;
   players: ManualPlayer[];
+  /** True when this team is part of an explicit picker selection
+   *  (tournament_team_selections has rows for this tournament) rather than
+   *  "every team under the linked auction/board." Drives the UI's locked
+   *  add-team/add-player forms and "Selected Teams" badge in TeamsManager. */
+  locked: boolean;
 }
 
 /**
@@ -86,6 +91,14 @@ async function getOrCreateManualAuction(
  * Fetches every team for a tournament (via its linked auction, manual or
  * real), each with its player roster. Returns [] if no auction/teams
  * exist yet — same "empty until generated" pattern as bracket data.
+ *
+ * If this tournament has an explicit team selection recorded in
+ * tournament_team_selections (i.e. the person used the "Pick teams from an
+ * auction or Squad Board" picker in TeamsManager rather than linking the
+ * whole auction), only those team ids are returned, and every returned
+ * team comes back with `locked: true` — that flag is what makes the UI
+ * hide the manual add-team/add-player forms and show "Selected Teams"
+ * instead of "Linked Auction".
  */
 export async function getTeamsWithPlayers(tournamentId: string): Promise<ManualTeam[]> {
   const { data: auction, error: auctionErr } = await supabase
@@ -102,11 +115,28 @@ export async function getTeamsWithPlayers(tournamentId: string): Promise<ManualT
   }
   if (!auction) return [];
 
-  const { data: teams, error: teamsErr } = await supabase
+  const { data: selectionRows, error: selectionErr } = await supabase
+    .from("tournament_team_selections")
+    .select("team_id")
+    .eq("tournament_id", tournamentId);
+
+  if (selectionErr) {
+    console.error("getTeamsWithPlayers(selections) failed:", selectionErr.message);
+  }
+  const selectedIds = (selectionRows ?? []).map((r: any) => r.team_id);
+  const isLocked = selectedIds.length > 0;
+
+  let teamsQuery = supabase
     .from("teams")
     .select("id, code, name, color, logo")
     .eq("auction_id", auction.id)
     .order("created_at", { ascending: true });
+
+  if (isLocked) {
+    teamsQuery = teamsQuery.in("id", selectedIds);
+  }
+
+  const { data: teams, error: teamsErr } = await teamsQuery;
 
   if (teamsErr) {
     console.error("getTeamsWithPlayers(teams) failed:", teamsErr.message);
@@ -131,6 +161,7 @@ export async function getTeamsWithPlayers(tournamentId: string): Promise<ManualT
     color: t.color,
     logo: t.logo || "",
     auctionId: auction.id,
+    locked: isLocked,
     players: (players ?? [])
       .filter((p) => p.sold_to_team_id === t.id)
       .map((p) => ({
@@ -171,7 +202,7 @@ export async function addManualTeam(
     return null;
   }
 
-  return { ...data, logo: data.logo || "", auctionId, players: [] };
+  return { ...data, logo: data.logo || "", auctionId, players: [], locked: false };
 }
 
 export async function updateManualTeam(
@@ -401,7 +432,82 @@ export async function linkAuctionToTournament(auctionId: string, tournamentId: s
   return true;
 }
 
-/** Detaches whichever auction is linked, without deleting any of its data — safe to re-link later. */
+export interface LinkSelectedTeamsResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Links `sourceId` (a real auction or a Squad Board — same underlying
+ * tables either way) to this tournament, and records exactly which of its
+ * teams participate via tournament_team_selections. Called from
+ * TeamsManager's team picker ("Pick teams from an auction or Squad
+ * Board" -> confirmTeamPicker).
+ *
+ * Replaces any prior selection for this tournament outright
+ * (delete-then-insert), so re-opening the picker and confirming a new set
+ * of teams is a clean replace, not a merge with whatever was selected
+ * before — this is what backs the "Change selected teams" link in the
+ * locked-mode banner.
+ *
+ * Linking the auction itself (tournament_id) is what makes
+ * getAllLinkedAuctions / getLinkedAuctionInfo find it at all — the
+ * selections table alone doesn't establish the tournament<->auction link,
+ * it only narrows which of that auction's teams getTeamsWithPlayers
+ * returns once linked.
+ */
+export async function linkAuctionWithSelectedTeams(
+  tournamentId: string,
+  sourceId: string,
+  teamIds: string[]
+): Promise<LinkSelectedTeamsResult> {
+  if (teamIds.length === 0) {
+    return { ok: false, error: "Pick at least one team." };
+  }
+
+  const { error: linkErr } = await supabase
+    .from("auctions")
+    .update({ tournament_id: tournamentId })
+    .eq("id", sourceId);
+
+  if (linkErr) {
+    console.error("linkAuctionWithSelectedTeams(link) failed:", linkErr.message);
+    return { ok: false, error: "Couldn't link that auction/Squad Board — please try again." };
+  }
+
+  const { error: clearErr } = await supabase
+    .from("tournament_team_selections")
+    .delete()
+    .eq("tournament_id", tournamentId);
+
+  if (clearErr) {
+    console.error("linkAuctionWithSelectedTeams(clear) failed:", clearErr.message);
+    return { ok: false, error: "Couldn't update your team selection — please try again." };
+  }
+
+  const { error: insertErr } = await supabase
+    .from("tournament_team_selections")
+    .insert(teamIds.map((teamId) => ({ tournament_id: tournamentId, team_id: teamId })));
+
+  if (insertErr) {
+    console.error("linkAuctionWithSelectedTeams(insert) failed:", insertErr.message);
+    return { ok: false, error: "Couldn't save your team selection — please try again." };
+  }
+
+  return { ok: true };
+}
+
+/** Detaches whichever auction is linked, without deleting any of its data — safe to re-link later.
+ *
+ *  NOTE: this intentionally does NOT clear tournament_team_selections.
+ *  Those rows are keyed by tournament_id + team_id and are harmless to
+ *  leave behind — if the same auction/board is re-linked later via
+ *  linkAuctionWithSelectedTeams, that function clears and replaces the
+ *  selection itself. If a *different* source is linked instead via the
+ *  plain "whole auction" path (linkAuctionToTournament), stale selection
+ *  rows pointing at the old auction's team ids simply won't match any
+ *  team under the new auction_id, so getTeamsWithPlayers's `.in(...)`
+ *  filter naturally returns nothing extra — they're inert, not a bug. */
 export async function unlinkAuctionFromTournament(auctionId: string): Promise<boolean> {
   const { error } = await supabase.from("auctions").update({ tournament_id: null }).eq("id", auctionId);
   if (error) {

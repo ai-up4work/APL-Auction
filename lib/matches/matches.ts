@@ -1,42 +1,24 @@
 // lib/matches/matches.ts
 // ─────────────────────────────────────────────────────────────────────────
-// Manual match creation, linking to bracket_matches, and deletion.
+// Bracket-fixture match creation/linking, and deletion.
 //
-// IMPORTANT SCHEMA NOTE:
-// `matches.auction_id` is a `text` column that is NOT NULL and UNIQUE — it
-// is NOT a foreign key to `auctions.id` in this table. In practice it's
-// used as a free-text session code (the live-scoring room code). Manual
-// matches created here get a generated UUID-shaped code (see
-// generateSessionCode for why it has to look like a real UUID).
+// Manual, unlinked match creation (the old "Manual Matches" section in
+// MatchesManager) has been removed from the UI — every match for a
+// tournament now traces back to a bracket fixture. createManualMatch /
+// getStandaloneMatchesForTournament / deleteStandaloneMatch are left here,
+// unused, in case anything else in the app still references them; nothing
+// in the current UI calls them anymore.
 //
-// `matches` also has no `tournament_id` column. To know which tournament a
-// manual match belongs to (for both fixture-linked and fully standalone
-// matches), we stash `tournamentId` inside `match_setup` (jsonb) and filter
-// on it with PostgREST's `->>` operator. If you'd rather have a real
-// column, add `tournament_id uuid references tournaments(id)` to `matches`
-// and swap the `match_setup->>tournamentId` filters below for a plain
-// `.eq("tournament_id", tournamentId)` — the rest of this file doesn't
-// need to change.
+// createMatchForFixture writes match_setup in the SAME flat team1/team2
+// shape createFriendlyMatch (organization.ts) uses — this is the shape
+// /match/[id]/edit's fromRawSetup already parses (team1.name, a flat
+// `squads` array keyed by team short code). Previously this used a
+// different shape (teamA/teamB) that the edit page couldn't read at all,
+// so a fixture-created match's teams/squads showed up blank when you
+// tried to edit them. Fixed here.
 //
-// MATCH_SETUP SHAPE:
-// This mirrors the JSON shape used elsewhere in the app (e.g. the
-// auction/live-match setup flow) so a match created here plugs into the
-// same downstream consumers without translation:
-//
-//   {
-//     teamA: { name, color, squad, squadPlayers, logoUrl, shortCode },
-//     teamB: { ...same },
-//     venue, format, season, matchMeta, matchTitle,
-//     tossWinner, tossDecision, tournament, kickoffTime,
-//     matchNumber, tournamentName, tournamentLogoUrl
-//   }
-//
-// `tournamentId` and `overs` are NOT part of that public shape but are
-// still tracked internally: `tournamentId` for the tournament-filter query
-// above, and `overs` because match-detail rendering (over limits, CRR/RRR)
-// needs a numeric ball count that `format` alone doesn't give you. Both
-// are optional extra keys on the stored jsonb and are simply ignored by
-// any other consumer that only knows about the public shape.
+// `matches.auction_id` is NOT a real link to a bidding auction — every
+// match self-references its own `id` (see the earlier auction_id fix).
 // ─────────────────────────────────────────────────────────────────────────
 
 import { supabase } from "@/lib/supabase"
@@ -45,15 +27,13 @@ export interface SquadPlayer {
   id: string
   name: string
   role: string
+  /** Whether this player is in the starting XI vs. on the bench. */
   xi: boolean
-  imageUrl?: string
 }
 
 export interface ManualMatchTeam {
   name: string
   color: string
-  /** Quick-reference list of player names/ids on the squad. Kept in sync
-   *  with squadPlayers — derived automatically, not edited directly. */
   squad: string[]
   squadPlayers: SquadPlayer[]
   logoUrl: string
@@ -75,7 +55,6 @@ export interface MatchSetup {
   matchNumber: string
   tournamentName: string
   tournamentLogoUrl: string
-  // ── internal-only, not part of the shared public shape ──
   tournamentId: string | null
   overs: number
 }
@@ -111,7 +90,13 @@ export interface FixtureRow {
   teamAId: string | null
   teamBId: string | null
   teamAName: string | null
+  teamACode: string | null
+  teamAColor: string | null
+  teamALogo: string | null
   teamBName: string | null
+  teamBCode: string | null
+  teamBColor: string | null
+  teamBLogo: string | null
   winnerTeamId: string | null
   scoreA: number | null
   scoreB: number | null
@@ -119,6 +104,21 @@ export interface FixtureRow {
   scheduledAt: string | null
   status: string
   overlayMatchId: string | null
+}
+
+/** Minimal shape needed to create a match for a fixture — a plain
+ *  FixtureRow satisfies this structurally, but callers that only have a
+ *  bare bracket_matches row (generateBracket.ts, advanceResultToNextMatches
+ *  in bracketData.ts) don't need to fabricate the extra display-only
+ *  fields (bracketType, position, scoreA/B, status, etc.) just to call
+ *  createMatchForFixture. */
+export interface FixtureLike {
+  id: string
+  teamAId: string | null
+  teamBId: string | null
+  round: number
+  venue?: string | null
+  scheduledAt?: string | null
 }
 
 type Result<T> = { ok: true } & T | { ok: false; error: string }
@@ -135,16 +135,9 @@ function emptyTeam(name = "", shortCode = "", color = "#c9971f"): ManualMatchTea
 }
 
 function generateSessionCode(): string {
-  // `matches.auction_id` is typed `text`, but a DB trigger
-  // (trg_check_auction_destination_on_matches) casts it to `uuid` before
-  // calling check_auction_destination(uuid) — a slug like "manual-xxx"
-  // fails that cast with "invalid input syntax for type uuid". Generating
-  // a real UUID string here keeps the column unique (still enforced by
-  // its UNIQUE constraint) while satisfying the trigger's cast.
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
   }
-  // Fallback for environments without crypto.randomUUID (older browsers).
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
     const v = c === "x" ? r : (r & 0x3) | 0x8
@@ -153,7 +146,8 @@ function generateSessionCode(): string {
 }
 
 /** Keeps `squad` (names) in lockstep with `squadPlayers` (full detail) so
- *  callers only ever need to manage one list. */
+ *  callers only ever need to manage one list. Only used by the (now
+ *  unused-by-UI) createManualMatch/updateManualMatch below. */
 function withDerivedSquad(team: ManualMatchTeam): ManualMatchTeam {
   return { ...team, squad: team.squadPlayers.map((p) => p.name) }
 }
@@ -184,7 +178,10 @@ function rowToSummary(row: any): MatchSummary {
   }
 }
 
-// ── Create a manual match row (no bracket link yet) ────────────────────
+/** UNUSED BY THE CURRENT UI — left in place in case anything else in the
+ *  app still calls it. The "Manual Matches" section that used to call
+ *  this was removed from MatchesManager.tsx; every match now traces back
+ *  to a bracket fixture via createMatchForFixture below. */
 async function insertMatch(params: {
   orgId: string
   tournamentId: string | null
@@ -241,7 +238,7 @@ async function insertMatch(params: {
   return { ok: true, matchId: data.id, sessionCode: data.auction_id }
 }
 
-// ── Standalone match: not tied to any bracket fixture ───────────────────
+/** UNUSED BY THE CURRENT UI — see insertMatch note above. */
 export async function createManualMatch(input: {
   orgId: string
   tournamentId: string | null
@@ -264,10 +261,7 @@ export async function createManualMatch(input: {
   return insertMatch(input)
 }
 
-// ── Update an existing manual match's setup fields ──────────────────────
-// Merges the given partial fields into the existing match_setup so an
-// edit form can be a simple "patch" rather than needing to resend the
-// entire setup blob every time.
+/** UNUSED BY THE CURRENT UI — see insertMatch note above. */
 export async function updateManualMatch(
   matchId: string,
   patch: Partial<Omit<MatchSetup, "tournamentId">>
@@ -307,11 +301,10 @@ export async function deleteStandaloneMatch(matchId: string): Promise<Result<{}>
   return { ok: true }
 }
 
+/** UNUSED BY THE CURRENT UI — see insertMatch note above. */
 export async function getStandaloneMatchesForTournament(
   tournamentId: string
 ): Promise<Result<{ matches: MatchSummary[] }>> {
-  // Pull every match tagged with this tournament, then exclude the ones
-  // already linked to a bracket fixture so the two lists don't overlap.
   const { data: rows, error } = await supabase
     .from("matches")
     .select("id, auction_id, match_setup, match_setup_completed, created_at")
@@ -335,6 +328,7 @@ export async function getStandaloneMatchesForTournament(
 }
 
 // ── Fixture-linked matches (bracket_matches → matches via overlay) ──────
+
 export async function getFixturesWithMatches(
   tournamentId: string
 ): Promise<Result<{ fixtures: FixtureRow[] }>> {
@@ -343,8 +337,8 @@ export async function getFixturesWithMatches(
     .select(
       `id, round, position, bracket_type, team_a_id, team_b_id, winner_team_id,
        score_a, score_b, venue, scheduled_at, status, overlay_match_id,
-       team_a:teams!bracket_matches_team_a_id_fkey(name),
-       team_b:teams!bracket_matches_team_b_id_fkey(name)`
+       team_a:teams!bracket_matches_team_a_id_fkey(name, code, color, logo),
+       team_b:teams!bracket_matches_team_b_id_fkey(name, code, color, logo)`
     )
     .eq("tournament_id", tournamentId)
     .order("round", { ascending: true })
@@ -360,7 +354,13 @@ export async function getFixturesWithMatches(
     teamAId: r.team_a_id,
     teamBId: r.team_b_id,
     teamAName: r.team_a?.name ?? null,
+    teamACode: r.team_a?.code ?? null,
+    teamAColor: r.team_a?.color ?? null,
+    teamALogo: r.team_a?.logo ?? null,
     teamBName: r.team_b?.name ?? null,
+    teamBCode: r.team_b?.code ?? null,
+    teamBColor: r.team_b?.color ?? null,
+    teamBLogo: r.team_b?.logo ?? null,
     winnerTeamId: r.winner_team_id,
     scoreA: r.score_a,
     scoreB: r.score_b,
@@ -373,8 +373,31 @@ export async function getFixturesWithMatches(
   return { ok: true, fixtures }
 }
 
+/**
+ * Creates a `matches` row for a bracket fixture and links it back via
+ * `bracket_matches.overlay_match_id`. Pulls each team's real color/logo
+ * (from `teams`) and its currently-sold roster (from `players`) so a
+ * fixture-created match carries exactly what the old standalone
+ * match-creation form used to let you set by hand — nothing is lost by
+ * going through the bracket instead of typing it manually.
+ *
+ * Writes match_setup in the flat team1/team2 shape (matching
+ * createFriendlyMatch in organization.ts) — this is the shape
+ * /match/[id]/edit's fromRawSetup already parses correctly. `rosterLocked:
+ * true` because these teams' rosters live on the real teams/players
+ * tables (via the auction or Squad Board the tournament is linked to);
+ * editing a player here should happen at the source, same rule
+ * organization.ts's createFriendlyMatch already applies for auction-
+ * sourced matches.
+ *
+ * Called automatically — from generateBracketForTournament for round 1,
+ * and from advanceResultToNextMatches whenever a later fixture gets both
+ * its teams filled in — as well as as a manual fallback button in
+ * MatchesManager for the rare case auto-creation didn't fire (e.g. an
+ * older bracket generated before this existed).
+ */
 export async function createMatchForFixture(
-  fixture: FixtureRow,
+  fixture: FixtureLike,
   orgId: string,
   tournamentId: string
 ): Promise<Result<{ matchId: string; sessionCode: string }>> {
@@ -382,38 +405,80 @@ export async function createMatchForFixture(
     return { ok: false, error: "Both teams need to be decided by the bracket before a match can be created." }
   }
 
-  const created = await insertMatch({
-    orgId,
-    tournamentId,
-    teamA: emptyTeam(
-      fixture.teamAName ?? "Team A",
-      (fixture.teamAName ?? "TBA").slice(0, 3).toUpperCase()
-    ),
-    teamB: emptyTeam(
-      fixture.teamBName ?? "Team B",
-      (fixture.teamBName ?? "TBB").slice(0, 3).toUpperCase()
-    ),
-    venue: fixture.venue ?? "",
-    kickoffTime: fixture.scheduledAt ?? "",
-    matchMeta: `Round ${fixture.round}`,
-  })
+  const { data: teamRows, error: teamErr } = await supabase
+    .from("teams")
+    .select("id, name, code, color, logo")
+    .in("id", [fixture.teamAId, fixture.teamBId])
 
-  if (!created.ok) return created
+  if (teamErr || !teamRows || teamRows.length !== 2) {
+    return { ok: false, error: teamErr?.message ?? "Couldn't load the fixture's teams." }
+  }
+  const tA = teamRows.find((t) => t.id === fixture.teamAId)!
+  const tB = teamRows.find((t) => t.id === fixture.teamBId)!
 
-  const { error } = await supabase
-    .from("bracket_matches")
-    .update({
-      overlay_match_id: created.matchId,
-      status: "live",
-      result_source: "overlay",
-    })
-    .eq("id", fixture.id)
+  const team1 = { name: tA.name, short: tA.code, logo: tA.logo || "", color: tA.color || "#c9971f" }
+  const team2 = { name: tB.name, short: tB.code, logo: tB.logo || "", color: tB.color || "#c9971f" }
 
-  if (error) {
-    return { ok: false, error: `Match was created but couldn't be linked to the bracket: ${error.message}` }
+  const { data: playerRows, error: playersErr } = await supabase
+    .from("players")
+    .select("name, role, img, sold_to_team_id, owner_team_code")
+    .in("sold_to_team_id", [fixture.teamAId, fixture.teamBId])
+
+  if (playersErr) {
+    console.error("createMatchForFixture(players) failed:", playersErr.message)
   }
 
-  return created
+  const squads = (playerRows ?? []).map((p) => ({
+    name: p.name,
+    role: p.role,
+    team: p.sold_to_team_id === fixture.teamAId ? team1.short : team2.short,
+    captain: !!p.owner_team_code,
+    imageUrl: p.img || undefined,
+  }))
+
+  const newId = crypto.randomUUID()
+  const matchSetup = {
+    tournamentName: "",
+    round: `Round ${fixture.round}`,
+    team1,
+    team2,
+    venue: fixture.venue ?? "",
+    date: "",
+    time: fixture.scheduledAt ?? "",
+    toss: "",
+    overs: 20,
+    officials: { format: "", umpires: "", thirdUmpire: "", referee: "" },
+    squads,
+    rosterLocked: true,
+  }
+
+  const { data, error } = await supabase
+    .from("matches")
+    .insert({
+      id: newId,
+      // Self-referencing, matching createFriendlyMatch's fix — never
+      // reuse the fixture/tournament/auction's own id here.
+      auction_id: newId,
+      org_id: orgId,
+      match_setup: matchSetup,
+    })
+    .select("id")
+    .single()
+
+  if (error || !data) {
+    return { ok: false, error: error?.message ?? "Couldn't create the match." }
+  }
+
+  const { error: linkErr } = await supabase
+    .from("bracket_matches")
+    .update({ overlay_match_id: data.id, status: "live", result_source: "overlay" })
+    .eq("id", fixture.id)
+
+  if (linkErr) {
+    return { ok: false, error: `Match was created but couldn't be linked to the bracket: ${linkErr.message}` }
+  }
+
+  return { ok: true, matchId: data.id, sessionCode: newId }
 }
 
 export async function unlinkAndDeleteFixtureMatch(
@@ -454,7 +519,6 @@ export async function recordFixtureResult(
 
   if (error) return { ok: false, error: error.message }
 
-  // Push the winner into whichever next-round match feeds off this one.
   const { data: nextAsA, error: nextAError } = await supabase
     .from("bracket_matches")
     .select("id")

@@ -32,10 +32,14 @@ export interface DoubleElimBoardProps {
 /*  bracket has an irregular round count, so fixed columns + a        */
 /*  horizontal scroll container is the simplest thing that stays      */
 /*  correct for any bracket shape).                                   */
+/*                                                                     */
+/*  COL_W / COL_GAP / CARD_GAP are NOT fixed anymore — a board with    */
+/*  only 2-3 columns (small single-elim-ish double-elim brackets) used */
+/*  to render into the same narrow 250px columns as a big bracket,    */
+/*  which left a lot of empty canvas to the right of the 1600px stage */
+/*  and looked lost/unbalanced. They're computed per-board inside the */
+/*  component instead, scaled up when there aren't many rounds.       */
 /* ------------------------------------------------------------------ */
-const COL_W = 250;
-const COL_GAP = 70;
-const CARD_GAP = 28;
 const HEADER_H = 34;
 // Reserved vertical space for each bracket's section header (the
 // "Winners bracket" / "Losers bracket" banner). Bumped up from the old
@@ -54,16 +58,6 @@ const HEADER_RIGHT_PAD = 32;
 // NOTE: kept at its original value on purpose — changing this shifts
 // every column in the board, which is not what we want here.
 const LEFT_MARGIN = 40;
-
-function colX(i: number) {
-  return LEFT_MARGIN + i * (COL_W + COL_GAP);
-}
-
-/** The x-coordinate of the empty gap immediately before column i. Always
- *  clear of cards, since cards only ever occupy [colX(i), colX(i)+COL_W]. */
-function laneXBefore(i: number) {
-  return colX(i) - COL_GAP / 2;
-}
 
 /** Connects two cards in different columns via a rounded elbow whose
  *  vertical run sits at the midpoint between the source's right edge and
@@ -229,6 +223,29 @@ export default function DoubleElimBoard({
   const [hoveredTeamCode, setHoveredTeamCode] = useState<string | null>(null);
   const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
   const activeTeamCode = hoveredTeamCode || selectedTeamCode;
+
+  // Small double-elim boards (few rounds) used to render into the same
+  // fixed 250px columns as a big bracket, which left a lot of empty
+  // canvas to the right of the 1600px stage and looked thin/lost. Scale
+  // the column width, column gap, and leaf-card gap up when there
+  // aren't many rounds so a 2-3 column board fills the stage the same
+  // way a bigger bracket naturally does. `+1` accounts for the grand
+  // final column, which always renders regardless of round count.
+  const totalCols = Math.max(data.winners.length, data.losers.length) + 1;
+  const spacious = totalCols <= 3;
+  const COL_W = spacious ? 340 : 250;
+  const COL_GAP = spacious ? 160 : 70;
+  const CARD_GAP = spacious ? 40 : 28;
+
+  function colX(i: number) {
+    return LEFT_MARGIN + i * (COL_W + COL_GAP);
+  }
+
+  /** The x-coordinate of the empty gap immediately before column i. Always
+   *  clear of cards, since cards only ever occupy [colX(i), colX(i)+COL_W]. */
+  function laneXBefore(i: number) {
+    return colX(i) - COL_GAP / 2;
+  }
 
   function handleTeamClick(code: string) {
     setSelectedTeamCode((prev) => (prev === code ? null : code));

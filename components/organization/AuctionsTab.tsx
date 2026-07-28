@@ -3,19 +3,24 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy } from "lucide-react"
+import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy, Shield, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   getAuctionsForOrg,
-  createAuction,
+  createAuctionWithPoolSeeds,
   deleteAuction,
   getTournamentsForOrg,
+  getTeamPool,
+  getPlayerBank,
   type OrgSummary,
   type AuctionSummary,
   type TournamentSummary,
+  type PoolTeam,
+  type BankPlayer,
 } from "@/lib/organization/organization"
+import { PoolTeamPickerCard, BankPlayerPickerCard } from "@/components/organization/SquadBoardTab"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -25,6 +30,10 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
       {children}
     </div>
   )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel block mb-1.5">{children}</label>
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -123,32 +132,90 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  // ── Pre-fill: Team Pool teams + Player Bank players — two INDEPENDENT
+  // multi-selects. Teams come in ready to bid with; players come in as
+  // available/unsold pool entries. Neither is paired with the other here
+  // — that pairing only happens through real bidding (or Shuffle ->
+  // Launch) once the auction is open, same as if everything had been
+  // typed in by hand. ──
+  const [poolTeams, setPoolTeams] = useState<PoolTeam[]>([])
+  const [poolTeamsLoaded, setPoolTeamsLoaded] = useState(false)
+  const [bankPlayers, setBankPlayers] = useState<BankPlayer[]>([])
+  const [bankPlayersLoaded, setBankPlayersLoaded] = useState(false)
+
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set())
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set())
+
   const reload = () => getAuctionsForOrg(org.id).then((a) => setAuctions(a))
 
   useEffect(() => {
     reload().then(() => setLoaded(true))
     getTournamentsForOrg(org.id).then(setTournaments)
+    getTeamPool(org.id).then((t) => {
+      setPoolTeams(t)
+      setPoolTeamsLoaded(true)
+    })
+    getPlayerBank(org.id).then((p) => {
+      setBankPlayers(p)
+      setBankPlayersLoaded(true)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id])
+
+  const toggleTeam = (id: string) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const togglePlayer = (id: string) => {
+    setSelectedPlayerIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const resetPrefill = () => {
+    setSelectedTeamIds(new Set())
+    setSelectedPlayerIds(new Set())
+  }
 
   const handleCreate = async () => {
     if (!name.trim()) return
     setIsCreating(true)
     setCreateError(null)
-    const id = await createAuction(org.id, userId, {
-      name: name.trim(),
-      tournamentId: tournamentId || undefined,
-    })
+
+    const { id, teamErrors, playerErrors } = await createAuctionWithPoolSeeds(
+      org.id,
+      userId,
+      { name: name.trim(), tournamentId: tournamentId || undefined },
+      Array.from(selectedTeamIds),
+      Array.from(selectedPlayerIds)
+    )
     setIsCreating(false)
     if (!id) {
       setCreateError("Couldn't create the auction — please try again.")
       return
     }
+    if (teamErrors.length > 0 || playerErrors.length > 0) {
+      setCreateError(
+        [
+          teamErrors.length > 0 ? `Teams not added: ${teamErrors.join(", ")}` : null,
+          playerErrors.length > 0 ? `Players not added: ${playerErrors.join(", ")}` : null,
+        ]
+          .filter(Boolean)
+          .join(" — ")
+      )
+    }
     setName("")
     setTournamentId("")
-    // Jumps straight into the admin dashboard for the new auction.
-    // Swap for `await reload()` instead if you'd rather stay on this
-    // page and create several auctions before configuring any of them.
+    resetPrefill()
+    // Jumps straight into the admin dashboard for the new auction, which
+    // already has whatever teams/pool players were pre-filled above —
+    // teams ready to bid with, players sitting in the pool unsold.
     router.push(`/auction/admin/${id}`)
   }
 
@@ -206,20 +273,103 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
               ))}
             </select>
           )}
-          <Button
-            onClick={handleCreate}
-            disabled={!name.trim() || isCreating}
-            className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 whitespace-nowrap"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating…" : "Create Auction"}
-          </Button>
         </div>
+
+        {/* ── Pre-fill: Team Pool teams (independent multi-select) ── */}
+        <div className="mt-5">
+          <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+            <FieldLabel>Pre-fill teams from Team Pool (optional)</FieldLabel>
+            {poolTeamsLoaded && poolTeams.length > 0 && (
+              <span className="text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border border-white/15 text-gray-400">
+                {selectedTeamIds.size} selected
+              </span>
+            )}
+          </div>
+          <p className="text-gray-500 text-xs mb-3">
+            These teams are copied onto the new auction ready to bid with — the pool entry itself is untouched.
+          </p>
+
+          {!poolTeamsLoaded ? (
+            <p className="text-gray-500 text-sm flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading team pool…
+            </p>
+          ) : poolTeams.length === 0 ? (
+            <p className="text-gray-500 text-sm italic">
+              No teams in the pool yet — add some from the <span className="text-gold">Team Pool</span> tab first.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
+              {poolTeams.map((t) => (
+                <PoolTeamPickerCard
+                  key={t.id}
+                  team={t}
+                  selected={selectedTeamIds.has(t.id)}
+                  onSelect={() => toggleTeam(t.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Pre-fill: Player Bank players (independent multi-select) ── */}
+        <div className="mt-5">
+          <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+            <FieldLabel>Pre-fill players from Player Bank (optional)</FieldLabel>
+            {bankPlayersLoaded && bankPlayers.length > 0 && (
+              <span className="text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border border-white/15 text-gray-400">
+                {selectedPlayerIds.size} selected
+              </span>
+            )}
+          </div>
+          <p className="text-gray-500 text-xs mb-3">
+            These players are copied into the new auction's pool as available/unsold — not assigned to any team.
+            They go through Shuffle and live bidding exactly like a player typed in by hand.
+          </p>
+
+          {!bankPlayersLoaded ? (
+            <p className="text-gray-500 text-sm flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading player bank…
+            </p>
+          ) : bankPlayers.length === 0 ? (
+            <p className="text-gray-500 text-sm italic">
+              No players in the bank yet — add some from the <span className="text-gold">Player Bank</span> tab first.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
+              {bankPlayers.map((p) => (
+                <BankPlayerPickerCard
+                  key={p.id}
+                  player={p}
+                  selected={selectedPlayerIds.has(p.id)}
+                  onSelect={() => togglePlayer(p.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {(selectedTeamIds.size > 0 || selectedPlayerIds.size > 0) && (
+          <button
+            onClick={resetPrefill}
+            className="mt-3 text-[10px] uppercase tracking-widest font-cinzel text-gray-500 hover:text-gold"
+          >
+            Clear pre-fill selection
+          </button>
+        )}
+
         {createError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mt-4">
             <AlertCircle className="h-4 w-4" /> {createError}
           </p>
         )}
+        <Button
+          onClick={handleCreate}
+          disabled={!name.trim() || isCreating}
+          className="bg-gold hover:bg-gold/90 ml-4 text-black font-bold disabled:opacity-50 mt-4"
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          {isCreating ? "Creating…" : "Create Auction"}
+        </Button>
       </Panel>
 
       <div>

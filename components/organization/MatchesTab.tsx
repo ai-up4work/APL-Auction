@@ -20,6 +20,7 @@ import {
   Calendar,
   Clock,
   ChevronDown,
+  Trophy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -134,9 +135,13 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
 /*  venue/date/time strip pulled straight from match_setup. A brand-new  */
 /*  standalone match (blank venue/date/time) just omits that section     */
 /*  entirely rather than showing empty placeholders.                     */
+/*                                                                       */
+/*  Exported so the Tournaments tab can reuse the exact same card for    */
+/*  the matches that live inside a bracket — one visual language for a   */
+/*  "match" everywhere it shows up, whether it's standalone or linked.   */
 /* ────────────────────────────────────────────────────────────────── */
 
-function MatchCard({
+export function MatchCard({
   match,
   selected,
   onToggleSelect,
@@ -145,17 +150,18 @@ function MatchCard({
   deleting,
 }: {
   match: FriendlyMatchSummary
-  selected: boolean
-  onToggleSelect: () => void
+  selected?: boolean
+  onToggleSelect?: () => void
   onSetupOverlay: () => void
   onDelete: () => void
   deleting: boolean
 }) {
   const hasDetails = Boolean(match.venue || match.date || match.time)
+  const selectable = Boolean(onToggleSelect) && !match.tournamentName
 
   return (
     <div className="group relative bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-lg overflow-hidden transition-colors flex flex-col">
-      {!match.tournamentName && (
+      {selectable && (
         <button
           onClick={onToggleSelect}
           className="absolute top-3 left-3 z-20 text-gray-300 hover:text-gold bg-black/60 rounded p-1"
@@ -256,7 +262,15 @@ function MatchCard({
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  MATCHES — quick-ref cards, search, multi-select + bulk delete,      */
-/*  realtime sync with admin panels                                    */
+/*  realtime sync with admin panels.                                   */
+/*                                                                       */
+/*  Standalone only: this tab is scoped to matches that AREN'T part of  */
+/*  a tournament bracket. A match that gets connected to a bracket slot */
+/*  disappears from here and shows up under the Tournaments tab instead */
+/*  — one home per match, so there's never a "which tab do I check"     */
+/*  question. Every list/search/select/bulk-delete operation below      */
+/*  works off `standaloneMatches`, not the raw `matches` fetch, so a    */
+/*  freshly-linked match can't briefly double up in both places.        */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -333,7 +347,10 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
 
   // Real-time sync: any change to this org's matches, or to the bracket /
   // overlay tables that affect how a match's status badges render, triggers
-  // a silent refetch so the dashboard stays current with admin panels.
+  // a silent refetch so the dashboard stays current with admin panels. This
+  // is also what makes a match vanish from this tab the moment it gets
+  // connected to a bracket slot elsewhere — the refetch picks up its new
+  // tournamentName and `standaloneMatches` below filters it out.
   useEffect(() => {
     const channel = subscribeToOrgMatches(org.id, () => {
       reload()
@@ -491,22 +508,26 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     })
   }
 
+  // Scope this whole tab to standalone matches only — tournament-linked
+  // matches are managed and displayed from the Tournaments tab, next to
+  // the bracket they belong to, instead of duplicated here.
+  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentName), [matches])
+  const tournamentMatchCount = matches.length - standaloneMatches.length
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return matches
-    return matches.filter(
+    if (!q) return standaloneMatches
+    return standaloneMatches.filter(
       (m) =>
         m.team1Name.toLowerCase().includes(q) ||
         m.team2Name.toLowerCase().includes(q) ||
-        m.round.toLowerCase().includes(q) ||
-        (m.tournamentName ?? "").toLowerCase().includes(q)
+        m.round.toLowerCase().includes(q)
     )
-  }, [matches, query])
+  }, [standaloneMatches, query])
 
-  // Only standalone (non-bracket-linked) matches in the current filtered
-  // view are selectable for bulk delete — bracket-linked ones must be
-  // disconnected on the tournament page first, same rule as single delete.
-  const selectableIds = useMemo(() => filtered.filter((m) => !m.tournamentName).map((m) => m.id), [filtered])
+  // Everything in this tab is standalone by definition now, so every
+  // visible match is selectable — no more "some rows are locked" carve-out.
+  const selectableIds = useMemo(() => filtered.map((m) => m.id), [filtered])
   const allSelectableChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
 
   const toggleSelectAll = () => {
@@ -529,7 +550,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
     if (selected.size === 0) return
     const ok = await confirm({
       title: `Delete ${selected.size} match${selected.size === 1 ? "" : "es"}?`,
-      description: "This can't be undone. Matches with recorded play data or an active bracket link will be skipped.",
+      description: "This can't be undone. Matches with recorded play data will be skipped.",
       confirmText: `Delete ${selected.size}`,
       tone: "danger",
     })
@@ -558,8 +579,9 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
         </h2>
         <p className="text-gray-500 text-xs mb-4">
           Every match created here is standalone. A match only becomes part of a tournament when a bracket slot on
-          that tournament's page is connected to it. Teams come from a Squad Board (already rostered with players) or
-          a real auction — there's no free-typed team name option, so every match's teams stay tied to something real.
+          that tournament's page is connected to it — from that point on it's managed from the Tournaments tab, not
+          here. Teams come from a Squad Board (already rostered with players) or a real auction — there's no
+          free-typed team name option, so every match's teams stay tied to something real.
         </p>
 
         <FieldLabel>Team source</FieldLabel>
@@ -793,9 +815,9 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
       </Panel>
 
       <Panel>
-        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
           <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
-            Your Matches
+            Standalone Matches
             {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
           </h2>
           <div className="relative w-full sm:w-64">
@@ -803,18 +825,27 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search teams, round, tournament…"
+              placeholder="Search teams or round…"
               className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
             />
           </div>
         </div>
 
+        {tournamentMatchCount > 0 && (
+          <p className="flex items-center gap-1.5 text-gray-500 text-xs mb-4">
+            <Trophy className="h-3 w-3 text-gold/50" />
+            {tournamentMatchCount} tournament match{tournamentMatchCount === 1 ? "" : "es"} are managed from the{" "}
+            <span className="text-gold">Tournaments tab</span>.
+          </p>
+        )}
+        {tournamentMatchCount === 0 && <div className="mb-4" />}
+
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
-        ) : matches.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No matches yet — create one above.</p>
+        ) : standaloneMatches.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No standalone matches yet — create one above.</p>
         ) : filtered.length === 0 ? (
           <p className="text-gray-500 text-sm italic">No matches match "{query}".</p>
         ) : (
@@ -832,7 +863,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
                   className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
                 >
                   {allSelectableChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-                  {allSelectableChecked ? "Deselect all" : "Select all standalone"}
+                  {allSelectableChecked ? "Deselect all" : "Select all"}
                 </button>
                 {selected.size > 0 && (
                   <button

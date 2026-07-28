@@ -347,10 +347,7 @@ async function backfillLogosFromPool(missingLogoTeamIds: string[]): Promise<Map<
  *  Player Bank entry later does NOT retroactively update rows that were
  *  already copied. getTeamRoster calls this to fall back to the live
  *  Player Bank photo whenever `players.img` is empty, so the UI
- *  self-heals without needing a manual re-assign.
- *
- *  Two flat queries, no embedded-join guessing (same defensive pattern
- *  used elsewhere in this file). Safe to call with an empty array. */
+ *  self-heals without needing a manual re-assign. */
 async function backfillImagesFromBank(missingImgPlayerIds: string[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   if (missingImgPlayerIds.length === 0) return result;
@@ -439,6 +436,13 @@ export interface FriendlyMatchSummary {
   round: string;
   createdAt: string;
   tournamentName: string | null;
+  /** The id of the tournament this match's bracket slot belongs to, when
+   *  it's linked (via bracket_matches.tournament_id). Null for standalone
+   *  matches. Used by the Tournaments tab to group each tournament's
+   *  matches for display right alongside that tournament — kept separate
+   *  from `tournamentName` since the name alone can't be used to key a
+   *  lookup safely (two tournaments could share a name). */
+  tournamentId: string | null;
   overlayConfigured: boolean;
   /** True if this match's teams were pulled from an auction (i.e. it has
    *  a non-empty squads array in match_setup) rather than typed manually.
@@ -466,17 +470,25 @@ export async function createFriendlyMatch(
 
   let team1: { name: string; short: string; logo: string };
   let team2: { name: string; short: string; logo: string };
-  let squads: { name: string; role: string; team: string; captain?: boolean; imageUrl?: string }[] = [];  // True only when the source is a REAL bidding auction (not a Squad
+  let squads: { name: string; role: string; team: string; captain?: boolean; imageUrl?: string }[] = [];
+  // True only when the source is a REAL bidding auction (not a Squad
   // Board, and not a standalone/manual match). Computed once, here, and
   // baked into match_setup.rosterLocked below.
   let rosterLocked = false;
+  // Informational reference to whichever auction/Squad Board these teams
+  // came from — stored inside match_setup only. NEVER written to the
+  // matches.auction_id column: that column must stay unique-per-match
+  // (every match self-references its own `id`), because a source
+  // auction/Squad Board is shared across every match built from it, and
+  // reusing its id as auction_id would violate the UNIQUE constraint on
+  // the second match created from the same board, and would also make
+  // getOrCreateMatch's lookup ambiguous between matches sharing a source.
   let sourceAuctionId: string | null = null;
 
   if (input.teamSource === "manual") {
     team1 = { name: input.team1Name.trim(), short: shortCode(input.team1Name), logo: input.team1Logo?.trim() || "" };
     team2 = { name: input.team2Name.trim(), short: shortCode(input.team2Name), logo: input.team2Logo?.trim() || "" };
   } else {
-    // Store reference to the source auction/squad board
     sourceAuctionId = input.auctionId;
 
     const { data: teamRows, error: teamErr } = await supabase
@@ -495,7 +507,7 @@ export async function createFriendlyMatch(
 
     const { data: playerRows, error: playersErr } = await supabase
       .from("players")
-      .select("name, role, img, sold_to_team_id, owner_team_code")   // add img
+      .select("name, role, img, sold_to_team_id, owner_team_code")
       .in("sold_to_team_id", [input.team1Id, input.team2Id]);
 
     if (playersErr) {
@@ -507,7 +519,7 @@ export async function createFriendlyMatch(
       role: p.role,
       team: p.sold_to_team_id === input.team1Id ? team1.short : team2.short,
       captain: !!p.owner_team_code,
-      imageUrl: p.img || undefined,   // add this
+      imageUrl: p.img || undefined,
     }));
 
     // Was this pulled from a real bidding auction, or a Squad Board
@@ -540,13 +552,16 @@ export async function createFriendlyMatch(
     officials: { format: "", umpires: "", thirdUmpire: "", referee: "" },
     squads,
     rosterLocked,
+    sourceAuctionId,
   };
 
   const { data, error } = await supabase
     .from("matches")
     .insert({
       id: newId,
-      auction_id: sourceAuctionId,
+      // Always self-reference — see sourceAuctionId comment above for why
+      // this must never be input.auctionId.
+      auction_id: newId,
       org_id: orgId,
       match_setup: matchSetup,
     })
@@ -728,14 +743,7 @@ export async function addBankPlayer(
 /** Updates a Player Bank entry. If `img` is part of the patch, the new
  *  photo is also pushed out to every `players` row that was ever copied
  *  from this bank player (found via player_bank_assignments) — not just
- *  the ones whose own `img` is currently empty.
- *
- *  WHY: assignBankPlayerToTeam copies `bankPlayer.img` into the `players`
- *  row ONCE, at insert time. Previously, editing the bank player's photo
- *  afterward only helped already-assigned rows via the
- *  backfillImagesFromBank fallback in getTeamRoster — and only when the
- *  copied `img` was blank. This actively syncs the photo forward on every
- *  linked `players` row whenever the bank entry's `img` changes. */
+ *  the ones whose own `img` is currently empty. */
 export async function updateBankPlayer(playerId: string, patch: Partial<BankPlayerInput>): Promise<boolean> {
   const { error } = await supabase.from("player_bank").update(patch).eq("id", playerId);
   if (error) {
@@ -783,22 +791,7 @@ async function propagateBankPlayerImageToAssignedPlayers(bankPlayerId: string, i
 
 /** Deletes a Player Bank entry, and propagates the deletion to every
  *  `players` row that was ever copied from it (found via
- *  player_bank_assignments), plus the assignment rows themselves.
- *
- *  WHY: without this, deleting a bank player only removes the pool
- *  entry — every team/Squad Board that player was assigned onto still
- *  keeps its copied `players` row forever, now pointing at a
- *  `bank_player_id` that no longer exists in `player_bank`. Cleaning up
- *  dependents FIRST (players, then player_bank_assignments) and only then
- *  deleting the `player_bank` row also avoids a possible FK violation if
- *  `player_bank_assignments.bank_player_id` references `player_bank`
- *  without an ON DELETE CASCADE.
- *
- *  NOTE: if a rostered copy still has live-play data tied to it (e.g. a
- *  scored match references that player row), the `players` delete below
- *  can fail with a 23503 — in that case this bails out entirely and
- *  leaves the bank entry untouched, rather than deleting the pool entry
- *  while leaving an orphaned roster row behind. */
+ *  player_bank_assignments), plus the assignment rows themselves. */
 export async function deleteBankPlayer(playerId: string): Promise<boolean> {
   const cleanedUp = await removeAssignedPlayersForBankPlayer(playerId);
   if (!cleanedUp) return false;
@@ -1112,7 +1105,15 @@ export async function getAssignableAuctionsForOrg(orgId: string): Promise<Auctio
   return auctions.filter((a) => a.status !== "completed");
 }
 
-export async function assignPoolTeamToAuction(poolTeam: PoolTeam, auction: AuctionSummary): Promise<AssignResult> {
+export interface AssignResultWithId extends AssignResult {
+  /** The id of the newly-inserted `teams` row, when the assignment
+   *  succeeded. Lets callers (e.g. createAuctionWithPoolTeams below)
+   *  immediately assign bank players onto this team without a second
+   *  round-trip to look it back up. */
+  teamId?: string;
+}
+
+export async function assignPoolTeamToAuction(poolTeam: PoolTeam, auction: AuctionSummary): Promise<AssignResultWithId> {
   const { data: inserted, error } = await supabase
     .from("teams")
     .insert({
@@ -1144,94 +1145,125 @@ export async function assignPoolTeamToAuction(poolTeam: PoolTeam, auction: Aucti
     console.error("assignPoolTeamToAuction(log) failed:", logErr.message);
   }
 
+  return { ok: true, teamId: inserted.id };
+}
+
+/* ── Seeding a brand-new auction with Team Pool teams + Player Bank
+     players — INDEPENDENTLY of each other. A Squad Board is where you
+     pre-assign a specific player onto a specific team with no bidding;
+     a real auction is the opposite of that on purpose. So here:
+       - selected Team Pool teams are copied onto the auction as bidding
+         teams (same insert as assignPoolTeamToAuction — untouched).
+       - selected Player Bank players are copied into the auction's
+         bidding POOL only: `auction_id` set, but `sold_to_team_id` /
+         `sold_price` / `lot_order` all left null, `status: 'available'`.
+         That's the exact shape of a player typed in by hand during
+         setup, before Shuffle/Launch ever run — so they flow through
+         the real auction/bidding UI normally afterward, with no team
+         pre-assigned. ── */
+
+export interface CreateAuctionWithPoolSeedsResult {
+  id: string | null;
+  /** Pool team names that failed to be copied onto the new auction (e.g.
+   *  a duplicate team code within this auction). */
+  teamErrors: string[];
+  /** Bank player names that failed to be copied into the auction's pool. */
+  playerErrors: string[];
+}
+
+/** Copies a Player Bank entry into a brand-new (or existing) auction's
+ *  bidding pool — NOT onto any team. Deliberately does NOT reuse
+ *  assignBankPlayerToTeam: that function immediately marks a player
+ *  'sold' onto a specific team with no bidding step (right for Squad
+ *  Boards, wrong here). These players still need to go through Shuffle
+ *  and the live auction like any other pool player. */
+export async function addBankPlayerToAuctionPool(auctionId: string, bankPlayer: BankPlayer): Promise<AssignResult> {
+  const { data: inserted, error } = await supabase
+    .from("players")
+    .insert({
+      auction_id: auctionId,
+      name: bankPlayer.name,
+      role: bankPlayer.role,
+      origin: bankPlayer.origin,
+      country: bankPlayer.country || "",
+      img: bankPlayer.img || "",
+      capped: bankPlayer.capped,
+      status: "available",
+    })
+    .select("id")
+    .single();
+
+  if (error || !inserted) {
+    console.error("addBankPlayerToAuctionPool(insert player) failed:", error?.message);
+    return { ok: false, error: "Couldn't add this player to the auction pool — please try again." };
+  }
+
+  // Logged with team_id: null — this player hasn't been assigned to a
+  // team, just made available in this auction's pool. Lets the image
+  // backfill machinery (and any future "where did this pool player come
+  // from" lookup) still trace it back to its Player Bank source.
+  const { error: logErr } = await supabase.from("player_bank_assignments").insert({
+    bank_player_id: bankPlayer.id,
+    players_row_id: inserted.id,
+    team_id: null,
+  });
+  if (logErr) {
+    console.error("addBankPlayerToAuctionPool(log) failed:", logErr.message);
+  }
+
   return { ok: true };
 }
 
-/* ────────────────────────────────────────────────────────────────── */
-/*  OVERLAYS                                                           */
-/* ────────────────────────────────────────────────────────────────── */
+/** Creates the auction row, then:
+ *    1. copies each selected Team Pool team onto it as a bidding team
+ *       (assignPoolTeamToAuction — unchanged, teams are ready to bid with)
+ *    2. copies each selected Player Bank player into the auction's pool
+ *       as an available, unsold player (addBankPlayerToAuctionPool above)
+ *  Teams and players are independent selections — no player is
+ *  pre-assigned to any team; that only happens through actual bidding
+ *  (or Shuffle -> Launch) afterward, same as a manually-built auction. */
+export async function createAuctionWithPoolSeeds(
+  orgId: string,
+  userId: string,
+  input: CreateAuctionInput,
+  poolTeamIds: string[],
+  bankPlayerIds: string[]
+): Promise<CreateAuctionWithPoolSeedsResult> {
+  const auctionId = await createAuction(orgId, userId, input);
+  if (!auctionId) return { id: null, teamErrors: [], playerErrors: [] };
 
-export interface OverlayMatchOption {
-  matchId: string;
-  label: string;
-}
+  const teamErrors: string[] = [];
+  const playerErrors: string[] = [];
 
-export async function getMatchesForOverlayPicker(orgId: string): Promise<OverlayMatchOption[]> {
-  const { data, error } = await supabase
-    .from("matches")
-    .select("id, match_setup")
-    .eq("org_id", orgId)
-    .order("created_at", { ascending: false });
+  if (poolTeamIds.length > 0) {
+    const poolTeams = await getTeamPool(orgId);
+    const selectedTeams = poolTeams.filter((t) => poolTeamIds.includes(t.id));
 
-  if (error) {
-    console.error("getMatchesForOverlayPicker failed:", error.message);
-    return [];
-  }
-
-  return (data ?? []).map((m) => {
-    const setup = (m.match_setup ?? {}) as Record<string, any>;
-    return {
-      matchId: m.id,
-      label: `${setup.team1?.name ?? "Team 1"} vs ${setup.team2?.name ?? "Team 2"}`,
+    const auctionStub: AuctionSummary = {
+      id: auctionId,
+      name: input.name.trim(),
+      status: "setup",
+      tournamentName: null,
+      createdAt: new Date().toISOString(),
     };
-  });
-}
 
-export interface OverlayConfig {
-  channels: { label: string; url: string }[];
-  weatherLat: number | null;
-  weatherLng: number | null;
-}
-
-export async function getOverlayConfig(matchId: string): Promise<OverlayConfig> {
-  const [{ data: channelsRow }, { data: weatherRow }] = await Promise.all([
-    supabase.from("on_air_channels").select("channels").eq("match_id", matchId).maybeSingle(),
-    supabase.from("weather_readings").select("coords").eq("match_id", matchId).maybeSingle(),
-  ]);
-
-  const channels = Array.isArray(channelsRow?.channels) ? channelsRow!.channels : [];
-  const coords = (weatherRow?.coords ?? {}) as { lat?: number; lng?: number };
-
-  return {
-    channels,
-    weatherLat: typeof coords.lat === "number" ? coords.lat : null,
-    weatherLng: typeof coords.lng === "number" ? coords.lng : null,
-  };
-}
-
-export async function saveOverlayChannels(
-  matchId: string,
-  channels: { label: string; url: string }[]
-): Promise<boolean> {
-  const { error } = await supabase
-    .from("on_air_channels")
-    .upsert({ match_id: matchId, channels, updated_at: new Date().toISOString() }, { onConflict: "match_id" });
-  if (error) {
-    console.error("saveOverlayChannels failed:", error.message);
-    return false;
+    for (const team of selectedTeams) {
+      const result = await assignPoolTeamToAuction(team, auctionStub);
+      if (!result.ok) teamErrors.push(team.name);
+    }
   }
-  return true;
-}
 
-export async function saveOverlayWeatherCoords(matchId: string, lat: number, lng: number): Promise<boolean> {
-  const { data: existing } = await supabase.from("weather_readings").select("data").eq("match_id", matchId).maybeSingle();
+  if (bankPlayerIds.length > 0) {
+    const bankPlayers = await getPlayerBank(orgId);
+    const selectedPlayers = bankPlayers.filter((p) => bankPlayerIds.includes(p.id));
 
-  const { error } = await supabase
-    .from("weather_readings")
-    .upsert(
-      {
-        match_id: matchId,
-        coords: { lat, lng },
-        data: existing?.data ?? {},
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "match_id" }
-    );
-  if (error) {
-    console.error("saveOverlayWeatherCoords failed:", error.message);
-    return false;
+    for (const player of selectedPlayers) {
+      const result = await addBankPlayerToAuctionPool(auctionId, player);
+      if (!result.ok) playerErrors.push(player.name);
+    }
   }
-  return true;
+
+  return { id: auctionId, teamErrors, playerErrors };
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -1349,7 +1381,7 @@ export async function deleteSquadBoard(boardId: string): Promise<UpdateOrgResult
   return { ok: true };
 }
 
-export async function assignPoolTeamToSquadBoard(poolTeam: PoolTeam, board: SquadBoard): Promise<AssignResult> {
+export async function assignPoolTeamToSquadBoard(poolTeam: PoolTeam, board: SquadBoard): Promise<AssignResultWithId> {
   return assignPoolTeamToAuction(poolTeam, {
     id: board.id,
     name: board.name,
@@ -1399,7 +1431,11 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
   const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }] = await Promise.all([
     supabase
       .from("bracket_matches")
-      .select("overlay_match_id, tournaments(name)")
+      // `tournament_id` is selected alongside the joined tournament name so
+      // callers (e.g. the Tournaments tab) can group matches by tournament
+      // id — the name alone isn't a safe grouping key since two
+      // tournaments could share one.
+      .select("overlay_match_id, tournament_id, tournaments(name)")
       .in("overlay_match_id", matchIds),
     supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
     supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
@@ -1410,9 +1446,13 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
   }
 
   const tournamentByMatch = new Map<string, string>();
+  const tournamentIdByMatch = new Map<string, string>();
   (brackets ?? []).forEach((b: any) => {
     if (b.overlay_match_id && b.tournaments?.name) {
       tournamentByMatch.set(b.overlay_match_id, b.tournaments.name);
+    }
+    if (b.overlay_match_id && b.tournament_id) {
+      tournamentIdByMatch.set(b.overlay_match_id, b.tournament_id);
     }
   });
 
@@ -1437,6 +1477,7 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
       tournamentName: tournamentByMatch.get(m.id) ?? null,
+      tournamentId: tournamentIdByMatch.get(m.id) ?? null,
       overlayConfigured: overlaySet.has(m.id),
       auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
       venue: setup.venue || null,
