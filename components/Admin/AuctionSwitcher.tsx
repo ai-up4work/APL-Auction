@@ -57,14 +57,18 @@ export default function AuctionSwitcher() {
 
   async function onClone(sourceId: string) {
     if (!cloneName.trim()) return;
-    const newId = await cloneFromPrevious(sourceId, cloneName.trim());
+    const newId = (await cloneFromPrevious(sourceId, cloneName.trim())) as
+      | string
+      | undefined;
     setCloning(null);
     setCloneName("");
     setOpen(false);
     // If cloneFromPrevious doesn't yet return the new id, this silently
     // no-ops and the user stays on the current auction — update
     // cloneFromPrevious to return the new record's id to fix that.
-    if (newId) router.push(`/auction/admin/${newId}`);
+    if (typeof newId === "string" && newId) {
+      router.push(`/auction/admin/${newId}`);
+    }
   }
 
   function pill(label: string, color: string) {
