@@ -718,18 +718,22 @@ export default function TournamentBracket({
   // than stretched.
   const desktopStageMaxWidth = 1600;
 
-  // The bracket stage always claims the remaining viewport height (down
-  // to the bottom of the screen) rather than sizing to its own content.
-  // This is a real `height`, not a `min-height` — every round column is
-  // stretched (`items-stretch` + `h-full`) to fill it, and each leaf
-  // column spaces its matches out with `justify-between` so the first
-  // and last card sit at the very top/bottom edge and everything else
-  // is spread evenly between them. Because every parent-round match is
-  // still positioned at the measured midpoint of the two matches that
-  // feed it (see computeCentersFromLeaves/recomputeLayout below), this
-  // spacing cascades correctly: each next-level match is always
-  // centered on its two parent matches, all the way up to the Final.
-  const stageHeightStyle = { height: "calc(100vh - 260px)" };
+  // The bracket stage claims the remaining viewport height as a
+  // *minimum* (not a hard cap) — every round column is stretched
+  // (`items-stretch` + `h-full`) to fill at least that much, and each
+  // leaf column spaces its matches out with `justify-between` so the
+  // first and last card sit at the very top/bottom edge and everything
+  // else is spread evenly between them. If a bracket needs more room
+  // than the viewport gives it (e.g. a Round-of-16 with 8 leaf cards
+  // plus gaps), the stage wrapper below scrolls vertically instead of
+  // clipping content — see the `overflow-y-auto` on the wrapper div.
+  // Because every parent-round match is still positioned at the
+  // measured midpoint of the two matches that feed it (see
+  // computeCentersFromLeaves/recomputeLayout below), this spacing
+  // cascades correctly regardless of how tall the stage ends up: each
+  // next-level match is always centered on its two parent matches, all
+  // the way up to the Final.
+  const stageHeightStyle = { minHeight: "calc(100vh - 260px)" };
 
   function getRef(key: string): RefSetter {
     if (!refCache.current[key]) {
@@ -1003,7 +1007,7 @@ export default function TournamentBracket({
       </div>
 
       <div className="hidden md:block mx-auto relative" style={{ maxWidth: desktopStageMaxWidth, ...stageHeightStyle }}>
-        <div className="w-full h-full overflow-x-hidden overflow-y-hidden">
+        <div className="w-full h-full overflow-x-hidden overflow-y-auto">
           {useMirroredLayout ? (
             <div
               ref={desktopContainerRef}
