@@ -51,27 +51,28 @@ export default async function TournamentBracketEditPage({
 
   const rows = await getBracketMatchesForTournament(tournament.id);
 
-  const singleRounds =
-    tournament.format === "single_elimination" && rows.length > 0
-      ? buildSingleEliminationRounds(rows)
-      : null;
+    const singleRounds =
+      tournament.format === "single_elimination" && rows.length > 0
+        ? buildSingleEliminationRounds(rows)
+        : null;
 
-  const doubleData =
-    tournament.format === "double_elimination" && rows.length > 0
-      ? buildDoubleEliminationData(rows)
-      : null;
+    const doubleData =
+      tournament.format === "double_elimination" && rows.length > 0
+        ? buildDoubleEliminationData(rows)
+        : null;
 
-  return (
-    <BracketEditClient
-      tournamentId={tournament.id}
-      tournamentOrgId={tournament.org_id}
-      tournamentName={tournament.name}
-      format={tournament.format as "single_elimination" | "double_elimination"}
-      initialSingleRounds={singleRounds}
-      initialDoubleData={doubleData}
-      initialLogoUrl={resolvedLogo}
-    />
-  );
+    return (
+      <BracketEditClient
+        tournamentId={tournament.id}
+        tournamentOrgId={tournament.org_id}
+        tournamentName={tournament.name}
+        format={tournament.format as "single_elimination" | "double_elimination"}
+        initialSingleRounds={singleRounds}
+        initialDoubleData={doubleData}
+        initialLogoUrl={resolvedLogo}
+        hasBracketRows={rows.length > 0}
+      />
+    );
 }
 
 function EmptyState({ message }: { message: string }) {

@@ -41,6 +41,27 @@ export async function hasBracketGenerated(tournamentId: string): Promise<boolean
  * because RLS blocked it" instead of reporting a false success.
  */
 export async function deleteBracketForTournament(tournamentId: string): Promise<GenerateBracketResult> {
+  // Break the circular FK first: bracket_matches.overlay_match_id -> matches.id
+  // means matches can't be deleted while bracket_matches still points at them.
+  const { error: clearOverlayErr } = await supabase
+    .from("bracket_matches")
+    .update({ overlay_match_id: null })
+    .eq("tournament_id", tournamentId);
+
+  if (clearOverlayErr) {
+    return { ok: false, error: `Couldn't unlink overlay matches: ${clearOverlayErr.message}` };
+  }
+
+  // Now safe to delete matches tied to this tournament.
+  const { error: matchesErr } = await supabase
+    .from("matches")
+    .delete()
+    .eq("tournament_id", tournamentId);
+
+  if (matchesErr) {
+    return { ok: false, error: `Couldn't clear linked matches: ${matchesErr.message}` };
+  }
+
   const { data, error } = await supabase
     .from("bracket_matches")
     .delete()
@@ -146,7 +167,7 @@ export async function generateBracketForTournament(
   }));
   const seeded = seeding === "random" ? randomDraw(teams) : teams;
 
-  try {
+try {
     if (tournament.format === "double_elimination") {
       const data = generateDoubleElimination(seeded);
       await insertDoubleElim(tournamentId, data);
@@ -154,15 +175,31 @@ export async function generateBracketForTournament(
       const rounds = generateSingleElimination(seeded);
       await insertSingleElim(tournamentId, rounds);
     }
-    
+
     // After bracket is generated successfully, create matches from bracket slots
     await createMatchesFromBracket(tournamentId, tournament.org_id);
   } catch (e: any) {
-    // Most common cause of a failure here: no INSERT row-level-security
-    // policy on bracket_matches (or one that doesn't match the caller's
-    // org), which surfaces from Supabase as a permission-denied /
-    // "new row violates row-level security policy" error on the very
-    // first insert. Surface it plainly rather than a generic message.
+    // Insertion is sequential and non-transactional (see insertDoubleElim/
+    // insertSingleElim) — if any row in the middle fails (bad feeder lookup,
+    // RLS, transient network error), earlier rows are already committed.
+    // Leaving those half-built rows in place is worse than an empty table:
+    // buildDoubleEliminationData() returns null without a grand_final row,
+    // which hides the "hasBracket" UI (no Regenerate button) while
+    // hasBracketGenerated() still sees rows and blocks a fresh Generate —
+    // a dead end the admin can't get out of from the UI. Clean up fully so
+    // a failed attempt always leaves the tournament in a clean, regenerable
+    // "no bracket" state instead.
+    const cleanup = await deleteBracketForTournament(tournamentId);
+    if (!cleanup.ok) {
+      console.error(
+        "generateBracketForTournament: failed to roll back partial bracket after error:",
+        cleanup.error
+      );
+      return {
+        ok: false,
+        error: `${e?.message ?? "Failed to generate bracket."} (also failed to clean up the partial bracket — please contact support or clear bracket_matches for this tournament manually.)`,
+      };
+    }
     return { ok: false, error: e?.message ?? "Failed to generate bracket." };
   }
 

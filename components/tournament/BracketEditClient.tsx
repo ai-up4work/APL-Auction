@@ -55,6 +55,7 @@ export default function BracketEditClient({
   initialSingleRounds,
   initialDoubleData,
   initialLogoUrl,
+  hasBracketRows,
 }: {
   tournamentId: string;
   tournamentOrgId: string | null;
@@ -68,6 +69,7 @@ export default function BracketEditClient({
    *  logo URL" field writes to — this is just a second place to set it,
    *  right above the board it's used on. */
   initialLogoUrl?: string;
+  hasBracketRows: boolean;
 }) {
   useScrollTop();
   const router = useRouter();
@@ -147,7 +149,7 @@ export default function BracketEditClient({
     setLogoBroken(false);
   }, [logoUrl]);
 
-  const hasBracket = format === "single_elimination" ? !!initialSingleRounds : !!initialDoubleData;
+  const hasBracket = hasBracketRows;
 
   const saveFormat = async () => {
     setIsSavingFormat(true);

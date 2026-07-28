@@ -177,7 +177,7 @@ export async function updateTournament(
     status: string;
     category: "Auction" | "Bracket" | "Overlay" | "League";
     description: string;
-    startDate: string; // ISO date, e.g. "2026-08-01"
+    startDate: string;
     imageUrl: string;
     logoUrl: string;
     prizePool: string;
@@ -188,10 +188,11 @@ export async function updateTournament(
 ): Promise<boolean> {
   if (Object.keys(patch).length === 0) return true;
 
-  // Map camelCase -> snake_case column names; everything else passes through.
   const { startDate, imageUrl, logoUrl, prizePool, ...rest } = patch;
   const payload: Record<string, unknown> = { ...rest };
-  if (startDate !== undefined) payload.start_date = startDate;
+  // Empty string isn't valid for a `date` column — Postgres needs NULL
+  // to represent "no date set", not "".
+  if (startDate !== undefined) payload.start_date = startDate === "" ? null : startDate;
   if (imageUrl !== undefined) payload.image_url = imageUrl;
   if (logoUrl !== undefined) payload.logo_url = logoUrl;
   if (prizePool !== undefined) payload.prize_pool = prizePool;
