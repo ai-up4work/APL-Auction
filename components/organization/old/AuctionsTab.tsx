@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy } from "lucide-react"
+import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy, Shield, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Panel, FieldLabel, AuctionStatusBadge, CollapsibleCreatePanel } from "@/components/organization/shared"
 import {
   getAuctionsForOrg,
   createAuctionWithPoolSeeds,
@@ -21,7 +20,46 @@ import {
   type PoolTeam,
   type BankPlayer,
 } from "@/lib/organization/organization"
-import { PoolTeamPickerCard, BankPlayerPickerCard } from "@/components/organization/SquadBoardTab"
+import { PoolTeamPickerCard, BankPlayerPickerCard } from "@/components/organization/old/SquadBoardTab"
+
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`bg-black/50 border border-gold/20 shine hover:border-gold/40 transition-all duration-300 rounded-lg p-6 md:p-8 shadow-lg shadow-black/40 ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel block mb-1.5">{children}</label>
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  STATUS BADGE — auctions.status is one of setup/live/paused/          */
+/*  completed (DB CHECK constraint). Each gets a distinct color so the    */
+/*  list reads at a glance without needing to open anything.              */
+/* ────────────────────────────────────────────────────────────────── */
+
+const STATUS_STYLES: Record<string, string> = {
+  setup: "border-gold/30 text-gold/80 bg-gold/[0.06]",
+  live: "border-green-500/40 text-green-400 bg-green-500/[0.08]",
+  paused: "border-amber-500/40 text-amber-400 bg-amber-500/[0.08]",
+  completed: "border-white/15 text-gray-400 bg-white/[0.02]",
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const style = STATUS_STYLES[status] ?? STATUS_STYLES.setup
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-1 rounded-full border ${style}`}
+    >
+      {status === "live" && <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />}
+      {status}
+    </span>
+  )
+}
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  AUCTION CARD                                                          */
@@ -42,7 +80,7 @@ function AuctionCard({
         <div className="bg-gold/10 p-2 rounded-lg shrink-0">
           <Landmark className="h-4 w-4 text-gold" />
         </div>
-        <AuctionStatusBadge status={auction.status} />
+        <StatusBadge status={auction.status} />
       </div>
 
       <p className="text-white text-sm font-bold font-cinzel truncate mb-1">{auction.name}</p>
@@ -90,11 +128,16 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
   const [tournamentId, setTournamentId] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [createPanelSignal, setCreatePanelSignal] = useState(0)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  // ── Pre-fill: Team Pool teams + Player Bank players — two INDEPENDENT
+  // multi-selects. Teams come in ready to bid with; players come in as
+  // available/unsold pool entries. Neither is paired with the other here
+  // — that pairing only happens through real bidding (or Shuffle ->
+  // Launch) once the auction is open, same as if everything had been
+  // typed in by hand. ──
   const [poolTeams, setPoolTeams] = useState<PoolTeam[]>([])
   const [poolTeamsLoaded, setPoolTeamsLoaded] = useState(false)
   const [bankPlayers, setBankPlayers] = useState<BankPlayer[]>([])
@@ -155,7 +198,6 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
     setIsCreating(false)
     if (!id) {
       setCreateError("Couldn't create the auction — please try again.")
-      setCreatePanelSignal((v) => v + 1)
       return
     }
     if (teamErrors.length > 0 || playerErrors.length > 0) {
@@ -171,6 +213,9 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
     setName("")
     setTournamentId("")
     resetPrefill()
+    // Jumps straight into the admin dashboard for the new auction, which
+    // already has whatever teams/pool players were pre-filled above —
+    // teams ready to bid with, players sitting in the pool unsold.
     router.push(`/auction/admin/${id}`)
   }
 
@@ -196,12 +241,10 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
 
   return (
     <div className="space-y-6">
-      <CollapsibleCreatePanel
-        title="Create an Auction"
-        icon={<Landmark className="h-4 w-4 text-gold" />}
-        defaultOpen={loaded && auctions.length === 0}
-        openSignal={createPanelSignal}
-      >
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-1 flex items-center gap-2">
+          <Plus className="h-4 w-4 text-gold" /> Create an Auction
+        </h2>
         <p className="text-gray-500 text-xs mb-4">
           Creates the auction record, then opens it directly in{" "}
           <Link href="/auction/admin" className="text-gold hover:underline">
@@ -322,12 +365,12 @@ export function AuctionsTab({ org, userId }: { org: OrgSummary; userId: string }
         <Button
           onClick={handleCreate}
           disabled={!name.trim() || isCreating}
-          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-4"
+          className="bg-gold hover:bg-gold/90 ml-4 text-black font-bold disabled:opacity-50 mt-4"
         >
           <Plus className="mr-2 h-4 w-4" />
           {isCreating ? "Creating…" : "Create Auction"}
         </Button>
-      </CollapsibleCreatePanel>
+      </Panel>
 
       <div>
         <h2 className="text-lg font-bold text-white font-cinzel mb-4 px-1">Your Auctions</h2>

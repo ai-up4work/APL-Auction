@@ -3,44 +3,33 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Building2, Trophy, Swords, Users, Lock, Shield, Link2, Landmark, Tv } from "lucide-react"
+import { Building2, Trophy, Lock, Shield, Tv } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppHeader } from "@/components/app-header"
 import { OverviewTab } from "@/components/organization/OverviewTab"
-import { MatchesTab } from "@/components/organization/MatchesTab"
-import { TournamentsTab, TeamPoolTab, PlayerBankTab } from "@/components/organization/TournamentsPoolsTab"
-import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
-import { AuctionsTab } from "@/components/organization/AuctionsTab"
-import { OverlaysTab } from "@/components/organization/Overlaystab"
+import { RostersSection } from "@/components/organization/RostersSection"
+import { EventsSection } from "@/components/organization/EventsSection"
+import { BroadcastSection } from "@/components/organization/Broadcastsection"
+import { WorkflowProvider, useWorkflow, type WorkflowId } from "@/components/organization/Workflowcontext"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
 import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
-import { RegistrationsTab } from "@/components/organization/Registrationstab"
 
+/* ────────────────────────────────────────────────────────────────── */
+/*  4 primary tabs instead of 9 — Rosters / Events / Broadcast mirror   */
+/*  the real dependency chain: you can't make a match without a roster, */
+/*  can't make an overlay without a match. Overview stays separate as    */
+/*  the workflow picker.                                                 */
+/* ────────────────────────────────────────────────────────────────── */
 
-type Tab =
-  | "overview"
-  | "matches"
-  | "overlays"
-  | "tournaments"
-  | "auctions"
-  | "teamPool"
-  | "playerBank"
-  | "squadBoard"
-  | "registrations"
-type GateState = "checking" | "denied" | "allowed"
+type Primary = "overview" | "rosters" | "events" | "broadcast"
 
-const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const PRIMARY_TABS: { key: Primary; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "overview", label: "Overview", icon: Building2 },
-  { key: "matches", label: "Matches", icon: Swords },
-  { key: "overlays", label: "Overlays", icon: Tv },
-  { key: "tournaments", label: "Tournaments", icon: Trophy },
-  { key: "auctions", label: "Auctions", icon: Landmark },
-  { key: "registrations", label: "Registrations", icon: Users },
-  { key: "teamPool", label: "Team Pool", icon: Shield },
-  { key: "playerBank", label: "Player Pool", icon: Users },
-  { key: "squadBoard", label: "Squad Board", icon: Link2 },
+  { key: "rosters", label: "Rosters", icon: Shield },
+  { key: "events", label: "Events", icon: Trophy },
+  { key: "broadcast", label: "Broadcast", icon: Tv },
 ]
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -53,6 +42,72 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   )
 }
 
+type GateState = "checking" | "denied" | "allowed"
+
+function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: string }) {
+  const [tab, setTab] = useState<Primary>("overview")
+  const [rosterSub, setRosterSub] = useState<"teamPool" | "playerBank" | "squadBoard">("teamPool")
+  const [eventsSub, setEventsSub] = useState<"tournaments" | "auctions" | "matches">("tournaments")
+  const [broadcastSub, setBroadcastSub] = useState<"overlays" | "registrations">("overlays")
+
+  const { setWorkflow } = useWorkflow()
+
+  // Central place any sub-navigation (breadcrumb clicks, Overview's
+  // workflow cards) routes through, so "jump to step 2" always lands on
+  // the right primary tab AND the right sub-tab in one call.
+  const navigate = (primary: "rosters" | "events" | "broadcast", sub: string) => {
+    setTab(primary)
+    if (primary === "rosters") setRosterSub(sub as any)
+    if (primary === "events") setEventsSub(sub as any)
+    if (primary === "broadcast") setBroadcastSub(sub as any)
+  }
+
+  const handleSelectPath = (path: WorkflowId) => {
+    setWorkflow(path)
+    if (path === "auction") navigate("events", "tournaments")
+    else if (path === "manual") navigate("rosters", "teamPool")
+    else navigate("rosters", "squadBoard")
+  }
+
+  return (
+    <>
+      <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+        <Building2 className="w-3.5 h-3.5" />
+        Organization
+      </span>
+      <h1 className="text-3xl font-bold text-white font-cinzel mb-6">{org.name}</h1>
+
+      <nav className="flex flex-wrap gap-1 mb-8 bg-black/50 border border-gold/20 p-1 rounded-lg w-fit">
+        {PRIMARY_TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md transition-all ${
+              tab === key ? "bg-gold text-black" : "text-gray-300 hover:text-gold"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "overview" && (
+        <OverviewTab org={org} onSelectPath={handleSelectPath} />
+      )}
+      {tab === "rosters" && (
+        <RostersSection org={org} userId={userId} initialSub={rosterSub} onNavigate={navigate} />
+      )}
+      {tab === "events" && (
+        <EventsSection org={org} userId={userId} initialSub={eventsSub} onNavigate={navigate} />
+      )}
+      {tab === "broadcast" && (
+        <BroadcastSection org={org} userId={userId} initialSub={broadcastSub} onNavigate={navigate} />
+      )}
+    </>
+  )
+}
+
 export default function OrganizationClient() {
   useScrollTop()
   const router = useRouter()
@@ -60,7 +115,6 @@ export default function OrganizationClient() {
 
   const [gate, setGate] = useState<GateState>("checking")
   const [org, setOrg] = useState<OrgSummary | null>(null)
-  const [tab, setTab] = useState<Tab>("overview")
 
   useEffect(() => {
     if (authLoading) return
@@ -113,53 +167,9 @@ export default function OrganizationClient() {
           )}
 
           {gate === "allowed" && org && (
-            <>
-              <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
-                <Building2 className="w-3.5 h-3.5" />
-                Organization
-              </span>
-              <h1 className="text-3xl font-bold text-white font-cinzel mb-6">{org.name}</h1>
-
-              <nav className="flex flex-wrap gap-1 mb-8 bg-black/50 border border-gold/20 p-1 rounded-lg w-fit">
-                {TABS.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTab(key)}
-                    className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md transition-all ${
-                      tab === key ? "bg-gold text-black" : "text-gray-300 hover:text-gold"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
-                  </button>
-                ))}
-              </nav>
-
-              {tab === "overview" && (
-                <div>
-                  <OverviewTab
-                    org={org}
-                    onSelectPath={(path) => {
-                      if (path === "auction") {
-                        setTab("auctions")
-                      } else if (path === "manual") {
-                        setTab("tournaments")
-                      } else {
-                        setTab("matches")
-                      }
-                    }}
-                  />
-                </div>
-              )}
-              {tab === "matches" && <MatchesTab org={org} userId={user!.id} />}
-              {tab === "overlays" && <OverlaysTab org={org} userId={user!.id} />}
-              {tab === "tournaments" && <TournamentsTab org={org} userId={user!.id} />}
-              {tab === "auctions" && <AuctionsTab org={org} userId={user!.id} />}
-              {tab === "registrations" && <RegistrationsTab org={org} userId={user!.id} />}
-              {tab === "teamPool" && <TeamPoolTab org={org} userId={user!.id} />}
-              {tab === "playerBank" && <PlayerBankTab org={org} userId={user!.id} />}
-              {tab === "squadBoard" && <SquadBoardTab org={org} userId={user!.id} />}
-            </>
+            <WorkflowProvider>
+              <OrganizationDashboard org={org} userId={user!.id} />
+            </WorkflowProvider>
           )}
         </div>
       </section>
