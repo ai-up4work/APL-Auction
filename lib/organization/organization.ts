@@ -419,6 +419,16 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
 
 export interface FriendlyMatchSummary {
   id: string;
+  /** The id used to resolve this match's Overlay Control Room route
+   *  (`/overlay/[auctionId]/admin`). For an auction-sourced match this is
+   *  the real auction's id (`matches.auction_id`). For a manual/standalone
+   *  match, `matches.auction_id` is NULL in the DB (see createFriendlyMatch
+   *  below), so this falls back to the match's own `id` — a synthetic
+   *  "auction id" that matchPersistence.ts's getOrCreateMatch must also
+   *  know how to resolve when there's no real auctions row behind it.
+   *  Always use this field for the overlay link — never `id` directly and
+   *  never assume the two are the same for every match. */
+  auctionId: string;
   team1Name: string;
   team2Name: string;
   /** Team logo URLs pulled from match_setup at creation time (copied from
@@ -1370,24 +1380,7 @@ export async function assignBankPlayerToSquadBoardTeam(
 }
 
 
-export interface FriendlyMatchSummaryFull {
-  id: string;
-  auctionId: string;
-  team1Name: string;
-  team2Name: string;
-  team1Logo: string | null;
-  team2Logo: string | null;
-  round: string;
-  createdAt: string;
-  tournamentName: string | null;
-  overlayConfigured: boolean;
-  auctionLinked: boolean;
-  venue: string | null;
-  date: string | null;
-  time: string | null;
-}
-
-export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummaryFull[]> {
+export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
   const { data, error } = await supabase
     .from("matches")
     .select("id, auction_id, match_setup, created_at")
