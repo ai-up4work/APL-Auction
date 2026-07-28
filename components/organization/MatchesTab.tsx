@@ -333,8 +333,8 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
   const reload = () => {
     setSyncing(true)
     return Promise.all([getFriendlyMatchesForOrg(org.id), getAuctionsForOrg(org.id)]).then(([m, a]) => {
-      setMatches(m)
       setAuctions(a)
+      setMatches(m)
       setLoaded(true)
       setSyncing(false)
     })
@@ -511,7 +511,7 @@ export function MatchesTab({ org, userId }: { org: OrgSummary; userId: string })
   // Scope this whole tab to standalone matches only — tournament-linked
   // matches are managed and displayed from the Tournaments tab, next to
   // the bracket they belong to, instead of duplicated here.
-  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentName), [matches])
+  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentId), [matches])
   const tournamentMatchCount = matches.length - standaloneMatches.length
 
   const filtered = useMemo(() => {

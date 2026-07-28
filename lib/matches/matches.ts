@@ -82,6 +82,24 @@ export interface MatchSummary {
   createdAt: string
 }
 
+export interface FriendlyMatchSummary {
+  id: string
+  auctionId: string
+  team1Name: string
+  team2Name: string
+  team1Logo: string | null
+  team2Logo: string | null
+  round: string
+  createdAt: string
+  tournamentName: string | null
+  tournamentId: string | null
+  overlayConfigured: boolean
+  auctionLinked: boolean
+  venue: string | null
+  date: string | null
+  time: string | null
+}
+
 export interface FixtureRow {
   id: string
   round: number
@@ -302,29 +320,61 @@ export async function deleteStandaloneMatch(matchId: string): Promise<Result<{}>
 }
 
 /** UNUSED BY THE CURRENT UI — see insertMatch note above. */
-export async function getStandaloneMatchesForTournament(
-  tournamentId: string
-): Promise<Result<{ matches: MatchSummary[] }>> {
-  const { data: rows, error } = await supabase
+/** Standalone matches only — filtered directly in the query via
+ *  `tournament_id is null`, rather than trusting the client to filter
+ *  FriendlyMatchSummary.tournamentId after the fact. This is the
+ *  source of truth for the Matches tab's list. */
+export async function getStandaloneMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
+  const { data, error } = await supabase
     .from("matches")
-    .select("id, auction_id, match_setup, match_setup_completed, created_at")
-    .eq("match_setup->>tournamentId", tournamentId)
-    .order("created_at", { ascending: false })
+    .select("id, auction_id, match_setup, created_at, tournament_id")
+    .eq("org_id", orgId)
+    .is("tournament_id", null)
+    .order("created_at", { ascending: false });
 
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    console.error("getStandaloneMatchesForOrg failed:", error.message);
+    return [];
+  }
 
-  const { data: linked, error: linkedError } = await supabase
-    .from("bracket_matches")
-    .select("overlay_match_id")
-    .eq("tournament_id", tournamentId)
-    .not("overlay_match_id", "is", null)
+  const matches = data ?? [];
+  const matchIds = matches.map((m) => m.id);
+  if (matchIds.length === 0) return [];
 
-  if (linkedError) return { ok: false, error: linkedError.message }
+  const [{ data: channelRows }, { data: weatherRows }] = await Promise.all([
+    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+  ]);
 
-  const linkedIds = new Set((linked ?? []).map((r) => r.overlay_match_id))
-  const standalone = (rows ?? []).filter((r) => !linkedIds.has(r.id))
+  const overlaySet = new Set<string>();
+  (channelRows ?? []).forEach((c: any) => {
+    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
+  });
+  (weatherRows ?? []).forEach((w: any) => {
+    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
+    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
+  });
 
-  return { ok: true, matches: standalone.map(rowToSummary) }
+  return matches.map((m: any) => {
+    const setup = (m.match_setup ?? {}) as Record<string, any>;
+    return {
+      id: m.id,
+      auctionId: m.auction_id ?? m.id,
+      team1Name: setup.team1?.name ?? "Team 1",
+      team2Name: setup.team2?.name ?? "Team 2",
+      team1Logo: setup.team1?.logo || null,
+      team2Logo: setup.team2?.logo || null,
+      round: setup.round ?? "Friendly",
+      createdAt: m.created_at,
+      tournamentName: null, // standalone by query, always null
+      tournamentId: null,   // standalone by query, always null
+      overlayConfigured: overlaySet.has(m.id),
+      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
+      venue: setup.venue || null,
+      date: setup.date || null,
+      time: setup.time || null,
+    };
+  });
 }
 
 // ── Fixture-linked matches (bracket_matches → matches via overlay) ──────

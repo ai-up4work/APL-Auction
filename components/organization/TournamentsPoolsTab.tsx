@@ -39,6 +39,7 @@ import {
   subscribeToOrgTournaments,
   subscribeToOrgMatches,
   getFriendlyMatchesForOrg,
+  getTournamentMatchesForOrg,
   unsubscribe,
   type OrgSummary,
   type TournamentSummary,
@@ -146,7 +147,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
   const reload = () => {
     setSyncing(true)
-    return Promise.all([getTournamentsForOrg(org.id), getFriendlyMatchesForOrg(org.id)]).then(([t, m]) => {
+    return Promise.all([getTournamentsForOrg(org.id), getTournamentMatchesForOrg(org.id)]).then(([t, m]) => {
       setTournaments(t)
       const grouped = new Map<string, FriendlyMatchSummary[]>()
       m.forEach((match) => {
@@ -282,6 +283,8 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     })
   }
 
+  
+
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
     const ok = await confirm({
@@ -381,11 +384,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
             />
           </div>
         </div>
-        <p className="text-gray-500 text-xs mb-4">
-          Open a tournament's bracket to connect each slot to a match — that's where a bracket match becomes a real
-          match with its own teams and, optionally, an overlay. Matches already connected show up below their
-          tournament here.
-        </p>
+      
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…

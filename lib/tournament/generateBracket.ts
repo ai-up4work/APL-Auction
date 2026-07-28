@@ -84,7 +84,7 @@ export async function generateBracketForTournament(
 ): Promise<GenerateBracketResult> {
   const { data: tournament, error: tErr } = await supabase
     .from("tournaments")
-    .select("id, format")
+    .select("id, format, org_id")
     .eq("id", tournamentId)
     .single();
   if (tErr || !tournament) return { ok: false, error: "Tournament not found." };
@@ -154,6 +154,9 @@ export async function generateBracketForTournament(
       const rounds = generateSingleElimination(seeded);
       await insertSingleElim(tournamentId, rounds);
     }
+    
+    // After bracket is generated successfully, create matches from bracket slots
+    await createMatchesFromBracket(tournamentId, tournament.org_id);
   } catch (e: any) {
     // Most common cause of a failure here: no INSERT row-level-security
     // policy on bracket_matches (or one that doesn't match the caller's
@@ -271,4 +274,103 @@ async function insertDoubleElim(tournamentId: string, data: DoubleElimData) {
   // bracketReset is only created in-memory after a real grand-final result
   // is recorded (see recordDoubleElimResult) — there's nothing to insert
   // for it yet at generation time.
+}
+
+/* ------------------------------------------------------------------ */
+/*  Auto-create Matches from Bracket Slots                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * After bracket is generated, automatically create a friendly match
+ * for each bracket slot that has two teams. This ensures matches are
+ * created immediately upon bracket generation, not as a separate step.
+ */
+async function createMatchesFromBracket(tournamentId: string, orgId: string): Promise<void> {
+  // Fetch all bracket matches for this tournament
+  const { data: bracketMatches, error: bracketErr } = await supabase
+    .from("bracket_matches")
+    .select("id, team_a_id, team_b_id, round, position")
+    .eq("tournament_id", tournamentId)
+    .order("round", { ascending: true })
+    .order("position", { ascending: true });
+
+  if (bracketErr || !bracketMatches) {
+    console.error("createMatchesFromBracket: failed to fetch bracket matches", bracketErr?.message);
+    return;
+  }
+
+  // Fetch team details for all teams in the bracket
+  const teamIds = new Set<string>();
+  bracketMatches.forEach((m) => {
+    if (m.team_a_id) teamIds.add(m.team_a_id);
+    if (m.team_b_id) teamIds.add(m.team_b_id);
+  });
+
+  if (teamIds.size === 0) return;
+
+  const { data: teams, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, name, code, logo")
+    .in("id", Array.from(teamIds));
+
+  if (teamsErr || !teams) {
+    console.error("createMatchesFromBracket: failed to fetch teams", teamsErr?.message);
+    return;
+  }
+
+  const teamMap = new Map(teams.map((t) => [t.id, t]));
+
+  // Get the tournament's linked auction for rosterLocked flag
+  const { data: auction, error: auctionErr } = await supabase
+    .from("auctions")
+    .select("id, is_synthetic")
+    .eq("tournament_id", tournamentId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const rosterLocked = auction && !auction.is_synthetic;
+
+  // Create a match for each bracket slot with two teams
+  for (const bracket of bracketMatches) {
+    if (!bracket.team_a_id || !bracket.team_b_id) continue;
+
+    const team1 = teamMap.get(bracket.team_a_id);
+    const team2 = teamMap.get(bracket.team_b_id);
+    if (!team1 || !team2) continue;
+
+    const matchId = crypto.randomUUID();
+    const matchSetup = {
+      tournamentName: "",
+      round: `Round ${bracket.round}, Match ${bracket.position}`,
+      team1: { name: team1.name, short: team1.code, logo: team1.logo || "" },
+      team2: { name: team2.name, short: team2.code, logo: team2.logo || "" },
+      venue: "",
+      date: "",
+      time: "",
+      toss: "",
+      overs: 20,
+      officials: { format: "", umpires: "", thirdUmpire: "", referee: "" },
+      squads: [],
+      rosterLocked,
+      sourceAuctionId: auction?.id || null,
+    };
+
+    // Insert the match
+    const { error: insertErr } = await supabase.from("matches").insert({
+      id: matchId,
+      auction_id: matchId,
+      org_id: orgId,
+      tournament_id: tournamentId,
+      bracket_match_id: bracket.id,
+      match_setup: matchSetup,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (insertErr) {
+      console.error("createMatchesFromBracket: failed to insert match", insertErr.message);
+      // Continue creating other matches even if one fails
+    }
+  }
 }

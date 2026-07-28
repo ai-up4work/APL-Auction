@@ -166,8 +166,7 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
   }, [org.id])
 
   const tournamentMatches = useMemo(() => matches.filter((m) => m.tournamentName), [matches])
-  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentName), [matches])
-
+  const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentId), [matches])
   return (
     <div className="space-y-6">
       <Panel>

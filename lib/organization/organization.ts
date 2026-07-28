@@ -412,7 +412,7 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  FRIENDLY MATCHES                                                   */
-/* ────────────────────────────────────────────────────────────────── */
+/* ───────────────────────────────────────────────────────��────────── */
 
 export interface FriendlyMatchSummary {
   id: string;
@@ -464,7 +464,9 @@ export type CreateFriendlyMatchInput =
 
 export async function createFriendlyMatch(
   orgId: string,
-  input: CreateFriendlyMatchInput
+  input: CreateFriendlyMatchInput,
+  tournamentId?: string | null,
+  bracketMatchId?: string | null
 ): Promise<string | null> {
   const newId = crypto.randomUUID();
 
@@ -563,6 +565,8 @@ export async function createFriendlyMatch(
       // this must never be input.auctionId.
       auction_id: newId,
       org_id: orgId,
+      tournament_id: tournamentId || null,
+      bracket_match_id: bracketMatchId || null,
       match_setup: matchSetup,
     })
     .select("id")
@@ -640,7 +644,8 @@ export function subscribeToOrgMatches(orgId: string, onChange: () => void): Real
     )
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "bracket_matches" },
+      { event: "*", schema: "public", table: "bracket_matches", 
+        filter: `tournament_id=in.(SELECT id FROM tournaments WHERE org_id=eq.${orgId})` },
       onChange
     )
     .on(
@@ -655,6 +660,62 @@ export function subscribeToOrgMatches(orgId: string, onChange: () => void): Real
     )
     .subscribe();
   return channel;
+}
+
+/**
+ * Fetch all matches for a specific tournament, filtered by tournament_id.
+ * This is preferred over getFriendlyMatchesForOrg when you need tournament-specific matches.
+ */
+export async function getMatchesForTournament(tournamentId: string): Promise<FriendlyMatchSummary[]> {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("id, match_setup, created_at, bracket_match_id, tournament_id")
+    .eq("tournament_id", tournamentId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getMatchesForTournament failed:", error.message);
+    return [];
+  }
+
+  const matches = data ?? [];
+  const matchIds = matches.map((m) => m.id);
+  if (matchIds.length === 0) return [];
+
+  const [{ data: channelRows }, { data: weatherRows }] = await Promise.all([
+    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+  ]);
+
+  const overlaySet = new Set<string>();
+  (channelRows ?? []).forEach((c: any) => {
+    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
+  });
+  (weatherRows ?? []).forEach((w: any) => {
+    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
+    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
+  });
+
+  return matches.map((m: any) => {
+    const setup = (m.match_setup ?? {}) as Record<string, any>;
+    return {
+      id: m.id,
+      auctionId: m.id,
+      team1Name: setup.team1?.name ?? "Team 1",
+      team2Name: setup.team2?.name ?? "Team 2",
+      team1Logo: setup.team1?.logo || null,
+      team2Logo: setup.team2?.logo || null,
+      round: setup.round ?? "Friendly",
+      createdAt: m.created_at,
+      tournamentName: null,
+      tournamentId: m.tournament_id ?? null,
+      overlayConfigured: overlaySet.has(m.id),
+      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
+      venue: setup.venue || null,
+      date: setup.date || null,
+      time: setup.time || null,
+    };
+  });
 }
 
 export function subscribeToOrgTournaments(orgId: string, onChange: () => void): RealtimeChannel {
@@ -1415,8 +1476,9 @@ export async function assignBankPlayerToSquadBoardTeam(
 export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
   const { data, error } = await supabase
     .from("matches")
-    .select("id, auction_id, match_setup, created_at")
+    .select("id, auction_id, match_setup, created_at, tournament_id")
     .eq("org_id", orgId)
+    .is("tournament_id", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -1477,7 +1539,69 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
       tournamentName: tournamentByMatch.get(m.id) ?? null,
-      tournamentId: tournamentIdByMatch.get(m.id) ?? null,
+      tournamentId: m.tournament_id ?? tournamentIdByMatch.get(m.id) ?? null,
+      overlayConfigured: overlaySet.has(m.id),
+      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
+      venue: setup.venue || null,
+      date: setup.date || null,
+      time: setup.time || null,
+    };
+  });
+}
+
+
+
+
+/** Tournament-linked matches only — the mirror of
+ *  getStandaloneMatchesForOrg. Filtered directly via
+ *  `tournament_id is not null`, and resolves tournamentName straight off
+ *  the `tournaments` table (not just the bracket_matches join), so a
+ *  match shows the right tournament name even before it's been dropped
+ *  into an actual bracket slot. */
+export async function getTournamentMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("id, auction_id, match_setup, created_at, tournament_id, tournaments(name)")
+    .eq("org_id", orgId)
+    .not("tournament_id", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getTournamentMatchesForOrg failed:", error.message);
+    return [];
+  }
+
+  const matches = data ?? [];
+  const matchIds = matches.map((m) => m.id);
+  if (matchIds.length === 0) return [];
+
+  const [{ data: channelRows }, { data: weatherRows }] = await Promise.all([
+    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+  ]);
+
+  const overlaySet = new Set<string>();
+  (channelRows ?? []).forEach((c: any) => {
+    if (Array.isArray(c.channels) && c.channels.length > 0) overlaySet.add(c.match_id);
+  });
+  (weatherRows ?? []).forEach((w: any) => {
+    const coords = (w.coords ?? {}) as { lat?: number; lng?: number };
+    if (typeof coords.lat === "number" && typeof coords.lng === "number") overlaySet.add(w.match_id);
+  });
+
+  return matches.map((m: any) => {
+    const setup = (m.match_setup ?? {}) as Record<string, any>;
+    return {
+      id: m.id,
+      auctionId: m.auction_id ?? m.id,
+      team1Name: setup.team1?.name ?? "Team 1",
+      team2Name: setup.team2?.name ?? "Team 2",
+      team1Logo: setup.team1?.logo || null,
+      team2Logo: setup.team2?.logo || null,
+      round: setup.round ?? "Friendly",
+      createdAt: m.created_at,
+      tournamentName: m.tournaments?.name ?? null,
+      tournamentId: m.tournament_id ?? null,
       overlayConfigured: overlaySet.has(m.id),
       auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
       venue: setup.venue || null,

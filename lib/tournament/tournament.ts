@@ -80,7 +80,8 @@ export async function getTournamentsForOrg(
       status,
       image_url,
       created_at,
-      organizations ( name, logo_url )
+      organizations ( name, logo_url ),
+      tournament_id
     `
     )
     .eq("org_id", orgId)
