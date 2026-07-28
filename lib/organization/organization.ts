@@ -1478,7 +1478,6 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
     .from("matches")
     .select("id, auction_id, match_setup, created_at, tournament_id")
     .eq("org_id", orgId)
-    .is("tournament_id", null)
     .order("created_at", { ascending: false });
 
   if (error) {
