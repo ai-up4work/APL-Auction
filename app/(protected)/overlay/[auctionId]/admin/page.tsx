@@ -252,11 +252,24 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
   const [setupPushed, setSetupPushed] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
-  // NEW — single source-of-truth hydration flag. True only once the
-  // Supabase load (success OR failure) has resolved. Nothing writes to
-  // Supabase before this flips, so we can never clobber a real DB row
-  // with the empty initial state during the fetch window.
+  // Single source-of-truth hydration flag. True only once the Supabase
+  // load (success OR failure) has resolved. Nothing writes to Supabase
+  // before this flips, so we can never clobber a real DB row with the
+  // empty initial state during the fetch window.
   const [hydrated, setHydrated] = useState(false);
+
+  // FIX — guards the very first save-effect run that fires as a side
+  // effect of hydration itself. `setMatchSetup(match.match_setup)` and
+  // `setHydrated(true)` land in the same hydration pass, so the
+  // save-on-change effect below used to fire immediately on page load —
+  // before the user had touched anything — and persist whatever shape
+  // the in-memory matchSetup happened to be in at that moment. Combined
+  // with the old non-merging saveMatchSetup, this is what wiped Match
+  // Editor data (team1/team2, squads, officials, rosterLocked, ...) the
+  // first time this admin page was opened for a friendly match. This
+  // ref suppresses exactly that one post-hydration save; every save
+  // after it reflects a genuine user edit.
+  const justHydratedRef = useRef(false);
 
   // ── Live State (incremental) ────────────────────────────────────────
   const [liveState, setLiveState] = useState<LiveState>(emptyLiveState);
@@ -339,6 +352,12 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
       // re-reads a later-arriving prop update. Setting matchSetupCompleted
       // last, alongside the rest, guarantees the first mount already has
       // the real data.
+      //
+      // FIX — mark this as a hydration-driven update BEFORE flipping
+      // hydrated, so the save effect below can tell this particular
+      // matchSetup change apart from a real user edit and skip saving it.
+      justHydratedRef.current = true;
+
       setMatchId(match.id);
       setSourceAuctionId(match.auction_id);
       setMatchSetup(match.match_setup); // already normalized by getOrCreateMatch
@@ -359,6 +378,20 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
   // so nothing writes back before the initial load has actually resolved. ──
   useEffect(() => {
     if (!hydrated || !matchIdRef.current) return;
+
+    // FIX — skip the one save that would otherwise fire as a direct
+    // side effect of hydration setting matchSetup + hydrated together.
+    // Without this, opening this page for a match that was set up via
+    // the Match Editor immediately re-persisted the overlay's narrower
+    // teamA/teamB view back over the row. (saveMatchSetup itself now
+    // also merges rather than overwrites — see matchPersistence.ts —
+    // so this guard and that fix both close the same hole, belt and
+    // braces.)
+    if (justHydratedRef.current) {
+      justHydratedRef.current = false;
+      return;
+    }
+
     saveMatchSetup(auctionId, matchSetup, matchSetupCompleted);
   }, [matchSetup, matchSetupCompleted, auctionId, hydrated]);
 

@@ -47,6 +47,26 @@ import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 // don't replace `toss` (kept as-is, still free text) or the
 // tournamentName/round fields already here — anything that only knows
 // the old shape keeps working untouched.
+//
+// ── SEASON / FORMAT (NEW) ──
+// The overlay admin side (MatchSetup in lib/overlayBus.ts) already has
+// `season` and an explicit `format: "T20"|"ODI"|"Test"` — this editor
+// had neither. `season` is purely additive, same pattern as the fields
+// above. `format` used to only be inferrable on the overlay side by
+// guessing from `overs` (see guessFormatFromOvers in
+// matchPersistence.ts) — that guess still exists as a fallback for old
+// rows, but new saves from here write an explicit `format` so nothing
+// needs to guess anymore.
+//
+// ── TOSS (DE-DUPLICATED) ──
+// This used to have a manual free-text `toss` field ("X won the toss
+// and elected to bat") living alongside the structured `tossWinner` /
+// `tossDecision` fields below — the same fact, entered twice, with no
+// guarantee they'd agree. `toss` is now auto-derived from
+// tossWinner/tossDecision (see the effect in the component) rather than
+// directly editable; it's still written into match_setup under the
+// same `toss` key so anything already reading that field as plain text
+// (the simulator, older overlay reads) keeps working unchanged.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -69,8 +89,11 @@ interface Officials {
   referee: string
 }
 
+type MatchFormat = "T20" | "ODI" | "Test"
+
 interface EditableSetup {
   tournamentName: string
+  season: string
   round: string
   team1Name: string
   team1Short: string
@@ -84,6 +107,7 @@ interface EditableSetup {
   date: string
   time: string
   toss: string
+  format: MatchFormat
   overs: number
   officials: Officials
   squads: Squad[]
@@ -99,6 +123,7 @@ interface EditableSetup {
 }
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter"]
+const FORMAT_OPTIONS: MatchFormat[] = ["T20", "ODI", "Test"]
 
 const emptyOfficials: Officials = { format: "", umpires: "", thirdUmpire: "", referee: "" }
 
@@ -111,6 +136,7 @@ function emptySquad(teamId: "team1" | "team2"): Squad {
 function emptySetup(): EditableSetup {
   return {
     tournamentName: "",
+    season: "",
     round: "",
     team1Name: "",
     team1Short: "",
@@ -124,6 +150,7 @@ function emptySetup(): EditableSetup {
     date: "",
     time: "",
     toss: "",
+    format: "T20",
     overs: 20,
     officials: { ...emptyOfficials },
     squads: [emptySquad("team1"), emptySquad("team2")],
@@ -227,6 +254,10 @@ function normalizeRawSquads(raw: Record<string, any> | null): Squad[] {
   ]
 }
 
+function normalizeFormat(value: unknown): MatchFormat {
+  return value === "T20" || value === "ODI" || value === "Test" ? value : "T20"
+}
+
 // Reads whatever shape currently exists in match_setup and maps it onto
 // the editable form fields, filling in blanks rather than erroring —
 // this page needs to work on a match_setup that's missing squads
@@ -236,6 +267,7 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
   if (!raw) return emptySetup()
   return {
     tournamentName: raw.tournamentName ?? "",
+    season: raw.season ?? "",
     round: raw.round ?? "",
     team1Name: raw.team1?.name ?? "",
     team1Short: raw.team1?.short ?? "",
@@ -249,6 +281,7 @@ function fromRawSetup(raw: Record<string, any> | null): EditableSetup {
     date: raw.date ?? "",
     time: raw.time ?? "",
     toss: raw.toss ?? "",
+    format: normalizeFormat(raw.format),
     overs: typeof raw.overs === "number" ? raw.overs : 20,
     officials: {
       format: raw.officials?.format ?? "",
@@ -276,6 +309,16 @@ function hadFlatSquads(raw: Record<string, any> | null): boolean {
   return rawSquads.length > 0 && !isGroupedShape(rawSquads)
 }
 
+// Builds the plain-text toss sentence from the structured fields, so
+// there's exactly one place this fact gets composed instead of a
+// separately-typed field that can drift out of sync with Toss
+// Winner/Toss Decision. Returns "" until both are set.
+function composeTossText(tossWinner: string, tossDecision: string): string {
+  if (!tossWinner || !tossDecision) return ""
+  const decisionText = tossDecision === "bat" ? "bat" : "bowl"
+  return `${tossWinner} won the toss and elected to ${decisionText}`
+}
+
 // Merges the edited fields back into whatever the raw match_setup blob
 // already contained, so runtime-only keys the simulator owns (target,
 // currentInnings) survive a save untouched instead of being wiped.
@@ -289,13 +332,18 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
   return {
     ...(raw ?? {}),
     tournamentName: form.tournamentName,
+    season: form.season,
     round: form.round,
     team1: { name: form.team1Name, short: form.team1Short, logo: form.team1Logo, color: form.team1Color },
     team2: { name: form.team2Name, short: form.team2Short, logo: form.team2Logo, color: form.team2Color },
     venue: form.venue,
     date: form.date,
     time: form.time,
-    toss: form.toss,
+    // Derived, not manually typed — see composeTossText. Written under
+    // the same `toss` key so any existing reader of plain toss text
+    // keeps working without changes.
+    toss: composeTossText(form.tossWinner, form.tossDecision),
+    format: form.format,
     overs: form.overs,
     officials: { ...form.officials },
     squads: form.squads.map((s) => ({
@@ -728,6 +776,19 @@ export default function EditMatchPage() {
     setForm((prev) => ({ ...prev, officials: { ...prev.officials, [key]: value } }))
   }
 
+  // ── Toss de-duplication ──
+  // `form.toss` is derived, not directly editable (see composeTossText
+  // in toRawSetup). Keep it in sync locally too so the preview line
+  // below the Toss Winner/Decision selects always reflects the latest
+  // choice without waiting for a save round-trip.
+  useEffect(() => {
+    const computed = composeTossText(form.tossWinner, form.tossDecision)
+    if (computed !== form.toss) {
+      setForm((prev) => ({ ...prev, toss: computed }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.tossWinner, form.tossDecision])
+
   function updateSquad(index: number, patch: Partial<Squad>) {
     setForm((prev) => {
       const squads = [...prev.squads]
@@ -917,13 +978,21 @@ export default function EditMatchPage() {
                   <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Match Details</h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
                     <FieldLabel>Tournament / Series</FieldLabel>
                     <TextInput
                       value={form.tournamentName}
                       onChange={(e) => update("tournamentName", e.target.value)}
                       placeholder="Valiant League — Season 1"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Season</FieldLabel>
+                    <TextInput
+                      value={form.season}
+                      onChange={(e) => update("season", e.target.value)}
+                      placeholder="e.g. 2026"
                     />
                   </div>
                   <div>
@@ -1008,14 +1077,20 @@ export default function EditMatchPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-[1fr_9rem] gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-[9rem_1fr] gap-4">
                   <div>
-                    <FieldLabel>Toss</FieldLabel>
-                    <TextInput
-                      value={form.toss}
-                      onChange={(e) => update("toss", e.target.value)}
-                      placeholder="Emberfall Paladins won the toss and elected to bat"
-                    />
+                    <FieldLabel>Format</FieldLabel>
+                    <select
+                      className="select-input w-full"
+                      value={form.format}
+                      onChange={(e) => update("format", e.target.value as MatchFormat)}
+                    >
+                      {FORMAT_OPTIONS.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <FieldLabel>Overs / Side</FieldLabel>
@@ -1064,7 +1139,13 @@ export default function EditMatchPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                {/* ── Toss — structured entry only. This used to sit
+                    alongside a separate free-text "Toss" field in the
+                    Match Details panel above; the two could say
+                    different things since nothing kept them in sync.
+                    Now this is the single source of truth, and the
+                    plain-text sentence below is generated from it. ── */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
                   <div>
                     <FieldLabel>Toss Winner</FieldLabel>
                     <select
@@ -1090,6 +1171,11 @@ export default function EditMatchPage() {
                     </select>
                   </div>
                 </div>
+                {form.toss ? (
+                  <p className="text-gray-400 text-xs mb-4">Preview: {form.toss}</p>
+                ) : (
+                  <p className="text-gray-600 text-xs mb-4">Set both fields above to generate the toss line.</p>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -1119,7 +1205,7 @@ export default function EditMatchPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <FieldLabel>Format</FieldLabel>
+                    <FieldLabel>Format Note</FieldLabel>
                     <TextInput
                       value={form.officials.format}
                       onChange={(e) => updateOfficials("format", e.target.value)}

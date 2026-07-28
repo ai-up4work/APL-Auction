@@ -158,6 +158,29 @@ function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlaye
   return rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined }));
 }
 
+// ── NEW — resolve a missing teamId from name/shortCode ────────────────
+// Older/pre-existing matches can have `matchSetup.teamA/B.name` and
+// `.shortCode` saved (e.g. typed manually, or saved before `teamId` was
+// part of the shape) but no `teamId` at all. Without a bound teamId,
+// nothing can ever look up that team's roster automatically — the user
+// would be stuck re-picking the team from the dropdown on every single
+// admin page load, even though the DB unambiguously has a matching team
+// row already. This does a best-effort match against the auction's own
+// teams table (already scoped by auction_id via useAuctionTeams) so we
+// only need `code` and/or `name` to line up, not a stored id.
+function resolveTeamId(team: TeamInfo, teamsState: TeamsDbState): string | undefined {
+  if (team.teamId) return team.teamId;
+  if (teamsState.status !== "ready") return undefined;
+  if (!team.shortCode && !team.name) return undefined;
+
+  const match = teamsState.teams.find(
+    (t) =>
+      (team.shortCode && t.code === team.shortCode) ||
+      (team.name && t.name === team.name)
+  );
+  return match?.id;
+}
+
 function MutedNote({ tone = "neutral", children }: { tone?: "neutral" | "warning"; children: React.ReactNode }) {
   return (
     <p
@@ -248,6 +271,53 @@ function TeamRosterPicker({
     if (roster.status !== "ready" || !team.teamId) return [];
     return roster.byTeamId.get(team.teamId) ?? [];
   }, [roster, team.teamId]);
+
+  // ── Reconcile stale "manual:Name" squad entries against the real
+  // roster once it loads. This happens for squads that came from the
+  // Match Editor's friendly-match shape before that player's row had
+  // been synced into the `players` table (or before that sync's
+  // `playerId` made it back into match_setup) — normalizeMatchSetup
+  // has no way to know the real id at that point, so it falls back to
+  // a `manual:` placeholder. Left alone, that placeholder can never
+  // match the real roster row that shows up here once the roster
+  // query resolves, so the same person renders TWICE: once as an
+  // unselected/grayed real roster chip, and once as a separate
+  // "manual" chip with a remove (×) button — which is exactly what
+  // looked like "12 players, 6 selected, 6 not" for a 6-person squad.
+  // This swaps the placeholder id for the real one by matching name
+  // (case-insensitive), so the roster chip renders as properly
+  // selected instead, and de-dupes if both ever ended up present.
+  useEffect(() => {
+    if (roster.status !== "ready" || !team.teamId) return;
+    const rows = roster.byTeamId.get(team.teamId) ?? [];
+    if (rows.length === 0) return;
+
+    const current = team.squadPlayers ?? [];
+    let changed = false;
+
+    const reconciled = current.map((p) => {
+      if (!p.id.startsWith("manual:")) return p;
+      const match = rows.find((r) => r.name.trim().toLowerCase() === p.name.trim().toLowerCase());
+      if (!match) return p;
+      changed = true;
+      return { id: match.id, name: match.name, imageUrl: match.image_url ?? undefined };
+    });
+
+    if (!changed) return;
+
+    // De-dupe — a real roster chip and a reconciled manual entry could
+    // now both point at the same id if the player was somehow present
+    // twice already.
+    const seen = new Set<string>();
+    const deduped = reconciled.filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+
+    onChange({ squadPlayers: deduped, squad: deduped.map((p) => p.name) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster.status, team.teamId]);
 
   // DEBUG — remove after diagnosing
   console.log("[roster lookup] team.teamId =", team.teamId,
@@ -472,6 +542,39 @@ export default function MatchSetupPanel({
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   }
 
+  // ── NEW — backfill a missing teamId from name/shortCode ─────────────
+  // Runs whenever the teams list becomes ready, or the team's own
+  // name/shortCode changes. Older/persisted setups that predate `teamId`
+  // being part of the saved shape (or that were typed in manually) will
+  // have name/shortCode but no teamId — without this, the roster picker
+  // below has nothing to key off of and silently shows nothing, forever,
+  // until someone manually re-picks the team from the dropdown. This
+  // only ever *sets* teamId when it's currently missing; it never
+  // overwrites an existing one, so a manual pick always wins.
+  useEffect(() => {
+    if (teamsState.status !== "ready") return;
+
+    (["teamA", "teamB"] as const).forEach((teamKey) => {
+      const team = matchSetup[teamKey];
+      if (team.teamId) return; // already bound — nothing to resolve
+
+      const resolved = resolveTeamId(team, teamsState);
+      if (!resolved) return;
+
+      setMatchSetup((prev) => ({
+        ...prev,
+        [teamKey]: { ...prev[teamKey], teamId: resolved },
+      }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    teamsState.status,
+    matchSetup.teamA.name,
+    matchSetup.teamA.shortCode,
+    matchSetup.teamB.name,
+    matchSetup.teamB.shortCode,
+  ]);
+
   useEffect(() => {
     if (roster.status !== "ready") return;
     if (locked) return;
@@ -493,8 +596,12 @@ export default function MatchSetupPanel({
         },
       }));
     });
+    // CHANGED — added the team ids here. teamId can now arrive
+    // asynchronously via the resolver effect above (not just via the
+    // dropdown's synchronous onApply), so this needs to react to that
+    // too, not just to roster.status/locked transitions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster.status, locked]);
+  }, [roster.status, locked, matchSetup.teamA.teamId, matchSetup.teamB.teamId]);
 
   if (locked) {
     return <LockedSummaryBar matchSetup={matchSetup} onEdit={handleEdit} />;
