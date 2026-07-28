@@ -797,7 +797,9 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
         <div className="flex flex-col lg:flex-row gap-8 items-start">
           <div className="flex-1 min-w-0 flex flex-col gap-6">
             <MatchSetupPanel
-              auctionId={sourceAuctionId}   // not matchId, not `${sourceAuctionId}`, not stringified
+              auctionId={sourceAuctionId}
+              matchId={matchId}                 // NEW — enables the Match Editor link
+              auctionAdminHref={undefined}      // set this to your real Auctions tab route
               matchSetup={matchSetup}
               setMatchSetup={setMatchSetup}
               onPush={pushMatchSetup}

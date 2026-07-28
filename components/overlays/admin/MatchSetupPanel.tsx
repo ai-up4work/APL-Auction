@@ -36,8 +36,6 @@ function useAuctionRoster(auctionId: string | null | undefined): RosterState {
 
   useEffect(() => {
     if (!isValidAuctionId(auctionId)) {
-      // Nothing to query yet (e.g. still hydrating upstream) — don't
-      // fire a request that Postgres will reject.
       setState({ status: "empty" });
       return;
     }
@@ -62,7 +60,6 @@ function useAuctionRoster(auctionId: string | null | undefined): RosterState {
           setState({ status: "empty" });
           return;
         }
-        // console.log("[useAuctionRoster] got", JSON.stringify(data, null, 2));
         const byTeamId = new Map<string, RosterRow[]>();
         for (const row of data as any[]) {
           const key = row.sold_to_team_id ?? "unassigned";
@@ -73,7 +70,8 @@ function useAuctionRoster(auctionId: string | null | undefined): RosterState {
             image_url: row.img || null,
             role: row.role,
             team_id: row.sold_to_team_id,
-          });        }
+          });
+        }
         setState({ status: "ready", byTeamId });
       });
 
@@ -159,15 +157,6 @@ function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlaye
 }
 
 // ── resolve a missing teamId from name/shortCode ────────────────
-// Older/pre-existing matches can have `matchSetup.teamA/B.name` and
-// `.shortCode` saved (e.g. typed manually, or saved before `teamId` was
-// part of the shape) but no `teamId` at all. Without a bound teamId,
-// nothing can ever look up that team's roster automatically — the user
-// would be stuck re-picking the team from the dropdown on every single
-// admin page load, even though the DB unambiguously has a matching team
-// row already. This does a best-effort match against the auction's own
-// teams table (already scoped by auction_id via useAuctionTeams) so we
-// only need `code` and/or `name` to line up, not a stored id.
 function resolveTeamId(team: TeamInfo, teamsState: TeamsDbState): string | undefined {
   if (team.teamId) return team.teamId;
   if (teamsState.status !== "ready") return undefined;
@@ -220,17 +209,12 @@ function TeamDbSelect({
     <select
       className="select-input select-input-compact"
       defaultValue=""
-        onChange={(e) => {
-          const team = teamsState.teams.find((t) => t.id === e.target.value);
-          if (!team) return;
+      onChange={(e) => {
+        const team = teamsState.teams.find((t) => t.id === e.target.value);
+        if (!team) return;
 
-          // DEBUG — remove after diagnosing
-          console.log("[team select] picked team.id =", team.id,
-            "roster status =", roster.status,
-            "roster keys =", roster.status === "ready" ? Array.from(roster.byTeamId.keys()) : "n/a");
-
-          const squadPlayers = rosterPlayersForTeamId(roster, team.id);
-          onApply({
+        const squadPlayers = rosterPlayersForTeamId(roster, team.id);
+        onApply({
           teamId: team.id,
           name: team.name,
           shortCode: team.code,
@@ -254,70 +238,26 @@ function TeamDbSelect({
 }
 
 // ── One team's roster picker ─────────────────────────────────────────
-//
-// CHANGES from the original version:
-//
-// 1. Manual player entry REMOVED from this panel entirely. Squads here
-//    are meant to be picked from players who already exist in the
-//    `players` table for this auction/team — typing a brand-new name
-//    in here used to create an ad-hoc "manual:<name>" entry with no
-//    backing DB row, which is exactly the kind of record the Match
-//    Editor's sync path (syncSquadsToPlayers) and the Auctions tab
-//    already own. Adding players now only happens from those two
-//    places; this panel just SELECTS from what's already there, plus a
-//    short note telling the user where to go if the player they want
-//    isn't listed yet.
-//
-//    Pre-existing "manual:" entries (already in team.squadPlayers from
-//    before this change, or reconciled in from an older friendly-match
-//    import) still render and can still be toggled OUT of today's
-//    squad — that's just excluding them from selection, not deleting
-//    the underlying record, so it stays allowed. What's gone is the
-//    ability to CREATE a new one from this screen.
-//
-// 2. Chip styling — was relying entirely on external `squad-list` /
-//    `squad-chip` / `is-selected` / `is-unselected` classes from
-//    globals.css, which were washing unselected chips out to
-//    near-invisibility. Replaced with explicit inline styles using the
-//    same CSS variable tokens the rest of this file already uses.
-//
-// 3. Reload/Clear controls — were using the shared <LinkBtn> from
-//    ./ui, whose default styling also rendered near-invisible on this
-//    panel. Replaced with plain inline-styled buttons scoped to just
-//    this component, so this fix can't affect other LinkBtn usages
-//    elsewhere that may rely on its current look.
 function TeamRosterPicker({
   team,
   onChange,
   roster,
+  matchEditorHref,
+  auctionAdminHref,
 }: {
   team: TeamInfo;
   onChange: (patch: Partial<TeamInfo>) => void;
   roster: RosterState;
+  matchEditorHref?: string;
+  auctionAdminHref?: string;
 }) {
   const selectedIds = useMemo(() => new Set((team.squadPlayers ?? []).map((p) => p.id)), [team.squadPlayers]);
 
-  // Only THIS team's roster rows — not every team's.
   const teamRosterRows = useMemo(() => {
     if (roster.status !== "ready" || !team.teamId) return [];
     return roster.byTeamId.get(team.teamId) ?? [];
   }, [roster, team.teamId]);
 
-  // ── Reconcile stale "manual:Name" squad entries against the real
-  // roster once it loads. This happens for squads that came from the
-  // Match Editor's friendly-match shape before that player's row had
-  // been synced into the `players` table (or before that sync's
-  // `playerId` made it back into match_setup) — normalizeMatchSetup
-  // has no way to know the real id at that point, so it falls back to
-  // a `manual:` placeholder. Left alone, that placeholder can never
-  // match the real roster row that shows up here once the roster
-  // query resolves, so the same person renders TWICE: once as an
-  // unselected/grayed real roster chip, and once as a separate
-  // "manual" chip with a remove (×) button — which is exactly what
-  // looked like "12 players, 6 selected, 6 not" for a 6-person squad.
-  // This swaps the placeholder id for the real one by matching name
-  // (case-insensitive), so the roster chip renders as properly
-  // selected instead, and de-dupes if both ever ended up present.
   useEffect(() => {
     if (roster.status !== "ready" || !team.teamId) return;
     const rows = roster.byTeamId.get(team.teamId) ?? [];
@@ -336,9 +276,6 @@ function TeamRosterPicker({
 
     if (!changed) return;
 
-    // De-dupe — a real roster chip and a reconciled manual entry could
-    // now both point at the same id if the player was somehow present
-    // twice already.
     const seen = new Set<string>();
     const deduped = reconciled.filter((p) => {
       if (seen.has(p.id)) return false;
@@ -366,9 +303,6 @@ function TeamRosterPicker({
     onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
   }
 
-  // Still allowed — this removes a pre-existing manual entry from
-  // TODAY'S squad (deselects it), it doesn't delete any record. What's
-  // removed is the ability to CREATE a new manual entry from here.
   function removeManual(id: string) {
     const next = (team.squadPlayers ?? []).filter((p) => p.id !== id);
     onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
@@ -385,8 +319,6 @@ function TeamRosterPicker({
       <div className="flex items-center justify-between">
         <FieldLabel>Squad ({selectedIds.size})</FieldLabel>
         <div className="flex items-center gap-4">
-          {/* Inline-styled instead of <LinkBtn> — see comment block
-              above the component for why. */}
           {team.teamId && roster.status === "ready" && (
             <button
               type="button"
@@ -449,10 +381,6 @@ function TeamRosterPicker({
         </MutedNote>
       )}
 
-      {/* ── Squad picker — click a card to toggle it in/out of today's
-           squad. Inline-styled (not dependent on external squad-list /
-           squad-chip classes) so this can't wash out again if those
-           classes ever change elsewhere. ── */}
       {hasAnyChips && (
         <div
           style={{
@@ -632,13 +560,49 @@ function TeamRosterPicker({
         </div>
       )}
 
-      <p
-        className="text-[9px]"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+      {/* ── Styled callout linking to where players are actually added
+           (Match Editor / Auctions), replacing the old plain <p>. ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "8px",
+          padding: "10px 12px",
+          borderRadius: "10px",
+          background: "rgba(201,151,31,0.06)",
+          border: "1px dashed rgba(201,151,31,0.35)",
+        }}
       >
-        Need to add a new player? Do that from the Match Editor or the Auctions tab — this panel only picks
-        today&apos;s XI from players already on record.
-      </p>
+        <span style={{ fontSize: 12, lineHeight: "14px", color: "var(--color-theme-orange)" }}>ⓘ</span>
+        <p
+          className="text-[10px] leading-relaxed"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+        >
+          Need to add a new player? Do that from the{" "}
+          {matchEditorHref ? (
+            <a
+              href={matchEditorHref}
+              style={{ color: "var(--color-theme-orange)", fontWeight: 700, textDecoration: "underline" }}
+            >
+              Match Editor
+            </a>
+          ) : (
+            <span style={{ color: "var(--color-theme-orange)" }}>Match Editor</span>
+          )}{" "}
+          or the{" "}
+          {auctionAdminHref ? (
+            <a
+              href={auctionAdminHref}
+              style={{ color: "var(--color-theme-orange)", fontWeight: 700, textDecoration: "underline" }}
+            >
+              Auctions
+            </a>
+          ) : (
+            <span style={{ color: "var(--color-theme-orange)" }}>Auctions</span>
+          )}{" "}
+          tab — this panel only picks today&apos;s XI from players already on record.
+        </p>
+      </div>
     </div>
   );
 }
@@ -705,6 +669,8 @@ export default function MatchSetupPanel({
   pushLabel,
   completed,
   onVenueSelect,
+  matchId,
+  auctionAdminHref,
 }: {
   auctionId: string | null | undefined;
   matchSetup: MatchSetup;
@@ -713,9 +679,15 @@ export default function MatchSetupPanel({
   pushLabel: string;
   completed: boolean;
   onVenueSelect?: (match: GeocodeMatch, displayName?: string) => void;
+  /** Used to build the "Match Editor" link inside the roster panel — e.g. `/match/[matchId]/edit`. */
+  matchId?: string | null;
+  /** Full URL/path to the Auctions admin tab. Optional — falls back to plain text if not passed. */
+  auctionAdminHref?: string;
 }) {
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);
+
+  const matchEditorHref = matchId ? `/match/${matchId}/edit` : undefined;
 
   const [locked, setLocked] = useState(completed);
   useEffect(() => {
@@ -738,21 +710,12 @@ export default function MatchSetupPanel({
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   }
 
-  // ── backfill a missing teamId from name/shortCode ─────────────
-  // Runs whenever the teams list becomes ready, or the team's own
-  // name/shortCode changes. Older/persisted setups that predate `teamId`
-  // being part of the saved shape (or that were typed in manually) will
-  // have name/shortCode but no teamId — without this, the roster picker
-  // below has nothing to key off of and silently shows nothing, forever,
-  // until someone manually re-picks the team from the dropdown. This
-  // only ever *sets* teamId when it's currently missing; it never
-  // overwrites an existing one, so a manual pick always wins.
   useEffect(() => {
     if (teamsState.status !== "ready") return;
 
     (["teamA", "teamB"] as const).forEach((teamKey) => {
       const team = matchSetup[teamKey];
-      if (team.teamId) return; // already bound — nothing to resolve
+      if (team.teamId) return;
 
       const resolved = resolveTeamId(team, teamsState);
       if (!resolved) return;
@@ -792,10 +755,6 @@ export default function MatchSetupPanel({
         },
       }));
     });
-    // CHANGED — added the team ids here. teamId can now arrive
-    // asynchronously via the resolver effect above (not just via the
-    // dropdown's synchronous onApply), so this needs to react to that
-    // too, not just to roster.status/locked transitions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roster.status, locked, matchSetup.teamA.teamId, matchSetup.teamB.teamId]);
 
@@ -804,18 +763,23 @@ export default function MatchSetupPanel({
   }
 
   return (
-      <DrawerSection
-        step="1" title="Match Setup" description="Teams & session — set once, then push"
-        done={completed} open={drawerOpen} onOpenChange={setDrawerOpen} >
-        {!isValidAuctionId(auctionId) && (
-          <p
-            className="text-[10px] uppercase tracking-widest"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-warning)" }}
-          >
-            No auction linked yet — team/roster lookups are disabled until this match has a valid auction_id.
-          </p>
-        )}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <DrawerSection
+      step="1"
+      title="Match Setup"
+      description="Teams & session — set once, then push"
+      done={completed}
+      open={drawerOpen}
+      onOpenChange={setDrawerOpen}
+    >
+      {!isValidAuctionId(auctionId) && (
+        <p
+          className="text-[10px] uppercase tracking-widest"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-warning)" }}
+        >
+          No auction linked yet — team/roster lookups are disabled until this match has a valid auction_id.
+        </p>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <TextField
           label="Tournament"
           value={matchSetup.tournamentName}
@@ -836,13 +800,6 @@ export default function MatchSetupPanel({
           label="Tournament Logo"
         />
 
-        {/* Free text — deliberately NOT autocomplete-backed. This is a
-            display label only ("Akkaraipattu Public Ground", etc.) and
-            has no bearing on weather lookups; those are handled entirely
-            inside WeatherPanel via its own autocomplete search field.
-            Decoupling these two means a venue that isn't in OSM's
-            database (small/local grounds) can still be typed here
-            freely without needing to resolve anywhere. */}
         <TextField
           label="Venue"
           value={matchSetup.venue}
@@ -850,7 +807,11 @@ export default function MatchSetupPanel({
           placeholder="Ground name"
         />
 
-        <SelectField label="Format" value={matchSetup.format} onChange={(v) => setMatchSetup((p) => ({ ...p, format: v as MatchSetup["format"] }))}>
+        <SelectField
+          label="Format"
+          value={matchSetup.format}
+          onChange={(v) => setMatchSetup((p) => ({ ...p, format: v as MatchSetup["format"] }))}
+        >
           <option value="T20">T20</option>
           <option value="ODI">ODI</option>
           <option value="Test">Test</option>
@@ -861,10 +822,6 @@ export default function MatchSetupPanel({
           onChange={(v) => setMatchSetup((p) => ({ ...p, matchNumber: v }))}
           placeholder="e.g. Match 14"
         />
-        {/* Free text so any local format works ("19:30", "7:30 PM
-            IST", "Starts after lunch break", etc.) rather than forcing a
-            single timezone-aware time picker. Feeds CricketMatchIntro's
-            Kickoff line, which only renders when this is non-empty. */}
         <TextField
           label="Kickoff Time"
           value={matchSetup.kickoffTime}
@@ -891,22 +848,25 @@ export default function MatchSetupPanel({
               style={{ ["--team-color" as string]: team.color, position: "relative", isolation: "isolate" }}
             >
               {team.logoUrl && (
-                // CHANGED — pinned to position:absolute + z-index:0 +
-                // pointer-events:none explicitly. Previously this relied
-                // on plain DOM order (watermark rendered before content)
-                // to stay behind the content div, which only holds if no
-                // CSS rule anywhere gives .team-card-watermark a z-index
-                // or its own stacking context. If it does (or .team-card
-                // resolves stacking differently than expected), the
-                // watermark renders ON TOP of the card, fogging out the
-                // buttons/text inside it — which is what was reported.
-                // Explicit z-index here plus `isolation: isolate` on the
-                // parent guarantees correct stacking regardless of what
-                // the external CSS does.
+                // ── Watermark fix ──
+                // team-card-content previously had a WebkitMaskImage /
+                // maskImage gradient that faded its right ~45% to
+                // transparent. That mask was fading the CONTENT
+                // (including the roster buttons) to near-invisibility,
+                // which is what made the watermark appear to "fog" the
+                // buttons. The mask has been removed from the content
+                // block below, and the watermark itself is now a
+                // low-opacity background image, absolutely positioned
+                // at z-index 0, fully behind the opaque content layer
+                // at z-index 1.
                 <div
                   className="team-card-watermark"
                   style={{
                     backgroundImage: `url(${team.logoUrl})`,
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "right center",
+                    opacity: 0.1,
                     position: "absolute",
                     inset: 0,
                     zIndex: 0,
@@ -922,16 +882,26 @@ export default function MatchSetupPanel({
                   zIndex: 1,
                   background: "var(--color-surface-container-low)",
                   border: "1px solid var(--color-border-overlay)",
-                  WebkitMaskImage: "linear-gradient(to right, black 55%, transparent 100%)",
-                  maskImage: "linear-gradient(to right, black 55%, transparent 100%)",
+                  // NOTE: mask-image intentionally removed — see comment
+                  // on the watermark div above for why.
                 }}
               >
                 <Eyebrow color="var(--color-theme-orange)">{teamKey === "teamA" ? "Team A" : "Team B"}</Eyebrow>
 
-                <TeamDbSelect teamsState={teamsState} roster={roster} excludeTeamId={matchSetup[otherKey].teamId} onApply={(patch) => updateTeam(teamKey, patch)} />
+                <TeamDbSelect
+                  teamsState={teamsState}
+                  roster={roster}
+                  excludeTeamId={matchSetup[otherKey].teamId}
+                  onApply={(patch) => updateTeam(teamKey, patch)}
+                />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <TextField label="Name" value={team.name} onChange={(v) => updateTeam(teamKey, { name: v })} placeholder="Team name" />
+                  <TextField
+                    label="Name"
+                    value={team.name}
+                    onChange={(v) => updateTeam(teamKey, { name: v })}
+                    placeholder="Team name"
+                  />
                   <TextField
                     label="Short Code"
                     mono
@@ -941,10 +911,22 @@ export default function MatchSetupPanel({
                     placeholder="e.g. CSK"
                   />
                   <ColorField label="Color" value={team.color} onChange={(v) => updateTeam(teamKey, { color: v })} />
-                  <ImageUploader auctionId={auctionId ?? ""} kind="team" value={team.logoUrl} onChange={(url) => updateTeam(teamKey, { logoUrl: url })} label="Logo" />
+                  <ImageUploader
+                    auctionId={auctionId ?? ""}
+                    kind="team"
+                    value={team.logoUrl}
+                    onChange={(url) => updateTeam(teamKey, { logoUrl: url })}
+                    label="Logo"
+                  />
                 </div>
 
-                <TeamRosterPicker team={team} roster={roster} onChange={(patch) => updateTeam(teamKey, patch)} />
+                <TeamRosterPicker
+                  team={team}
+                  roster={roster}
+                  onChange={(patch) => updateTeam(teamKey, patch)}
+                  matchEditorHref={matchEditorHref}
+                  auctionAdminHref={auctionAdminHref}
+                />
               </div>
             </div>
           );
@@ -979,7 +961,10 @@ export default function MatchSetupPanel({
       </div>
 
       {!completed && (
-        <p className="text-[9px] uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>
+        <p
+          className="text-[9px] uppercase tracking-widest"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+        >
           Push once to unlock the preview link and live scoring below.
         </p>
       )}
