@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import { FieldLabel, IconBtn } from "./ui";
+import Image from "next/image";
 
 export function ImageUploader({
   auctionId,
@@ -59,7 +60,7 @@ export function ImageUploader({
         >
           {value ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={value} alt="" className="w-full h-full object-cover" />
+            <Image src={value} alt="" className="w-full h-full object-cover" width={size} height={size} />
           ) : (
             <span className="material-symbols-outlined" style={{ fontSize: compact ? 16 : 18, color: "var(--color-outline)" }}>
               image

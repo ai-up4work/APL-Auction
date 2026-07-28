@@ -158,7 +158,7 @@ function rosterPlayersForTeamId(roster: RosterState, teamId: string): SquadPlaye
   return rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined }));
 }
 
-// ── NEW — resolve a missing teamId from name/shortCode ────────────────
+// ── resolve a missing teamId from name/shortCode ────────────────
 // Older/pre-existing matches can have `matchSetup.teamA/B.name` and
 // `.shortCode` saved (e.g. typed manually, or saved before `teamId` was
 // part of the shape) but no `teamId` at all. Without a bound teamId,
@@ -254,6 +254,38 @@ function TeamDbSelect({
 }
 
 // ── One team's roster picker ─────────────────────────────────────────
+//
+// CHANGES from the original version:
+//
+// 1. Manual player entry REMOVED from this panel entirely. Squads here
+//    are meant to be picked from players who already exist in the
+//    `players` table for this auction/team — typing a brand-new name
+//    in here used to create an ad-hoc "manual:<name>" entry with no
+//    backing DB row, which is exactly the kind of record the Match
+//    Editor's sync path (syncSquadsToPlayers) and the Auctions tab
+//    already own. Adding players now only happens from those two
+//    places; this panel just SELECTS from what's already there, plus a
+//    short note telling the user where to go if the player they want
+//    isn't listed yet.
+//
+//    Pre-existing "manual:" entries (already in team.squadPlayers from
+//    before this change, or reconciled in from an older friendly-match
+//    import) still render and can still be toggled OUT of today's
+//    squad — that's just excluding them from selection, not deleting
+//    the underlying record, so it stays allowed. What's gone is the
+//    ability to CREATE a new one from this screen.
+//
+// 2. Chip styling — was relying entirely on external `squad-list` /
+//    `squad-chip` / `is-selected` / `is-unselected` classes from
+//    globals.css, which were washing unselected chips out to
+//    near-invisibility. Replaced with explicit inline styles using the
+//    same CSS variable tokens the rest of this file already uses.
+//
+// 3. Reload/Clear controls — were using the shared <LinkBtn> from
+//    ./ui, whose default styling also rendered near-invisible on this
+//    panel. Replaced with plain inline-styled buttons scoped to just
+//    this component, so this fix can't affect other LinkBtn usages
+//    elsewhere that may rely on its current look.
 function TeamRosterPicker({
   team,
   onChange,
@@ -263,7 +295,6 @@ function TeamRosterPicker({
   onChange: (patch: Partial<TeamInfo>) => void;
   roster: RosterState;
 }) {
-  const [manualName, setManualName] = useState("");
   const selectedIds = useMemo(() => new Set((team.squadPlayers ?? []).map((p) => p.id)), [team.squadPlayers]);
 
   // Only THIS team's roster rows — not every team's.
@@ -319,12 +350,6 @@ function TeamRosterPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roster.status, team.teamId]);
 
-  // DEBUG — remove after diagnosing
-  console.log("[roster lookup] team.teamId =", team.teamId,
-    "found rows =", teamRosterRows.length,
-    "roster status =", roster.status,
-    "all roster keys =", roster.status === "ready" ? Array.from(roster.byTeamId.keys()) : "n/a");
-
   const manualPlayers = (team.squadPlayers ?? []).filter((p) => p.id.startsWith("manual:"));
 
   function reloadFromBoundTeam() {
@@ -341,15 +366,9 @@ function TeamRosterPicker({
     onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
   }
 
-  function addManual() {
-    const name = manualName.trim();
-    if (!name) return;
-    const player: SquadPlayer = { id: `manual:${name}`, name };
-    const next = [...(team.squadPlayers ?? []), player];
-    onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
-    setManualName("");
-  }
-
+  // Still allowed — this removes a pre-existing manual entry from
+  // TODAY'S squad (deselects it), it doesn't delete any record. What's
+  // removed is the ability to CREATE a new manual entry from here.
   function removeManual(id: string) {
     const next = (team.squadPlayers ?? []).filter((p) => p.id !== id);
     onChange({ squadPlayers: next, squad: next.map((p) => p.name) });
@@ -359,90 +378,267 @@ function TeamRosterPicker({
     onChange({ squadPlayers: [], squad: [] });
   }
 
+  const hasAnyChips = teamRosterRows.length > 0 || manualPlayers.length > 0;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <FieldLabel>Squad ({selectedIds.size})</FieldLabel>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          {/* Inline-styled instead of <LinkBtn> — see comment block
+              above the component for why. */}
           {team.teamId && roster.status === "ready" && (
-            <LinkBtn onClick={reloadFromBoundTeam} title="Reload full squad from roster for the bound team">
+            <button
+              type="button"
+              onClick={reloadFromBoundTeam}
+              title="Reload full squad from roster for the bound team"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                fontSize: 10,
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--color-theme-orange)",
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                opacity: 1,
+              }}
+            >
               Reload
-            </LinkBtn>
+            </button>
           )}
           {selectedIds.size > 0 && (
-            <LinkBtn danger onClick={clearSquad} title="Remove everyone from today's squad">
+            <button
+              type="button"
+              onClick={clearSquad}
+              title="Remove everyone from today's squad"
+              style={{
+                fontFamily: "var(--font-label-mono)",
+                fontSize: 10,
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--color-error)",
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                opacity: 1,
+              }}
+            >
               Clear
-            </LinkBtn>
+            </button>
           )}
         </div>
       </div>
 
       {roster.status === "loading" && <MutedNote>Loading roster…</MutedNote>}
-      {roster.status === "error" && <MutedNote tone="warning">Couldn&apos;t reach the roster table — add players manually below.</MutedNote>}
-      {roster.status === "ready" && !team.teamId && (
-        <MutedNote>Select a team above to load its roster, or add players manually below.</MutedNote>
+      {roster.status === "error" && (
+        <MutedNote tone="warning">Couldn&apos;t reach the roster table — try again shortly.</MutedNote>
       )}
-      {roster.status === "ready" && team.teamId && teamRosterRows.length === 0 && (
-        <MutedNote>No sold players found for this team yet — add players manually below.</MutedNote>
+      {roster.status === "ready" && !team.teamId && (
+        <MutedNote>Select a team above to load its roster.</MutedNote>
+      )}
+      {roster.status === "ready" && team.teamId && teamRosterRows.length === 0 && manualPlayers.length === 0 && (
+        <MutedNote>
+          No sold players found for this team yet — add players from the{" "}
+          <span style={{ color: "var(--color-theme-orange)" }}>Match Editor</span> or the{" "}
+          <span style={{ color: "var(--color-theme-orange)" }}>Auctions</span> tab.
+        </MutedNote>
       )}
 
-      {/* ── Squad — single clickable carousel. Click a card to toggle it
-           in/out of today's squad. IMPORTANT: this div must carry ONLY
-           the "squad-list" class — see the globals.css comment for why. ── */}
-      {(teamRosterRows.length > 0 || manualPlayers.length > 0) && (
-        <div className="squad-list">
+      {/* ── Squad picker — click a card to toggle it in/out of today's
+           squad. Inline-styled (not dependent on external squad-list /
+           squad-chip classes) so this can't wash out again if those
+           classes ever change elsewhere. ── */}
+      {hasAnyChips && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "8px",
+            padding: "10px",
+            borderRadius: "10px",
+            background: "var(--color-surface-container-low)",
+            border: "1px solid var(--color-border-overlay)",
+          }}
+        >
           {teamRosterRows.map((r) => {
             const checked = selectedIds.has(r.id);
             return (
               <button
                 type="button"
                 key={r.id}
-                className={`squad-chip ${checked ? "is-selected" : "is-unselected"}`}
                 onClick={() => togglePlayer({ id: r.id, name: r.name, imageUrl: r.image_url ?? undefined })}
                 title={checked ? "Remove from today's squad" : "Add to today's squad"}
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 10px 6px 6px",
+                  borderRadius: "999px",
+                  background: checked ? "rgba(201,151,31,0.14)" : "var(--color-surface-container-high)",
+                  border: `1px solid ${checked ? "rgba(201,151,31,0.55)" : "var(--color-border-overlay)"}`,
+                  opacity: 1,
+                  cursor: "pointer",
+                  transition: "background 0.15s, border-color 0.15s",
+                }}
               >
-                {checked && <span className="squad-check">✓</span>}
-                <span className="squad-avatar">
+                {checked && (
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: -4,
+                      right: -4,
+                      width: 16,
+                      height: 16,
+                      borderRadius: "50%",
+                      background: "var(--color-theme-orange)",
+                      color: "#1a1206",
+                      fontSize: 10,
+                      fontWeight: 900,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✓
+                  </span>
+                )}
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "var(--color-surface-container-low)",
+                  }}
+                >
                   {r.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.image_url} alt="" />
+                    <img src={r.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
-                    <span className="squad-avatar-fallback">{initials(r.name) || "?"}</span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 800,
+                        fontFamily: "var(--font-label-mono)",
+                        color: "var(--color-outline)",
+                      }}
+                    >
+                      {initials(r.name) || "?"}
+                    </span>
                   )}
                 </span>
-                <span className="squad-name">{r.name}</span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: "var(--font-label-mono)",
+                    color: checked ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {r.name}
+                </span>
               </button>
             );
           })}
 
           {manualPlayers.map((p) => (
-            <div key={p.id} className="squad-chip is-selected">
-              <button type="button" className="squad-remove" onClick={() => removeManual(p.id)} title="Remove from today's squad">
+            <div
+              key={p.id}
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 26px 6px 6px",
+                borderRadius: "999px",
+                background: "rgba(201,151,31,0.14)",
+                border: "1px solid rgba(201,151,31,0.55)",
+              }}
+            >
+              <span
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "var(--color-surface-container-low)",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    fontFamily: "var(--font-label-mono)",
+                    color: "var(--color-outline)",
+                  }}
+                >
+                  {initials(p.name) || "?"}
+                </span>
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: "var(--font-label-mono)",
+                  color: "var(--color-theme-orange)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {p.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeManual(p.id)}
+                title="Remove from today's squad"
+                style={{
+                  position: "absolute",
+                  right: 4,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  border: "none",
+                  background: "var(--color-error)",
+                  color: "var(--color-on-primary)",
+                  fontSize: 11,
+                  lineHeight: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  opacity: 1,
+                }}
+              >
                 ×
               </button>
-              <span className="squad-avatar">
-                <span className="squad-avatar-fallback">{initials(p.name) || "?"}</span>
-              </span>
-              <span className="squad-name">{p.name}</span>
             </div>
           ))}
         </div>
       )}
 
-      <div className="flex gap-2">
-        <Input
-          value={manualName}
-          onChange={setManualName}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addManual();
-            }
-          }}
-          placeholder="Add a player by name…"
-        />
-        <SmallButton onClick={addManual}>Add</SmallButton>
-      </div>
+      <p
+        className="text-[9px]"
+        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+      >
+        Need to add a new player? Do that from the Match Editor or the Auctions tab — this panel only picks
+        today&apos;s XI from players already on record.
+      </p>
     </div>
   );
 }
@@ -542,7 +738,7 @@ export default function MatchSetupPanel({
     setMatchSetup((prev) => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   }
 
-  // ── NEW — backfill a missing teamId from name/shortCode ─────────────
+  // ── backfill a missing teamId from name/shortCode ─────────────
   // Runs whenever the teams list becomes ready, or the team's own
   // name/shortCode changes. Older/persisted setups that predate `teamId`
   // being part of the saved shape (or that were typed in manually) will
@@ -665,7 +861,7 @@ export default function MatchSetupPanel({
           onChange={(v) => setMatchSetup((p) => ({ ...p, matchNumber: v }))}
           placeholder="e.g. Match 14"
         />
-        {/* NEW — free text so any local format works ("19:30", "7:30 PM
+        {/* Free text so any local format works ("19:30", "7:30 PM
             IST", "Starts after lunch break", etc.) rather than forcing a
             single timezone-aware time picker. Feeds CricketMatchIntro's
             Kickoff line, which only renders when this is non-empty. */}
@@ -689,13 +885,41 @@ export default function MatchSetupPanel({
           const team = matchSetup[teamKey];
           const otherKey = teamKey === "teamA" ? "teamB" : "teamA";
           return (
-            <div key={teamKey} className="team-card" style={{ ["--team-color" as string]: team.color }}>
+            <div
+              key={teamKey}
+              className="team-card"
+              style={{ ["--team-color" as string]: team.color, position: "relative", isolation: "isolate" }}
+            >
               {team.logoUrl && (
-                <div className="team-card-watermark" style={{ backgroundImage: `url(${team.logoUrl})` }} aria-hidden="true" />
+                // CHANGED — pinned to position:absolute + z-index:0 +
+                // pointer-events:none explicitly. Previously this relied
+                // on plain DOM order (watermark rendered before content)
+                // to stay behind the content div, which only holds if no
+                // CSS rule anywhere gives .team-card-watermark a z-index
+                // or its own stacking context. If it does (or .team-card
+                // resolves stacking differently than expected), the
+                // watermark renders ON TOP of the card, fogging out the
+                // buttons/text inside it — which is what was reported.
+                // Explicit z-index here plus `isolation: isolate` on the
+                // parent guarantees correct stacking regardless of what
+                // the external CSS does.
+                <div
+                  className="team-card-watermark"
+                  style={{
+                    backgroundImage: `url(${team.logoUrl})`,
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 0,
+                    pointerEvents: "none",
+                  }}
+                  aria-hidden="true"
+                />
               )}
               <div
                 className="team-card-content rounded-xl p-4"
                 style={{
+                  position: "relative",
+                  zIndex: 1,
                   background: "var(--color-surface-container-low)",
                   border: "1px solid var(--color-border-overlay)",
                   WebkitMaskImage: "linear-gradient(to right, black 55%, transparent 100%)",
