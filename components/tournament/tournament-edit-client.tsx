@@ -748,7 +748,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
                 {bracketExists && (
                   <div className="mt-6 pt-4 border-t border-gold/10">
-                    <Link href={`/tournaments/${tournament.id}/bracket`}>
+                    <Link href={`/tournaments/${tournament.id}/bracket/edit`}>
                       <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30">
                         <Swords className="mr-2 h-4 w-4" />
                         Edit bracket
