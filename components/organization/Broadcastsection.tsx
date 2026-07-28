@@ -38,7 +38,7 @@ export function BroadcastSection({
             key={key}
             onClick={() => setSub(key)}
             className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-3.5 py-1.5 rounded-md transition-all ${
-              sub === key ? "bg-gold/90 text-black" : "text-gray-400 hover:text-gold"
+              sub === key ? "bg-gold/90 text-gold" : "text-gray-400 hover:text-gold"
             }`}
           >
             <Icon className="h-3.5 w-3.5" />
