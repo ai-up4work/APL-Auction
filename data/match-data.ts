@@ -437,7 +437,7 @@ function buildSquads(setup: MatchSetup, teamAName: string, teamBName: string): M
     return {
       team: teamName,
       captain: s.captain,
-      players: s.players.map((p) => ({ name: p.name, role: p.role, xi: p.xi })),
+      players: s.players?.map((p) => ({ name: p.name, role: p.role, xi: p.xi })) || [],   // handle the empty player set gracefully
     }
   })
 }
