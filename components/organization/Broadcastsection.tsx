@@ -1,17 +1,17 @@
 "use client"
 
 import { useState } from "react"
-import { Tv, Users } from "lucide-react"
+import { Tv, Brackets } from "lucide-react"
 import { OverlaysTab } from "@/components/organization/Overlaystab"
-import { RegistrationsTab } from "@/components/organization/Registrationstab"
+import { BracketsTab } from "@/components/organization/Bracketstab"
 import { WorkflowBreadcrumb } from "@/components/organization/Workflowbreadcrumb"
 import type { OrgSummary } from "@/lib/organization/organization"
 
-type BroadcastSub = "overlays" | "registrations"
+type BroadcastSub = "overlays" | "brackets"
 
 const SUBS: { key: BroadcastSub; label: string; icon: React.ComponentType<{ className?: string }>; blurb: string }[] = [
   { key: "overlays", label: "Overlays", icon: Tv, blurb: "Set up on-air graphics for any match, tournament-linked or standalone." },
-  { key: "registrations", label: "Registrations", icon: Users, blurb: "Let team owners and players sign themselves up for review." },
+  { key: "brackets", label: "Brackets", icon: Brackets, blurb: "Every knockout tournament's live bracket, ready to pull up on-air." },
 ]
 
 export function BroadcastSection({
@@ -49,7 +49,7 @@ export function BroadcastSection({
       <p className="text-gray-500 text-xs mb-6 px-1">{active.blurb}</p>
 
       {sub === "overlays" && <OverlaysTab org={org} userId={userId} />}
-      {sub === "registrations" && <RegistrationsTab org={org} userId={userId} />}
+      {sub === "brackets" && <BracketsTab org={org} />}
     </div>
   )
 }

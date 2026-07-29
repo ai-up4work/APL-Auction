@@ -451,7 +451,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <Link
-                        href={`/tournaments/${t.id}/bracket`}
+                        href={`/tournaments/${t.id}/bracket/edit`}
                         className="text-gray-500 hover:text-gold transition-colors outline-none"
                       >
                         <Brackets className="h-3.5 w-3.5" />  

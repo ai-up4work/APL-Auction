@@ -46,9 +46,9 @@ type GateState = "checking" | "denied" | "allowed"
 
 function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: string }) {
   const [tab, setTab] = useState<Primary>("overview")
-  const [rosterSub, setRosterSub] = useState<"teamPool" | "playerBank" | "squadBoard">("teamPool")
+  const [rosterSub, setRosterSub] = useState<"teamPool" | "playerBank" | "squadBoard" | "registrations">("teamPool")
   const [eventsSub, setEventsSub] = useState<"tournaments" | "auctions" | "matches">("tournaments")
-  const [broadcastSub, setBroadcastSub] = useState<"overlays" | "registrations">("overlays")
+  const [broadcastSub, setBroadcastSub] = useState<"overlays" | "brackets">("overlays")
 
   const { setWorkflow } = useWorkflow()
 

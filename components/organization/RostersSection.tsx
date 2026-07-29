@@ -2,18 +2,25 @@
 "use client"
 
 import { useState } from "react"
-import { Shield, Users, Link2 } from "lucide-react"
+import { Shield, Users, Link2, UserPlus } from "lucide-react"
 import { TeamPoolTab, PlayerBankTab } from "@/components/organization/TournamentsPoolsTab"
 import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
+import { RegistrationsTab } from "@/components/organization/Registrationstab"
 import { WorkflowBreadcrumb } from "@/components/organization/Workflowbreadcrumb"
 import type { OrgSummary } from "@/lib/organization/organization"
 
-type RosterSub = "teamPool" | "playerBank" | "squadBoard"
+type RosterSub = "teamPool" | "playerBank" | "squadBoard" | "registrations"
 
 const SUBS: { key: RosterSub; label: string; icon: React.ComponentType<{ className?: string }>; blurb: string }[] = [
   { key: "teamPool", label: "Team Pool", icon: Shield, blurb: "Reusable teams — assign them into a Squad Board or an auction whenever you need them." },
   { key: "playerBank", label: "Player Bank", icon: Users, blurb: "Reusable players — assign them onto any team on a Squad Board, or pre-fill an auction's pool." },
   { key: "squadBoard", label: "Squad Boards", icon: Link2, blurb: "Pair Team Pool teams with Player Bank players to build a real roster, ready for a match." },
+  {
+    key: "registrations",
+    label: "Registrations",
+    icon: UserPlus,
+    blurb: "Let team owners and players sign themselves up for review — approved entries land right here, in the Team Pool and Player Bank above.",
+  },
 ]
 
 export function RostersSection({
@@ -53,6 +60,7 @@ export function RostersSection({
       {sub === "teamPool" && <TeamPoolTab org={org} userId={userId} />}
       {sub === "playerBank" && <PlayerBankTab org={org} userId={userId} />}
       {sub === "squadBoard" && <SquadBoardTab org={org} userId={userId} />}
+      {sub === "registrations" && <RegistrationsTab org={org} userId={userId} />}
     </div>
   )
 }
