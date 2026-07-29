@@ -569,17 +569,29 @@ export async function recordFixtureResult(
 
   if (error) return { ok: false, error: error.message }
 
+  // Advance the winner into whichever next fixture(s) feed off this one.
+  // Uses a plain array query rather than .maybeSingle() — a bracket
+  // should only ever have ONE next match per feeder slot, but if bracket
+  // generation ever produced duplicate feeder links, .maybeSingle() would
+  // throw ("multiple rows returned") and abort the whole result save.
+  // This instead advances every match found and logs a warning so the
+  // underlying data issue is visible without blocking the save.
   const { data: nextAsA, error: nextAError } = await supabase
     .from("bracket_matches")
     .select("id")
     .eq("feeder_match_a_id", fixture.id)
-    .maybeSingle()
+
   if (nextAError) return { ok: false, error: nextAError.message }
-  if (nextAsA) {
+  if (nextAsA && nextAsA.length > 0) {
+    if (nextAsA.length > 1) {
+      console.error(
+        `recordFixtureResult: ${nextAsA.length} bracket_matches rows share feeder_match_a_id = ${fixture.id} — bracket wiring is corrupted for this tournament.`
+      )
+    }
     const { error: advanceError } = await supabase
       .from("bracket_matches")
       .update({ team_a_id: winnerTeamId })
-      .eq("id", nextAsA.id)
+      .in("id", nextAsA.map((r) => r.id))
     if (advanceError) return { ok: false, error: advanceError.message }
   }
 
@@ -587,13 +599,18 @@ export async function recordFixtureResult(
     .from("bracket_matches")
     .select("id")
     .eq("feeder_match_b_id", fixture.id)
-    .maybeSingle()
+
   if (nextBError) return { ok: false, error: nextBError.message }
-  if (nextAsB) {
+  if (nextAsB && nextAsB.length > 0) {
+    if (nextAsB.length > 1) {
+      console.error(
+        `recordFixtureResult: ${nextAsB.length} bracket_matches rows share feeder_match_b_id = ${fixture.id} — bracket wiring is corrupted for this tournament.`
+      )
+    }
     const { error: advanceError } = await supabase
       .from("bracket_matches")
       .update({ team_b_id: winnerTeamId })
-      .eq("id", nextAsB.id)
+      .in("id", nextAsB.map((r) => r.id))
     if (advanceError) return { ok: false, error: advanceError.message }
   }
 

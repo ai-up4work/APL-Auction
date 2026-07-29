@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Lock, RotateCcw, Sparkles, CheckCircle2, AlertCircle, Save, Settings2, ImageOff } from "lucide-react";
+import {
+  Lock,
+  RotateCcw,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Save,
+  Settings2,
+  ImageOff,
+  Trophy,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SiteHeader } from "@/components/landing/site-header";
@@ -63,11 +73,6 @@ export default function BracketEditClient({
   format: BracketFormat;
   initialSingleRounds: Round[] | null;
   initialDoubleData: DoubleElimData | null;
-  /** Current value of tournaments.logo_url, passed down from the server
-   *  page so this panel can seed its own logo editor without a separate
-   *  fetch. Same column the Tournament edit page's Details → "Tournament
-   *  logo URL" field writes to — this is just a second place to set it,
-   *  right above the board it's used on. */
   initialLogoUrl?: string;
   hasBracketRows: boolean;
 }) {
@@ -81,20 +86,12 @@ export default function BracketEditClient({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [seedingMethod, setSeedingMethod] = useState<SeedingMethod>("random");
 
-  // ── Format — same field the Details section on the Tournament edit page
-  // writes to. Changing it here only updates the `tournaments.format`
-  // column; it does NOT reshape the matches that already exist. That's
-  // why a change nudges the admin toward Regenerate rather than silently
-  // rendering the old data against the new bracket type.
   const [formatValue, setFormatValue] = useState<BracketFormat>(format);
   const [isSavingFormat, setIsSavingFormat] = useState(false);
   const [formatSaveError, setFormatSaveError] = useState<string | null>(null);
   const [formatSavedAt, setFormatSavedAt] = useState<number | null>(null);
   const formatDirty = formatValue !== format;
 
-  // ── Logo — tournaments.logo_url, the watermark shown behind the Final
-  // on this same board. Kept as its own tiny save flow (like Format) so
-  // it doesn't get tangled up with the destructive format-change path.
   const [logoUrl, setLogoUrl] = useState(initialLogoUrl ?? "");
   const [logoBroken, setLogoBroken] = useState(false);
   const [isSavingLogo, setIsSavingLogo] = useState(false);
@@ -135,8 +132,6 @@ export default function BracketEditClient({
     };
   }, [authLoading, user, tournamentOrgId]);
 
-  // Keep local format state in sync if the server prop changes underneath
-  // us (e.g. after router.refresh() following a save).
   useEffect(() => {
     setFormatValue(format);
   }, [format]);
@@ -155,11 +150,6 @@ export default function BracketEditClient({
     setIsSavingFormat(true);
     setFormatSaveError(null);
 
-    // A format change makes the existing bracket structurally wrong (wrong
-    // number of rounds, no losers bracket, etc). Rather than leave stale
-    // matches sitting around mismatched with the new format, clear them as
-    // part of the save — even mid-tournament. If the admin wants to keep a
-    // record of what happened, that's on them to capture before confirming.
     if (hasBracket) {
       const del = await deleteBracketForTournament(tournamentId);
       if (!del.ok) {
@@ -182,9 +172,6 @@ export default function BracketEditClient({
   const handleSaveFormat = () => {
     if (!formatDirty) return;
 
-    // Changing format while a bracket already exists means clearing it out
-    // (see saveFormat above) — confirm before doing something destructive,
-    // especially mid-tournament.
     if (hasBracket) {
       setConfirmDialog({
         title: "Change tournament format?",
@@ -240,10 +227,6 @@ export default function BracketEditClient({
       return;
     }
 
-    // Bracket rows are gone in the DB the moment the delete succeeds —
-    // refresh now so the page reflects that immediately (an empty state
-    // while generating) instead of showing now-deleted matches until the
-    // whole regenerate cycle finishes.
     router.refresh();
 
     const result = await generateBracketForTournament(tournamentId, seedingMethod);
@@ -311,22 +294,20 @@ export default function BracketEditClient({
         handleNavigation={handleNavigation}
       />
 
-      <section className="pt-20 sm:pt-24 relative section-pattern">
+      <section className="pt-20 sm:pt-24 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        {/* Wide, explicitly centered container — bracket columns
-            (Quarterfinal / Semifinal / Final) need real horizontal room.
-            Tailwind's bare `container` class caps width per breakpoint
-            but does NOT center itself unless `theme.container.center`
-            is set in tailwind.config — without that it just sits flush
-            left with dead space on the right, which is what was
-            happening here. mx-auto + an explicit max-width fixes it. */}
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 relative z-10">
           {gate === "checking" && (
-            <p className="text-center text-gray-400">Checking access…</p>
+            <div className="flex items-center justify-center py-24">
+              <p className="flex items-center gap-2 text-gray-400 text-sm">
+                <span className="h-3 w-3 rounded-full border-2 border-gold/40 border-t-gold animate-spin" />
+                Checking access…
+              </p>
+            </div>
           )}
 
           {gate === "denied" && (
-            <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center mx-auto">
+            <div className="bg-black/50 border border-gold/20 rounded-xl p-8 text-center mx-auto max-w-md">
               <Lock className="h-6 w-6 text-gold mx-auto mb-3" />
               <h1 className="text-xl font-bold text-white font-cinzel mb-2">
                 You can't edit this bracket
@@ -344,33 +325,45 @@ export default function BracketEditClient({
 
           {gate === "allowed" && (
             <>
-              {/* FORMAT + LOGO + TOOLBAR — cards side by side on larger
-                  screens so this header doesn't eat vertical space; they
-                  stack on narrow/mobile widths where there isn't room for
-                  all of them. */}
-              <div
-                className={`grid grid-cols-1 ${hasBracket ? "lg:grid-cols-3" : "lg:grid-cols-2"} gap-6 mb-6`}
-              >
-                {/* FORMAT — same field as Details → Format on the Tournament
-                    edit page, surfaced here since it's the thing that most
-                    directly affects this screen. Saving only updates the
-                    tournaments.format column; it does not reshape existing
-                    matches, so a change here is flagged until the admin
-                    regenerates. */}
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
-                      <Settings2 className="h-3.5 w-3.5 text-gold" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white font-cinzel truncate">{tournamentName}</h2>
-                  </div>
+              {/* PAGE HEADER */}
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <div className="min-w-0">
+                  <Link
+                    href={`/tournaments/${tournamentId}/edit`}
+                    className="text-[10px] uppercase tracking-widest text-gray-500 hover:text-gold font-cinzel transition-colors"
+                  >
+                    ← Back to tournament settings
+                  </Link>
+                  <h1 className="text-2xl font-bold text-white font-cinzel truncate mt-1">
+                    {tournamentName}
+                  </h1>
+                </div>
+                <span
+                  className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-cinzel px-3 py-1.5 rounded-full border shrink-0 ${
+                    hasBracket
+                      ? "border-gold/30 text-gold bg-gold/[0.06]"
+                      : "border-white/15 text-gray-400 bg-white/[0.02]"
+                  }`}
+                >
+                  <Trophy className="h-3 w-3" />
+                  {hasBracket ? "Bracket generated" : "No bracket yet"}
+                </span>
+              </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="text-gray-400 text-sm shrink-0">Format</span>
+              {/* CONFIG STRIP — the ONLY settings UI on this page. One slim
+                  bar: Format / Logo / Reseed+Regenerate as inline segments,
+                  separated by dividers. No separate big cards duplicating
+                  this below — that was the bug causing the doubled-up look. */}
+              <div className="bg-black/50 border border-gold/15 rounded-lg mb-8 overflow-hidden">
+                <div className="flex flex-wrap divide-y divide-gold/10 sm:divide-y-0">
+                  {/* FORMAT */}
+                  <div className="flex items-center gap-2.5 px-4 py-3 flex-1 min-w-[280px] sm:border-r sm:border-gold/10">
+                    <Settings2 className="h-3.5 w-3.5 text-gold shrink-0" />
+                    <span className="text-gray-500 text-xs shrink-0 hidden md:inline">Format</span>
                     <select
                       value={formatValue}
                       onChange={(e) => setFormatValue(e.target.value as BracketFormat)}
-                      className="flex-1 min-w-[10rem] bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      className="bg-black/40 border border-gold/20 rounded-md text-white text-xs px-2 py-1.5 flex-1 min-w-0"
                     >
                       <option value="single_elimination">Single Elimination</option>
                       <option value="double_elimination">Double Elimination</option>
@@ -378,53 +371,27 @@ export default function BracketEditClient({
                     <Button
                       onClick={handleSaveFormat}
                       disabled={!formatDirty || isSavingFormat}
-                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                      size="sm"
+                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-40 h-7 px-2.5 text-xs shrink-0"
                     >
-                      <Save className="mr-2 h-4 w-4" />
-                      {isSavingFormat ? "Saving…" : "Save format"}
+                      <Save className="h-3 w-3" />
                     </Button>
+                    {formatSavedAt && !formatDirty && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                    )}
+                    {formatSaveError && (
+                      <AlertCircle
+                        className="h-3.5 w-3.5 text-red-500 shrink-0"
+                        aria-label={formatSaveError}
+                      >
+                        <title>{formatSaveError}</title>
+                      </AlertCircle>
+                    )}
                   </div>
 
-                  {formatDirty && (
-                    <p className="text-gray-500 text-xs mt-2">
-                      {hasBracket
-                        ? "Saving will delete the existing bracket's matches and results so it can be rebuilt in the new format."
-                        : "Saving updates the tournament's format for when the bracket is generated."}
-                    </p>
-                  )}
-                  {formatSavedAt && !formatDirty && (
-                    <span className="flex items-center gap-1.5 text-green-500 text-sm mt-3">
-                      <CheckCircle2 className="h-4 w-4" /> Saved
-                    </span>
-                  )}
-                  {formatSaveError && (
-                    <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
-                      <AlertCircle className="h-4 w-4" /> {formatSaveError}
-                    </span>
-                  )}
-                </div>
-
-                {/* LOGO — tournaments.logo_url, the watermark shown behind
-                    the Final on the board below. Same column as the
-                    Tournament edit page's "Tournament logo URL" field —
-                    this is just a second, closer-to-the-result place to
-                    set it. */}
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
-                      <ImageOff className="h-3.5 w-3.5 text-gold" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white font-cinzel">Bracket logo</h2>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <Input
-                      value={logoUrl}
-                      onChange={(e) => setLogoUrl(e.target.value)}
-                      placeholder="https://…"
-                      className="bg-black/50 border-gold/30 text-white flex-1 min-w-0"
-                    />
-                    <div className="w-10 h-10 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                  {/* LOGO */}
+                  <div className="flex items-center gap-2.5 px-4 py-3 flex-1 min-w-[280px] sm:border-r sm:border-gold/10">
+                    <div className="w-6 h-6 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
                       {logoUrl && !logoBroken ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -434,88 +401,106 @@ export default function BracketEditClient({
                           onError={() => setLogoBroken(true)}
                         />
                       ) : (
-                        <ImageOff className="h-4 w-4 text-gray-600" />
+                        <ImageOff className="h-3 w-3 text-gray-600" />
                       )}
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 mt-3">
+                    <Input
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="Logo URL…"
+                      className="bg-black/40 border-gold/20 text-white text-xs h-7 flex-1 min-w-0 px-2"
+                    />
                     <Button
                       onClick={handleSaveLogo}
                       disabled={!logoDirty || isSavingLogo}
-                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                      size="sm"
+                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-40 h-7 px-2.5 text-xs shrink-0"
                     >
-                      <Save className="mr-2 h-4 w-4" />
-                      {isSavingLogo ? "Saving…" : "Save logo"}
+                      <Save className="h-3 w-3" />
                     </Button>
                     {logoSavedAt && !logoDirty && (
-                      <span className="flex items-center gap-1.5 text-green-500 text-sm">
-                        <CheckCircle2 className="h-4 w-4" /> Saved
-                      </span>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                    )}
+                    {logoSaveError && (
+                      <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" aria-label={logoSaveError}>
+                        <title>{logoSaveError}</title>
+                      </AlertCircle>
                     )}
                   </div>
-                  {logoSaveError && (
-                    <span className="flex items-center gap-1.5 text-red-500 text-sm mt-2">
-                      <AlertCircle className="h-4 w-4" /> {logoSaveError}
-                    </span>
-                  )}
-                  <p className="text-gray-500 text-xs mt-2">
-                    Falls back to your org's logo if left blank.
-                  </p>
-                </div>
 
-                {/* TOOLBAR — matches the Bracket section on the Tournament edit
-                    page (same card, same copy, same button styling), sitting
-                    directly above the board it controls. Only shown once a
-                    bracket exists; the empty state below has its own inline
-                    seeding control before the first generate. */}
-                {hasBracket && (
-                  <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                    <div className="flex flex-col gap-3">
-                      <span className="text-gray-400 text-sm">Reseed using</span>
+                  {/* REGENERATE — only once a bracket exists */}
+                  {hasBracket && (
+                    <div className="flex items-center gap-2.5 px-4 py-3 flex-1 min-w-[300px]">
+                      <span className="text-gray-500 text-xs shrink-0 hidden md:inline">Reseed</span>
                       <select
                         value={seedingMethod}
                         onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                        className="bg-black/40 border border-gold/20 rounded-md text-white text-xs px-2 py-1.5 shrink-0"
                       >
                         <option value="random">Random draw</option>
-                        <option value="creation_order">Team creation order</option>
+                        <option value="creation_order">Creation order</option>
                       </select>
                       <Button
                         onClick={handleRegenerate}
                         disabled={isGenerating}
-                        className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
+                        size="sm"
+                        className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50 h-7 px-2.5 text-xs flex-1 min-w-0"
                       >
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
+                        <RotateCcw className="mr-1.5 h-3 w-3 shrink-0" />
+                        <span className="truncate">
+                          {isGenerating ? "Regenerating…" : "Delete & Regenerate"}
+                        </span>
                       </Button>
+                      {generateError && (
+                        <AlertCircle
+                          className="h-3.5 w-3.5 text-red-500 shrink-0"
+                          aria-label={generateError}
+                        >
+                          <title>{generateError}</title>
+                        </AlertCircle>
+                      )}
                     </div>
-                    <p className="text-gray-500 text-xs mt-2">
-                      This deletes all existing matches and results for this tournament and
-                      builds a fresh bracket.
-                    </p>
-                    {generateError && (
-                      <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
-                        <AlertCircle className="h-4 w-4" /> {generateError}
-                      </span>
+                  )}
+                </div>
+
+                {/* Overflow messages — only rendered when there's actually
+                    something to say, so the bar stays thin the rest of the
+                    time. */}
+                {(formatDirty || formatSaveError || logoSaveError || generateError) && (
+                  <div className="border-t border-gold/10 px-4 py-2 space-y-1 bg-white/[0.015]">
+                    {formatDirty && (
+                      <p className="text-gray-500 text-[11px] leading-relaxed">
+                        {hasBracket
+                          ? "Saving format will delete the existing bracket's matches and results."
+                          : "Saving updates the format for when the bracket is generated."}
+                      </p>
                     )}
+                    {formatSaveError && <p className="text-red-500 text-[11px]">{formatSaveError}</p>}
+                    {logoSaveError && <p className="text-red-500 text-[11px]">{logoSaveError}</p>}
+                    {generateError && <p className="text-red-500 text-[11px]">{generateError}</p>}
                   </div>
                 )}
               </div>
 
+              {/* BOARD / EMPTY STATE */}
               {!hasBracket ? (
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center mx-auto">
-                  <Sparkles className="h-6 w-6 text-gold mx-auto mb-3" />
-                  <p className="text-gray-300 text-sm mb-6">
-                    No bracket yet — this needs a completed auction with at least 2 teams linked
-                    to this tournament.
+                <div className="relative bg-black/50 border border-gold/20 rounded-xl p-10 text-center mx-auto max-w-lg overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+                  <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center mx-auto mb-4">
+                    <Sparkles className="h-5 w-5 text-gold" />
+                  </div>
+                  <h3 className="text-white font-bold font-cinzel mb-2">No bracket yet</h3>
+                  <p className="text-gray-400 text-sm mb-6 max-w-sm mx-auto leading-relaxed">
+                    This needs a completed auction with at least 2 teams linked to this tournament.
                   </p>
-                  <div className="mb-4 text-left mx-auto">
-                    <label className="text-gray-400 text-sm block mb-1">Seed teams using</label>
+                  <div className="mb-5 text-left flex items-center gap-2">
+                    <label className="text-gray-400 text-xs uppercase tracking-widest font-cinzel shrink-0">
+                      Seed using
+                    </label>
                     <select
                       value={seedingMethod}
                       onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                      className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                      className="flex-1 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
                     >
                       <option value="random">Random draw</option>
                       <option value="creation_order">Team creation order</option>
@@ -524,18 +509,19 @@ export default function BracketEditClient({
                   <Button
                     onClick={handleGenerate}
                     disabled={isGenerating}
-                    className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                    className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 px-8"
                   >
+                    <Trophy className="mr-2 h-4 w-4" />
                     {isGenerating ? "Generating…" : "Generate Bracket"}
                   </Button>
                   {generateError && (
-                    <span className="flex items-center justify-center gap-1.5 text-red-500 text-sm mt-3">
+                    <p className="flex items-center justify-center gap-1.5 text-red-500 text-sm mt-3">
                       <AlertCircle className="h-4 w-4" /> {generateError}
-                    </span>
+                    </p>
                   )}
                 </div>
               ) : (
-                <>
+                <div className="bg-black/30 border border-gold/10 rounded-xl py-4 sm:py-6">
                   {format === "single_elimination" && initialSingleRounds && (
                     <TournamentBracket
                       rounds={initialSingleRounds}
@@ -554,22 +540,20 @@ export default function BracketEditClient({
                       logoSrc={initialLogoUrl}
                     />
                   )}
-                </>
+                </div>
               )}
 
               {saveError && (
-                <span className="flex items-center justify-center gap-1.5 text-red-500 text-sm mt-6">
+                <p className="flex items-center justify-center gap-1.5 text-red-500 text-sm mt-6">
                   <AlertCircle className="h-4 w-4" /> {saveError}
-                </span>
+                </p>
               )}
             </>
           )}
         </div>
       </section>
 
-      {/* CONFIRM MODAL — replaces window.confirm() so destructive/consequential
-          actions (regenerate, format change over an existing bracket) match
-          the rest of the UI instead of popping the browser's native dialog. */}
+      {/* CONFIRM MODAL */}
       {confirmDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"

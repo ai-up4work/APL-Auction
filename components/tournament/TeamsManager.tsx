@@ -794,10 +794,7 @@ export default function TeamsManager({
         <div className="border border-gold/20 rounded-lg p-4 mb-6 bg-white/[0.02] flex items-start justify-between gap-3 flex-wrap">
           <p className="text-gray-400 text-xs flex items-start gap-2 max-w-md">
             <Link2 className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
-            These teams and rosters come from your selection — they're read-only here. Add,
-            remove, or reassign players on the source auction/Squad Board instead. You can change
-            which <span className="text-gold">teams</span> are included any time, right up until
-            you generate the bracket.
+            These teams are read-only because they came from the auction or Squad Board you picked above. If you want to change which teams are included, click the button to pick a different source or deselect some teams.
           </p>
           <button
             onClick={openTeamPicker}
