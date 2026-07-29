@@ -392,15 +392,22 @@ async function getPointsTableForTournament(tournamentId: string) {
  * match (and supports bracket_type = 'round_robin'), so it doubles as the
  * source for both the Bracket tab and the Schedule tab. Not hand-edited
  * here; match scheduling/results update these rows directly.
+ *
+ * `overlay_match_id` (aliased below to `matchId`) is what makes a
+ * schedule card clickable — it's the same FK BracketPanel already reads
+ * via hasMatchDetail/matchId to link a bracket slot through to its real
+ * `/match/[id]` page. Previously this wasn't selected here at all, so
+ * every fixture card silently rendered as non-clickable even when a live
+ * match existed for it.
  */
 async function getFixturesForTournament(tournamentId: string) {
   const { data, error } = await supabase
     .from("bracket_matches")
     .select(
       `
-      id, scheduled_at, venue, status, score_a, score_b,
-      team_a:team_a_id ( name ),
-      team_b:team_b_id ( name ),
+      id, scheduled_at, venue, status, score_a, score_b, overlay_match_id,
+      team_a:team_a_id ( name, logo ),
+      team_b:team_b_id ( name, logo ),
       winner:winner_team_id ( name )
       `
     )
@@ -420,8 +427,14 @@ async function getFixturesForTournament(tournamentId: string) {
 
     return {
       id: m.id,
+      // Links the Schedule tab's fixture card through to /match/[id],
+      // same as the Bracket tab. Undefined (not null) when there's no
+      // linked match yet, matching Fixture.matchId?: string.
+      matchId: m.overlay_match_id ?? undefined,
       team1: teamA?.name ?? "TBD",
       team2: teamB?.name ?? "TBD",
+      team1Logo: teamA?.logo ?? undefined,
+      team2Logo: teamB?.logo ?? undefined,
       date: scheduled ? scheduled.toLocaleDateString() : "TBD",
       time: scheduled ? scheduled.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
       venue: m.venue ?? "",
@@ -434,7 +447,7 @@ async function getFixturesForTournament(tournamentId: string) {
   });
 }
 
-// ──────────────��──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 // BRACKET CHART DATA — Round[] / DoubleElimData for BracketPreviewPanel
 // ─────────────────────────────────────────────────────────────
 
@@ -605,8 +618,9 @@ async function getBracketChartDataForTournament(
  *     BracketPreviewPanel actually renders; the flat `bracket` array above
  *     is only used as a fallback for round_robin tournaments.
  *   - fixtures: mapped ✅ — derived from the same bracket_matches rows
- *     (venue/scheduled_at/status/scores). There's no separate fixtures
- *     table; bracket_matches already supports bracket_type='round_robin'.
+ *     (venue/scheduled_at/status/scores/overlay_match_id). There's no
+ *     separate fixtures table; bracket_matches already supports
+ *     bracket_type='round_robin'.
  *   - prizes: mapped ✅ via tournament_prizes.tournament_id
  *   - awards: mapped ✅ via tournament_awards.tournament_id
  *   - pointsTable: mapped ✅ via standings.tournament_id (direct FK —

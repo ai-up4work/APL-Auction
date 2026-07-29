@@ -52,11 +52,14 @@ export interface Fixture {
   id: string
   team1: string
   team2: string
+  team1Logo?: string
+  team2Logo?: string
   date: string
   time: string
   venue: string
   status: "upcoming" | "live" | "completed"
   result?: string
+  matchId?: string // links this card to /tournaments/[slug]/match/[matchId] when set
 }
 
 export interface BracketTeam {

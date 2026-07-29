@@ -289,7 +289,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 {/* SCHEDULE */}
                 <TabsContent value="schedule" className="mt-0">
                   {hasFixtures ? (
-                    <SchedulePanel fixtures={tournament.fixtures!} />
+                    <SchedulePanel fixtures={tournament.fixtures!} squads={tournament.squads} slug={slug} />
                   ) : (
                     <LockedTabPlaceholder
                       icon={CalendarClock}
@@ -722,8 +722,9 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
 // ─────────────────────────────────────────────────────────────
 // SCHEDULE PANEL
 // ─────────────────────────────────────────────────────────────
-function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
+function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads?: Squad[]; slug: string }) {
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "completed">("all")
+  const logoByTeam = new Map(squads?.map((s) => [s.team, s.logo]) ?? [])
 
   const counts = {
     all: fixtures.length,
@@ -734,21 +735,29 @@ function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
 
   const filtered = filter === "all" ? fixtures : fixtures.filter((f) => f.status === filter)
 
-  // Groups consecutive fixtures that share the same date string into one
-  // dated section. Assumes fixtures already arrive in a sensible order
-  // (as they do from tournament-data) rather than re-sorting an
-  // arbitrary display-format date string.
-  const groups: { date: string; items: Fixture[] }[] = []
+  // Stage/round grouping (falls back to a single "Matches" bucket
+  // if fixtures don't carry a stage field yet).
+  const stageOf = (f: Fixture) => (f as any).stage ?? "Matches"
+  const stageOrder = ["Group Stage", "Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final", "Matches"]
+
+  const stageGroups = new Map<string, Fixture[]>()
   for (const f of filtered) {
-    const current = groups[groups.length - 1]
-    if (current && current.date === f.date) current.items.push(f)
-    else groups.push({ date: f.date, items: [f] })
+    const s = stageOf(f)
+    if (!stageGroups.has(s)) stageGroups.set(s, [])
+    stageGroups.get(s)!.push(f)
   }
+  const stages = [...stageGroups.keys()].sort((a, b) => {
+    const ai = stageOrder.indexOf(a), bi = stageOrder.indexOf(b)
+    if (ai === -1 && bi === -1) return a.localeCompare(b)
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
 
   const statusBadge = (s: Fixture["status"]) => {
-    if (s === "live") return <Badge className="bg-red-600 hover:bg-red-700">Live</Badge>
+    if (s === "live") return <Badge className="bg-green-600 hover:bg-green-700">Live</Badge>
     if (s === "completed") return <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>
-    return <Badge className="bg-green-600 hover:bg-green-700">Upcoming</Badge>
+    return <Badge className="bg-yellow-600 hover:bg-yellow-700">Upcoming</Badge>
   }
 
   const filterOptions: { key: typeof filter; label: string }[] = [
@@ -773,9 +782,7 @@ function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
                   key={key}
                   onClick={() => setFilter(key)}
                   className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
-                    filter === key
-                      ? "bg-gold text-black border-gold"
-                      : "border-gold/20 text-gray-300 hover:border-gold/50"
+                    filter === key ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
                   }`}
                 >
                   {label} <span className="opacity-60">({counts[key]})</span>
@@ -790,95 +797,289 @@ function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
           No {filter !== "all" ? filter : ""} matches to show.
         </p>
       ) : (
-        <div className="space-y-6">
-          {groups.map((group) => (
-            <div key={group.date}>
-              <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-2.5 flex items-center gap-3">
-                <span className="h-px flex-1 bg-gold/10" />
-                {group.date}
-                <span className="h-px flex-1 bg-gold/10" />
-              </p>
-              <div className="space-y-3">
-                {group.items.map((f) => (
-                  <div
-                    key={f.id}
-                    className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-md p-4 border transition-colors ${
-                      f.status === "live"
-                        ? "border-red-500/40 bg-red-500/[0.06]"
-                        : f.status === "completed"
-                          ? "border-gold/10 bg-white/[0.02] opacity-70"
-                          : "border-gold/10 bg-white/[0.02] hover:border-gold/30"
-                    }`}
-                  >
-                    <div>
-                      <p className="text-white font-semibold flex items-center gap-2">
-                        {f.status === "live" && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-                        )}
-                        {f.team1} <span className="text-gray-500 font-normal">vs</span> {f.team2}
-                      </p>
-                      <p className="text-gray-400 text-xs mt-1">
-                        {f.time} · {f.venue}
-                      </p>
-                      {f.result && <p className="text-gold text-xs mt-1 font-medium">{f.result}</p>}
+        <div className="space-y-10">
+          {stages.map((stage) => {
+            const stageFixtures = stageGroups.get(stage)!
+            // date sub-grouping within the stage, same logic as before
+            const dateGroups: { date: string; items: Fixture[] }[] = []
+            for (const f of stageFixtures) {
+              const current = dateGroups[dateGroups.length - 1]
+              if (current && current.date === f.date) current.items.push(f)
+              else dateGroups.push({ date: f.date, items: [f] })
+            }
+            return (
+              <div key={stage}>
+                {stage !== "Matches" && (
+                  <h3 className="text-white font-bold font-cinzel text-sm uppercase tracking-wide mb-4 flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-gold" />
+                    {stage}
+                  </h3>
+                )}
+                <div className="space-y-6">
+                  {dateGroups.map((group) => (
+                    <div key={group.date}>
+                      {group.date && group.date !== "TBD" && (
+                        <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-2.5 flex items-center gap-3">
+                          <span className="h-px flex-1 bg-gold/10" />
+                          {group.date}
+                          <span className="h-px flex-1 bg-gold/10" />
+                        </p>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {group.items.map((f, i) => (
+                          <FixtureCard
+                            key={f.id}
+                            fixture={f}
+                            team1Logo={logoByTeam.get(f.team1)}
+                            team2Logo={logoByTeam.get(f.team2)}
+                            statusBadge={statusBadge}
+                            slug={slug}
+                            matchNumber={fixtures.indexOf(f) + 1}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div>{statusBadge(f.status)}</div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
+function TeamBadge({ name, logo }: { name: string; logo?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 w-16 shrink-0 transition-transform duration-300 group-hover:scale-[1.03]">
+      {logo ? (
+        <div className="relative h-10 w-10 rounded-full overflow-hidden border border-gold/25 ring-1 ring-black/40 bg-black/40 shrink-0">
+          <Image src={logo} alt={`${name} logo`} fill className="object-cover" />
+        </div>
+      ) : (
+        <div className="h-10 w-10 rounded-full bg-gold/10 border border-gold/25 flex items-center justify-center shrink-0">
+          <span className="text-gold text-[10px] font-bold font-cinzel">{initials(name)}</span>
+        </div>
+      )}
+      <span className="text-white text-[11px] font-semibold font-cinzel text-center leading-tight truncate w-full">
+        {name}
+      </span>
+    </div>
+  )
+}
+
+function FixtureCard({
+  fixture: f,
+  team1Logo,
+  team2Logo,
+  statusBadge,
+  slug,
+  matchNumber,
+}: {
+  fixture: Fixture
+  team1Logo?: string
+  team2Logo?: string
+  statusBadge: (s: Fixture["status"]) => React.ReactNode
+  slug: string
+  matchNumber?: number
+}) {
+  const isLive = f.status === "live"
+  const isCompleted = f.status === "completed"
+  const clickable = !!f.matchId
+
+  // Round/stage label shown on every card, not just in a section
+  // header — falls back to a generic "Match N" if no stage data yet.
+  const roundLabel = (f as any).stage || (f as any).round || (matchNumber ? `Match ${matchNumber}` : null)
+
+  // Time/venue always renders something, even if data is missing,
+  // instead of silently collapsing to an empty line.
+  const timeLabel = f.time || "Time TBD"
+  const venueLabel = f.venue || null
+  const dateLabel = f.date && f.date !== "TBD" ? f.date : null
+
+  const card = (
+    <div
+      className={`group relative rounded-xl border p-4 overflow-hidden h-full transition-all duration-300 ${
+        isLive
+          ? "border-red-500/50 bg-gradient-to-br from-red-500/[0.10] via-red-500/[0.03] to-transparent shadow-[0_0_25px_-8px_rgba(220,38,38,0.35)]"
+          : isCompleted
+            ? "border-gold/10 bg-white/[0.015] opacity-70"
+            : "border-gold/10 bg-white/[0.02]"
+      } ${
+        clickable
+          ? "cursor-pointer hover:border-gold/50 hover:bg-white/[0.04] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(0,0,0,0.5)]"
+          : ""
+      }`}
+    >
+      {isLive && (
+        <>
+          <span className="absolute top-0 left-0 h-full w-[3px] bg-red-500 animate-pulse" />
+          <span className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-red-500/20 blur-2xl" />
+        </>
+      )}
+
+      {/* Round/stage pill — always visible, top-left */}
+      {roundLabel && (
+        <span className="inline-block text-gold/80 text-[10px] font-cinzel uppercase tracking-widest bg-gold/10 border border-gold/20 rounded-full px-2.5 py-0.5 mb-3 relative z-10">
+          {roundLabel}
+        </span>
+      )}
+
+      <div className="flex items-center justify-between mb-3 gap-2 relative z-10">
+        <div className="min-w-0">
+          <p className="text-gray-300 text-xs font-medium flex items-center gap-1.5 truncate">
+            {isLive && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />}
+            {timeLabel}
+          </p>
+          {(dateLabel || venueLabel) && (
+            <p className="text-gray-500 text-[11px] truncate">
+              {[dateLabel, venueLabel].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+        {statusBadge(f.status)}
+      </div>
+
+      <div className="flex items-center justify-center gap-4 relative z-10">
+        <TeamBadge name={f.team1} logo={team1Logo} />
+        <div className="flex flex-col items-center gap-1 shrink-0">
+          <span className="h-7 w-7 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center text-gold/80 font-cinzel text-[10px] font-bold">
+            VS
+          </span>
+        </div>
+        <TeamBadge name={f.team2} logo={team2Logo} />
+      </div>
+
+      {f.result && (
+        <p className="text-gold text-xs font-medium text-center mt-3 pt-3 border-t border-gold/10 relative z-10">
+          {f.result}
+        </p>
+      )}
+
+      {clickable && (
+        <p className="text-gold/70 text-[10px] uppercase tracking-widest font-cinzel mt-3 text-center flex items-center justify-center gap-1 relative z-10 transition-transform duration-300 group-hover:gap-1.5">
+          View match <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
+        </p>
+      )}
+    </div>
+  )
+
+  return clickable ? (
+    <Link href={`/match/${f.matchId}`} className="block h-full">
+      {card}
+    </Link>
+  ) : (
+    card
+  )
+}
+
 // ─────────────────────────────────────────────────────────────
-// BRACKET PANEL (legacy flat-array fallback — used only when a
-// tournament has no `bracketFormat` set but still has a flat
-// `bracket` array)
+// BRACKET PANEL (legacy flat-array fallback) — groups matches
+// into round columns instead of a flat grid, so it scales
+// cleanly from a 4-team final up to a 32-team draw.
 // ─────────────────────────────────────────────────────────────
 function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string }) {
+  // Group by round. Falls back to inferring round from `label`
+  // (e.g. "Round of 32 - Match 3" -> "Round of 32") if `round`
+  // isn't set on the data yet.
+  const roundOf = (m: BracketMatch) =>
+    (m as any).round ?? m.label.replace(/\s*-?\s*Match\s*\d+$/i, "").trim()
+
+  const roundOrder = ["Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final"]
+  const grouped = new Map<string, BracketMatch[]>()
+  for (const m of matches) {
+    const r = roundOf(m)
+    if (!grouped.has(r)) grouped.set(r, [])
+    grouped.get(r)!.push(m)
+  }
+
+  // Order rounds: known rounds first in bracket order, then any
+  // unrecognized round names appended alphabetically as a fallback.
+  const rounds = [...grouped.keys()].sort((a, b) => {
+    const ai = roundOrder.indexOf(a)
+    const bi = roundOrder.indexOf(b)
+    if (ai === -1 && bi === -1) return a.localeCompare(b)
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+
+  const COL_WIDTH = 260
+  const CARD_HEIGHT = 108
+  const CARD_GAP = 24
+
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 overflow-x-auto">
       <h2 className="text-2xl font-bold text-white mb-6 font-cinzel flex items-center gap-2">
         <Network className="h-5 w-5 text-gold" />
         PLAYOFF BRACKET
       </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-[520px] sm:min-w-0">
-        {matches.map((m) => {
-          const playable = hasMatchDetail(m.id)
-          const card = (
-            <div
-              className={`border border-gold/10 rounded-md p-4 bg-white/[0.02] transition-all ${
-                playable ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
-              }`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-gold text-xs font-bold font-cinzel uppercase tracking-wide">{m.label}</span>
-                {m.date && <span className="text-gray-500 text-xs">{m.date}</span>}
-              </div>
-              <BracketTeamRow team={m.team1} isWinner={m.winner === m.team1.short} />
-              <BracketTeamRow team={m.team2} isWinner={m.winner === m.team2.short} />
-              {playable && (
-                <p className="text-gold text-[10px] uppercase tracking-widest font-cinzel mt-3 text-right">
-                  View match →
-                </p>
-              )}
-            </div>
-          )
 
-          return playable ? (
-            <Link key={m.id} href={`/tournaments/${slug}/match/${m.id}`}>
-              {card}
-            </Link>
-          ) : (
-            <div key={m.id}>{card}</div>
+      <div
+        className="flex gap-10 min-w-max pb-2"
+        style={{ minWidth: rounds.length * (COL_WIDTH + 40) }}
+      >
+        {rounds.map((round, colIdx) => {
+          const roundMatches = grouped.get(round)!
+          // Vertical spacing doubles each round so brackets converge
+          // visually toward the final, like a real knockout tree.
+          const spacingMultiplier = Math.pow(2, colIdx)
+          const topOffset = colIdx === 0 ? 0 : (CARD_HEIGHT + CARD_GAP) * (spacingMultiplier / 2 - 0.5)
+          const gapBetween = (CARD_HEIGHT + CARD_GAP) * spacingMultiplier - CARD_HEIGHT
+
+          return (
+            <div key={round} style={{ width: COL_WIDTH }} className="shrink-0">
+              <p className="text-gold/80 text-xs font-cinzel uppercase tracking-widest text-center mb-4 pb-2 border-b border-gold/10">
+                {round}
+              </p>
+              <div
+                className="flex flex-col"
+                style={{ marginTop: topOffset, gap: gapBetween }}
+              >
+                {roundMatches.map((m) => (
+                  <BracketCard key={m.id} match={m} height={CARD_HEIGHT} />
+                ))}
+              </div>
+            </div>
           )
         })}
       </div>
     </div>
+  )
+}
+
+function BracketCard({ match: m, height }: { match: BracketMatch; height: number }) {
+  const playable = hasMatchDetail(m.id)
+  const card = (
+    <div
+      style={{ height }}
+      className={`border border-gold/10 rounded-md p-3 bg-white/[0.02] flex flex-col justify-center transition-all ${
+        playable ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-gold text-[10px] font-bold font-cinzel uppercase tracking-wide truncate">
+          {m.label}
+        </span>
+        {m.date && <span className="text-gray-500 text-[10px] shrink-0 ml-2">{m.date}</span>}
+      </div>
+      <BracketTeamRow team={m.team1} isWinner={m.winner === m.team1.short} />
+      <BracketTeamRow team={m.team2} isWinner={m.winner === m.team2.short} />
+      {playable && (
+        <p className="text-gold text-[9px] uppercase tracking-widest font-cinzel mt-1.5 text-right">
+          View match →
+        </p>
+      )}
+    </div>
+  )
+
+  return playable ? (
+    <Link href={`/match/${m.id}`} className="block">
+      {card}
+    </Link>
+  ) : (
+    <div>{card}</div>
   )
 }
 
