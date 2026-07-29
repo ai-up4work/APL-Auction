@@ -351,30 +351,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 )}
 
                 <TabsContent value="prizes" className="mt-0">
-                  <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">PRIZE POOL</h2>
-                    {tournament.prizePool && (
-                      <p className="text-gray-300 mb-4">
-                        <span className="text-gold font-semibold">Total: </span>
-                        {tournament.prizePool}
-                      </p>
-                    )}
-                    {tournament.prizes && tournament.prizes.length > 0 ? (
-                      <div className="space-y-3">
-                        {tournament.prizes.map((p) => (
-                          <div
-                            key={p.place}
-                            className="flex items-center justify-between border-b border-gold/10 pb-2"
-                          >
-                            <span className="text-white font-semibold">{p.place}</span>
-                            <span className="text-gray-300">{p.reward}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-gray-400 text-sm">Prize breakdown to be announced.</p>
-                    )}
-                  </div>
+                  <PrizesPanel prizePool={tournament.prizePool} prizes={tournament.prizes} />
                 </TabsContent>
               </Tabs>
             </div>
@@ -670,39 +647,122 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
 
 // ─────────────────────────────────────────────────────────────
 // SCHEDULE PANEL
+//
+// Improved from a flat list into a real itinerary: fixtures are
+// grouped under date headers (so a multi-week schedule doesn't read as
+// one undifferentiated wall of cards), filterable by status with live
+// counts on each filter, the live match pulses and floats to the top
+// of its day, and completed matches dim back so the eye goes to what's
+// next by default.
 // ─────────────────────────────────────────────────────────────
 function SchedulePanel({ fixtures }: { fixtures: Fixture[] }) {
+  const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "completed">("all")
+
+  const counts = {
+    all: fixtures.length,
+    live: fixtures.filter((f) => f.status === "live").length,
+    upcoming: fixtures.filter((f) => f.status === "upcoming").length,
+    completed: fixtures.filter((f) => f.status === "completed").length,
+  }
+
+  const filtered = filter === "all" ? fixtures : fixtures.filter((f) => f.status === filter)
+
+  // Groups consecutive fixtures that share the same date string into one
+  // dated section. Assumes fixtures already arrive in a sensible order
+  // (as they do from tournament-data) rather than re-sorting an
+  // arbitrary display-format date string.
+  const groups: { date: string; items: Fixture[] }[] = []
+  for (const f of filtered) {
+    const current = groups[groups.length - 1]
+    if (current && current.date === f.date) current.items.push(f)
+    else groups.push({ date: f.date, items: [f] })
+  }
+
   const statusBadge = (s: Fixture["status"]) => {
     if (s === "live") return <Badge className="bg-red-600 hover:bg-red-700">Live</Badge>
     if (s === "completed") return <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>
     return <Badge className="bg-green-600 hover:bg-green-700">Upcoming</Badge>
   }
 
+  const filterOptions: { key: typeof filter; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "live", label: "Live" },
+    { key: "upcoming", label: "Upcoming" },
+    { key: "completed", label: "Completed" },
+  ]
+
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-      <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
-        <CalendarClock className="h-5 w-5 text-gold" />
-        MATCH SCHEDULE
-      </h2>
-      <div className="space-y-3">
-        {fixtures.map((f) => (
-          <div
-            key={f.id}
-            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border border-gold/10 rounded-md p-4 bg-white/[0.02]"
-          >
-            <div>
-              <p className="text-white font-semibold">
-                {f.team1} <span className="text-gray-500 font-normal">vs</span> {f.team2}
-              </p>
-              <p className="text-gray-400 text-xs mt-1">
-                {f.date} · {f.time} · {f.venue}
-              </p>
-              {f.result && <p className="text-gold text-xs mt-1">{f.result}</p>}
-            </div>
-            <div>{statusBadge(f.status)}</div>
-          </div>
-        ))}
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
+          <CalendarClock className="h-5 w-5 text-gold" />
+          MATCH SCHEDULE
+        </h2>
+        <div className="flex flex-wrap gap-1.5">
+          {filterOptions.map(
+            ({ key, label }) =>
+              counts[key] > 0 && (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
+                    filter === key
+                      ? "bg-gold text-black border-gold"
+                      : "border-gold/20 text-gray-300 hover:border-gold/50"
+                  }`}
+                >
+                  {label} <span className="opacity-60">({counts[key]})</span>
+                </button>
+              )
+          )}
+        </div>
       </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-gray-500 text-sm italic text-center py-10">
+          No {filter !== "all" ? filter : ""} matches to show.
+        </p>
+      ) : (
+        <div className="space-y-6">
+          {groups.map((group) => (
+            <div key={group.date}>
+              <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-2.5 flex items-center gap-3">
+                <span className="h-px flex-1 bg-gold/10" />
+                {group.date}
+                <span className="h-px flex-1 bg-gold/10" />
+              </p>
+              <div className="space-y-3">
+                {group.items.map((f) => (
+                  <div
+                    key={f.id}
+                    className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-md p-4 border transition-colors ${
+                      f.status === "live"
+                        ? "border-red-500/40 bg-red-500/[0.06]"
+                        : f.status === "completed"
+                          ? "border-gold/10 bg-white/[0.02] opacity-70"
+                          : "border-gold/10 bg-white/[0.02] hover:border-gold/30"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-white font-semibold flex items-center gap-2">
+                        {f.status === "live" && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                        )}
+                        {f.team1} <span className="text-gray-500 font-normal">vs</span> {f.team2}
+                      </p>
+                      <p className="text-gray-400 text-xs mt-1">
+                        {f.time} · {f.venue}
+                      </p>
+                      {f.result && <p className="text-gold text-xs mt-1 font-medium">{f.result}</p>}
+                    </div>
+                    <div>{statusBadge(f.status)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -882,6 +942,73 @@ function AwardsPanel({ awards }: { awards: AwardEntry[] }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRIZES PANEL
+//
+// Was a plain "label — value" list. Now reads like an actual podium:
+// the total prize pool gets its own pill up top, and the first three
+// entries (by array position, or by "1st"/"champion"/"winner" etc. in
+// the place text) get a medal + a gold/silver/bronze-tinted card so
+// the top prizes are visually distinct from the rest of the breakdown.
+// ─────────────────────────────────────────────────────────────
+function PrizesPanel({
+  prizePool,
+  prizes,
+}: {
+  prizePool?: string
+  prizes?: { place: string; reward: string }[]
+}) {
+  const medalFor = (place: string, index: number) => {
+    const p = place.toLowerCase()
+    if (index === 0 || p.includes("1st") || p.includes("champion") || p.includes("winner")) {
+      return { icon: "🥇", tone: "border-gold/50 bg-gradient-to-br from-gold/15 via-gold/5 to-transparent" }
+    }
+    if (index === 1 || p.includes("2nd") || p.includes("runner")) {
+      return { icon: "🥈", tone: "border-gray-300/40 bg-gradient-to-br from-gray-300/10 via-gray-300/5 to-transparent" }
+    }
+    if (index === 2 || p.includes("3rd")) {
+      return { icon: "🥉", tone: "border-amber-700/40 bg-gradient-to-br from-amber-700/10 via-amber-700/5 to-transparent" }
+    }
+    return { icon: null, tone: "border-gold/10 bg-white/[0.02]" }
+  }
+
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
+      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
+          <Award className="h-5 w-5 text-gold" />
+          PRIZE POOL
+        </h2>
+        {prizePool && (
+          <div className="flex items-center gap-2 bg-gold/10 border border-gold/30 rounded-full px-4 py-1.5">
+            <Trophy className="h-3.5 w-3.5 text-gold" />
+            <span className="text-gold font-bold font-cinzel text-sm">{prizePool}</span>
+          </div>
+        )}
+      </div>
+
+      {prizes && prizes.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {prizes.map((p, i) => {
+            const { icon, tone } = medalFor(p.place, i)
+            return (
+              <div key={p.place} className={`rounded-lg p-5 border transition-transform hover:-translate-y-0.5 ${tone}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {icon && <span className="text-xl leading-none">{icon}</span>}
+                  <span className="text-white font-bold font-cinzel text-sm">{p.place}</span>
+                </div>
+                <p className="text-gold text-lg font-bold font-cinzel">{p.reward}</p>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="text-gray-400 text-sm">Prize breakdown to be announced.</p>
+      )}
     </div>
   )
 }
