@@ -73,7 +73,7 @@ const teamA: TeamInfo = {
 const teamB: TeamInfo = {
   name: "Ravenhold Riders",
   shortCode: "RHR",
-  color: "#2f6fed",
+  color: "#2f6fed",  
   logoUrl: "/Franchises/ravens.png",
   squad: RAVENHOLD_XI,
   // knight-12..knight-22

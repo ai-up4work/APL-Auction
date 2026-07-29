@@ -95,10 +95,10 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
   const status = tournament.status || "Upcoming"
   const statusColor =
     status === "Live"
-      ? "bg-red-600 hover:bg-red-700"
+      ? "bg-green-600 hover:bg-green-700"
       : status === "Completed"
         ? "bg-gray-600 hover:bg-gray-700"
-        : "bg-green-600 hover:bg-green-700"
+        : "bg-blue-600 hover:bg-blue-700"
 
   const hasLive = !!tournament.liveMatch
   const hasPoints = !!tournament.pointsTable?.length
@@ -161,7 +161,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   <p className="text-gray-300 mt-2 text-sm md:text-base">{tournament.by}</p>
                 </div>
                 {hasLive && (
-                  <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-red-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-green-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
                     <Radio className="h-3 w-3" />
                     LIVE
                   </div>
@@ -511,12 +511,12 @@ function LiveScorePanel({ match }: { match: LiveMatch }) {
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
-          <Radio className="h-5 w-5 text-red-500" />
+          <Radio className="h-5 w-5 text-green-500" />
           LIVE SCORE
         </h2>
         {match.matchStatus === "live" && (
-          <span className="flex items-center gap-1.5 text-red-500 text-xs font-bold font-cinzel">
-            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="flex items-center gap-1.5 text-green-500 text-xs font-bold font-cinzel">
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
             IN PROGRESS
           </span>
         )}
@@ -725,6 +725,7 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
 function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads?: Squad[]; slug: string }) {
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "completed">("all")
   const logoByTeam = new Map(squads?.map((s) => [s.team, s.logo]) ?? [])
+  const colorByTeam = new Map(squads?.map((s) => [s.team, (s as any).color as string | undefined]) ?? [])
 
   const counts = {
     all: fixtures.length,
@@ -760,12 +761,26 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
     return <Badge className="bg-yellow-600 hover:bg-yellow-700">Upcoming</Badge>
   }
 
+  function getTeamColor(name: string, explicit?: string) {
+    if (explicit) return explicit
+    let hash = 0
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+    const hue = Math.abs(hash) % 360
+    return `hsl(${hue}, 62%, 42%)`
+  }
+
   const filterOptions: { key: typeof filter; label: string }[] = [
     { key: "all", label: "All" },
     { key: "live", label: "Live" },
     { key: "upcoming", label: "Upcoming" },
     { key: "completed", label: "Completed" },
   ]
+
+  const statusBadgeClass = (s: Fixture["status"], liveAccent: "red" | "green" = "red") => {
+    if (s === "live") return liveAccent === "green" ? "bg-green-600 hover:bg-green-700" : "bg-green-600 hover:bg-green-700"
+    if (s === "completed") return "bg-gray-600 hover:bg-gray-700"
+    return "bg-blue-600 hover:bg-blue-700" // upcoming — moved off green, see note above
+  }
 
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
@@ -832,7 +847,9 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
                             fixture={f}
                             team1Logo={logoByTeam.get(f.team1)}
                             team2Logo={logoByTeam.get(f.team2)}
-                            statusBadge={statusBadge}
+                            team1Color={getTeamColor(f.team1, colorByTeam.get(f.team1))}
+                            team2Color={getTeamColor(f.team2, colorByTeam.get(f.team2))}
+                            statusBadgeClass={statusBadgeClass}
                             slug={slug}
                             matchNumber={fixtures.indexOf(f) + 1}
                           />
@@ -873,14 +890,18 @@ function FixtureCard({
   fixture: f,
   team1Logo,
   team2Logo,
-  statusBadge,
+  team1Color,
+  team2Color,
+  statusBadgeClass,
   slug,
   matchNumber,
 }: {
   fixture: Fixture
   team1Logo?: string
   team2Logo?: string
-  statusBadge: (s: Fixture["status"]) => React.ReactNode
+  team1Color: string
+  team2Color: string
+  statusBadgeClass: (s: Fixture["status"], liveAccent?: "red" | "green") => string
   slug: string
   matchNumber?: number
 }) {
@@ -888,80 +909,124 @@ function FixtureCard({
   const isCompleted = f.status === "completed"
   const clickable = !!f.matchId
 
-  // Round/stage label shown on every card, not just in a section
-  // header — falls back to a generic "Match N" if no stage data yet.
+  const liveAccent: "red" | "green" = (f as any).liveAccent === "green" ? "green" : "red"
   const roundLabel = (f as any).stage || (f as any).round || (matchNumber ? `Match ${matchNumber}` : null)
-
-  // Time/venue always renders something, even if data is missing,
-  // instead of silently collapsing to an empty line.
   const timeLabel = f.time || "Time TBD"
   const venueLabel = f.venue || null
   const dateLabel = f.date && f.date !== "TBD" ? f.date : null
 
+  const statusLabel = isLive ? "Live" : isCompleted ? "Completed" : "Upcoming"
+
   const card = (
     <div
-      className={`group relative rounded-xl border p-4 overflow-hidden h-full transition-all duration-300 ${
+      className={`group relative rounded-xl border overflow-hidden h-full flex flex-col transition-all duration-300 ${
         isLive
-          ? "border-red-500/50 bg-gradient-to-br from-red-500/[0.10] via-red-500/[0.03] to-transparent shadow-[0_0_25px_-8px_rgba(220,38,38,0.35)]"
+          ? liveAccent === "green"
+            ? "border-green-500/50 shadow-[0_0_25px_-8px_rgba(34,197,94,0.35)]"
+            : "border-red-500/50 shadow-[0_0_25px_-8px_rgba(220,38,38,0.35)]"
           : isCompleted
-            ? "border-gold/10 bg-white/[0.015] opacity-70"
-            : "border-gold/10 bg-white/[0.02]"
+            ? "border-gold/10 opacity-70"
+            : "border-gold/10"
       } ${
         clickable
-          ? "cursor-pointer hover:border-gold/50 hover:bg-white/[0.04] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(0,0,0,0.5)]"
+          ? "cursor-pointer hover:border-gold/50 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(0,0,0,0.5)]"
           : ""
       }`}
     >
-      {isLive && (
-        <>
-          <span className="absolute top-0 left-0 h-full w-[3px] bg-red-500 animate-pulse" />
-          <span className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-red-500/20 blur-2xl" />
-        </>
-      )}
+      {/* Duel banner — diagonal split, team-colored halves */}
+      <div className="relative h-36 bg-black/60">
+        <div
+          className="absolute inset-0"
+          style={{
+            clipPath: "polygon(0 0, 58% 0, 42% 100%, 0 100%)",
+            background: `linear-gradient(135deg, ${team1Color}80, rgba(0,0,0,0.92))`,
+          }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            clipPath: "polygon(58% 0, 100% 0, 100% 100%, 42% 100%)",
+            background: `linear-gradient(225deg, ${team2Color}80, rgba(0,0,0,0.92))`,
+          }}
+        />
+        {/* seam highlight */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ clipPath: "polygon(57% 0, 60% 0, 44% 100%, 41% 100%)", background: "rgba(255,255,255,0.08)" }}
+        />
 
-      {/* Round/stage pill — always visible, top-left */}
-      {roundLabel && (
-        <span className="inline-block text-gold/80 text-[10px] font-cinzel uppercase tracking-widest bg-gold/10 border border-gold/20 rounded-full px-2.5 py-0.5 mb-3 relative z-10">
-          {roundLabel}
+        {roundLabel && (
+          <span className="absolute top-2 left-2 z-20 text-white/90 text-[10px] font-cinzel uppercase tracking-widest bg-black/50 border border-white/10 rounded-full px-2.5 py-0.5">
+            {roundLabel}
+          </span>
+        )}
+        <span
+          className={`absolute top-2 right-2 z-20 text-white text-[10px] font-bold font-cinzel px-2.5 py-1 rounded-full flex items-center gap-1 ${statusBadgeClass(
+            f.status,
+            liveAccent
+          )}`}
+        >
+          {isLive && <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />}
+          {statusLabel}
         </span>
-      )}
 
-      <div className="flex items-center justify-between mb-3 gap-2 relative z-10">
-        <div className="min-w-0">
-          <p className="text-gray-300 text-xs font-medium flex items-center gap-1.5 truncate">
-            {isLive && <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />}
-            {timeLabel}
-          </p>
-          {(dateLabel || venueLabel) && (
-            <p className="text-gray-500 text-[11px] truncate">
-              {[dateLabel, venueLabel].filter(Boolean).join(" · ")}
-            </p>
+        {/* Team 1 */}
+        <div className="absolute left-[16%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
+          {team1Logo ? (
+            <div className="relative h-2 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team1Color }}>
+              <Image src={team1Logo} alt={`${f.team1} logo`} fill className="object-cover" />
+            </div>
+          ) : (
+            <div className="h-2 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team1Color }}>
+              <span className="text-white text-[11px] font-bold font-cinzel">{initials(f.team1)}</span>
+            </div>
           )}
+          <span className="text-white text-[11px] font-semibold font-cinzel text-center leading-tight max-w-[80px] truncate">
+            {f.team1}
+          </span>
         </div>
-        {statusBadge(f.status)}
-      </div>
 
-      <div className="flex items-center justify-center gap-4 relative z-10">
-        <TeamBadge name={f.team1} logo={team1Logo} />
-        <div className="flex flex-col items-center gap-1 shrink-0">
-          <span className="h-7 w-7 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center text-gold/80 font-cinzel text-[10px] font-bold">
+        {/* VS seam badge */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
+          <span className="h-8 w-8 rounded-full border border-gold/40 bg-black/70 flex items-center justify-center text-gold font-cinzel text-[10px] font-bold">
             VS
           </span>
         </div>
-        <TeamBadge name={f.team2} logo={team2Logo} />
+
+        {/* Team 2 */}
+        <div className="absolute left-[84%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
+          {team2Logo ? (
+            <div className="relative h-2 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team2Color }}>
+              <Image src={team2Logo} alt={`${f.team2} logo`} fill className="object-cover" />
+            </div>
+          ) : (
+            <div className="h-2 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team2Color }}>
+              <span className="text-white text-[11px] font-bold font-cinzel">{initials(f.team2)}</span>
+            </div>
+          )}
+          <span className="text-white text-[11px] font-semibold font-cinzel text-center leading-tight max-w-[80px] truncate">
+            {f.team2}
+          </span>
+        </div>
       </div>
 
-      {f.result && (
-        <p className="text-gold text-xs font-medium text-center mt-3 pt-3 border-t border-gold/10 relative z-10">
-          {f.result}
-        </p>
-      )}
-
-      {clickable && (
-        <p className="text-gold/70 text-[10px] uppercase tracking-widest font-cinzel mt-3 text-center flex items-center justify-center gap-1 relative z-10 transition-transform duration-300 group-hover:gap-1.5">
-          View match <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
-        </p>
-      )}
+      {/* Info footer */}
+      <div className="bg-black/50 p-4 flex-1">
+        <p className="text-gray-300 text-xs font-medium text-center">{timeLabel}</p>
+        {(dateLabel || venueLabel) && (
+          <p className="text-gray-500 text-[11px] text-center mt-0.5 truncate">
+            {[dateLabel, venueLabel].filter(Boolean).join(" · ")}
+          </p>
+        )}
+        {f.result && (
+          <p className="text-gold text-xs font-medium text-center mt-2 pt-2 border-t border-gold/10">{f.result}</p>
+        )}
+        {clickable && (
+          <p className="text-gold/70 text-[10px] uppercase tracking-widest font-cinzel mt-2 text-center flex items-center justify-center gap-1 transition-transform duration-300 group-hover:gap-1.5">
+            View match <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
+          </p>
+        )}
+      </div>
     </div>
   )
 
