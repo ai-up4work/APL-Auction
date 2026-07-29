@@ -740,7 +740,7 @@ export async function getMatchDetailById(
     currentInnings,
     winProb,
   }
-
+  // console.log("getMatchDetailById: returning match detail for matchId", matchId, ":", match.squads[0].players)
   return { ok: true, match }
 }
 

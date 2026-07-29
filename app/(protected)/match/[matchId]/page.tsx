@@ -16,6 +16,7 @@ export async function generateMetadata({ params }: MatchPageProps): Promise<Meta
   }
 
   const match = result.match
+  // console.log("generateMetadata: match detail for matchId", matchId, ":", match.squads[0].players)
   const title = `${match.teamA.name} vs ${match.teamB.name} — ${match.round} | Valiant League`
   const description = match.tournamentName
     ? `${match.round} of ${match.tournamentName}: ${match.teamA.name} vs ${match.teamB.name} at ${match.venue}.`

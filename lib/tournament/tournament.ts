@@ -812,7 +812,7 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
   // Team-selection subset, if any has been saved — used by both the
   // primary and fallback paths below.
   const { data: selectionRows, error: selectionErr } = await supabase
-    .from("tournament_teams")
+    .from("tournament_team_selections")
     .select("team_id")
     .eq("tournament_id", tournamentId);
   if (selectionErr) console.error("getSquadsForTournament(selection) failed:", selectionErr.message);
