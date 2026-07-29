@@ -126,15 +126,15 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
       />
 
 
-      <SiteHeader
+      {/* <SiteHeader
         activeSection="tournament"
         isNavOpen={isNavOpen}
         setIsNavOpen={setIsNavOpen}
         scrollToSection={scrollToSection}
         handleNavigation={handleNavigation}
-      />
+      /> */}
 
-      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-16 sm:pt-20 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
 
             <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10">          {/* Row 1: Banner + Tournament Information.
@@ -973,11 +973,11 @@ function FixtureCard({
         {/* Team 1 */}
         <div className="absolute left-[16%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
           {team1Logo ? (
-            <div className="relative h-2 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team1Color }}>
+            <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team1Color }}>
               <Image src={team1Logo} alt={`${f.team1} logo`} fill className="object-cover" />
             </div>
           ) : (
-            <div className="h-2 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team1Color }}>
+            <div className="h-20 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team1Color }}>
               <span className="text-white text-[11px] font-bold font-cinzel">{initials(f.team1)}</span>
             </div>
           )}
@@ -996,11 +996,11 @@ function FixtureCard({
         {/* Team 2 */}
         <div className="absolute left-[84%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
           {team2Logo ? (
-            <div className="relative h-2 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team2Color }}>
+            <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team2Color }}>
               <Image src={team2Logo} alt={`${f.team2} logo`} fill className="object-cover" />
             </div>
           ) : (
-            <div className="h-2 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team2Color }}>
+            <div className="h-20 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center" style={{ borderColor: team2Color }}>
               <span className="text-white text-[11px] font-bold font-cinzel">{initials(f.team2)}</span>
             </div>
           )}

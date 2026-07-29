@@ -323,14 +323,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         }}
       />
 
-      <SiteHeader
-        activeSection="tournament"
-        isNavOpen={isNavOpen}
-        setIsNavOpen={setIsNavOpen}
-        scrollToSection={scrollToSection}
-        handleNavigation={handleNavigation}
-      />
-
       {/* ═══════════════════════════════════════════
           HERO
       ═══════════════════════════════════════════ */}
