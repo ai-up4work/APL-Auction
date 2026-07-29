@@ -221,6 +221,6 @@ export function buildSquads(setup: MatchSetup, teamAName: string, teamBName: str
     const isTeamA = tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
     const isTeamB = tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
     const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
-    return { team: teamName, captain: s.captain, players: s.players.map((p) => ({ name: p.name, role: p.role, xi: p.xi })) }
+    return { team: teamName, captain: s.captain, players: s.players?.map((p) => ({ name: p.name, role: p.role, xi: p.xi })) || [] }   // handle empty player set gracefully
   })
 }
