@@ -666,10 +666,12 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                   tournamentId={tournament.id}
                   orgId={tournament.orgId!}
                   tournamentName={tournament.name}
+                  sourceType={tournament.sourceType}
+                  sourceId={tournament.sourceId}
                 />
               </div>
 
-                           {/* BRACKET — generates bracket_matches from the linked auction's teams */}
+              {/* BRACKET — generates bracket_matches from the linked auction's teams */}
               <div id="bracket" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
                 <SectionHeading icon={Swords} title="Bracket" />
 

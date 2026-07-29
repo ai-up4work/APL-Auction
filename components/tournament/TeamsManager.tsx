@@ -54,6 +54,13 @@ interface TeamsManagerProps {
   tournamentId: string
   orgId: string
   tournamentName: string
+  /** Source chosen when the tournament was created (from
+   *  TournamentCreationDialog -> tournaments.source_type/source_id).
+   *  When present and nothing has been linked yet, this is used to
+   *  auto-link every team from that source instead of asking the person
+   *  to pick a source again — they already picked it once at creation. */
+  sourceType?: "board" | "auction"
+  sourceId?: string | null
 }
 
 type Phase = "loading" | "choose" | "pickTeams" | "selectLinked" | "manage"
@@ -103,15 +110,35 @@ function StyledSelect({
   )
 }
 
-export default function TeamsManager({ tournamentId, orgId, tournamentName }: TeamsManagerProps) {
+/** Small read-only pill used in place of the crown/pencil/trash action
+ *  buttons whenever a team's roster is locked (sourced from an
+ *  auction/Squad Board) — communicates "this is a mirror of the source,
+ *  not editable here" without just silently removing the buttons. */
+function ReadOnlyTag() {
+  return (
+    <span className="text-[9px] uppercase tracking-widest font-cinzel text-gray-600 border border-white/10 rounded px-1.5 py-0.5 shrink-0">
+      Read-only
+    </span>
+  )
+}
+
+export default function TeamsManager({
+  tournamentId,
+  orgId,
+  tournamentName,
+  sourceId,
+}: TeamsManagerProps) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [linkedAuction, setLinkedAuction] = useState<LinkedAuctionInfo | null>(null)
   const [teams, setTeams] = useState<ManualTeam[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // True when the current team list came through the picker below
-  // (tournament_team_selections has rows) rather than the old "whole
-  // auction" link or manual add — locks out Add Player / Add Team.
+  // (tournament_team_selections has rows) — either from the person
+  // explicitly using "Pick Teams", or from the auto-link-on-first-load
+  // below using the tournament's own creation-time source. Locks out
+  // Add Player / Add Team / rename / delete / captain-toggle, since this
+  // roster is a live mirror of the auction/board, not owned here.
   const locked = teams.length > 0 && teams[0].locked
 
   // ── Team picker: pick a source (auction or Squad Board), then pick
@@ -162,11 +189,40 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
   const [isSelectingLinked, setIsSelectingLinked] = useState(false)
   const [selectLinkedError, setSelectLinkedError] = useState<string | null>(null)
 
+  // Shown briefly after the auto-link-from-creation-source path runs, so
+  // the person understands why teams just "appeared" instead of being
+  // asked to pick a source again.
+  const [autoLinkedNotice, setAutoLinkedNotice] = useState(false)
+
   const loadEverything = async () => {
     setLoadError(null)
     const candidates = await getAllLinkedAuctions(tournamentId)
 
     if (candidates.length === 0) {
+      // Nothing linked via the picker yet. If this tournament was
+      // created FROM a specific auction/board (TournamentCreationDialog
+      // -> tournaments.source_id), use that now instead of asking the
+      // person to choose a source a second time. Every team from that
+      // source is linked by default — they can narrow it down afterward
+      // with "Change selected teams" below, same as the manual picker.
+      if (sourceId) {
+        const sourceTeams = await getTeamsForAuction(sourceId)
+        const allTeamIds = sourceTeams.map((t) => t.id)
+        if (allTeamIds.length > 0) {
+          const result = await linkAuctionWithSelectedTeams(tournamentId, sourceId, allTeamIds)
+          if (result.ok) {
+            const t = await getTeamsWithPlayers(tournamentId)
+            setTeams(t)
+            setLinkedAuction({ id: sourceId, name: tournamentName, status: "setup", isManual: false })
+            setAutoLinkedNotice(true)
+            setPhase("manage")
+            return
+          }
+          // Auto-link failed — fall through to "choose" so the person
+          // still has a way forward rather than a silent dead end.
+          setLoadError(result.error ?? "Couldn't load teams from the source you picked at creation.")
+        }
+      }
       setLinkedAuction(null)
       setPhase("choose")
       return
@@ -209,6 +265,12 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     loadEverything()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournamentId])
+
+  useEffect(() => {
+    if (!autoLinkedNotice) return
+    const timer = setTimeout(() => setAutoLinkedNotice(false), 6000)
+    return () => clearTimeout(timer)
+  }, [autoLinkedNotice])
 
   // ── Team picker flow ────────────────────────────────────────────────
 
@@ -278,6 +340,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
       setPickerError(result.error ?? "Couldn't save your team selection — please try again.")
       return
     }
+    setAutoLinkedNotice(false)
     await loadEverything()
   }
 
@@ -303,6 +366,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
     if (ok) {
       setLinkedAuction(null)
       setTeams([])
+      setAutoLinkedNotice(false)
       setPhase("choose")
     }
   }
@@ -476,7 +540,11 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
           This tournament doesn't have any teams yet. There are two ways to get them here — pick
           whichever matches how you're running this event.
         </p>
-        {loadError && <p className="text-red-500 text-sm mb-4">{loadError}</p>}
+        {loadError && (
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-4">
+            <AlertCircle className="h-4 w-4" /> {loadError}
+          </p>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             onClick={openTeamPicker}
@@ -589,6 +657,14 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
                       checked={pickerSelectedIds.has(t.id)}
                       onChange={() => togglePickerTeam(t.id)}
                     />
+                    {t.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.logo} alt="" className="h-6 w-6 rounded-full object-cover border border-white/10" />
+                    ) : (
+                      <span className="h-6 w-6 rounded-full bg-black/60 border border-white/10 flex items-center justify-center">
+                        <Shield className="h-3 w-3 text-white/40" />
+                      </span>
+                    )}
                     <span className="text-white text-sm">{t.name}</span>
                     <span className="text-gray-500 text-xs">({t.code})</span>
                   </label>
@@ -596,7 +672,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
               </div>
               <p className="text-gray-500 text-xs mt-2">
                 All teams are selected by default — uncheck any that shouldn't be part of this
-                tournament.
+                tournament. Rosters are read-only here; they mirror the source auction/board.
               </p>
             </div>
           )
@@ -617,7 +693,7 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
             {isConfirmingPicker ? "Saving…" : `Use ${pickerSelectedIds.size || ""} Team${pickerSelectedIds.size === 1 ? "" : "s"}`}
           </Button>
           <Button
-            onClick={() => setPhase("choose")}
+            onClick={() => (linkedAuction ? setPhase("manage") : setPhase("choose"))}
             disabled={isConfirmingPicker}
             className="bg-transparent hover:bg-white/5 text-gray-300 border border-gold/20"
           >
@@ -695,6 +771,15 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
           </div>
         )}
       </div>
+
+      {autoLinkedNotice && (
+        <div className="flex items-center gap-2 text-xs text-gold/90 bg-gold/5 border border-gold/20 rounded-md px-3 py-2 mb-4">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          Linked automatically from the source you picked when you created this tournament — teams
+          are pre-selected, change them any time below.
+        </div>
+      )}
+
       <p className="text-gray-400 text-sm mb-6">
         {linkedAuction?.isManual
           ? "Teams and players added here show up directly on the tournament page's Squads tab."
@@ -703,13 +788,16 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
             : `Reading from "${linkedAuction?.name}". Teams and their sold players are shown below exactly as the auction settled — add more manually if you need to.`}
       </p>
 
-      {/* Locked notice — teams came from the picker, so no manual add here */}
+      {/* Locked notice — teams came from the picker/auto-link, so no
+          manual editing here at all: everything is a read-only mirror. */}
       {locked && (
         <div className="border border-gold/20 rounded-lg p-4 mb-6 bg-white/[0.02] flex items-start justify-between gap-3 flex-wrap">
           <p className="text-gray-400 text-xs flex items-start gap-2 max-w-md">
             <Link2 className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
-            These teams and rosters come from your selection — add or remove players over on the
-            source auction/Squad Board instead. You can change which teams are included any time.
+            These teams and rosters come from your selection — they're read-only here. Add,
+            remove, or reassign players on the source auction/Squad Board instead. You can change
+            which <span className="text-gold">teams</span> are included any time, right up until
+            you generate the bracket.
           </p>
           <button
             onClick={openTeamPicker}
@@ -791,15 +879,20 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
           <p className="text-gray-500 text-sm italic">No teams yet — add the first one below.</p>
         )}
         {teams.map((team) => (
-          <div key={team.id} className="border border-gold/10 rounded-lg p-4 bg-white/[0.02]">
+          <div
+            key={team.id}
+            className={`border rounded-lg p-4 transition-colors ${
+              locked ? "border-gold/10 bg-white/[0.015]" : "border-gold/10 bg-white/[0.02] hover:border-gold/25"
+            }`}
+          >
             <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
               <div className="flex items-center gap-2">
                 <span
-                  className="h-4 w-4 rounded-full border border-white/20"
+                  className="h-4 w-4 rounded-full border border-white/20 shrink-0"
                   style={{ backgroundColor: team.color }}
                 />
-                <Shield className="h-4 w-4 text-gold" />
-                {editingTeamId === team.id ? (
+                <Shield className="h-4 w-4 text-gold shrink-0" />
+                {editingTeamId === team.id && !locked ? (
                   <>
                     <Input
                       value={editingTeamName}
@@ -817,18 +910,24 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
                   <>
                     <span className="text-white font-bold font-cinzel">{team.name}</span>
                     <span className="text-gray-500 text-xs">({team.code})</span>
-                    <button onClick={() => startEditTeamName(team)} className="text-gray-500 hover:text-gold">
-                      <Pencil className="h-3 w-3" />
-                    </button>
+                    {!locked && (
+                      <button onClick={() => startEditTeamName(team)} className="text-gray-500 hover:text-gold">
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
                   </>
                 )}
               </div>
-              <button
-                onClick={() => handleDeleteTeam(team.id, team.name)}
-                className="text-gray-400 hover:text-red-400 text-xs flex items-center gap-1"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete team
-              </button>
+              {locked ? (
+                <ReadOnlyTag />
+              ) : (
+                <button
+                  onClick={() => handleDeleteTeam(team.id, team.name)}
+                  className="text-gray-400 hover:text-red-400 text-xs flex items-center gap-1"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete team
+                </button>
+              )}
             </div>
 
             {/* Player roster */}
@@ -842,13 +941,19 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
                   className="flex items-center justify-between gap-2 bg-black/30 rounded-md px-3 py-1.5"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <button
-                      onClick={() => handleToggleCaptain(team, p.id, !p.isCaptain)}
-                      title={p.isCaptain ? "Remove captain" : "Make captain"}
-                    >
-                      <Crown className={`h-3.5 w-3.5 shrink-0 ${p.isCaptain ? "text-gold" : "text-gray-600 hover:text-gray-400"}`} />
-                    </button>
-                    {editingPlayerId === p.id ? (
+                    {locked ? (
+                      <span title={p.isCaptain ? "Captain" : undefined}>
+                        <Crown className={`h-3.5 w-3.5 shrink-0 ${p.isCaptain ? "text-gold" : "text-gray-700"}`} />
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleToggleCaptain(team, p.id, !p.isCaptain)}
+                        title={p.isCaptain ? "Remove captain" : "Make captain"}
+                      >
+                        <Crown className={`h-3.5 w-3.5 shrink-0 ${p.isCaptain ? "text-gold" : "text-gray-600 hover:text-gray-400"}`} />
+                      </button>
+                    )}
+                    {editingPlayerId === p.id && !locked ? (
                       <>
                         <Input
                           value={editingPlayerName}
@@ -863,29 +968,32 @@ export default function TeamsManager({ tournamentId, orgId, tournamentName }: Te
                       <>
                         <span className="text-gray-200 text-sm truncate">{p.name}</span>
                         <span className="text-gray-500 text-xs shrink-0">{p.role}</span>
-                        <button
-                          onClick={() => startEditPlayerName(p.id, p.name)}
-                          className="text-gray-600 hover:text-gold shrink-0"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
+                        {!locked && (
+                          <button
+                            onClick={() => startEditPlayerName(p.id, p.name)}
+                            className="text-gray-600 hover:text-gold shrink-0"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleDeletePlayer(team.id, p.id)}
-                    className="text-gray-500 hover:text-red-400 shrink-0"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {!locked && (
+                    <button
+                      onClick={() => handleDeletePlayer(team.id, p.id)}
+                      className="text-gray-500 hover:text-red-400 shrink-0"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
 
             {/* Add player row — hidden when this team's roster came from
-                the picker (locked): the person already chose their teams,
-                so adding a player here would only exist on this tournament's
-                view, not on the source auction/board it's meant to mirror. */}
+                the picker/auto-link (locked): the person already chose
+                their teams, and players are owned by the source auction. */}
             {!locked && (
               <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center pt-2 border-t border-gold/5">
                 <Input

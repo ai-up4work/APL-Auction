@@ -19,6 +19,7 @@ import {
   Crown,
   X,
   Swords,
+  Lock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -41,15 +42,18 @@ import {
   getFriendlyMatchesForOrg,
   getTournamentMatchesForOrg,
   unsubscribe,
+  getAuctionsForOrg,
   type OrgSummary,
   type TournamentSummary,
   type BankPlayer,
   type PoolTeam,
   type FriendlyMatchSummary,
+  type AuctionSummary,
 } from "@/lib/organization/organization"
 import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
 import Image from "next/image"
 import { MatchCard } from "./MatchesTab"
+import { TournamentCreationDialog } from "./TournamentCreationDialog"
 
 const ROLE_OPTIONS = ["Batter", "Bowler", "All-rounder", "WK-Batter", "Batsman", "Wicket Keeper"]
 const TIER_OPTIONS = ["A", "B", "C", "Pro", "Elite", "Legend"]
@@ -129,14 +133,9 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
   const [matchesByTournament, setMatchesByTournament] = useState<Map<string, FriendlyMatchSummary[]>>(new Map())
   const [expandedMatches, setExpandedMatches] = useState<Set<string>>(new Set())
 
-  const [name, setName] = useState("")
-  const [format, setFormat] = useState<"single_elimination" | "double_elimination" | "round_robin">(
-    "single_elimination"
-  )
-  const [category, setCategory] = useState("")
-  const [logoUrl, setLogoUrl] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [auctions, setAuctions] = useState<AuctionSummary[]>([])
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -188,20 +187,29 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
   useRefetchOnFocus(reload)
 
-  const handleCreate = async () => {
-    if (!name.trim()) return
+  // Load auctions for tournament creation
+  useEffect(() => {
+    getAuctionsForOrg(org.id).then(setAuctions).catch(() => setAuctions([]))
+  }, [org.id])
+
+  const handleTournamentCreate = async (data: {
+    name: string
+    format: "single_elimination" | "double_elimination" | "round_robin"
+    source: "board" | "auction"
+    sourceId: string | null
+  }) => {
     setIsCreating(true)
     setCreateError(null)
     const id = await createTournament(org.id, userId, {
-      name: name.trim(),
-      format,
-      category: category ? (category as any) : undefined,
-      logoUrl: logoUrl.trim() || undefined,
+      name: data.name,
+      format: data.format,
+      source: data.source,
+      sourceId: data.sourceId,
     })
     setIsCreating(false)
     if (!id) {
       setCreateError("Couldn't create the tournament — please try again.")
-      return
+      throw new Error("Failed to create tournament")
     }
     router.push(`/tournaments/${id}/edit`)
   }
@@ -314,58 +322,19 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
         <h2 className="text-lg font-bold text-white font-cinzel mb-4 flex items-center gap-2">
           <Plus className="h-4 w-4 text-gold" /> Create a Tournament
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <div className="sm:col-span-2">
-            <FieldLabel>Name</FieldLabel>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Valiant League — Season 2" className="bg-black/50 border-gold/30 text-white" />
-          </div>
-          <div>
-            <FieldLabel>Format</FieldLabel>
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value as typeof format)}
-              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5"
-            >
-              <option value="single_elimination">Single Elimination</option>
-              <option value="double_elimination">Double Elimination</option>
-              <option value="round_robin">Round Robin</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <FieldLabel>Tournament Logo (optional)</FieldLabel>
-          <div className="flex items-center gap-3">
-            <div className="h-14 w-14 rounded-md overflow-hidden border border-gold/20 bg-black/60 flex items-center justify-center shrink-0">
-              {logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <Trophy className="h-5 w-5 text-gold/30" />
-              )}
-            </div>
-            <Input
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              placeholder="https://…"
-              className="bg-black/50 border-gold/30 text-white flex-1"
-            />
-          </div>
-          <p className="text-gray-500 text-xs mt-1.5">Shown on this tournament's card below, and anywhere else its logo appears.</p>
-        </div>
-
+        
+        <TournamentCreationDialog
+          onConfirm={handleTournamentCreate}
+          poolTeams={[]}
+          auctions={auctions}
+          isLoading={isCreating}
+        />
+        
         {createError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
+          <p className="flex items-center gap-1.5 text-red-500 text-sm mt-4">
             <AlertCircle className="h-4 w-4" /> {createError}
           </p>
         )}
-        <Button
-          onClick={handleCreate}
-          disabled={!name.trim() || isCreating}
-          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-        >
-          {isCreating ? "Creating…" : "Create & Build Bracket"}
-        </Button>
       </Panel>
 
       <Panel>
@@ -446,6 +415,18 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
                           <StatusBadge tone="neutral">{t.format.replace("_", " ")}</StatusBadge>
                           <StatusBadge tone={t.status === "setup" ? "warn" : "linked"}>{t.status}</StatusBadge>
                           {t.category && <StatusBadge tone="neutral">{t.category}</StatusBadge>}
+                          {t.sourceType === "auction" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border border-amber-500/30 text-amber-400">
+                              <Lock className="h-2.5 w-2.5" />
+                              From Auction
+                            </span>
+                          )}
+                          {t.sourceType === "board" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border border-blue-500/30 text-blue-400">
+                              <Swords className="h-2.5 w-2.5" />
+                              From Board
+                            </span>
+                          )}
                         </div>
                       </Link>
                     </div>

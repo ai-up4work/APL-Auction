@@ -13,6 +13,7 @@ export interface OrgSummary {
   plan: string;
   description: string | null;
   logoUrl: string | null;
+  createdAt?: string;
 }
 
 /** The org the current user belongs to (assumes one org per user for now,
@@ -96,20 +97,42 @@ export interface TournamentSummary {
    *  a placeholder in the UI when both are empty. */
   imageUrl: string | null;
   logoUrl: string | null;
+  /** Source type: "board" (editable) or "auction" (locked) */
+  sourceType?: "board" | "auction";
+  /** ID of the source board or auction */
+  sourceId?: string | null;
 }
 
 export async function getTournamentsForOrg(orgId: string): Promise<TournamentSummary[]> {
-  const { data, error } = await supabase
+  // Try to fetch with source fields first, fall back to without if columns don't exist
+  let { data, error } = await supabase
     .from("tournaments")
-    .select("id, name, format, status, category, created_at, image_url, logo_url")
+    .select("id, name, format, status, category, created_at, image_url, logo_url, source_type, source_id")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
+
+  // If the query fails due to missing columns, retry without them
+  if (error && error.message?.includes("source_type")) {
+    const { data: retryData, error: retryError } = await supabase
+      .from("tournaments")
+      .select("id, name, format, status, category, created_at, image_url, logo_url")
+      .eq("org_id", orgId)
+      .order("created_at", { ascending: false });
+
+    if (retryError) {
+      console.error("getTournamentsForOrg failed:", retryError.message);
+      return [];
+    }
+    data = retryData as any;
+    error = retryError;
+  }
 
   if (error) {
     console.error("getTournamentsForOrg failed:", error.message);
     return [];
   }
-  return (data ?? []).map((t) => ({
+
+  return (data ?? []).map((t: any) => ({
     id: t.id,
     name: t.name,
     format: t.format,
@@ -118,6 +141,8 @@ export async function getTournamentsForOrg(orgId: string): Promise<TournamentSum
     createdAt: t.created_at,
     imageUrl: t.image_url,
     logoUrl: t.logo_url,
+    sourceType: t.source_type ?? "board", // Default to board if not present
+    sourceId: t.source_id ?? null,
   }));
 }
 
@@ -129,6 +154,11 @@ export interface CreateTournamentInput {
    *  card via TournamentSummary.logoUrl (imageUrl still takes priority if
    *  it's ever set separately, e.g. from the tournament's edit page). */
   logoUrl?: string;
+  /** Source of the tournament: "board" (from Team Pool) or "auction" (from real auction)
+   *  If "auction", sourceId must be provided and will lock player editing */
+  source?: "board" | "auction";
+  /** ID of the source board or auction. Required if source is "auction" */
+  sourceId?: string | null;
 }
 
 /** Creates a bare tournament row — the resulting id is where the caller
@@ -138,19 +168,37 @@ export async function createTournament(
   userId: string,
   input: CreateTournamentInput
 ): Promise<string | null> {
-  const { data, error } = await supabase
+  const insertData: any = {
+    org_id: orgId,
+    name: input.name,
+    format: input.format,
+    category: input.category ?? null,
+    created_by: userId,
+    status: "setup",
+    logo_url: input.logoUrl?.trim() || null,
+  };
+
+  if (input.source !== undefined) {
+    insertData.source_type = input.source ?? "board";
+  }
+  if (input.sourceId !== undefined) {
+    insertData.source_id = input.sourceId ?? null;
+  }
+
+  let { data, error } = await supabase
     .from("tournaments")
-    .insert({
-      org_id: orgId,
-      name: input.name,
-      format: input.format,
-      category: input.category ?? null,
-      created_by: userId,
-      status: "setup",
-      logo_url: input.logoUrl?.trim() || null,
-    })
+    .insert(insertData)
     .select("id")
     .single();
+
+  // Schema hasn't been migrated yet — retry without source fields
+  if (error && (error.message?.includes("source_type") || error.message?.includes("source_id"))) {
+    delete insertData.source_type;
+    delete insertData.source_id;
+    const retry = await supabase.from("tournaments").insert(insertData).select("id").single();
+    data = retry.data as any;
+    error = retry.error;
+  }
 
   if (error || !data) {
     console.error("createTournament failed:", error?.message);
@@ -266,12 +314,32 @@ export async function createAuction(
 }
 
 export async function deleteAuction(auctionId: string): Promise<UpdateOrgResult> {
-  const { error } = await supabase.from("auctions").delete().eq("id", auctionId);
-  if (error) {
-    console.error("deleteAuction failed:", error.message);
-    if (error.code === "23503") {
-      return { ok: false, error: "This auction still has teams or players linked to it and can't be deleted yet." };
-    }
+  // First, unlink all teams from this auction by setting auction_id to NULL
+  const { error: unlinkTeamsError } = await supabase
+    .from("auction_teams")
+    .update({ auction_id: null })
+    .eq("auction_id", auctionId);
+
+  if (unlinkTeamsError) {
+    console.error("Failed to unlink teams from auction:", unlinkTeamsError.message);
+    return { ok: false, error: "Couldn't unlink teams from this auction — please try again." };
+  }
+
+  // Then, unlink all players from this auction by setting auction_id to NULL
+  const { error: unlinkPlayersError } = await supabase
+    .from("auction_roster_players")
+    .update({ auction_id: null })
+    .eq("auction_id", auctionId);
+
+  if (unlinkPlayersError) {
+    console.error("Failed to unlink players from auction:", unlinkPlayersError.message);
+    return { ok: false, error: "Couldn't unlink players from this auction — please try again." };
+  }
+
+  // Now delete the auction itself
+  const { error: deleteError } = await supabase.from("auctions").delete().eq("id", auctionId);
+  if (deleteError) {
+    console.error("deleteAuction failed:", deleteError.message);
     return { ok: false, error: "Couldn't delete that auction — please try again." };
   }
   return { ok: true };
@@ -1431,12 +1499,32 @@ export async function createSquadBoard(orgId: string, userId: string, name: stri
 }
 
 export async function deleteSquadBoard(boardId: string): Promise<UpdateOrgResult> {
-  const { error } = await supabase.from("auctions").delete().eq("id", boardId);
-  if (error) {
-    console.error("deleteSquadBoard failed:", error.message);
-    if (error.code === "23503") {
-      return { ok: false, error: "This Squad Board still has teams or players on it and can't be deleted yet." };
-    }
+  // First, unlink all teams from this board by setting auction_id to NULL
+  const { error: unlinkTeamsError } = await supabase
+    .from("auction_teams")
+    .update({ auction_id: null })
+    .eq("auction_id", boardId);
+
+  if (unlinkTeamsError) {
+    console.error("Failed to unlink teams from squad board:", unlinkTeamsError.message);
+    return { ok: false, error: "Couldn't unlink teams from this board — please try again." };
+  }
+
+  // Then, unlink all players from this board by setting auction_id to NULL
+  const { error: unlinkPlayersError } = await supabase
+    .from("auction_roster_players")
+    .update({ auction_id: null })
+    .eq("auction_id", boardId);
+
+  if (unlinkPlayersError) {
+    console.error("Failed to unlink players from squad board:", unlinkPlayersError.message);
+    return { ok: false, error: "Couldn't unlink players from this board — please try again." };
+  }
+
+  // Now delete the board itself
+  const { error: deleteError } = await supabase.from("auctions").delete().eq("id", boardId);
+  if (deleteError) {
+    console.error("deleteSquadBoard failed:", deleteError.message);
     return { ok: false, error: "Couldn't delete that Squad Board — please try again." };
   }
   return { ok: true };

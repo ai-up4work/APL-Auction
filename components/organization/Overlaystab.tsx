@@ -2,8 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Loader2, Tv, Swords, ArrowRight, Info, Trophy } from "lucide-react"
-import { getFriendlyMatchesForOrg, type OrgSummary, type FriendlyMatchSummary } from "@/lib/organization/organization"
+import { Loader2, Tv, Swords, ArrowRight, Info, Trophy, Filter } from "lucide-react"
+import {
+  getFriendlyMatchesForOrg,
+  getTournamentsForOrg,
+  type OrgSummary,
+  type FriendlyMatchSummary,
+  type TournamentSummary,
+} from "@/lib/organization/organization"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -49,14 +55,13 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
 /*  auction-sourced match it's the real auction's id — never assume the      */
 /*  two are equal, always use `match.auctionId`.                            */
 /*                                                                           */
-/*  Now also carries the same "which tournament (if any) is this match      */
-/*  tied to" badge used on MatchCard, so a tournament match reads the        */
-/*  same way here as it does on the Tournaments tab — an overlay isn't a    */
-/*  different kind of match, just a different thing you're configuring      */
-/*  for it.                                                                  */
+/*  The round is still shown here (useful within a tournament's own          */
+/*  section), but the tournament-name badge is dropped — once cards are      */
+/*  grouped under their tournament's own heading, repeating the name on      */
+/*  every card is just noise.                                               */
 /* ────────────────────────────────────────────────────────────────── */
 
-function OverlayCard({ match }: { match: FriendlyMatchSummary }) {
+function OverlayCard({ match, showTournamentBadge }: { match: FriendlyMatchSummary; showTournamentBadge: boolean }) {
   return (
     <div className="bg-black/50 border border-gold/20 hover:border-gold/40 transition-all duration-300 rounded-lg p-5 shadow-lg shadow-black/40">
       <div className="flex items-center gap-2 mb-3">
@@ -92,13 +97,17 @@ function OverlayCard({ match }: { match: FriendlyMatchSummary }) {
       </p>
 
       <div className="flex items-center gap-1.5 flex-wrap mb-4">
-        {match.tournamentName ? (
-          <StatusBadge tone="linked">
-            {match.tournamentName}
-            {match.round ? ` · ${match.round}` : ""}
-          </StatusBadge>
+        {showTournamentBadge ? (
+          match.tournamentName ? (
+            <StatusBadge tone="linked">
+              {match.tournamentName}
+              {match.round ? ` · ${match.round}` : ""}
+            </StatusBadge>
+          ) : (
+            <StatusBadge tone="none">Standalone{match.round ? ` · ${match.round}` : ""}</StatusBadge>
+          )
         ) : (
-          <StatusBadge tone="none">Standalone{match.round ? ` · ${match.round}` : ""}</StatusBadge>
+          match.round && <StatusBadge tone="neutral">{match.round}</StatusBadge>
         )}
       </div>
 
@@ -122,10 +131,12 @@ function MatchGroup({
   title,
   icon,
   matches,
+  showTournamentBadge = false,
 }: {
   title: string
   icon: React.ReactNode
   matches: FriendlyMatchSummary[]
+  showTournamentBadge?: boolean
 }) {
   if (matches.length === 0) return null
   return (
@@ -136,9 +147,62 @@ function MatchGroup({
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {matches.map((m) => (
-          <OverlayCard key={m.id} match={m} />
+          <OverlayCard key={m.id} match={m} showTournamentBadge={showTournamentBadge} />
         ))}
       </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  FILTER BAR — pill-style filter across "All", every tournament that     */
+/*  actually has at least one match with an overlay-eligible slot, and     */
+/*  "Standalone". Purely a display filter — doesn't refetch, just narrows   */
+/*  which of the already-loaded groups render below.                        */
+/* ────────────────────────────────────────────────────────────────── */
+
+type FilterValue = "all" | "standalone" | string // string = tournamentId
+
+function FilterBar({
+  value,
+  onChange,
+  tournamentOptions,
+  standaloneCount,
+}: {
+  value: FilterValue
+  onChange: (v: FilterValue) => void
+  tournamentOptions: { id: string; name: string; count: number }[]
+  standaloneCount: number
+}) {
+  const pillClass = (active: boolean) =>
+    `flex items-center gap-1.5 text-[11px] font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-full border whitespace-nowrap transition-colors ${
+      active
+        ? "bg-gold text-black border-gold"
+        : "border-gold/20 text-gray-400 hover:text-gold hover:border-gold/40"
+    }`
+
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto pb-1 px-1 -mx-1">
+      <span className="flex items-center gap-1 text-gray-600 shrink-0 mr-1">
+        <Filter className="h-3 w-3" />
+      </span>
+      <button onClick={() => onChange("all")} className={pillClass(value === "all")}>
+        All
+      </button>
+      {tournamentOptions.map((t) => (
+        <button key={t.id} onClick={() => onChange(t.id)} className={pillClass(value === t.id)}>
+          <Trophy className="h-3 w-3" />
+          {t.name}
+          <span className={value === t.id ? "text-black/60" : "text-gray-600"}>({t.count})</span>
+        </button>
+      ))}
+      {standaloneCount > 0 && (
+        <button onClick={() => onChange("standalone")} className={pillClass(value === "standalone")}>
+          <Swords className="h-3 w-3" />
+          Standalone
+          <span className={value === "standalone" ? "text-black/60" : "text-gray-600"}>({standaloneCount})</span>
+        </button>
+      )}
     </div>
   )
 }
@@ -148,25 +212,63 @@ function MatchGroup({
 /*                                                                           */
 /*  Every match in the org can have an overlay, tournament-linked or not —  */
 /*  unlike the Matches tab (standalone only) and the Tournaments tab         */
-/*  (tournament-linked only), this tab intentionally shows both, since       */
-/*  overlay setup is orthogonal to that split. To keep the two kinds from    */
-/*  blurring together in one flat grid, they're separated into their own    */
-/*  labeled sections instead — same visual language (tournament/standalone  */
-/*  badge) as MatchCard, just grouped rather than mixed.                    */
+/*  (tournament-linked only), this tab intentionally shows both. Matches     */
+/*  are grouped by their OWN tournament (one section per tournament, not     */
+/*  one lumped "Tournament Matches" bucket) so an org running several         */
+/*  events at once can actually tell them apart. A filter bar lets you       */
+/*  jump straight to one tournament, or Standalone, instead of scrolling.    */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
   const [matches, setMatches] = useState<FriendlyMatchSummary[]>([])
+  const [tournaments, setTournaments] = useState<TournamentSummary[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [filter, setFilter] = useState<FilterValue>("all")
 
   useEffect(() => {
-    getFriendlyMatchesForOrg(org.id)
-      .then(setMatches)
+    Promise.all([getFriendlyMatchesForOrg(org.id), getTournamentsForOrg(org.id)])
+      .then(([m, t]) => {
+        setMatches(m)
+        setTournaments(t)
+      })
       .finally(() => setLoaded(true))
   }, [org.id])
 
-  const tournamentMatches = useMemo(() => matches.filter((m) => m.tournamentName), [matches])
   const standaloneMatches = useMemo(() => matches.filter((m) => !m.tournamentId), [matches])
+
+  // Group tournament-linked matches by their actual tournamentId, in the
+  // same order as `tournaments` (so it lines up with how they're sorted
+  // on the Tournaments tab — most recently created first).
+  const matchesByTournament = useMemo(() => {
+    const grouped = new Map<string, FriendlyMatchSummary[]>()
+    matches.forEach((m) => {
+      if (!m.tournamentId) return
+      const list = grouped.get(m.tournamentId) ?? []
+      list.push(m)
+      grouped.set(m.tournamentId, list)
+    })
+    return grouped
+  }, [matches])
+
+  // Only tournaments that actually have at least one match get a pill —
+  // no point offering to filter to an empty section.
+  const tournamentOptions = useMemo(
+    () =>
+      tournaments
+        .map((t) => ({ id: t.id, name: t.name, count: matchesByTournament.get(t.id)?.length ?? 0 }))
+        .filter((t) => t.count > 0),
+    [tournaments, matchesByTournament]
+  )
+
+  // Reset back to "All" if the currently-selected tournament filter no
+  // longer has any matches (e.g. its last match was deleted elsewhere).
+  useEffect(() => {
+    if (filter === "all" || filter === "standalone") return
+    if (!matchesByTournament.has(filter)) setFilter("all")
+  }, [filter, matchesByTournament])
+
+  const hasAnyTournamentMatches = tournamentOptions.length > 0
+
   return (
     <div className="space-y-6">
       <Panel>
@@ -202,16 +304,52 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
           </Panel>
         ) : (
           <>
-            <MatchGroup
-              title="Tournament Matches"
-              icon={<Trophy className="h-3 w-3 text-gold/50" />}
-              matches={tournamentMatches}
-            />
-            <MatchGroup
-              title="Standalone Matches"
-              icon={<Swords className="h-3 w-3 text-gold/50" />}
-              matches={standaloneMatches}
-            />
+            {(hasAnyTournamentMatches || standaloneMatches.length > 0) && (
+              <FilterBar
+                value={filter}
+                onChange={setFilter}
+                tournamentOptions={tournamentOptions}
+                standaloneCount={standaloneMatches.length}
+              />
+            )}
+
+            {/* ALL — one section per tournament, then Standalone last */}
+            {filter === "all" && (
+              <>
+                {tournamentOptions.map((t) => (
+                  <MatchGroup
+                    key={t.id}
+                    title={t.name}
+                    icon={<Trophy className="h-3 w-3 text-gold/50" />}
+                    matches={matchesByTournament.get(t.id) ?? []}
+                  />
+                ))}
+                <MatchGroup
+                  title="Standalone Matches"
+                  icon={<Swords className="h-3 w-3 text-gold/50" />}
+                  matches={standaloneMatches}
+                />
+              </>
+            )}
+
+            {/* ONE TOURNAMENT selected — just that section, badge dropped
+                since the heading already says which tournament this is */}
+            {filter !== "all" && filter !== "standalone" && (
+              <MatchGroup
+                title={tournamentOptions.find((t) => t.id === filter)?.name ?? "Tournament"}
+                icon={<Trophy className="h-3 w-3 text-gold/50" />}
+                matches={matchesByTournament.get(filter) ?? []}
+              />
+            )}
+
+            {/* STANDALONE selected */}
+            {filter === "standalone" && (
+              <MatchGroup
+                title="Standalone Matches"
+                icon={<Swords className="h-3 w-3 text-gold/50" />}
+                matches={standaloneMatches}
+              />
+            )}
           </>
         )}
       </div>

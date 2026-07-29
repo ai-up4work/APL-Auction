@@ -221,6 +221,8 @@ export type TournamentEditData = {
   twitter: string;
   discord: string;
   orgId: string | null;
+  sourceType?: "board" | "auction";
+  sourceId?: string | null;
 };
 
 /**
@@ -233,13 +235,32 @@ export type TournamentEditData = {
  * form to someone who can't save it anyway.
  */
 export async function getTournamentForEdit(id: string): Promise<TournamentEditData | null> {
-  const { data, error } = await supabase
+  // Try to fetch with source fields first
+  let { data, error } = await supabase
     .from("tournaments")
     .select(
-      "id, name, format, status, category, description, start_date, image_url, logo_url, prize_pool, website, twitter, discord, org_id"
+      "id, name, format, status, category, description, start_date, image_url, logo_url, prize_pool, website, twitter, discord, org_id, source_type, source_id"
     )
     .eq("id", id)
     .single();
+
+  // If the query fails due to missing columns, retry without source fields
+  if (error && error.message?.includes("source_type")) {
+    const { data: retryData, error: retryError } = await supabase
+      .from("tournaments")
+      .select(
+        "id, name, format, status, category, description, start_date, image_url, logo_url, prize_pool, website, twitter, discord, org_id"
+      )
+      .eq("id", id)
+      .single();
+
+    if (retryError) {
+      console.error("getTournamentForEdit failed:", retryError?.message);
+      return null;
+    }
+    data = retryData as any;
+    error = retryError;
+  }
 
   if (error || !data) {
     console.error("getTournamentForEdit failed:", error?.message);
@@ -261,6 +282,8 @@ export async function getTournamentForEdit(id: string): Promise<TournamentEditDa
     twitter: data.twitter ?? "",
     discord: data.discord ?? "",
     orgId: data.org_id ?? null,
+    sourceType: (data as any).source_type ?? "board", // Default to board if not present
+    sourceId: (data as any).source_id ?? null,
   };
 }
 
@@ -411,7 +434,7 @@ async function getFixturesForTournament(tournamentId: string) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────��──────────────────────────────────────────────
 // BRACKET CHART DATA — Round[] / DoubleElimData for BracketPreviewPanel
 // ─────────────────────────────────────────────────────────────
 

@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Building2, Trophy, Lock, Shield, Tv } from "lucide-react"
+import { Building2, Trophy, Lock, Shield, Tv, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppHeader } from "@/components/app-header"
 import { OverviewTab } from "@/components/organization/OverviewTab"
 import { RostersSection } from "@/components/organization/RostersSection"
 import { EventsSection } from "@/components/organization/EventsSection"
 import { BroadcastSection } from "@/components/organization/Broadcastsection"
+import { SettingsTab } from "@/components/organization/SettingsTab"
 import { WorkflowProvider, useWorkflow, type WorkflowId } from "@/components/organization/Workflowcontext"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
@@ -23,13 +24,14 @@ import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 /*  the workflow picker.                                                 */
 /* ────────────────────────────────────────────────────────────────── */
 
-type Primary = "overview" | "rosters" | "events" | "broadcast"
+type Primary = "overview" | "rosters" | "events" | "broadcast" | "settings"
 
 const PRIMARY_TABS: { key: Primary; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "overview", label: "Overview", icon: Building2 },
   { key: "rosters", label: "Rosters", icon: Shield },
   { key: "events", label: "Events", icon: Trophy },
   { key: "broadcast", label: "Broadcast", icon: Tv },
+  { key: "settings", label: "Settings", icon: Settings },
 ]
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -103,6 +105,9 @@ function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: strin
       )}
       {tab === "broadcast" && (
         <BroadcastSection org={org} userId={userId} initialSub={broadcastSub} onNavigate={navigate} />
+      )}
+      {tab === "settings" && (
+        <SettingsTab org={org} />
       )}
     </>
   )
