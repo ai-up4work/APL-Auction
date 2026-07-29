@@ -91,7 +91,7 @@ export type FowEntry = [string, string, string]
 export interface MatchSquad {
   team: string
   captain: string
-  players: { name: string; role: string; xi: boolean }[]
+  players: { name: string; role: string; xi: boolean; img?: string }[]
 }
 
 export interface InningsComplete {
@@ -196,6 +196,7 @@ interface MatchSetupSquadPlayer {
   name: string
   role: string
   xi: boolean
+  img?: string
 }
 
 interface MatchSetupSquad {
@@ -425,21 +426,95 @@ function parseMatchSetup(raw: unknown): MatchSetup | null {
   return setup as MatchSetup
 }
 
-function buildSquads(setup: MatchSetup, teamAName: string, teamBName: string): MatchSquad[] {
+async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: string): Promise<MatchSquad[]> {
   if (!setup.squads || setup.squads.length === 0) return []
-  return setup.squads.map((s) => {
-    const tag = s.teamId?.toLowerCase?.() ?? ""
-    const isTeamA =
-      tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
-    const isTeamB =
-      tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
-    const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
-    return {
-      team: teamName,
-      captain: s.captain,
-      players: s.players?.map((p) => ({ name: p.name, role: p.role, xi: p.xi })) || [],   // handle the empty player set gracefully
-    }
+
+  // Collect all playerIds from all squads
+  const playerIds = new Set<string>()
+  setup.squads.forEach((s) => {
+    s.players?.forEach((p) => {
+      if (p.playerId) playerIds.add(p.playerId)
+    })
   })
+
+
+
+  // Fetch player data (including images) from the players table, with fallback to player_bank
+  const playerMap = new Map<string, { name: string; img?: string }>()
+  if (playerIds.size > 0) {
+    // First try players table
+    const { data: playerRows, error } = await supabase
+      .from("players")
+      .select("id, name, img")
+      .in("id", Array.from(playerIds))
+
+    playerRows?.forEach((p) => {
+      playerMap.set(p.id, { name: p.name, img: p.img || undefined })
+    })
+
+    // For players without images, try to get from player_bank by name
+    const missingPlayers = Array.from(playerIds).filter((id) => {
+      const mapped = playerMap.get(id)
+      return !mapped?.img
+    })
+
+    if (missingPlayers.length > 0) {
+      
+      // Get player names first
+      const playerNames: { [key: string]: string } = {}
+      playerRows?.forEach((p) => {
+        playerNames[p.id] = p.name
+      })
+
+      // Query player_bank by names
+      const namesToSearch = Object.values(playerNames)
+      if (namesToSearch.length > 0) {
+        const { data: bankPlayers } = await supabase
+          .from("player_bank")
+          .select("name, img")
+          .in("name", namesToSearch)
+          .limit(100)
+
+        const bankByName = new Map(bankPlayers?.map((p: any) => [p.name, p.img]))
+
+        // Update player map with images from player_bank
+        missingPlayers.forEach((id) => {
+          const playerData = playerMap.get(id)
+          if (playerData) {
+            const bankImg = bankByName.get(playerData.name)
+            if (bankImg) {
+              playerData.img = bankImg
+            }
+          }
+        })
+      }
+    }
+  }
+
+
+
+  // Build squads with enriched player data
+    return setup.squads.map((s) => {
+      const tag = s.teamId?.toLowerCase?.() ?? ""
+      const isTeamA =
+        tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
+      const isTeamB =
+        tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
+      const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
+      return {
+        team: teamName,
+        captain: s.captain,
+        players: s.players?.map((p) => {
+          const playerData = p.playerId ? playerMap.get(p.playerId) : null
+          return {
+            name: playerData?.name || p.name,
+            role: p.role,
+            xi: p.xi,
+            img: playerData?.img || p.img || undefined,
+          }
+        }) || [],
+      }
+    })
 }
 
 /**
@@ -560,6 +635,7 @@ export async function getMatchDetailById(
       message: "The database rejected the lookup for this match's ball-by-ball data.",
       detail: ballErr.message,
     }
+
   }
 
   const allBalls = ballRows ?? []
@@ -631,6 +707,8 @@ export async function getMatchDetailById(
     fow: innings2Agg.fow,
   }
 
+  const squads = await buildSquads(setup, teamA.name, teamB.name)
+
   const match: MatchDetail = {
     id: matchRow.id,
     tournamentSlug: resolvedTournamentSlug,
@@ -655,7 +733,7 @@ export async function getMatchDetailById(
     innings1,
     innings2Final: innings2Agg,
     innings2Partial,
-    squads: buildSquads(setup, teamA.name, teamB.name),
+    squads,
     matchStatus,
     isLive,
     hasBallData,
