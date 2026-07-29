@@ -674,7 +674,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
               >
                 {logo ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logo} alt="" className="h-full w-full object-cover" />
+                  <Image src={logo} alt="" className="h-full w-full object-cover" width={48} height={48} />
                 ) : (
                   <Shield className="h-4 w-4 text-white/60" />
                 )}
@@ -743,7 +743,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
                   >
                     {t.logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.logo} alt="" className="h-full w-full object-cover" />
+                      <Image src={t.logo} alt="" className="h-full w-full object-cover" width={48} height={48} />
                     ) : (
                       <Shield className="h-5 w-5 text-white/70" />
                     )}
@@ -934,7 +934,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
               <div className="h-10 w-10 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
                 {img ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={img} alt="" className="h-full w-full object-cover" />
+                  <Image src={img} alt="" className="h-full w-full object-cover" width={48} height={48} />
                 ) : (
                   <UserPlus className="h-4 w-4 text-white/40" />
                 )}
@@ -997,7 +997,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
                   <div className="relative h-12 w-12 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
                     {p.img ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.img} alt="" className="h-full w-full object-cover" />
+                      <Image src={p.img} alt="" className="h-full w-full object-cover" width={48} height={48} />
                     ) : (
                       <UserPlus className="h-5 w-5 text-white/40" />
                     )}

@@ -10,6 +10,7 @@ import {
   type FriendlyMatchSummary,
   type TournamentSummary,
 } from "@/lib/organization/organization"
+import Image from "next/image"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -68,7 +69,7 @@ function OverlayCard({ match, showTournamentBadge }: { match: FriendlyMatchSumma
         <div className="h-7 w-7 rounded-full overflow-hidden border border-white/10 bg-black/60 shrink-0 flex items-center justify-center">
           {match.team1Logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={match.team1Logo} alt="" className="h-full w-full object-cover" />
+            <Image src={match.team1Logo} alt="" className="h-full w-full object-cover" width={28} height={28} />
           ) : (
             <Swords className="h-3 w-3 text-gray-500" />
           )}
@@ -76,7 +77,7 @@ function OverlayCard({ match, showTournamentBadge }: { match: FriendlyMatchSumma
         <div className="h-7 w-7 rounded-full overflow-hidden border border-white/10 bg-black/60 shrink-0 flex items-center justify-center -ml-2">
           {match.team2Logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={match.team2Logo} alt="" className="h-full w-full object-cover" />
+            <Image src={match.team2Logo} alt="" className="h-full w-full object-cover" width={28} height={28} />
           ) : (
             <Swords className="h-3 w-3 text-gray-500" />
           )}

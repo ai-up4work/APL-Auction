@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Loader2, Trophy, Brackets, ArrowRight } from "lucide-react"
 import { Panel, StatusBadge } from "@/components/organization/shared"
 import { getTournamentsForOrg, type OrgSummary, type TournamentSummary } from "@/lib/organization/organization"
+import Image from "next/image"
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  BRACKET CARD — one tournament, its format/status, and a link         */
@@ -27,7 +28,7 @@ function BracketCard({ tournament }: { tournament: TournamentSummary }) {
         <div className="h-11 w-11 rounded-md overflow-hidden border border-gold/20 bg-black/60 flex items-center justify-center shrink-0">
           {thumb ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumb} alt="" className="h-full w-full object-cover" />
+            <Image src={thumb} alt="" className="h-full w-full object-cover" width={44} height={44} />
           ) : (
             <Trophy className="h-4 w-4 text-gold/30" />
           )}

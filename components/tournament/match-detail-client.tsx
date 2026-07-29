@@ -1040,14 +1040,18 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
               } ${isEven ? "md:border-r border-gold/10" : ""}`}
             >
               <div className="relative h-12 w-12 rounded-full overflow-hidden bg-black/60 border border-gold/20 flex items-center justify-center shrink-0 shadow-[inner_0_2px_4px_rgba(0,0,0,0.6)]">
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-center p-0.5 leading-none z-0">
-                  <span className="text-[5.5px] font-sans font-semibold text-gray-500 tracking-tighter uppercase">
-                    Image not available
-                  </span>
-                </div>
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-white/15 via-transparent to-transparent text-xs font-bold text-gold font-cinzel z-10">
-                  {initials(p.name)}
-                </div>
+                {p.img ? (
+                  <img
+                    src={p.img}
+                    alt={p.name}
+                    className="w-full h-full object-cover"
+                    crossOrigin="anonymous"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-white/15 via-transparent to-transparent text-xs font-bold text-gold font-cinzel">
+                    {initials(p.name)}
+                  </div>
+                )}
               </div>
               <div className="min-w-0">
                 <h4 className="text-sm font-bold text-white tracking-wide truncate">{p.name}</h4>

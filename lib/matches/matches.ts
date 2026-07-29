@@ -466,8 +466,8 @@ export async function createMatchForFixture(
   const tA = teamRows.find((t) => t.id === fixture.teamAId)!
   const tB = teamRows.find((t) => t.id === fixture.teamBId)!
 
-  const team1 = { name: tA.name, short: tA.code, logo: tA.logo || "", color: tA.color || "#c9971f" }
-  const team2 = { name: tB.name, short: tB.code, logo: tB.logo || "", color: tB.color || "#c9971f" }
+  const team1 = { name: tA.name, short: tA.code, logo: tA.logo || "", color: tA.color || "#c9971f", id: tA.id }
+  const team2 = { name: tB.name, short: tB.code, logo: tB.logo || "", color: tB.color || "#c9971f", id: tB.id }
 
   const { data: playerRows, error: playersErr } = await supabase
     .from("players")
@@ -478,13 +478,41 @@ export async function createMatchForFixture(
     console.error("createMatchForFixture(players) failed:", playersErr.message)
   }
 
-  const squads = (playerRows ?? []).map((p) => ({
-    name: p.name,
-    role: p.role,
-    team: p.sold_to_team_id === fixture.teamAId ? team1.short : team2.short,
-    captain: !!p.owner_team_code,
-    imageUrl: p.img || undefined,
-  }))
+  // Group players by team with playerId references - images will be fetched dynamically
+  const team1Players = (playerRows ?? [])
+    .filter((p: any) => p.sold_to_team_id === fixture.teamAId)
+    .map((p: any) => ({
+      name: p.name,
+      role: p.role,
+      xi: true,
+      playerId: p.id,
+    }))
+  
+  const team2Players = (playerRows ?? [])
+    .filter((p: any) => p.sold_to_team_id === fixture.teamBId)
+    .map((p: any) => ({
+      name: p.name,
+      role: p.role,
+      xi: true,
+      playerId: p.id,
+    }))
+
+  // Find captains: first player with owner_team_code, or first player if none found
+  const team1Captain = (playerRows ?? []).find((p: any) => p.sold_to_team_id === fixture.teamAId && p.owner_team_code)?.name || team1Players[0]?.name || ""
+  const team2Captain = (playerRows ?? []).find((p: any) => p.sold_to_team_id === fixture.teamBId && p.owner_team_code)?.name || team2Players[0]?.name || ""
+
+  const squads = [
+    {
+      teamId: fixture.teamAId,
+      captain: team1Captain,
+      players: team1Players,
+    },
+    {
+      teamId: fixture.teamBId,
+      captain: team2Captain,
+      players: team2Players,
+    },
+  ].filter((s) => s.players.length > 0)
 
   const newId = crypto.randomUUID()
   const matchSetup = {

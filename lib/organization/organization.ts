@@ -584,13 +584,47 @@ export async function createFriendlyMatch(
       console.error("createFriendlyMatch(auction players) failed:", playersErr.message);
     }
 
-    squads = (playerRows ?? []).map((p) => ({
+    // Group players by team with playerId references - images will be fetched dynamically
+    const team1Players = (playerRows ?? [])
+      .filter((p: any) => p.sold_to_team_id === input.team1Id)
+      .map((p: any) => ({
+        name: p.name,
+        role: p.role,
+        xi: true,
+        playerId: p.id,
+      }))
+    
+    const team2Players = (playerRows ?? [])
+      .filter((p: any) => p.sold_to_team_id === input.team2Id)
+      .map((p: any) => ({
+        name: p.name,
+        role: p.role,
+        xi: true,
+        playerId: p.id,
+      }))
+
+    // Find captains: first player with owner_team_code, or first player if none found
+    const team1Captain = (playerRows ?? []).find((p: any) => p.sold_to_team_id === input.team1Id && p.owner_team_code)?.name || team1Players[0]?.name || ""
+    const team2Captain = (playerRows ?? []).find((p: any) => p.sold_to_team_id === input.team2Id && p.owner_team_code)?.name || team2Players[0]?.name || ""
+
+    // Flatten players into the squads array with team reference
+    const team1Squads = team1Players.map((p) => ({
       name: p.name,
       role: p.role,
-      team: p.sold_to_team_id === input.team1Id ? team1.short : team2.short,
-      captain: !!p.owner_team_code,
-      imageUrl: p.img || undefined,
-    }));
+      team: input.team1Id,
+      captain: p.name === team1Captain || undefined,
+      imageUrl: undefined,
+    }))
+
+    const team2Squads = team2Players.map((p) => ({
+      name: p.name,
+      role: p.role,
+      team: input.team2Id,
+      captain: p.name === team2Captain || undefined,
+      imageUrl: undefined,
+    }))
+
+    squads = [...team1Squads, ...team2Squads];
 
     // Was this pulled from a real bidding auction, or a Squad Board
     // (which is just a synthetic auction row reusing the same tables)?

@@ -40,6 +40,7 @@ import {
 import { unsubscribe, type OrgSummary } from "@/lib/organization/organization"
 import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
 import { Panel, FieldLabel, StatusBadge, StyledSelect, CollapsibleCreatePanel } from "@/components/organization/shared"
+import Image from "next/image"
 
 type StatusFilter = "pending" | "approved" | "rejected" | "all"
 type TypeFilter = "all" | "team" | "player"
@@ -101,8 +102,7 @@ function RegistrationCard({
             style={isTeam ? { backgroundColor: payload.color || "#e45d35" } : undefined}
           >
             {image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={image} alt="" className="h-full w-full object-cover" />
+              <Image src={image} alt="" className="h-full w-full object-cover" width={44} height={44} />
             ) : isTeam ? (
               <Shield className="h-4 w-4 text-white/70" />
             ) : (
@@ -473,7 +473,7 @@ function FormEditorCard({
         <div className="h-28 rounded-md overflow-hidden border border-gold/20 bg-black/60 mb-2 flex items-center justify-center">
           {bannerUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={bannerUrl} alt="" className="h-full w-full object-cover" />
+            <Image src={bannerUrl} alt="" className="h-full w-full object-cover" width={1200} height={300} />
           ) : (
             <p className="text-gray-600 text-xs italic">No banner set — a plain header is used instead</p>
           )}
