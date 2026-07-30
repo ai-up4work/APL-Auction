@@ -53,6 +53,7 @@ export default function SquadBoardResultsPage() {
   const squadBoardId = params?.squadBoardId as string;
   const playerListRef = useRef<HTMLDivElement>(null);
   const teamListRef = useRef<HTMLDivElement>(null);
+  const teamListInnerRef = useRef<HTMLDivElement>(null);
 
   const [squadBoard, setSquadBoard] = useState<SquadBoardData | null>(null);
   const [teams, setTeams] = useState<Record<string, TeamData>>({});
@@ -60,6 +61,21 @@ export default function SquadBoardResultsPage() {
   const [loading, setLoading] = useState(true);
   const [activePlayer, setActivePlayer] = useState<string | null>(null);
   const [activeTeam, setActiveTeam] = useState<string | null>(null);
+
+  const [teamsOverflow, setTeamsOverflow] = useState(false);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      if (!teamListRef.current || !teamListInnerRef.current) return;
+      const containerHeight = teamListRef.current.clientHeight;
+      const contentHeight = teamListInnerRef.current.scrollHeight;
+      setTeamsOverflow(contentHeight > containerHeight);
+    };
+
+    checkOverflow();
+    window.addEventListener("resize", checkOverflow);
+    return () => window.removeEventListener("resize", checkOverflow);
+  });
 
   useEffect(() => {
     async function loadData() {
@@ -206,8 +222,10 @@ export default function SquadBoardResultsPage() {
             ) : (
               <div className="flex flex-col space-y-3 pb-20">
                 {flowPlayers.map((p) => {
-                  const isHighlighted = activePlayer === String(p.id);
-                  const isDimmed = activePlayer !== null && !isHighlighted;
+                  const isHighlighted = activePlayer
+                    ? activePlayer === String(p.id)
+                    : activeTeam !== null && activeTeam === p.teamShortCode;
+                  const isDimmed = (activePlayer !== null || activeTeam !== null) && !isHighlighted;
 
                   return (
                     <div
@@ -244,9 +262,12 @@ export default function SquadBoardResultsPage() {
           {/* Teams list */}
           <aside
             ref={teamListRef}
-            className="col-span-3 h-full flex flex-col justify-center overflow-hidden px-6 py-6 z-10 border-l border-white/5"
+            className={[
+              "col-span-3 h-full flex flex-col px-6 py-6 z-10 border-l border-white/5",
+              teamsOverflow ? "overflow-y-auto no-scrollbar justify-start" : "overflow-hidden justify-center",
+            ].join(" ")}
           >
-            <div className="flex items-center justify-between mb-4 absolute top-[72px] right-6">
+            <div className={teamsOverflow ? "mb-4 pt-2 flex items-center justify-between" : "flex items-center justify-between mb-4 absolute top-[72px] right-6"}>
               <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
                 Teams
               </h3>
@@ -260,9 +281,12 @@ export default function SquadBoardResultsPage() {
                 No teams assigned to this board yet.
               </p>
             ) : (
-              <div className="flex flex-col space-y-3">
+              <div
+                ref={teamListInnerRef}
+                className={["flex flex-col space-y-3", teamsOverflow ? "pb-20" : ""].join(" ")}
+              >
                 {flowTeams.map((t) => {
-                  const isHighlighted = activeTeam === t.id;
+                  const isHighlighted = activeTeam === t.shortCode;
                   const isDimmed = activeTeam !== null && !isHighlighted;
                   const memberCount = flowPlayers.filter((p) => p.teamShortCode === t.shortCode).length;
 
@@ -270,7 +294,7 @@ export default function SquadBoardResultsPage() {
                     <div
                       key={t.id}
                       id={`team-${t.shortCode}`}
-                      onClick={() => setActiveTeam((prev) => (prev === t.id ? null : t.id))}
+                      onClick={() => setActiveTeam((prev) => (prev === t.shortCode ? null : t.shortCode))}
                       className={[
                         "glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300",
                         isHighlighted
