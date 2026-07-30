@@ -10,11 +10,25 @@ import SessionTab  from "@/components/Admin/SessionTab";
 import LaunchTab   from "@/components/Admin/LaunchTab";
 import TournamentPromptModal from "@/components/Admin/TournamentPromptModal";
 import { useAuction } from "@/context/AuctionContext";
+import { RoleGate } from "@/components/RoleGate";
+import { getOrgIdForAuction } from "@/lib/organization/invites";
 
 const CONFIG_STEPS = ["teams", "players", "rules", "session"] as const;
 
 export default function AdminAuctionPage() {
   const { auctionId: routeAuctionId } = useParams<{ auctionId: string }>();
+
+  return (
+    <RoleGate
+      resolveOrgId={() => getOrgIdForAuction(routeAuctionId)}
+      allowedRoles={["auctioneer"]}
+    >
+      <AdminAuctionPageContent routeAuctionId={routeAuctionId} />
+    </RoleGate>
+  );
+}
+
+function AdminAuctionPageContent({ routeAuctionId }: { routeAuctionId: string }) {
   const router = useRouter();
   const [activeStep, setActiveStep] = useState("teams");
 
@@ -32,7 +46,7 @@ export default function AdminAuctionPage() {
     linkTournament,
     createAndLinkTournament,
     skipTournamentLink,
-    switchAuction, // <-- assumed to exist on the context; adjust name if different
+    switchAuction,
     addTeam,
     editTeam,
     deleteTeam,
@@ -49,9 +63,6 @@ export default function AdminAuctionPage() {
     handleShuffle,
   } = useAuction();
 
-  // Load the auction named by the URL into context as soon as we're
-  // hydrated. If it's already the active one, switchAuction can just
-  // no-op — that's up to the context implementation.
   useEffect(() => {
     if (isHydrated && routeAuctionId) {
       switchAuction(routeAuctionId);
@@ -80,7 +91,6 @@ export default function AdminAuctionPage() {
     setActiveStep("teams");
   }
 
-  // Waiting on rehydration, or on context catching up to the id in the URL.
   if (!isHydrated || auctionId !== routeAuctionId) {
     return (
       <div
@@ -165,41 +175,13 @@ export default function AdminAuctionPage() {
         style={{ position: "relative", zIndex: 1 }}
       >
         {activeStep === "teams" && (
-          <TeamsTab
-            locked={auctionLocked}
-            teams={teams}
-            auctionId={auctionId!}
-            onAddTeam={addTeam}
-            onEditTeam={editTeam}
-            onDeleteTeam={deleteTeam}
-          />
+          <TeamsTab locked={auctionLocked} teams={teams} auctionId={auctionId!} onAddTeam={addTeam} onEditTeam={editTeam} onDeleteTeam={deleteTeam} />
         )}
         {activeStep === "players" && (
-          <PlayersTab
-            locked={auctionLocked}
-            players={players}
-            teams={teams}
-            auctionId={auctionId!}
-            onAddPlayer={addPlayer}
-            onEditPlayer={editPlayer}
-            onDeletePlayer={deletePlayer}
-          />
+          <PlayersTab locked={auctionLocked} players={players} teams={teams} auctionId={auctionId!} onAddPlayer={addPlayer} onEditPlayer={editPlayer} onDeletePlayer={deletePlayer} />
         )}
-        {activeStep === "rules" && (
-          <RulesTab
-            locked={auctionLocked}
-            rules={rules}
-            onRulesChange={updateRules}
-          />
-        )}
-        {activeStep === "session" && (
-          <SessionTab
-            locked={auctionLocked}
-            session={session}
-            onSessionChange={updateSession}
-            auctionId={auctionId!}
-          />
-        )}
+        {activeStep === "rules" && <RulesTab locked={auctionLocked} rules={rules} onRulesChange={updateRules} />}
+        {activeStep === "session" && <SessionTab locked={auctionLocked} session={session} onSessionChange={updateSession} auctionId={auctionId!} />}
         {activeStep === "launch" && (
           <LaunchTab
             auctionStatus={auctionStatus}

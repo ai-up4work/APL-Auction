@@ -1,3 +1,4 @@
+// app/(protected)/auction/admin/page.tsx
 "use client";
 
 import { useRouter } from "next/navigation";

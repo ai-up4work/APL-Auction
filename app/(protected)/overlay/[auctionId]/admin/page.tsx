@@ -25,6 +25,8 @@ import {
 
 import WeatherPanel, { type WeatherPanelHandle } from "@/components/overlays/admin/WeatherPanel";
 import { GeocodeMatch } from "@/lib/fetchVenueWeather";
+import { RoleGate } from "@/components/RoleGate";
+import { getOrgIdForMatch } from "@/lib/organization/invites";
 
 
 // ── Match Setup (SESSION) ──────────────────────────────────────────────
@@ -232,10 +234,25 @@ function BatterPickerButton({
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGE — auth gate wraps the real content component below
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function OverlayAdminPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
 
+  return (
+    <RoleGate resolveOrgId={() => getOrgIdForMatch(auctionId)} allowedRoles={["scorer"]}>
+      <OverlayAdminPageContent auctionId={auctionId} />
+    </RoleGate>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTENT — everything that used to be the page body lives here, unchanged
+// ─────────────────────────────────────────────────────────────────────────────
+
+function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const matchIdRef = useRef<string | null>(null);
 

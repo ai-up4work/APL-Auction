@@ -7,6 +7,8 @@ import { ShotClockProvider, useShotClock } from "@/context/ShotClockContext";
 import { AuctionStamp } from "@/components/AuctionStamp";
 import { AuctionStatusGate } from "@/components/AuctionStatusGate";
 import DesktopOnlyWrapper from "@/components/DesktopOnlyWrapper";
+import { RoleGate } from "@/components/RoleGate";
+import { getOrgIdForAuction } from "@/lib/organization/invites";
 import {
   loadLiveState,
   closeLotSold,
@@ -1626,9 +1628,11 @@ export default function LiveAuctioneerPage({
 }) {
   const { auctionId } = use(params);
   return (
-    <AuctionProvider>
-      <AuctionNameAwareWrapper auctionId={auctionId} />
-    </AuctionProvider>
+    <RoleGate resolveOrgId={() => getOrgIdForAuction(auctionId)} allowedRoles={["auctioneer"]}>
+      <AuctionProvider>
+        <AuctionNameAwareWrapper auctionId={auctionId} />
+      </AuctionProvider>
+    </RoleGate>
   );
 }
 
