@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Trophy, Landmark, Swords } from "lucide-react"
 import { TournamentsTab } from "@/components/organization/TournamentsPoolsTab"
 import { AuctionsTab } from "@/components/organization/AuctionsTab"
@@ -28,6 +28,24 @@ export function EventsSection({
   onNavigate: (primary: "rosters" | "events" | "broadcast", sub: string) => void
 }) {
   const [sub, setSub] = useState<EventsSub>(initialSub)
+
+  // useState(initialSub) only seeds on first mount — if the parent later
+  // changes initialSub (e.g. the URL's ?sub= changed via back/forward, or
+  // WorkflowBreadcrumb/Overview navigated here with a different sub), this
+  // component would otherwise keep showing its stale first-mount value.
+  // Sync down whenever the prop actually changes.
+  useEffect(() => {
+    setSub(initialSub)
+  }, [initialSub])
+
+  // Local tab clicks must also propagate up, so the parent's eventsSub
+  // (and therefore the URL) stays in lockstep with what's actually shown
+  // here — otherwise clicking a sub-tab locally silently desyncs the URL.
+  const selectSub = (key: EventsSub) => {
+    setSub(key)
+    onNavigate("events", key)
+  }
+
   const active = SUBS.find((s) => s.key === sub)!
 
   return (
@@ -38,7 +56,7 @@ export function EventsSection({
         {SUBS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => setSub(key)}
+            onClick={() => selectSub(key)}
             className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-3.5 py-1.5 rounded-md transition-all ${
               sub === key ? "bg-gold/90 text-gold" : "text-gray-400 hover:text-gold"
             }`}

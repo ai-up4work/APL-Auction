@@ -1,7 +1,7 @@
 // app/components/organization/Rosterssection.tsx
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Shield, Users, Link2, UserPlus } from "lucide-react"
 import { TeamPoolTab, PlayerBankTab } from "@/components/organization/TournamentsPoolsTab"
 import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
@@ -35,6 +35,16 @@ export function RostersSection({
   onNavigate: (primary: "rosters" | "events" | "broadcast", sub: string) => void
 }) {
   const [sub, setSub] = useState<RosterSub>(initialSub)
+
+  useEffect(() => {
+    setSub(initialSub)
+  }, [initialSub])
+
+  const selectSub = (key: RosterSub) => {
+    setSub(key)
+    onNavigate("rosters", key)
+  }
+
   const active = SUBS.find((s) => s.key === sub)!
 
   return (
@@ -45,7 +55,7 @@ export function RostersSection({
         {SUBS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => setSub(key)}
+            onClick={() => selectSub(key)}
             className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-3.5 py-1.5 rounded-md transition-all ${
               sub === key ? "bg-gold/90 text-gold" : "text-gray-400 hover:text-gold"
             }`}

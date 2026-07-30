@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Tv, Brackets } from "lucide-react"
 import { OverlaysTab } from "@/components/organization/Overlaystab"
 import { BracketsTab } from "@/components/organization/Bracketstab"
@@ -26,6 +26,21 @@ export function BroadcastSection({
   onNavigate: (primary: "rosters" | "events" | "broadcast", sub: string) => void
 }) {
   const [sub, setSub] = useState<BroadcastSub>(initialSub)
+
+  // useState(initialSub) only seeds on first mount — sync down whenever
+  // the parent's initialSub prop actually changes (URL back/forward,
+  // breadcrumb/Overview navigation into a different sub).
+  useEffect(() => {
+    setSub(initialSub)
+  }, [initialSub])
+
+  // Propagate local tab clicks back up so the parent's broadcastSub (and
+  // therefore the URL) stays in sync with what's actually shown here.
+  const selectSub = (key: BroadcastSub) => {
+    setSub(key)
+    onNavigate("broadcast", key)
+  }
+
   const active = SUBS.find((s) => s.key === sub)!
 
   return (
@@ -36,7 +51,7 @@ export function BroadcastSection({
         {SUBS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => setSub(key)}
+            onClick={() => selectSub(key)}
             className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-3.5 py-1.5 rounded-md transition-all ${
               sub === key ? "bg-gold/90 text-gold" : "text-gray-400 hover:text-gold"
             }`}

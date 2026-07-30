@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Building2, Trophy, Lock, Shield, Tv, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,13 +17,6 @@ import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
 import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 
-/* ────────────────────────────────────────────────────────────────── */
-/*  4 primary tabs instead of 9 — Rosters / Events / Broadcast mirror   */
-/*  the real dependency chain: you can't make a match without a roster, */
-/*  can't make an overlay without a match. Overview stays separate as    */
-/*  the workflow picker.                                                 */
-/* ────────────────────────────────────────────────────────────────── */
-
 type Primary = "overview" | "rosters" | "events" | "broadcast" | "settings"
 
 const PRIMARY_TABS: { key: Primary; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -33,6 +26,20 @@ const PRIMARY_TABS: { key: Primary; label: string; icon: React.ComponentType<{ c
   { key: "broadcast", label: "Broadcast", icon: Tv },
   { key: "settings", label: "Settings", icon: Settings },
 ]
+const PRIMARY_KEYS = PRIMARY_TABS.map((t) => t.key)
+
+const ROSTER_SUBS = ["teamPool", "playerBank", "squadBoard", "registrations"] as const
+type RosterSub = (typeof ROSTER_SUBS)[number]
+
+const EVENTS_SUBS = ["tournaments", "auctions", "matches"] as const
+type EventsSub = (typeof EVENTS_SUBS)[number]
+
+const BROADCAST_SUBS = ["overlays", "brackets"] as const
+type BroadcastSub = (typeof BROADCAST_SUBS)[number]
+
+function isValid<T extends readonly string[]>(list: T, val: string | null): val is T[number] {
+  return !!val && (list as readonly string[]).includes(val)
+}
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -47,21 +54,50 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 type GateState = "checking" | "denied" | "allowed"
 
 function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: string }) {
-  const [tab, setTab] = useState<Primary>("overview")
-  const [rosterSub, setRosterSub] = useState<"teamPool" | "playerBank" | "squadBoard" | "registrations">("teamPool")
-  const [eventsSub, setEventsSub] = useState<"tournaments" | "auctions" | "matches">("tournaments")
-  const [broadcastSub, setBroadcastSub] = useState<"overlays" | "brackets">("overlays")
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Hydrate initial tab/sub from the URL once, falling back to sane
+  // defaults for anything missing or invalid.
+  const [tab, setTab] = useState<Primary>(() => {
+    const t = searchParams.get("tab")
+    return isValid(PRIMARY_KEYS as any, t) ? (t as Primary) : "overview"
+  })
+  const [rosterSub, setRosterSub] = useState<RosterSub>(() => {
+    const s = searchParams.get("sub")
+    return isValid(ROSTER_SUBS, s) ? (s as RosterSub) : "teamPool"
+  })
+  const [eventsSub, setEventsSub] = useState<EventsSub>(() => {
+    const s = searchParams.get("sub")
+    return isValid(EVENTS_SUBS, s) ? (s as EventsSub) : "tournaments"
+  })
+  const [broadcastSub, setBroadcastSub] = useState<BroadcastSub>(() => {
+    const s = searchParams.get("sub")
+    return isValid(BROADCAST_SUBS, s) ? (s as BroadcastSub) : "overlays"
+  })
 
   const { setWorkflow } = useWorkflow()
+
+  // Keep ?tab=&sub= in sync with whichever tab/sub is active, so leaving
+  // the page and coming back (including browser Back) restores the same view.
+  useEffect(() => {
+    const sub = tab === "rosters" ? rosterSub : tab === "events" ? eventsSub : tab === "broadcast" ? broadcastSub : undefined
+    const params = new URLSearchParams()
+    params.set("tab", tab)
+    if (sub) params.set("sub", sub)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, rosterSub, eventsSub, broadcastSub])
 
   // Central place any sub-navigation (breadcrumb clicks, Overview's
   // workflow cards) routes through, so "jump to step 2" always lands on
   // the right primary tab AND the right sub-tab in one call.
   const navigate = (primary: "rosters" | "events" | "broadcast", sub: string) => {
     setTab(primary)
-    if (primary === "rosters") setRosterSub(sub as any)
-    if (primary === "events") setEventsSub(sub as any)
-    if (primary === "broadcast") setBroadcastSub(sub as any)
+    if (primary === "rosters") setRosterSub(sub as RosterSub)
+    if (primary === "events") setEventsSub(sub as EventsSub)
+    if (primary === "broadcast") setBroadcastSub(sub as BroadcastSub)
   }
 
   const handleSelectPath = (path: WorkflowId) => {
@@ -94,9 +130,7 @@ function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: strin
         ))}
       </nav>
 
-      {tab === "overview" && (
-        <OverviewTab org={org} onSelectPath={handleSelectPath} />
-      )}
+      {tab === "overview" && <OverviewTab org={org} onSelectPath={handleSelectPath} />}
       {tab === "rosters" && (
         <RostersSection org={org} userId={userId} initialSub={rosterSub} onNavigate={navigate} />
       )}
@@ -106,9 +140,7 @@ function OrganizationDashboard({ org, userId }: { org: OrgSummary; userId: strin
       {tab === "broadcast" && (
         <BroadcastSection org={org} userId={userId} initialSub={broadcastSub} onNavigate={navigate} />
       )}
-      {tab === "settings" && (
-        <SettingsTab org={org} />
-      )}
+      {tab === "settings" && <SettingsTab org={org} />}
     </>
   )
 }
