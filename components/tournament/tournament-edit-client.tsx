@@ -550,7 +550,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           </div>
 
                           <div>
-                            <label className="text-gray-400 text-sm block mb-1">Tournament logo URL</label>
+                            <label className="text-gray-400 text-sm block mb-1">Tournament Banner</label>
                             <div className="flex gap-3 items-start">
                               <Input
                                 value={logoUrl}

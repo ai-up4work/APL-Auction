@@ -170,6 +170,7 @@ export interface MatchDetail {
   currentInnings: 1 | 2
   /** From match_state.live_state, when the engine populates it. */
   winProb?: { a: number; b: number }
+  tournamentLogoUrl?: string
 }
 
 /**
@@ -709,6 +710,8 @@ export async function getMatchDetailById(
 
   const squads = await buildSquads(setup, teamA.name, teamB.name)
 
+  const tournamentLogoUrl = matchRow.match_setup?.tournamentLogoUrl || bracketRow?.tournament_id
+
   const match: MatchDetail = {
     id: matchRow.id,
     tournamentSlug: resolvedTournamentSlug,
@@ -739,6 +742,7 @@ export async function getMatchDetailById(
     hasBallData,
     currentInnings,
     winProb,
+    tournamentLogoUrl
   }
   // console.log("getMatchDetailById: returning match detail for matchId", matchId, ":", match.squads[0].players)
   return { ok: true, match }
