@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { SiteHeader } from "@/components/landing/site-header"
+// import { SiteHeader } from "@/components/landing/site-header"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
 import { useAuth } from "@/context/AuthContext"
@@ -41,6 +41,7 @@ import {
 } from "@/lib/tournament/generateBracket"
 import TeamsManager from "@/components/tournament/TeamsManager"
 import MatchesManager from "@/components/tournament/MatchesManager"
+import { AppHeader } from "@/components/app-header"
 
 interface TournamentEditClientProps {
   tournament: TournamentEditData
@@ -351,13 +352,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
 
-      <SiteHeader
-        activeSection="tournament"
-        isNavOpen={isNavOpen}
-        setIsNavOpen={setIsNavOpen}
-        scrollToSection={scrollToSection}
-        handleNavigation={handleNavigation}
-      />
+      <AppHeader title="Tournament Editor" />
 
       <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
