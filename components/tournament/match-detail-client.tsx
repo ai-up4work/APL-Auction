@@ -194,6 +194,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
     setIsNavOpen(false)
   }
 
+  console.log("MatchDetailClient: initial match detail for matchId", initialMatch.id, ":", initialMatch.squads[0].players)
+
   // ── live state ──
   // Replaces the old 8s setInterval poll of /api/match/[id]/live. This
   // hook does an initial fetch + aggregation, then subscribes to
@@ -1045,13 +1047,19 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
                     src={p.img}
                     alt={p.name}
                     className="w-full h-full object-cover"
-                    crossOrigin="anonymous"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none"
+                      e.currentTarget.nextElementSibling?.classList.remove("hidden")
+                    }}
                   />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-white/15 via-transparent to-transparent text-xs font-bold text-gold font-cinzel">
-                    {initials(p.name)}
-                  </div>
-                )}
+                ) : null}
+                <div
+                  className={`w-full h-full flex items-center justify-center bg-gradient-to-b from-white/15 via-transparent to-transparent text-xs font-bold text-gold font-cinzel ${
+                    p.img ? "hidden" : ""
+                  }`}
+                >
+                  {initials(p.name)}
+                </div>
               </div>
               <div className="min-w-0">
                 <h4 className="text-sm font-bold text-white tracking-wide truncate">{p.name}</h4>

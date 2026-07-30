@@ -1451,7 +1451,34 @@ export async function getSquadBoardsForOrg(orgId: string): Promise<SquadBoard[]>
     console.error("getSquadBoardsForOrg failed:", error.message);
     return [];
   }
-  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
+
+  const candidates = data ?? [];
+  if (candidates.length === 0) return [];
+
+  // A DB trigger auto-creates a placeholder `auctions` row (is_synthetic
+  // = true) for every `matches` insert, purely to satisfy the FK on
+  // matches.auction_id — every friendly match self-references its own id
+  // as auction_id (see createFriendlyMatch). Those placeholder rows are
+  // NOT real Squad Boards and must never show up in this list. They're
+  // identifiable because their auction id is also a matches.id (a real
+  // user-created Squad Board's id never appears in `matches` this way).
+  const candidateIds = candidates.map((r: any) => r.id);
+  const { data: matchRows, error: matchErr } = await supabase
+    .from("matches")
+    .select("id")
+    .in("id", candidateIds);
+
+  if (matchErr) {
+    console.error("getSquadBoardsForOrg(match-placeholder check) failed:", matchErr.message);
+    // Fail open rather than silently hiding real boards if this lookup breaks.
+    return candidates.map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
+  }
+
+  const matchPlaceholderIds = new Set((matchRows ?? []).map((m: any) => m.id));
+
+  return candidates
+    .filter((r: any) => !matchPlaceholderIds.has(r.id))
+    .map((r: any) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
 }
 
 export interface SquadBoardPreview extends SquadBoard {
