@@ -19,6 +19,10 @@ import {
   Copy,
   ExternalLink,
   Check,
+  ImageIcon,
+  Palette,
+  Link2,
+  Users2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -44,6 +48,8 @@ import Image from "next/image"
 
 type StatusFilter = "pending" | "approved" | "rejected" | "all"
 type TypeFilter = "all" | "team" | "player"
+
+const DEFAULT_ACCENT = "#d4af37"
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  REGISTRATION CARD — approve is one click; reject expands an inline    */
@@ -191,29 +197,57 @@ function RegistrationCard({
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  CAPACITY CARD — small open/closed + optional cap control, shared      */
-/*  by the team and player halves of a form editor.                      */
+/*  SECTION LABEL — small eyebrow used to group the form editor into      */
+/*  clear zones (link, branding, capacity) instead of one long stack.     */
+/* ────────────────────────────────────────────────────────────────── */
+
+function SectionLabel({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-3">
+      <span className="text-gold/70">{icon}</span>
+      <p className="text-[10px] font-cinzel uppercase tracking-[0.18em] text-gray-500">{children}</p>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
+/*  CAPACITY CARD — open/closed + optional cap, now with a type icon and   */
+/*  a filled progress bar so "37 of 40" reads at a glance instead of       */
+/*  needing to be parsed as text. The bar tints with the form's own        */
+/*  accent color so it feels like part of that form, not a generic stat.  */
 /* ────────────────────────────────────────────────────────────────── */
 
 function CapacityCard({
   label,
+  icon,
   open,
   onToggleOpen,
   cap,
   onCapChange,
   count,
+  accentColor,
 }: {
   label: string
+  icon: React.ReactNode
   open: boolean
   onToggleOpen: () => void
   cap: string
   onCapChange: (v: string) => void
   count: number
+  accentColor: string
 }) {
+  const capNum = cap.trim() ? Number(cap) : null
+  const hasCap = capNum != null && capNum > 0
+  const pct = hasCap ? Math.min(100, Math.round((count / capNum) * 100)) : 0
+  const isFull = hasCap && count >= capNum
+
   return (
     <div className="bg-white/[0.02] border border-gold/10 rounded-lg p-4">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <p className="text-xs font-cinzel uppercase tracking-wide text-gray-300">{label}</p>
+        <p className="text-xs font-cinzel uppercase tracking-wide text-gray-300 flex items-center gap-1.5">
+          <span className="text-gray-500">{icon}</span>
+          {label}
+        </p>
         <button
           onClick={onToggleOpen}
           className={`text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded border transition-colors ${
@@ -223,6 +257,7 @@ function CapacityCard({
           {open ? "Open" : "Closed"}
         </button>
       </div>
+
       <FieldLabel>Cap (optional)</FieldLabel>
       <Input
         type="number"
@@ -232,9 +267,29 @@ function CapacityCard({
         placeholder="No limit"
         className="bg-black/50 border-gold/30 text-white"
       />
-      <p className="text-gray-600 text-[11px] mt-1.5">
-        {count} pending/approved so far{cap.trim() ? ` of ${cap}` : ""}.
-      </p>
+
+      <div className="mt-3">
+        <div className="h-1.5 w-full rounded-full bg-white/[0.06] overflow-hidden">
+          {hasCap && (
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${pct}%`,
+                backgroundColor: isFull ? "#f87171" : accentColor,
+              }}
+            />
+          )}
+        </div>
+        <p className="text-gray-600 text-[11px] mt-1.5">
+          {isFull ? (
+            <span className="text-red-400/80">{count} of {capNum} — full</span>
+          ) : (
+            <>
+              {count} pending/approved{hasCap ? ` of ${capNum}` : " so far"}
+            </>
+          )}
+        </p>
+      </div>
     </div>
   )
 }
@@ -281,10 +336,11 @@ function LinkRow({ label, url, copied, onCopy }: { label: string; url: string; c
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  FORM EDITOR CARD — one registration form's full settings: banner,     */
-/*  welcome message, accent color, per-type open/closed + caps, active    */
-/*  toggle, its own shareable link, and delete. An org can have many of   */
-/*  these; each is completely independent of the others.                 */
+/*  FORM EDITOR CARD — one registration form's full settings. Grouped     */
+/*  into three zones (link, branding, capacity) with dividers so the      */
+/*  card reads as a short document instead of one long stack of fields.   */
+/*  The banner preview and accent swatch now double as a live preview of  */
+/*  what an applicant will actually see on this form's page.              */
 /* ────────────────────────────────────────────────────────────────── */
 
 function FormEditorCard({
@@ -336,6 +392,11 @@ function FormEditorCard({
   const baseLink = `${origin}/register/${org.slug}/${form.slug}`
   const teamLink = `${baseLink}?type=team`
   const playerLink = `${baseLink}?type=player`
+
+  // The accent color drives every live-preview surface in this editor
+  // (banner overlay, accent swatch, capacity bars) so a form's identity
+  // is visible while editing it, not just after visiting its live link.
+  const liveAccent = accentColor || DEFAULT_ACCENT
 
   // The team/player split only means anything when a form actually has
   // both types open — on a form where only one is open, the base link
@@ -411,7 +472,8 @@ function FormEditorCard({
 
   return (
     <Panel>
-      <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+      {/* Header — name, live status, delete */}
+      <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <FieldLabel>Form name</FieldLabel>
           <Input
@@ -424,10 +486,14 @@ function FormEditorCard({
           {pendingCount > 0 && <StatusBadge tone="warn">{pendingCount} pending</StatusBadge>}
           <button
             onClick={() => setIsActive((v) => !v)}
-            className={`text-[10px] uppercase tracking-widest font-cinzel px-2.5 py-1 rounded-full border transition-colors ${
+            className={`flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-cinzel px-2.5 py-1 rounded-full border transition-colors ${
               isActive ? "border-gold/40 text-gold" : "border-white/15 text-gray-500"
             }`}
           >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-gold" : "bg-gray-600"}`}
+              aria-hidden
+            />
             {isActive ? "Active" : "Inactive"}
           </button>
           <button
@@ -441,41 +507,30 @@ function FormEditorCard({
         </div>
       </div>
 
-      <div className="mb-4 space-y-3">
-        <LinkRow
-          label={showSplitLinks ? "General link (shows both options)" : "Shareable link"}
-          url={baseLink}
-          copied={copiedKey === "base"}
-          onCopy={() => copyLink("base", baseLink)}
-        />
-
-        {showSplitLinks && (
-          <>
-            <LinkRow label="Team-only link" url={teamLink} copied={copiedKey === "team"} onCopy={() => copyLink("team", teamLink)} />
-            <LinkRow
-              label="Player-only link"
-              url={playerLink}
-              copied={copiedKey === "player"}
-              onCopy={() => copyLink("player", playerLink)}
-            />
-          </>
-        )}
-
-        {!isActive && (
-          <p className="text-yellow-400/80 text-[11px] flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" /> Inactive forms 404 on these links — flip it back to Active to accept submissions again.
-          </p>
-        )}
-      </div>
-
-      <div className="mb-4">
-        <FieldLabel>Banner image URL</FieldLabel>
-        <div className="h-28 rounded-md overflow-hidden border border-gold/20 bg-black/60 mb-2 flex items-center justify-center">
+      {/* Banner — doubles as a live preview of the form's hero, with the
+          name overlaid so it's obvious this is "what applicants will see"
+          rather than just an image field. */}
+      <div className="mb-5">
+        <SectionLabel icon={<ImageIcon className="h-3 w-3" />}>Banner preview</SectionLabel>
+        <div
+          className="relative h-32 rounded-lg overflow-hidden border bg-black/60 mb-2 flex items-center justify-center"
+          style={{ borderColor: `${liveAccent}40` }}
+        >
           {bannerUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <Image src={bannerUrl} alt="" className="h-full w-full object-cover" width={1200} height={300} />
+            <>
+              <Image src={bannerUrl} alt="" className="h-full w-full object-cover" width={1200} height={300} />
+              <div
+                className="absolute inset-x-0 bottom-0 h-16 flex items-end px-4 pb-2.5"
+                style={{ background: `linear-gradient(to top, ${liveAccent}33, transparent)` }}
+              >
+                <p className="text-white text-sm font-cinzel font-bold drop-shadow-md truncate">{name || form.name}</p>
+              </div>
+            </>
           ) : (
-            <p className="text-gray-600 text-xs italic">No banner set — a plain header is used instead</p>
+            <div className="flex flex-col items-center gap-1.5 text-gray-600">
+              <ImageIcon className="h-5 w-5" />
+              <p className="text-xs italic">No banner set — a plain header is used instead</p>
+            </div>
           )}
         </div>
         <Input
@@ -486,61 +541,112 @@ function FormEditorCard({
         />
       </div>
 
-      <div className="mb-4">
-        <FieldLabel>Welcome message (optional)</FieldLabel>
-        <textarea
-          value={welcomeMessage}
-          onChange={(e) => setWelcomeMessage(e.target.value)}
-          rows={3}
-          placeholder="e.g. Registration closes August 15th. Entry fee: LKR 5,000 per team."
-          className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 resize-none focus-visible:ring-1 focus-visible:ring-gold/40 outline-none"
-        />
-      </div>
-
-      <div className="mb-4">
-        <FieldLabel>Accent color (optional)</FieldLabel>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={accentColor || "#d4af37"}
-            onChange={(e) => setAccentColor(e.target.value)}
-            className="h-10 w-14 rounded-md border border-gold/30 bg-black/50 cursor-pointer"
-          />
-          <Input
-            value={accentColor}
-            onChange={(e) => setAccentColor(e.target.value)}
-            placeholder="Default gold"
-            className="bg-black/50 border-gold/30 text-white flex-1"
+      {/* Branding — welcome message + accent color, with a live swatch that
+          shows the accent as it'll actually appear on a button. */}
+      <div className="mb-5 pt-5 border-t border-white/5">
+        <SectionLabel icon={<Palette className="h-3 w-3" />}>Branding</SectionLabel>
+        <div className="mb-3">
+          <FieldLabel>Welcome message (optional)</FieldLabel>
+          <textarea
+            value={welcomeMessage}
+            onChange={(e) => setWelcomeMessage(e.target.value)}
+            rows={3}
+            placeholder="e.g. Registration closes August 15th. Entry fee: LKR 5,000 per team."
+            className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2.5 resize-none focus-visible:ring-1 focus-visible:ring-gold/40 outline-none"
           />
         </div>
-        <p className="text-gray-600 text-[11px] mt-1.5">Replaces the gold accents on this registration page only — nothing else in your dashboard changes.</p>
+        <div>
+          <FieldLabel>Accent color (optional)</FieldLabel>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={liveAccent}
+              onChange={(e) => setAccentColor(e.target.value)}
+              className="h-10 w-14 rounded-md border border-gold/30 bg-black/50 cursor-pointer shrink-0"
+            />
+            <Input
+              value={accentColor}
+              onChange={(e) => setAccentColor(e.target.value)}
+              placeholder="Default gold"
+              className="bg-black/50 border-gold/30 text-white flex-1"
+            />
+            <span
+              className="hidden sm:flex shrink-0 h-10 px-3 items-center rounded-md text-xs font-bold font-cinzel"
+              style={{ backgroundColor: liveAccent, color: "#0a0a0a" }}
+            >
+              Register
+            </span>
+          </div>
+          <p className="text-gray-600 text-[11px] mt-1.5">
+            Replaces the gold accents on this registration page only — nothing else in your dashboard changes.
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        <CapacityCard
-          label="Team registration"
-          open={teamOpen}
-          onToggleOpen={() => setTeamOpen((v) => !v)}
-          cap={teamCap}
-          onCapChange={setTeamCap}
-          count={countsLoaded ? teamCount : 0}
-        />
-        <CapacityCard
-          label="Player registration"
-          open={playerOpen}
-          onToggleOpen={() => setPlayerOpen((v) => !v)}
-          cap={playerCap}
-          onCapChange={setPlayerCap}
-          count={countsLoaded ? playerCount : 0}
-        />
+      {/* Capacity — one card per type, each with an icon and fill bar */}
+      <div className="mb-5 pt-5 border-t border-white/5">
+        <SectionLabel icon={<Users2 className="h-3 w-3" />}>Capacity</SectionLabel>
+        <div className="grid grid-cols-1 gap-4">
+          <CapacityCard
+            label="Team registration"
+            icon={<Shield className="h-3.5 w-3.5" />}
+            open={teamOpen}
+            onToggleOpen={() => setTeamOpen((v) => !v)}
+            cap={teamCap}
+            onCapChange={setTeamCap}
+            count={countsLoaded ? teamCount : 0}
+            accentColor={liveAccent}
+          />
+          <CapacityCard
+            label="Player registration"
+            icon={<UserPlus className="h-3.5 w-3.5" />}
+            open={playerOpen}
+            onToggleOpen={() => setPlayerOpen((v) => !v)}
+            cap={playerCap}
+            onCapChange={setPlayerCap}
+            count={countsLoaded ? playerCount : 0}
+            accentColor={liveAccent}
+          />
+        </div>
+      </div>
+
+      {/* Links */}
+      <div className="pt-5 border-t border-white/5">
+        <SectionLabel icon={<Link2 className="h-3 w-3" />}>Share</SectionLabel>
+        <div className="space-y-3">
+          <LinkRow
+            label={showSplitLinks ? "General link (shows both options)" : "Shareable link"}
+            url={baseLink}
+            copied={copiedKey === "base"}
+            onCopy={() => copyLink("base", baseLink)}
+          />
+
+          {showSplitLinks && (
+            <>
+              <LinkRow label="Team-only link" url={teamLink} copied={copiedKey === "team"} onCopy={() => copyLink("team", teamLink)} />
+              <LinkRow
+                label="Player-only link"
+                url={playerLink}
+                copied={copiedKey === "player"}
+                onCopy={() => copyLink("player", playerLink)}
+              />
+            </>
+          )}
+
+          {!isActive && (
+            <p className="text-yellow-400/80 text-[11px] flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" /> Inactive forms 404 on these links — flip it back to Active to accept submissions again.
+            </p>
+          )}
+        </div>
       </div>
 
       {saveError && (
-        <p className="flex items-center gap-1.5 text-red-500 text-sm mt-4">
+        <p className="flex items-center gap-1.5 text-red-500 text-sm mt-5">
           <AlertCircle className="h-4 w-4" /> {saveError}
         </p>
       )}
-      <Button onClick={handleSave} disabled={isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-4">
+      <Button onClick={handleSave} disabled={isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-5">
         {isSaving ? "Saving…" : saved ? "Saved ✓" : "Save form"}
       </Button>
 
