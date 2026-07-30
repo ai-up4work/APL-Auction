@@ -4,7 +4,22 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { Pencil, Save, Plus, Trash2, Users, MapPin, Gavel, Loader2, CheckCircle2, AlertTriangle, Sparkles, Shield, Lock, Info } from "lucide-react"
+import {
+  Pencil,
+  Save,
+  Plus,
+  Trash2,
+  Users,
+  MapPin,
+  Gavel,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Sparkles,
+  Shield,
+  Lock,
+  Info,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { AppHeader } from "@/components/app-header"
@@ -661,20 +676,42 @@ async function syncSquadsToPlayers(matchId: string, form: EditableSetup): Promis
   return { result: { auctionId, teamsUpserted, playersUpserted, skippedSquads }, updatedSquads }
 }
 
+// ─────────────────────────────────────────────────────────────
+// SHARED UI PRIMITIVES — same shell/tokens as the Tournament Edit page
+// (top pill nav + single active section + sticky live-preview rail),
+// so this page reads as a sibling of that admin screen instead of a
+// one-off form.
+// ─────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────
-// SHARED UI PRIMITIVES — same shell/tokens as the rest of the app
-// (OrganizationClient / MatchesTab / TeamsManager / SquadBoardTab), so
-// this page reads as part of the same dashboard.
-// ─────────────────────────────────────────────────────────────
+type SectionId = "details" | "info" | "officials" | "squads"
+
+const JUMP_SECTIONS: { id: SectionId; label: string }[] = [
+  { id: "details", label: "Details" },
+  { id: "info", label: "Info" },
+  { id: "officials", label: "Officials" },
+  { id: "squads", label: "Squads" },
+]
+
+function SectionHeading({
+  icon: Icon,
+  title,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-6">
+      <div className="w-7 h-7 rounded-md bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+        <Icon className="h-3.5 w-3.5 text-gold" />
+      </div>
+      <h2 className="text-lg font-bold text-white font-cinzel">{title}</h2>
+    </div>
+  )
+}
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={`bg-black/50 border border-gold/20 shine hover:border-gold/40 transition-all duration-300 rounded-lg p-6 md:p-8 shadow-lg shadow-black/40 ${className}`}
-    >
-      {children}
-    </div>
+    <div className={`bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6 ${className}`}>{children}</div>
   )
 }
 
@@ -726,6 +763,11 @@ export default function EditMatchPage() {
   useScrollTop()
   const params = useParams<{ matchId: string }>()
   const matchId = params?.matchId ?? ""
+
+  // ── Which section is open. Only one renders in the middle column at a
+  // time, matching the Tournament Edit page — clicking a nav pill swaps
+  // it instead of everything being stacked and scrolled past. ─────────
+  const [activeSection, setActiveSection] = useState<SectionId>("details")
 
   const [state, setState] = useState<SaveState>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -859,8 +901,7 @@ export default function EditMatchPage() {
     // duplicate team code, or an RLS rule blocking the write), the
     // match_setup save has already succeeded and shouldn't be reported
     // as an error too.
-  try 
-    {
+    try {
       const { result, updatedSquads } = await syncSquadsToPlayers(matchId, savedForm)
 
       setForm((prev) => ({ ...prev, squads: updatedSquads }))
@@ -900,6 +941,16 @@ export default function EditMatchPage() {
 
   const xiCount = (squadIndex: number) => form.squads[squadIndex]?.players.filter((p) => p.xi).length ?? 0
 
+  // ── Derived flags for the Setup checklist in the live-preview rail ──
+  const teamsNamed = !!(form.team1Name.trim() && form.team2Name.trim())
+  const venueDateSet = !!(form.venue.trim() && form.date.trim())
+  const squadsHavePlayers = form.squads.every((s) => s.players.some((p) => p.name.trim()))
+  const xiComplete = form.squads.every((_, i) => xiCount(i) === 11)
+  const tossSet = !!form.toss
+  const officialsSet = !!(form.officials.umpires.trim() || form.officials.referee.trim() || form.officials.thirdUmpire.trim())
+
+  const isActive = (id: SectionId) => activeSection === id
+
   return (
     <main className="overflow-x-hidden max-w-full">
       <style
@@ -913,30 +964,13 @@ export default function EditMatchPage() {
 
       <section className="pt-28 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 max-w-4xl space-y-6">
-          <div>
-            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
-              <Pencil className="w-3.5 h-3.5" />
-              Match Editor
-            </span>
-            <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel mb-2">
-              {form.team1Name || "Team 1"} <span className="text-gray-500 font-normal">vs</span> {form.team2Name || "Team 2"}
-            </h1>
-            <p className="text-gray-400 text-sm">
-              Everything here writes directly into <code className="text-gold">match_setup</code> — the same field
-              the simulator and live match page both read from.
-            </p>
-          </div>
-
-          {state === "loading" && (
-            <Panel className="flex items-center justify-center gap-3 text-gray-400">
-              <Loader2 className="h-5 w-5 animate-spin text-gold" />
-              Loading match data…
-            </Panel>
-          )}
+        {/* Widened from max-w-4xl so the right rail has room to breathe on
+            desktop without the content column itself stretching uncomfortably wide. */}
+        <div className="container mx-auto px-4 relative z-10 max-w-8xl">
+          {state === "loading" && <p className="text-center text-gray-400">Loading match data…</p>}
 
           {state === "error" && errorMsg && (
-            <Panel className="border-red-500/40">
+            <div className="bg-black/50 border border-red-500/40 rounded-lg p-5 mb-6 max-w-2xl">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
                 <div>
@@ -944,484 +978,640 @@ export default function EditMatchPage() {
                   <p className="text-gray-400 text-sm">{errorMsg}</p>
                 </div>
               </div>
-            </Panel>
+            </div>
           )}
 
           {state !== "loading" && (
-            <>
-              {showImportedHint && (
-                <div className="flex items-start gap-3 bg-gold/[0.05] border border-gold/25 rounded-lg p-4">
-                  <Sparkles className="h-4 w-4 text-gold shrink-0 mt-0.5" />
-                  <p className="text-gray-300 text-xs">
-                    Squads below were imported from the source this match was created from (auction or Squad Board) —
-                    the first 11 players on each side were defaulted into the Playing XI. Review and hit{" "}
-                    <span className="text-gold">Save Changes</span> to lock them in.
-                  </p>
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+                    <Pencil className="w-3.5 h-3.5" />
+                    Match Admin
+                  </span>
+                  <h1 className="text-3xl font-bold text-white font-cinzel">
+                    {form.team1Name || "Team 1"} <span className="text-gray-500 font-normal">vs</span>{" "}
+                    {form.team2Name || "Team 2"}
+                  </h1>
                 </div>
-              )}
-
-              {form.rosterLocked && (
-                <div className="flex items-start gap-3 bg-white/[0.02] border border-gold/20 rounded-lg p-4">
-                  <Lock className="h-4 w-4 text-gold shrink-0 mt-0.5" />
-                  <p className="text-gray-300 text-xs">
-                    These squads came from a live auction, so rosters are locked here — add, rename, or remove players
-                    from the <span className="text-gold">Auctions</span> tab instead. You can still set today's{" "}
-                    <span className="text-gold">Playing XI</span> and <span className="text-gold">captain</span> below.
-                  </p>
-                </div>
-              )}
-
-              {/* ── MATCH DETAILS ── */}
-              <Panel>
-                <div className="flex items-center gap-2 mb-6">
-                  <MapPin className="h-4 w-4 text-gold" />
-                  <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Match Details</h2>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <FieldLabel>Tournament / Series</FieldLabel>
-                    <TextInput
-                      value={form.tournamentName}
-                      onChange={(e) => update("tournamentName", e.target.value)}
-                      placeholder="Valiant League — Season 1"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Season</FieldLabel>
-                    <TextInput
-                      value={form.season}
-                      onChange={(e) => update("season", e.target.value)}
-                      placeholder="e.g. 2026"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Round</FieldLabel>
-                    <TextInput
-                      value={form.round}
-                      onChange={(e) => update("round", e.target.value)}
-                      placeholder="Semi Final 1"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="flex items-end gap-2">
-                    <TeamAvatar logo={form.team1Logo} />
-                    <ColorInput
-                      value={form.team1Color}
-                      onChange={(e) => update("team1Color", e.target.value)}
-                      title="Team 1 color"
-                    />
-                    <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
-                      <div>
-                        <FieldLabel>Team 1 Name</FieldLabel>
-                        <TextInput
-                          value={form.team1Name}
-                          onChange={(e) => update("team1Name", e.target.value)}
-                          placeholder="Emberfall Paladins"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>Short</FieldLabel>
-                        <TextInput
-                          value={form.team1Short}
-                          onChange={(e) => update("team1Short", e.target.value.toUpperCase().slice(0, 4))}
-                          placeholder="EMB"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <TeamAvatar logo={form.team2Logo} />
-                    <ColorInput
-                      value={form.team2Color}
-                      onChange={(e) => update("team2Color", e.target.value)}
-                      title="Team 2 color"
-                    />
-                    <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
-                      <div>
-                        <FieldLabel>Team 2 Name</FieldLabel>
-                        <TextInput
-                          value={form.team2Name}
-                          onChange={(e) => update("team2Name", e.target.value)}
-                          placeholder="Duskmere Reapers"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>Short</FieldLabel>
-                        <TextInput
-                          value={form.team2Short}
-                          onChange={(e) => update("team2Short", e.target.value.toUpperCase().slice(0, 4))}
-                          placeholder="DUS"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <FieldLabel>Venue</FieldLabel>
-                    <TextInput value={form.venue} onChange={(e) => update("venue", e.target.value)} placeholder="Simulated Grounds" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <FieldLabel>Date</FieldLabel>
-                      <TextInput type="date" value={form.date} onChange={(e) => update("date", e.target.value)} />
-                    </div>
-                    <div>
-                      <FieldLabel>Time</FieldLabel>
-                      <TextInput type="time" value={form.time} onChange={(e) => update("time", e.target.value)} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-[9rem_1fr] gap-4">
-                  <div>
-                    <FieldLabel>Format</FieldLabel>
-                    <select
-                      className="select-input w-full"
-                      value={form.format}
-                      onChange={(e) => update("format", e.target.value as MatchFormat)}
-                    >
-                      {FORMAT_OPTIONS.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <FieldLabel>Overs / Side</FieldLabel>
-                    <NumberInput
-                      min={1}
-                      max={50}
-                      value={form.overs}
-                      onChange={(e) => update("overs", Number(e.target.value) || 20)}
-                    />
-                  </div>
-                </div>
-              </Panel>
-
-              {/* ── ADDITIONAL DETAILS (new fields) ── */}
-              <Panel>
-                <div className="flex items-center gap-2 mb-6">
-                  <Info className="h-4 w-4 text-gold" />
-                  <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Additional Details</h2>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <FieldLabel>Match Title</FieldLabel>
-                    <TextInput
-                      value={form.matchTitle}
-                      onChange={(e) => update("matchTitle", e.target.value)}
-                      placeholder="The Grand Rematch"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Match Number</FieldLabel>
-                    <TextInput
-                      value={form.matchNumber}
-                      onChange={(e) => update("matchNumber", e.target.value)}
-                      placeholder="Match 14"
-                    />
-                  </div>
-                </div>
-
-                <div className="mb-4">
-                  <FieldLabel>Match Meta / Notes</FieldLabel>
-                  <TextInput
-                    value={form.matchMeta}
-                    onChange={(e) => update("matchMeta", e.target.value)}
-                    placeholder="Day/night fixture, rain delay expected, etc."
-                  />
-                </div>
-
-                {/* ── Toss — structured entry only. This used to sit
-                    alongside a separate free-text "Toss" field in the
-                    Match Details panel above; the two could say
-                    different things since nothing kept them in sync.
-                    Now this is the single source of truth, and the
-                    plain-text sentence below is generated from it. ── */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
-                  <div>
-                    <FieldLabel>Toss Winner</FieldLabel>
-                    <select
-                      className="select-input w-full"
-                      value={form.tossWinner}
-                      onChange={(e) => update("tossWinner", e.target.value)}
-                    >
-                      <option value="">Select team…</option>
-                      {form.team1Name && <option value={form.team1Name}>{form.team1Name}</option>}
-                      {form.team2Name && <option value={form.team2Name}>{form.team2Name}</option>}
-                    </select>
-                  </div>
-                  <div>
-                    <FieldLabel>Toss Decision</FieldLabel>
-                    <select
-                      className="select-input w-full"
-                      value={form.tossDecision}
-                      onChange={(e) => update("tossDecision", e.target.value)}
-                    >
-                      <option value="">Elected to…</option>
-                      <option value="bat">Bat</option>
-                      <option value="bowl">Bowl</option>
-                    </select>
-                  </div>
-                </div>
-                {form.toss ? (
-                  <p className="text-gray-400 text-xs mb-4">Preview: {form.toss}</p>
-                ) : (
-                  <p className="text-gray-600 text-xs mb-4">Set both fields above to generate the toss line.</p>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel>Tournament (ref / slug)</FieldLabel>
-                    <TextInput
-                      value={form.tournament}
-                      onChange={(e) => update("tournament", e.target.value)}
-                      placeholder="valiant-league-s1"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Tournament Logo URL</FieldLabel>
-                    <TextInput
-                      value={form.tournamentLogoUrl}
-                      onChange={(e) => update("tournamentLogoUrl", e.target.value)}
-                      placeholder="https://…"
-                    />
-                  </div>
-                </div>
-              </Panel>
-
-              {/* ── OFFICIALS & FORMAT ── */}
-              <Panel>
-                <div className="flex items-center gap-2 mb-6">
-                  <Gavel className="h-4 w-4 text-gold" />
-                  <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel">Officials &amp; Format</h2>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel>Format Note</FieldLabel>
-                    <TextInput
-                      value={form.officials.format}
-                      onChange={(e) => updateOfficials("format", e.target.value)}
-                      placeholder="T20 · 20 overs per side"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Umpires</FieldLabel>
-                    <TextInput
-                      value={form.officials.umpires}
-                      onChange={(e) => updateOfficials("umpires", e.target.value)}
-                      placeholder="The Umpires"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Third Umpire</FieldLabel>
-                    <TextInput
-                      value={form.officials.thirdUmpire}
-                      onChange={(e) => updateOfficials("thirdUmpire", e.target.value)}
-                      placeholder="The Referee"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Match Referee</FieldLabel>
-                    <TextInput
-                      value={form.officials.referee}
-                      onChange={(e) => updateOfficials("referee", e.target.value)}
-                      placeholder="The Witness"
-                    />
-                  </div>
-                </div>
-              </Panel>
-
-              {/* ── SQUADS ── */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {form.squads.map((squad, squadIndex) => {
-                  const teamName = squadIndex === 0 ? form.team1Name || "Team 1" : form.team2Name || "Team 2"
-                  const teamLogo = squadIndex === 0 ? form.team1Logo : form.team2Logo
-                  const count = squad.players.length
-                  const xi = xiCount(squadIndex)
-                  const locked = form.rosterLocked
-                  return (
-                    <Panel key={squad.teamId}>
-                      <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <TeamAvatar logo={teamLogo} />
-                          <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel truncate">{teamName} Squad</h2>
-                          {locked && <Lock className="h-3 w-3 text-gold/60 shrink-0" />}
-                        </div>
-                        <span
-                          className={`text-[10px] font-mono uppercase tracking-widest px-2.5 py-1 rounded-full border ${
-                            xi === 11
-                              ? "border-green-500/40 text-green-400 bg-green-500/5"
-                              : "border-amber-500/30 text-amber-400 bg-amber-500/5"
-                          }`}
-                        >
-                          {xi}/11 in XI · {count} total
-                        </span>
-                      </div>
-
-                      <div className="mb-5">
-                        <FieldLabel>Captain</FieldLabel>
-                        <TextInput
-                          value={squad.captain}
-                          onChange={(e) => updateSquad(squadIndex, { captain: e.target.value })}
-                          placeholder="Captain name"
-                          list={`${squad.teamId}-players`}
-                        />
-                        <datalist id={`${squad.teamId}-players`}>
-                          {squad.players.map((p, i) => (p.name ? <option key={i} value={p.name} /> : null))}
-                        </datalist>
-                      </div>
-
-                      <div className="space-y-2 mb-4">
-                        {squad.players.length === 0 && (
-                          <p className="text-gray-500 text-xs text-center py-6 border border-dashed border-gold/10 rounded-md">
-                            No players yet — add the squad below.
-                          </p>
-                        )}
-                        {squad.players.map((player, playerIndex) => (
-                          <div
-                            key={playerIndex}
-                            className="grid grid-cols-[1fr_7.5rem_2.25rem_2.25rem] gap-2 items-center bg-white/[0.02] border border-gold/10 rounded-md px-2.5 py-2"
-                          >
-                            <input
-                              value={player.name}
-                              onChange={(e) => updatePlayer(squadIndex, playerIndex, { name: e.target.value })}
-                              placeholder={`Player ${playerIndex + 1}`}
-                              disabled={locked}
-                              title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
-                              className="bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none min-w-0 disabled:opacity-60 disabled:cursor-not-allowed"
-                            />
-                            <select
-                              className="select-input select-input-compact disabled:opacity-60 disabled:cursor-not-allowed"
-                              value={player.role}
-                              disabled={locked}
-                              title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
-                              onChange={(e) => updatePlayer(squadIndex, playerIndex, { role: e.target.value })}
-                            >
-                              {ROLE_OPTIONS.map((r) => (
-                                <option key={r} value={r}>
-                                  {r}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              title={player.xi ? "In Playing XI" : "On bench"}
-                              onClick={() => updatePlayer(squadIndex, playerIndex, { xi: !player.xi })}
-                              className={`h-8 w-8 rounded-md border flex items-center justify-center text-[10px] font-bold font-cinzel transition-colors ${
-                                player.xi
-                                  ? "bg-gold/15 border-gold text-gold"
-                                  : "bg-white/[0.02] border-gold/15 text-gray-500 hover:text-gray-300"
-                              }`}
-                            >
-                              XI
-                            </button>
-                            <button
-                              type="button"
-                              title={locked ? "Roster locked — remove players from the Auctions tab" : "Remove player"}
-                              onClick={() => removePlayer(squadIndex, playerIndex)}
-                              disabled={locked}
-                              className="h-8 w-8 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/5"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-
-                      {locked ? (
-                        <p className="text-gray-500 text-[11px] text-center py-2 border border-dashed border-gold/10 rounded-md">
-                          Roster comes from a live auction — manage players on the Auctions tab.
-                        </p>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => addPlayer(squadIndex)}
-                          className="w-full border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold font-cinzel uppercase tracking-wide text-xs"
-                        >
-                          <Plus className="mr-2 h-4 w-4" />
-                          Add Player
-                        </Button>
-                      )}
-                    </Panel>
-                  )
-                })}
-              </div>
-
-              {/* ── SAVE BAR ── */}
-              <div className="sticky bottom-4 z-20">
-                <Panel className="p-4 md:p-5 flex items-center justify-between flex-wrap gap-3 shadow-2xl shadow-black/60">
-                  <div className="flex flex-col gap-1.5 text-sm">
-                    <div className="flex items-center gap-2">
-                      {state === "saving" && (
-                        <span className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="h-4 w-4 animate-spin text-gold" /> Saving…
-                        </span>
-                      )}
-                      {state === "saved" && (
-                        <span className="flex items-center gap-2 text-green-400 font-cinzel">
-                          <CheckCircle2 className="h-4 w-4" /> Saved
-                        </span>
-                      )}
-                      {state === "error" && errorMsg && (
-                        <span className="flex items-center gap-2 text-red-400">
-                          <AlertTriangle className="h-4 w-4" /> {errorMsg}
-                        </span>
-                      )}
-                      {state === "idle" && !syncMsg && !syncErrorMsg && (
-                        <span className="text-gray-500">Unsaved changes are kept locally until you save.</span>
-                      )}
-                    </div>
-                    {syncMsg && (
-                      <span className="flex items-center gap-2 text-gray-400 text-xs">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" /> {syncMsg}
-                      </span>
-                    )}
-                    {syncErrorMsg && (
-                      <span className="flex items-center gap-2 text-amber-400 text-xs">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Players sync: {syncErrorMsg}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Link href={`/match/${matchId}`}>
-                      <Button variant="outline" className="border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold">
-                        Cancel
-                      </Button>
-                    </Link>
-                    <Button
-                      onClick={handleSave}
-                      disabled={state === "saving"}
-                      className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 disabled:opacity-50"
-                    >
-                      <Save className="mr-2 h-4 w-4" />
-                      Save Changes
-                    </Button>
-                  </div>
-                </Panel>
-              </div>
-
-              <div className="flex items-center justify-center gap-4 pt-2 pb-4">
-                <Link href={`/match/${matchId}`} className="text-gold hover:underline text-sm font-cinzel">
-                  ← Back to Match
+                <Link href={`/match/${matchId}`} className="hidden sm:block shrink-0">
+                  <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30 text-xs">
+                    Back to match
+                  </Button>
                 </Link>
-                {/* <span className="text-gray-700">|</span>
-                <Link href={`/match/${matchId}/simulate`} className="text-gold hover:underline text-sm font-cinzel">
-                  Go to Simulator →
-                </Link> */}
               </div>
-            </>
+
+              <p className="text-gray-400 text-sm mb-6 max-w-2xl">
+                Everything below writes directly into <code className="text-gold">match_setup</code> — the same
+                field the simulator and live match page both read from. Saving also syncs squads into the
+                players table.
+              </p>
+
+              {/* ── TOP NAV — mirrors Tournament Edit's section pills ── */}
+              <nav className="flex flex-wrap gap-x-1 gap-y-2 mb-8 pb-4 border-b border-gold/10">
+                {JUMP_SECTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setActiveSection(s.id)}
+                    className={`text-[11px] font-cinzel uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors ${
+                      isActive(s.id)
+                        ? "text-gold border-gold/40 bg-gold/10"
+                        : "text-gray-400 hover:text-gold border-transparent hover:border-gold/20"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </nav>
+
+              {/* ── CONTENT + LIVE PREVIEW ── */}
+              <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-12 xl:items-stretch">
+                {/* MAIN CONTENT COLUMN — only the active section renders */}
+                <div className="min-w-0 xl:sticky xl:top-28 xl:min-h-0 xl:overflow-y-auto xl:pr-2 space-y-6 pb-6">
+                  {/* DETAILS */}
+                  {activeSection === "details" && (
+                    <Panel>
+                      <SectionHeading icon={MapPin} title="Match Details" />
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div>
+                          <FieldLabel>Tournament / Series</FieldLabel>
+                          <TextInput
+                            value={form.tournamentName}
+                            onChange={(e) => update("tournamentName", e.target.value)}
+                            placeholder="Valiant League — Season 1"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Season</FieldLabel>
+                          <TextInput value={form.season} onChange={(e) => update("season", e.target.value)} placeholder="e.g. 2026" />
+                        </div>
+                        <div>
+                          <FieldLabel>Round</FieldLabel>
+                          <TextInput value={form.round} onChange={(e) => update("round", e.target.value)} placeholder="Semi Final 1" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="flex items-end gap-2">
+                          <TeamAvatar logo={form.team1Logo} />
+                          <ColorInput value={form.team1Color} onChange={(e) => update("team1Color", e.target.value)} title="Team 1 color" />
+                          <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
+                            <div>
+                              <FieldLabel>Team 1 Name</FieldLabel>
+                              <TextInput
+                                value={form.team1Name}
+                                onChange={(e) => update("team1Name", e.target.value)}
+                                placeholder="Emberfall Paladins"
+                              />
+                            </div>
+                            <div>
+                              <FieldLabel>Short</FieldLabel>
+                              <TextInput
+                                value={form.team1Short}
+                                onChange={(e) => update("team1Short", e.target.value.toUpperCase().slice(0, 4))}
+                                placeholder="EMB"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <TeamAvatar logo={form.team2Logo} />
+                          <ColorInput value={form.team2Color} onChange={(e) => update("team2Color", e.target.value)} title="Team 2 color" />
+                          <div className="grid grid-cols-[1fr_5.5rem] gap-2 flex-1">
+                            <div>
+                              <FieldLabel>Team 2 Name</FieldLabel>
+                              <TextInput
+                                value={form.team2Name}
+                                onChange={(e) => update("team2Name", e.target.value)}
+                                placeholder="Duskmere Reapers"
+                              />
+                            </div>
+                            <div>
+                              <FieldLabel>Short</FieldLabel>
+                              <TextInput
+                                value={form.team2Short}
+                                onChange={(e) => update("team2Short", e.target.value.toUpperCase().slice(0, 4))}
+                                placeholder="DUS"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <FieldLabel>Venue</FieldLabel>
+                          <TextInput value={form.venue} onChange={(e) => update("venue", e.target.value)} placeholder="Simulated Grounds" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <FieldLabel>Date</FieldLabel>
+                            <TextInput type="date" value={form.date} onChange={(e) => update("date", e.target.value)} />
+                          </div>
+                          <div>
+                            <FieldLabel>Time</FieldLabel>
+                            <TextInput type="time" value={form.time} onChange={(e) => update("time", e.target.value)} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-[9rem_1fr] gap-4">
+                        <div>
+                          <FieldLabel>Format</FieldLabel>
+                          <select
+                            className="select-input w-full"
+                            value={form.format}
+                            onChange={(e) => update("format", e.target.value as MatchFormat)}
+                          >
+                            {FORMAT_OPTIONS.map((f) => (
+                              <option key={f} value={f}>
+                                {f}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <FieldLabel>Overs / Side</FieldLabel>
+                          <NumberInput
+                            min={1}
+                            max={50}
+                            value={form.overs}
+                            onChange={(e) => update("overs", Number(e.target.value) || 20)}
+                          />
+                        </div>
+                      </div>
+                    </Panel>
+                  )}
+
+                  {/* INFO (additional details) */}
+                  {activeSection === "info" && (
+                    <Panel>
+                      <SectionHeading icon={Info} title="Additional Details" />
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <FieldLabel>Match Title</FieldLabel>
+                          <TextInput
+                            value={form.matchTitle}
+                            onChange={(e) => update("matchTitle", e.target.value)}
+                            placeholder="The Grand Rematch"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Match Number</FieldLabel>
+                          <TextInput
+                            value={form.matchNumber}
+                            onChange={(e) => update("matchNumber", e.target.value)}
+                            placeholder="Match 14"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mb-4">
+                        <FieldLabel>Match Meta / Notes</FieldLabel>
+                        <TextInput
+                          value={form.matchMeta}
+                          onChange={(e) => update("matchMeta", e.target.value)}
+                          placeholder="Day/night fixture, rain delay expected, etc."
+                        />
+                      </div>
+
+                      {/* ── Toss — structured entry only. The plain-text
+                          sentence is generated from these two fields
+                          rather than typed separately, so it can't drift
+                          out of sync with what's selected here. ── */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+                        <div>
+                          <FieldLabel>Toss Winner</FieldLabel>
+                          <select
+                            className="select-input w-full"
+                            value={form.tossWinner}
+                            onChange={(e) => update("tossWinner", e.target.value)}
+                          >
+                            <option value="">Select team…</option>
+                            {form.team1Name && <option value={form.team1Name}>{form.team1Name}</option>}
+                            {form.team2Name && <option value={form.team2Name}>{form.team2Name}</option>}
+                          </select>
+                        </div>
+                        <div>
+                          <FieldLabel>Toss Decision</FieldLabel>
+                          <select
+                            className="select-input w-full"
+                            value={form.tossDecision}
+                            onChange={(e) => update("tossDecision", e.target.value)}
+                          >
+                            <option value="">Elected to…</option>
+                            <option value="bat">Bat</option>
+                            <option value="bowl">Bowl</option>
+                          </select>
+                        </div>
+                      </div>
+                      {form.toss ? (
+                        <p className="text-gray-400 text-xs mb-4">Preview: {form.toss}</p>
+                      ) : (
+                        <p className="text-gray-600 text-xs mb-4">Set both fields above to generate the toss line.</p>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <FieldLabel>Tournament (ref / slug)</FieldLabel>
+                          <TextInput
+                            value={form.tournament}
+                            onChange={(e) => update("tournament", e.target.value)}
+                            placeholder="valiant-league-s1"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Tournament Logo URL</FieldLabel>
+                          <TextInput
+                            value={form.tournamentLogoUrl}
+                            onChange={(e) => update("tournamentLogoUrl", e.target.value)}
+                            placeholder="https://…"
+                          />
+                        </div>
+                      </div>
+                    </Panel>
+                  )}
+
+                  {/* OFFICIALS & FORMAT */}
+                  {activeSection === "officials" && (
+                    <Panel>
+                      <SectionHeading icon={Gavel} title="Officials & Format" />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <FieldLabel>Format Note</FieldLabel>
+                          <TextInput
+                            value={form.officials.format}
+                            onChange={(e) => updateOfficials("format", e.target.value)}
+                            placeholder="T20 · 20 overs per side"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Umpires</FieldLabel>
+                          <TextInput
+                            value={form.officials.umpires}
+                            onChange={(e) => updateOfficials("umpires", e.target.value)}
+                            placeholder="The Umpires"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Third Umpire</FieldLabel>
+                          <TextInput
+                            value={form.officials.thirdUmpire}
+                            onChange={(e) => updateOfficials("thirdUmpire", e.target.value)}
+                            placeholder="The Referee"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Match Referee</FieldLabel>
+                          <TextInput
+                            value={form.officials.referee}
+                            onChange={(e) => updateOfficials("referee", e.target.value)}
+                            placeholder="The Witness"
+                          />
+                        </div>
+                      </div>
+                    </Panel>
+                  )}
+
+                  {/* SQUADS */}
+                  {activeSection === "squads" && (
+                    <div className="space-y-5">
+                      {showImportedHint && (
+                        <div className="flex items-start gap-3 bg-gold/[0.05] border border-gold/25 rounded-lg p-4">
+                          <Sparkles className="h-4 w-4 text-gold shrink-0 mt-0.5" />
+                          <p className="text-gray-300 text-xs">
+                            Squads below were imported from the source this match was created from (auction or
+                            Squad Board) — the first 11 players on each side were defaulted into the Playing XI.
+                            Review and hit <span className="text-gold">Save Changes</span> to lock them in.
+                          </p>
+                        </div>
+                      )}
+
+                      {form.rosterLocked && (
+                        <div className="flex items-start gap-3 bg-white/[0.02] border border-gold/20 rounded-lg p-4">
+                          <Lock className="h-4 w-4 text-gold shrink-0 mt-0.5" />
+                          <p className="text-gray-300 text-xs">
+                            These squads came from a live auction, so rosters are locked here — add, rename, or
+                            remove players from the <span className="text-gold">Auctions</span> tab instead. You
+                            can still set today's <span className="text-gold">Playing XI</span> and{" "}
+                            <span className="text-gold">captain</span> below.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {form.squads.map((squad, squadIndex) => {
+                          const teamName = squadIndex === 0 ? form.team1Name || "Team 1" : form.team2Name || "Team 2"
+                          const teamLogo = squadIndex === 0 ? form.team1Logo : form.team2Logo
+                          const count = squad.players.length
+                          const xi = xiCount(squadIndex)
+                          const locked = form.rosterLocked
+                          return (
+                            <Panel key={squad.teamId}>
+                              <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <TeamAvatar logo={teamLogo} />
+                                  <h2 className="text-gold text-xs uppercase tracking-widest font-cinzel truncate">
+                                    {teamName} Squad
+                                  </h2>
+                                  {locked && <Lock className="h-3 w-3 text-gold/60 shrink-0" />}
+                                </div>
+                                <span
+                                  className={`text-[10px] font-mono uppercase tracking-widest px-2.5 py-1 rounded-full border ${
+                                    xi === 11
+                                      ? "border-green-500/40 text-green-400 bg-green-500/5"
+                                      : "border-amber-500/30 text-amber-400 bg-amber-500/5"
+                                  }`}
+                                >
+                                  {xi}/11 in XI · {count} total
+                                </span>
+                              </div>
+
+                              <div className="mb-5">
+                                <FieldLabel>Captain</FieldLabel>
+                                <TextInput
+                                  value={squad.captain}
+                                  onChange={(e) => updateSquad(squadIndex, { captain: e.target.value })}
+                                  placeholder="Captain name"
+                                  list={`${squad.teamId}-players`}
+                                />
+                                <datalist id={`${squad.teamId}-players`}>
+                                  {squad.players.map((p, i) => (p.name ? <option key={i} value={p.name} /> : null))}
+                                </datalist>
+                              </div>
+
+                              <div className="space-y-2 mb-4">
+                                {squad.players.length === 0 && (
+                                  <p className="text-gray-500 text-xs text-center py-6 border border-dashed border-gold/10 rounded-md">
+                                    No players yet — add the squad below.
+                                  </p>
+                                )}
+                                {squad.players.map((player, playerIndex) => (
+                                  <div
+                                    key={playerIndex}
+                                    className="grid grid-cols-[1fr_7.5rem_2.25rem_2.25rem] gap-2 items-center bg-white/[0.02] border border-gold/10 rounded-md px-2.5 py-2"
+                                  >
+                                    <input
+                                      value={player.name}
+                                      onChange={(e) => updatePlayer(squadIndex, playerIndex, { name: e.target.value })}
+                                      placeholder={`Player ${playerIndex + 1}`}
+                                      disabled={locked}
+                                      title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
+                                      className="bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none min-w-0 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    />
+                                    <select
+                                      className="select-input select-input-compact disabled:opacity-60 disabled:cursor-not-allowed"
+                                      value={player.role}
+                                      disabled={locked}
+                                      title={locked ? "Roster locked — edit players from the Auctions tab" : undefined}
+                                      onChange={(e) => updatePlayer(squadIndex, playerIndex, { role: e.target.value })}
+                                    >
+                                      {ROLE_OPTIONS.map((r) => (
+                                        <option key={r} value={r}>
+                                          {r}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      title={player.xi ? "In Playing XI" : "On bench"}
+                                      onClick={() => updatePlayer(squadIndex, playerIndex, { xi: !player.xi })}
+                                      className={`h-8 w-8 rounded-md border flex items-center justify-center text-[10px] font-bold font-cinzel transition-colors ${
+                                        player.xi
+                                          ? "bg-gold/15 border-gold text-gold"
+                                          : "bg-white/[0.02] border-gold/15 text-gray-500 hover:text-gray-300"
+                                      }`}
+                                    >
+                                      XI
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title={locked ? "Roster locked — remove players from the Auctions tab" : "Remove player"}
+                                      onClick={() => removePlayer(squadIndex, playerIndex)}
+                                      disabled={locked}
+                                      className="h-8 w-8 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/15 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/5"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {locked ? (
+                                <p className="text-gray-500 text-[11px] text-center py-2 border border-dashed border-gold/10 rounded-md">
+                                  Roster comes from a live auction — manage players on the Auctions tab.
+                                </p>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => addPlayer(squadIndex)}
+                                  className="w-full border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold font-cinzel uppercase tracking-wide text-xs"
+                                >
+                                  <Plus className="mr-2 h-4 w-4" />
+                                  Add Player
+                                </Button>
+                              )}
+                            </Panel>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-center xl:hidden mt-2">
+                    <Link href={`/match/${matchId}`}>
+                      <Button className="bg-gold hover:bg-gold/90 text-black font-bold">Back to match</Button>
+                    </Link>
+                  </div>
+                </div>
+
+                {/* ── RIGHT RAIL — xl-only live preview, mirrors the
+                    Tournament Edit page's sticky rail. ─────────────────── */}
+                <aside className="hidden xl:flex xl:sticky xl:top-28">
+                  <div className="space-y-4">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Live Preview
+                      </span>
+                      <div className="bg-black/50 border border-gold/20 rounded-lg overflow-hidden p-4">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <TeamAvatar logo={form.team1Logo} />
+                            <span className="text-white font-cinzel font-bold text-sm truncate">
+                              {form.team1Short || form.team1Name || "TM1"}
+                            </span>
+                          </div>
+                          <span className="text-gray-500 text-xs font-cinzel shrink-0">vs</span>
+                          <div className="flex items-center gap-2 min-w-0 justify-end">
+                            <span className="text-white font-cinzel font-bold text-sm truncate">
+                              {form.team2Short || form.team2Name || "TM2"}
+                            </span>
+                            <TeamAvatar logo={form.team2Logo} />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-gold/30 text-gold bg-gold/5">
+                            {form.format} · {form.overs} ov
+                          </span>
+                          {form.tournamentName && (
+                            <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-white/15 text-gray-300 truncate max-w-[9rem]">
+                              {form.tournamentName}
+                            </span>
+                          )}
+                        </div>
+
+                        <dl className="space-y-1.5 text-xs">
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-gray-500">Venue</dt>
+                            <dd className="text-gray-300 text-right truncate max-w-[9rem]">{form.venue || "—"}</dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-gray-500">Date</dt>
+                            <dd className="text-gray-300">
+                              {[form.date, form.time].filter(Boolean).join(" · ") || "—"}
+                            </dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-gray-500">Toss</dt>
+                            <dd className="text-gray-300 text-right truncate max-w-[9rem]">
+                              {form.toss ? `${form.tossWinner} — ${form.tossDecision}` : "—"}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                    </div>
+
+                    {/* Setup checklist */}
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Setup checklist
+                      </span>
+                      <ul className="space-y-2 text-xs">
+                        <li className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${teamsNamed ? "bg-green-500" : "bg-gray-600"}`} />
+                          <span className={teamsNamed ? "text-gray-300" : "text-gray-500"}>Teams named</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${venueDateSet ? "bg-green-500" : "bg-gray-600"}`} />
+                          <span className={venueDateSet ? "text-gray-300" : "text-gray-500"}>Venue &amp; date set</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              squadsHavePlayers ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span className={squadsHavePlayers ? "text-gray-300" : "text-gray-500"}>Squads added</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${xiComplete ? "bg-green-500" : "bg-gray-600"}`} />
+                          <span className={xiComplete ? "text-gray-300" : "text-gray-500"}>Playing XI complete (11/11 each)</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${tossSet ? "bg-green-500" : "bg-gray-600"}`} />
+                          <span className={tossSet ? "text-gray-300" : "text-gray-500"}>Toss recorded</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${officialsSet ? "bg-green-500" : "bg-gray-600"}`} />
+                          <span className={officialsSet ? "text-gray-300" : "text-gray-500"}>Officials set</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Squads summary */}
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Squads
+                      </span>
+                      <ul className="space-y-1.5 text-xs">
+                        {form.squads.map((s, i) => (
+                          <li key={s.teamId} className="flex justify-between gap-2">
+                            <span className="text-gray-500 truncate">
+                              {i === 0 ? form.team1Short || form.team1Name || "Team 1" : form.team2Short || form.team2Name || "Team 2"}
+                            </span>
+                            <span className="text-gray-300">
+                              {xiCount(i)}/11 · {s.players.length} total
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {form.rosterLocked && (
+                        <p className="text-gray-500 text-[10px] mt-2 flex items-center gap-1">
+                          <Lock className="h-2.5 w-2.5" /> Rosters locked (from auction)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
           )}
         </div>
       </section>
+
+      {/* ── SAVE BAR — global, since Details/Info/Officials/Squads all
+          write into the same match_setup blob in a single save (unlike
+          Tournament Edit, where each section has its own save action). ── */}
+      {state !== "loading" && (
+        <div className="sticky bottom-4 z-20 px-4">
+          <div className="container mx-auto max-w-8xl">
+            <div className="bg-[#0a0a0a] border border-gold/30 rounded-lg p-4 md:p-5 flex items-center justify-between flex-wrap gap-3 shadow-2xl shadow-black/60">
+              <div className="flex flex-col gap-1.5 text-sm">
+                <div className="flex items-center gap-2">
+                  {state === "saving" && (
+                    <span className="flex items-center gap-2 text-gray-400">
+                      <Loader2 className="h-4 w-4 animate-spin text-gold" /> Saving…
+                    </span>
+                  )}
+                  {state === "saved" && (
+                    <span className="flex items-center gap-2 text-green-400 font-cinzel">
+                      <CheckCircle2 className="h-4 w-4" /> Saved
+                    </span>
+                  )}
+                  {state === "error" && errorMsg && (
+                    <span className="flex items-center gap-2 text-red-400">
+                      <AlertTriangle className="h-4 w-4" /> {errorMsg}
+                    </span>
+                  )}
+                  {state === "idle" && !syncMsg && !syncErrorMsg && (
+                    <span className="text-gray-500">Unsaved changes are kept locally until you save.</span>
+                  )}
+                </div>
+                {syncMsg && (
+                  <span className="flex items-center gap-2 text-gray-400 text-xs">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" /> {syncMsg}
+                  </span>
+                )}
+                {syncErrorMsg && (
+                  <span className="flex items-center gap-2 text-amber-400 text-xs">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Players sync: {syncErrorMsg}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <Link href={`/match/${matchId}`}>
+                  <Button variant="outline" className="border-gold/40 text-gold hover:bg-gold/10 bg-transparent font-bold">
+                    Cancel
+                  </Button>
+                </Link>
+                <Button
+                  onClick={handleSave}
+                  disabled={state === "saving"}
+                  className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel uppercase tracking-wide text-xs px-6 disabled:opacity-50"
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

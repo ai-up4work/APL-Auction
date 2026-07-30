@@ -48,7 +48,9 @@ interface TournamentEditClientProps {
 
 type GateState = "checking" | "denied" | "allowed"
 
-const JUMP_SECTIONS = [
+type SectionId = "details" | "prizes" | "bracket" | "teams" | "schedule" | "awards"
+
+const JUMP_SECTIONS: { id: SectionId; label: string }[] = [
   { id: "details", label: "Details" },
   { id: "prizes", label: "Prizes" },
   { id: "bracket", label: "Bracket" },
@@ -81,6 +83,12 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [gate, setGate] = useState<GateState>("checking")
+
+  // ── Which section is open. Only one renders in the middle column at a
+  // time — clicking a nav item swaps it, rather than everything being
+  // stacked and scrolled past. The middle column now scrolls internally,
+  // independently of the sticky right rail. ──────────────────────────────
+  const [activeSection, setActiveSection] = useState<SectionId>("details")
 
   const [name, setName] = useState(tournament.name)
   const [format, setFormat] = useState(tournament.format)
@@ -335,6 +343,10 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     })
   }
 
+  // ── Tab button — shared by the top pill nav on every breakpoint. Just
+  // flips `activeSection`; nothing here scrolls the page anymore. ────────
+  const isActive = (id: SectionId) => activeSection === id
+
   return (
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
@@ -349,13 +361,15 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
       <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 max-w-3xl">
+        {/* Widened from max-w-3xl so the right rail has room to breathe on
+            desktop without the content column itself stretching uncomfortably wide. */}
+        <div className="container mx-auto px-4 relative z-10 max-w-8xl">
           {gate === "checking" && (
             <p className="text-center text-gray-400">Checking access…</p>
           )}
 
           {gate === "denied" && (
-            <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center">
+            <div className="bg-black/50 border border-gold/20 rounded-lg p-8 text-center max-w-md mx-auto">
               <Lock className="h-6 w-6 text-gold mx-auto mb-3" />
               <h1 className="text-xl font-bold text-white font-cinzel mb-2">
                 You can't edit this tournament
@@ -372,438 +386,640 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
           )}
 
           {gate === "allowed" && (
-            <>
-              <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
-                <Settings2 className="w-3.5 h-3.5" />
-                Tournament Admin
-              </span>
-              <h1 className="text-3xl font-bold text-white font-cinzel mb-2">{tournament.name}</h1>
-              <p className="text-gray-400 text-sm mb-6 max-w-xl">
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
+                    <Settings2 className="w-3.5 h-3.5" />
+                    Tournament Admin
+                  </span>
+                  <h1 className="text-3xl font-bold text-white font-cinzel">{tournament.name}</h1>
+                </div>
+                <Link href={`/tournaments/${tournament.id}`} className="hidden sm:block shrink-0">
+                  <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30 text-xs">
+                    Back to tournament
+                  </Button>
+                </Link>
+              </div>
+
+              <p className="text-gray-400 text-sm mb-6 max-w-2xl">
                 Details, Prizes, Bracket, and Matches save immediately. Awards is read-only here
                 for now — see note below.
               </p>
 
-              {/* JUMP NAV — turns the long stack of sections into something scannable */}
+              {/* ── TOP NAV — full width, all breakpoints. Replaces the old
+                  left sidebar; the section tabs now sit above the content
+                  instead of stealing a column from it. ─────────────────── */}
               <nav className="flex flex-wrap gap-x-1 gap-y-2 mb-8 pb-4 border-b border-gold/10">
                 {JUMP_SECTIONS.map((s) => (
-                  <a
+                  <button
                     key={s.id}
-                    href={`#${s.id}`}
-                    className="text-[11px] font-cinzel uppercase tracking-widest text-gray-400 hover:text-gold px-3 py-1.5 rounded-full border border-transparent hover:border-gold/20 transition-colors"
+                    type="button"
+                    onClick={() => setActiveSection(s.id)}
+                    className={`text-[11px] font-cinzel uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors ${
+                      isActive(s.id)
+                        ? "text-gold border-gold/40 bg-gold/10"
+                        : "text-gray-400 hover:text-gold border-transparent hover:border-gold/20"
+                    }`}
                   >
                     {s.label}
-                  </a>
+                  </button>
                 ))}
               </nav>
 
-              {/* DETAILS — the only section backed by real columns today */}
-              <div id="details" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
-                <SectionHeading icon={Settings2} title="Details" />
+              {/* ── CONTENT + LIVE PREVIEW. Content now takes the width the
+                  old left sidebar used to occupy. The Live Preview rail
+                  is never clipped — it renders at whatever height its own
+                  cards need. Grid's default stretch behavior then makes
+                  the main content column exactly that same height, and
+                  the main column scrolls internally (xl:overflow-y-auto)
+                  if its active section is taller than the preview. ────── */}
+              <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-12 xl:items-stretch">
+                {/* MAIN CONTENT COLUMN — only the active section renders.
+                    xl:min-h-0 is required alongside overflow-y-auto here:
+                    without it, a stretched grid item won't actually clip
+                    content shorter than its own min-content height. */}
+                <div className="min-w-0 xl:sticky xl:top-28 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
+                  {/* DETAILS */}
+                  {activeSection === "details" && (
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
+                      <SectionHeading icon={Settings2} title="Details" />
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Tournament name</label>
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="bg-black/50 border-gold/30 text-white"
-                    />
-                  </div>
+                      <div className="space-y-5">
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-1">Tournament name</label>
+                          <Input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="bg-black/50 border-gold/30 text-white"
+                          />
+                        </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Format</label>
-                      <select
-                        value={format}
-                        onChange={(e) => setFormat(e.target.value as typeof format)}
-                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                      >
-                        <option value="single_elimination">Single Elimination</option>
-                        <option value="double_elimination">Double Elimination</option>
-                        <option value="round_robin">Round Robin</option>
-                      </select>
-                      {formatChanging && bracketExists && (
-                        <p className="text-gray-500 text-xs mt-1">
-                          Saving will delete the existing bracket's matches and results.
-                        </p>
-                      )}
-                    </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="lg:col-span-1">
+                            <label className="text-gray-400 text-sm block mb-1">Format</label>
+                            <select
+                              value={format}
+                              onChange={(e) => setFormat(e.target.value as typeof format)}
+                              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                            >
+                              <option value="single_elimination">Single Elimination</option>
+                              <option value="double_elimination">Double Elimination</option>
+                              <option value="round_robin">Round Robin</option>
+                            </select>
+                            {formatChanging && bracketExists && (
+                              <p className="text-gray-500 text-xs mt-1">
+                                Saving will delete the existing bracket's matches and results.
+                              </p>
+                            )}
+                          </div>
 
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Status</label>
-                      <select
-                        value={status}
-                        onChange={(e) => setStatus(e.target.value)}
-                        className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                      >
-                        <option value="setup">Setup</option>
-                        <option value="upcoming">Upcoming</option>
-                        <option value="live">Live</option>
-                        <option value="completed">Completed</option>
-                      </select>
-                    </div>
-                  </div>
+                          <div className="lg:col-span-1">
+                            <label className="text-gray-400 text-sm block mb-1">Status</label>
+                            <select
+                              value={status}
+                              onChange={(e) => setStatus(e.target.value)}
+                              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                            >
+                              <option value="setup">Setup</option>
+                              <option value="upcoming">Upcoming</option>
+                              <option value="live">Live</option>
+                              <option value="completed">Completed</option>
+                            </select>
+                          </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Start date</label>
-                      <Input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="bg-black/50 border-gold/30 text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Prize pool (total)</label>
-                      <Input
-                        value={prizePool}
-                        onChange={(e) => setPrizePool(e.target.value)}
-                        placeholder="e.g. $5,000"
-                        className="bg-black/50 border-gold/30 text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-gray-400 text-sm block mb-1">Description</label>
-                    <Textarea
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      placeholder="What's this tournament about? Shown on the Overview tab."
-                      rows={4}
-                      className="bg-black/50 border-gold/30 text-white"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
-                      <div className="flex gap-3 items-start">
-                        <Input
-                          value={imageUrl}
-                          onChange={(e) => setImageUrl(e.target.value)}
-                          placeholder="https://…"
-                          className="bg-black/50 border-gold/30 text-white flex-1"
-                        />
-                        <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
-                          {imageUrl && !imageBroken ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={imageUrl}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={() => setImageBroken(true)}
+                          <div className="lg:col-span-1">
+                            <label className="text-gray-400 text-sm block mb-1">Start date</label>
+                            <Input
+                              type="date"
+                              value={startDate}
+                              onChange={(e) => setStartDate(e.target.value)}
+                              className="bg-black/50 border-gold/30 text-white"
                             />
-                          ) : (
-                            <ImageOff className="h-4 w-4 text-gray-600" />
-                          )}
+                          </div>
+
+                          <div className="lg:col-span-1">
+                            <label className="text-gray-400 text-sm block mb-1">Prize pool (total)</label>
+                            <Input
+                              value={prizePool}
+                              onChange={(e) => setPrizePool(e.target.value)}
+                              placeholder="e.g. $5,000"
+                              className="bg-black/50 border-gold/30 text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-1">Description</label>
+                          <Textarea
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            placeholder="What's this tournament about? Shown on the Overview tab."
+                            rows={4}
+                            className="bg-black/50 border-gold/30 text-white"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
+                            <div className="flex gap-3 items-start">
+                              <Input
+                                value={imageUrl}
+                                onChange={(e) => setImageUrl(e.target.value)}
+                                placeholder="https://…"
+                                className="bg-black/50 border-gold/30 text-white flex-1"
+                              />
+                              <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                                {imageUrl && !imageBroken ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={imageUrl}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                    onError={() => setImageBroken(true)}
+                                  />
+                                ) : (
+                                  <ImageOff className="h-4 w-4 text-gray-600" />
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-gray-500 text-xs mt-1">
+                              Wide banner shown at the top of the tournament page.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="text-gray-400 text-sm block mb-1">Tournament logo URL</label>
+                            <div className="flex gap-3 items-start">
+                              <Input
+                                value={logoUrl}
+                                onChange={(e) => setLogoUrl(e.target.value)}
+                                placeholder="https://…"
+                                className="bg-black/50 border-gold/30 text-white flex-1"
+                              />
+                              <div className="w-12 h-12 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
+                                {logoUrl && !logoBroken ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <Image
+                                    src={logoUrl}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                    onError={() => setLogoBroken(true)}
+                                    width={48}
+                                    height={48}
+                                  />
+                                ) : (
+                                  <ImageOff className="h-4 w-4 text-gray-600" />
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-gray-500 text-xs mt-1">
+                              Square badge — used as the watermark behind the Final on the bracket.
+                              Falls back to your org's logo if left blank.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-gray-400 text-sm block mb-1">Website</label>
+                            <Input
+                              value={website}
+                              onChange={(e) => setWebsite(e.target.value)}
+                              placeholder="https://…"
+                              className="bg-black/50 border-gold/30 text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-gray-400 text-sm block mb-1">Twitter</label>
+                            <Input
+                              value={twitter}
+                              onChange={(e) => setTwitter(e.target.value)}
+                              placeholder="https://x.com/…"
+                              className="bg-black/50 border-gold/30 text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-gray-400 text-sm block mb-1">Discord</label>
+                            <Input
+                              value={discord}
+                              onChange={(e) => setDiscord(e.target.value)}
+                              placeholder="https://discord.gg/…"
+                              className="bg-black/50 border-gold/30 text-white"
+                            />
+                          </div>
                         </div>
                       </div>
-                      <p className="text-gray-500 text-xs mt-1">
-                        Wide banner shown at the top of the tournament page.
-                      </p>
-                    </div>
 
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Tournament logo URL</label>
-                      <div className="flex gap-3 items-start">
-                        <Input
-                          value={logoUrl}
-                          onChange={(e) => setLogoUrl(e.target.value)}
-                          placeholder="https://…"
-                          className="bg-black/50 border-gold/30 text-white flex-1"
-                        />
-                        <div className="w-12 h-12 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
-                          {logoUrl && !logoBroken ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <Image 
-                              src={logoUrl}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={() => setLogoBroken(true)}
-                              width={48}
-                              height={48}
-                            />
-                          ) : (
-                            <ImageOff className="h-4 w-4 text-gray-600" />
-                          )}
-                        </div>
+                      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
+                        <Button
+                          onClick={handleSave}
+                          disabled={!dirty || isSaving}
+                          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                        >
+                          <Save className="mr-2 h-4 w-4" />
+                          {isSaving ? "Saving…" : "Save changes"}
+                        </Button>
+                        {savedAt && !dirty && (
+                          <span className="flex items-center gap-1.5 text-green-500 text-sm">
+                            <CheckCircle2 className="h-4 w-4" /> Saved
+                          </span>
+                        )}
+                        {saveError && (
+                          <span className="flex items-center gap-1.5 text-red-500 text-sm">
+                            <AlertCircle className="h-4 w-4" /> {saveError}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-gray-500 text-xs mt-1">
-                        Square badge — used as the watermark behind the Final on the bracket.
-                        Falls back to your org's logo if left blank.
-                      </p>
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Website</label>
-                      <Input
-                        value={website}
-                        onChange={(e) => setWebsite(e.target.value)}
-                        placeholder="https://…"
-                        className="bg-black/50 border-gold/30 text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Twitter</label>
-                      <Input
-                        value={twitter}
-                        onChange={(e) => setTwitter(e.target.value)}
-                        placeholder="https://x.com/…"
-                        className="bg-black/50 border-gold/30 text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 text-sm block mb-1">Discord</label>
-                      <Input
-                        value={discord}
-                        onChange={(e) => setDiscord(e.target.value)}
-                        placeholder="https://discord.gg/…"
-                        className="bg-black/50 border-gold/30 text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
-                  <Button
-                    onClick={handleSave}
-                    disabled={!dirty || isSaving}
-                    className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-                  >
-                    <Save className="mr-2 h-4 w-4" />
-                    {isSaving ? "Saving…" : "Save changes"}
-                  </Button>
-                  {savedAt && !dirty && (
-                    <span className="flex items-center gap-1.5 text-green-500 text-sm">
-                      <CheckCircle2 className="h-4 w-4" /> Saved
-                    </span>
                   )}
-                  {saveError && (
-                    <span className="flex items-center gap-1.5 text-red-500 text-sm">
-                      <AlertCircle className="h-4 w-4" /> {saveError}
-                    </span>
-                  )}
-                </div>
-              </div>
 
-              {/* PRIZES — its own table, saved separately from Details */}
-              <div id="prizes" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
-                <SectionHeading icon={Trophy} title="Prizes" />
+                  {/* PRIZES */}
+                  {activeSection === "prizes" && (
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
+                      <SectionHeading icon={Trophy} title="Prizes" />
 
-                {!prizesLoaded ? (
-                  <p className="text-gray-500 text-sm">Loading…</p>
-                ) : (
-                  <>
-                    <div className="space-y-3">
-                      {prizes.length === 0 && (
-                        <p className="text-gray-500 text-sm italic">No prizes added yet.</p>
-                      )}
-                      {prizes.map((p, i) => (
-                        <div key={i} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-                          <Input
-                            value={p.place}
-                            onChange={(e) => updatePrizeRow(i, "place", e.target.value)}
-                            placeholder="e.g. 1st Place"
-                            className="bg-black/50 border-gold/30 text-white sm:w-1/3"
-                          />
-                          <Input
-                            value={p.reward}
-                            onChange={(e) => updatePrizeRow(i, "reward", e.target.value)}
-                            placeholder="e.g. $2,500 + trophy"
-                            className="bg-black/50 border-gold/30 text-white flex-1"
-                          />
+                      {!prizesLoaded ? (
+                        <p className="text-gray-500 text-sm">Loading…</p>
+                      ) : (
+                        <>
+                          <div className="space-y-3">
+                            {prizes.length === 0 && (
+                              <p className="text-gray-500 text-sm italic">No prizes added yet.</p>
+                            )}
+                            {prizes.map((p, i) => (
+                              <div key={i} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+                                <Input
+                                  value={p.place}
+                                  onChange={(e) => updatePrizeRow(i, "place", e.target.value)}
+                                  placeholder="e.g. 1st Place"
+                                  className="bg-black/50 border-gold/30 text-white sm:w-1/3"
+                                />
+                                <Input
+                                  value={p.reward}
+                                  onChange={(e) => updatePrizeRow(i, "reward", e.target.value)}
+                                  placeholder="e.g. $2,500 + trophy"
+                                  className="bg-black/50 border-gold/30 text-white flex-1"
+                                />
+                                <Button
+                                  type="button"
+                                  onClick={() => removePrizeRow(i)}
+                                  className="bg-transparent hover:bg-red-600/20 text-red-500 border border-red-500/30 px-3"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+
                           <Button
                             type="button"
-                            onClick={() => removePrizeRow(i)}
-                            className="bg-transparent hover:bg-red-600/20 text-red-500 border border-red-500/30 px-3"
+                            onClick={addPrizeRow}
+                            className="mt-4 bg-transparent hover:bg-gold/10 text-gold border border-gold/30"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add prize
                           </Button>
+
+                          <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
+                            <Button
+                              onClick={handleSavePrizes}
+                              disabled={!prizesDirty || isSavingPrizes}
+                              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                            >
+                              <Save className="mr-2 h-4 w-4" />
+                              {isSavingPrizes ? "Saving…" : "Save prizes"}
+                            </Button>
+                            {prizesSavedAt && !prizesDirty && (
+                              <span className="flex items-center gap-1.5 text-green-500 text-sm">
+                                <CheckCircle2 className="h-4 w-4" /> Saved
+                              </span>
+                            )}
+                            {prizesSaveError && (
+                              <span className="flex items-center gap-1.5 text-red-500 text-sm">
+                                <AlertCircle className="h-4 w-4" /> {prizesSaveError}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* BRACKET */}
+                  {activeSection === "bracket" && (
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
+                      <SectionHeading icon={Swords} title="Bracket" />
+
+                      {format === "round_robin" ? (
+                        <p className="text-gray-400 text-sm">
+                          Round-robin tournaments don't use a bracket — check the Points Table on the
+                          tournament page instead.
+                        </p>
+                      ) : bracketExists === null ? (
+                        <p className="text-gray-500 text-sm">Checking…</p>
+                      ) : bracketExists ? (
+                        <>
+                          <p className="text-gray-300 text-sm mb-4">
+                            A bracket has already been generated for this tournament.
+                          </p>
+                          <div className="mb-4">
+                            <label className="text-gray-400 text-sm block mb-1">Reseed using</label>
+                            <select
+                              value={seedingMethod}
+                              onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
+                              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                            >
+                              <option value="random">Random draw</option>
+                              <option value="creation_order">Team creation order</option>
+                            </select>
+                          </div>
+                          <Button
+                            onClick={handleRegenerateBracket}
+                            disabled={isGenerating}
+                            className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
+                          >
+                            {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
+                          </Button>
+                          <p className="text-gray-500 text-xs mt-2">
+                            This deletes all existing matches and results for this tournament and
+                            builds a fresh bracket.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-gray-300 text-sm mb-4">
+                            No bracket yet — this needs a completed auction with at least 2 teams
+                            linked to this tournament.
+                          </p>
+                          <div className="mb-4">
+                            <label className="text-gray-400 text-sm block mb-1">Seed teams using</label>
+                            <select
+                              value={seedingMethod}
+                              onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
+                              className="w-full bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
+                            >
+                              <option value="random">Random draw</option>
+                              <option value="creation_order">Team creation order</option>
+                            </select>
+                          </div>
+                          <Button
+                            onClick={handleGenerateBracket}
+                            disabled={isGenerating}
+                            className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                          >
+                            {isGenerating ? "Generating…" : "Generate Bracket"}
+                          </Button>
+                        </>
+                      )}
+
+                      {generateSuccess && (
+                        <span className="flex items-center gap-1.5 text-green-500 text-sm mt-3">
+                          <CheckCircle2 className="h-4 w-4" /> Bracket generated
+                        </span>
+                      )}
+                      {generateError && (
+                        <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
+                          <AlertCircle className="h-4 w-4" /> {generateError}
+                        </span>
+                      )}
+
+                      {bracketExists && (
+                        <div className="mt-6 pt-4 border-t border-gold/10">
+                          <Link href={`/tournaments/${tournament.id}/bracket/edit`}>
+                            <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30">
+                              <Swords className="mr-2 h-4 w-4" />
+                              Edit bracket
+                            </Button>
+                          </Link>
                         </div>
-                      ))}
-                    </div>
-
-                    <Button
-                      type="button"
-                      onClick={addPrizeRow}
-                      className="mt-4 bg-transparent hover:bg-gold/10 text-gold border border-gold/30"
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add prize
-                    </Button>
-
-                    <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
-                      <Button
-                        onClick={handleSavePrizes}
-                        disabled={!prizesDirty || isSavingPrizes}
-                        className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-                      >
-                        <Save className="mr-2 h-4 w-4" />
-                        {isSavingPrizes ? "Saving…" : "Save prizes"}
-                      </Button>
-                      {prizesSavedAt && !prizesDirty && (
-                        <span className="flex items-center gap-1.5 text-green-500 text-sm">
-                          <CheckCircle2 className="h-4 w-4" /> Saved
-                        </span>
-                      )}
-                      {prizesSaveError && (
-                        <span className="flex items-center gap-1.5 text-red-500 text-sm">
-                          <AlertCircle className="h-4 w-4" /> {prizesSaveError}
-                        </span>
                       )}
                     </div>
-                  </>
-                )}
-              </div>
+                  )}
 
- 
-              <div id="teams" className="scroll-mt-28 mb-6">
-                <TeamsManager
-                  tournamentId={tournament.id}
-                  orgId={tournament.orgId!}
-                  tournamentName={tournament.name}
-                  sourceType={tournament.sourceType}
-                  sourceId={tournament.sourceId}
-                />
-              </div>
-
-              {/* BRACKET — generates bracket_matches from the linked auction's teams */}
-              <div id="bracket" className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-6 scroll-mt-28">
-                <SectionHeading icon={Swords} title="Bracket" />
-
-                {format === "round_robin" ? (
-                  <p className="text-gray-400 text-sm">
-                    Round-robin tournaments don't use a bracket — check the Points Table on the
-                    tournament page instead.
-                  </p>
-                ) : bracketExists === null ? (
-                  <p className="text-gray-500 text-sm">Checking…</p>
-                ) : bracketExists ? (
-                  <>
-                    <p className="text-gray-300 text-sm mb-4">
-                      A bracket has already been generated for this tournament.
-                    </p>
-                    <div className="mb-4">
-                      <label className="text-gray-400 text-sm block mb-1">Reseed using</label>
-                      <select
-                        value={seedingMethod}
-                        onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                        className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                      >
-                        <option value="random">Random draw</option>
-                        <option value="creation_order">Team creation order</option>
-                      </select>
+                  {/* TEAMS */}
+                  {activeSection === "teams" && (
+                    <div className="space-y-5">
+                      <TeamsManager
+                        tournamentId={tournament.id}
+                        orgId={tournament.orgId!}
+                        tournamentName={tournament.name}
+                        sourceType={tournament.sourceType}
+                        sourceId={tournament.sourceId}
+                      />
+                      <div className="bg-black/30 border border-gold/10 rounded-lg p-4">
+                        <p className="text-gray-400 text-xs flex items-start gap-2">
+                          <Users className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
+                          <span>
+                            <span className="text-gold font-semibold">Squads</span> aren't edited here
+                            — they come from your linked auction's results. Update the auction to
+                            change those.
+                          </span>
+                        </p>
+                      </div>
                     </div>
-                    <Button
-                      onClick={handleRegenerateBracket}
-                      disabled={isGenerating}
-                      className="bg-red-600/80 hover:bg-red-600 text-white font-bold disabled:opacity-50"
-                    >
-                      {isGenerating ? "Regenerating…" : "Delete & Regenerate Bracket"}
-                    </Button>
-                    <p className="text-gray-500 text-xs mt-2">
-                      This deletes all existing matches and results for this tournament and
-                      builds a fresh bracket.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-gray-300 text-sm mb-4">
-                      No bracket yet — this needs a completed auction with at least 2 teams
-                      linked to this tournament.
-                    </p>
-                    <div className="mb-4">
-                      <label className="text-gray-400 text-sm block mb-1">Seed teams using</label>
-                      <select
-                        value={seedingMethod}
-                        onChange={(e) => setSeedingMethod(e.target.value as SeedingMethod)}
-                        className="w-full sm:w-64 bg-black/50 border border-gold/30 rounded-md text-white text-sm px-3 py-2"
-                      >
-                        <option value="random">Random draw</option>
-                        <option value="creation_order">Team creation order</option>
-                      </select>
+                  )}
+
+                  {/* MATCHES / SCHEDULE */}
+                  {activeSection === "schedule" && (
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
+                      <SectionHeading icon={CalendarClock} title="Matches" />
+                      <MatchesManager
+                        tournamentId={tournament.id}
+                        tournamentName={tournament.name}
+                        orgId={tournament.orgId!}
+                      />
                     </div>
-                    <Button
-                      onClick={handleGenerateBracket}
-                      disabled={isGenerating}
-                      className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-                    >
-                      {isGenerating ? "Generating…" : "Generate Bracket"}
-                    </Button>
-                  </>
-                )}
+                  )}
 
-                {generateSuccess && (
-                  <span className="flex items-center gap-1.5 text-green-500 text-sm mt-3">
-                    <CheckCircle2 className="h-4 w-4" /> Bracket generated
-                  </span>
-                )}
-                {generateError && (
-                  <span className="flex items-center gap-1.5 text-red-500 text-sm mt-3">
-                    <AlertCircle className="h-4 w-4" /> {generateError}
-                  </span>
-                )}
+                  {/* AWARDS */}
+                  {activeSection === "awards" && (
+                    <PlaceholderSection
+                      icon={Award}
+                      title="Awards"
+                      note="Backed by tournament_awards — reading works, but there's no write function or UI yet. Usually filled in after the tournament ends."
+                    />
+                  )}
 
-                {bracketExists && (
-                  <div className="mt-6 pt-4 border-t border-gold/10">
-                    <Link href={`/tournaments/${tournament.id}/bracket/edit`}>
-                      <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30">
-                        <Swords className="mr-2 h-4 w-4" />
-                        Edit bracket
+                  <div className="text-center xl:hidden mt-8">
+                    <Link href={`/tournaments/${tournament.id}`}>
+                      <Button className="bg-gold hover:bg-gold/90 text-black font-bold">
+                        Back to tournament page
                       </Button>
                     </Link>
                   </div>
-                )}
-              </div>
-
-
-              {/* MATCHES / SCHEDULE — bracket_matches fixtures each get a
-                  "Create Match" action that inserts into `matches` and links
-                  via overlay_match_id, plus a section for standalone manual
-                  matches that aren't tied to any bracket fixture. */}
-              <div id="schedule" className="scroll-mt-28 mb-6">
-                <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-                  <SectionHeading icon={CalendarClock} title="Matches" />
-                  <MatchesManager
-                    tournamentId={tournament.id}
-                    tournamentName={tournament.name}
-                    orgId={tournament.orgId!}
-                  />
                 </div>
-              </div>
 
-              {/* PLACEHOLDER SECTION — still needs write support */}
-              <div id="awards" className="scroll-mt-28">
-                <PlaceholderSection
-                  icon={Award}
-                  title="Awards"
-                  note="Backed by tournament_awards — reading works, but there's no write function or UI yet. Usually filled in after the tournament ends."
-                />
-              </div>
+                {/* ── RIGHT RAIL — xl-only live preview. Sticky to the
+                    viewport and stretched to the maximum height it can
+                    have (calc(100vh - top offset)), scrolling internally
+                    if its own content ever runs longer than that. ──────── */}
+                <aside className="hidden xl:flex xl:sticky xl:top-28">
+                  <div className="space-y-4">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Live Preview
+                      </span>
+                      <div className="bg-black/50 border border-gold/20 rounded-lg overflow-hidden">
+                        <div className="relative h-28 bg-black/60 border-b border-gold/10">
+                          {imageUrl && !imageBroken ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <ImageOff className="h-5 w-5 text-gray-700" />
+                            </div>
+                          )}
+                          <div className="absolute -bottom-6 left-4 w-14 h-14 rounded-full border-2 border-gold/40 bg-black overflow-hidden flex items-center justify-center shadow-lg">
+                            {logoUrl && !logoBroken ? (
+                              <Image
+                                src={logoUrl}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                width={56}
+                                height={56}
+                              />
+                            ) : (
+                              <ImageOff className="h-3.5 w-3.5 text-gray-600" />
+                            )}
+                          </div>
+                        </div>
 
-              <div className="bg-black/30 border border-gold/10 rounded-lg p-4 mb-8">
-                <p className="text-gray-400 text-xs flex items-start gap-2">
-                  <Users className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
-                  <span>
-                    <span className="text-gold font-semibold">Squads</span> aren't edited here —
-                    they come from your linked auction's results. Update the auction to change
-                    those.
-                  </span>
-                </p>
-              </div>
+                        <div className="pt-9 pb-4 px-4">
+                          <h3 className="text-white font-cinzel font-bold text-sm leading-snug mb-2">
+                            {name || "Untitled tournament"}
+                          </h3>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-gold/30 text-gold bg-gold/5">
+                              {format === "single_elimination"
+                                ? "Single Elim"
+                                : format === "double_elimination"
+                                  ? "Double Elim"
+                                  : "Round Robin"}
+                            </span>
+                            <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-white/15 text-gray-300">
+                              {status}
+                            </span>
+                          </div>
+                          <dl className="space-y-1.5 text-xs">
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-gray-500">Starts</dt>
+                              <dd className="text-gray-300">{startDate || "—"}</dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-gray-500">Prize pool</dt>
+                              <dd className="text-gray-300">{prizePool || "—"}</dd>
+                            </div>
+                          </dl>
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="text-center">
-                <Link href={`/tournaments/${tournament.id}`}>
-                  <Button className="bg-gold hover:bg-gold/90 text-black font-bold">
-                    Back to tournament page
-                  </Button>
-                </Link>
+                    {/* Setup checklist */}
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Setup checklist
+                      </span>
+                      <ul className="space-y-2 text-xs">
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              imageUrl ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span className={imageUrl ? "text-gray-300" : "text-gray-500"}>
+                            Banner &amp; logo set
+                          </span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              prizes.length ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span className={prizes.length ? "text-gray-300" : "text-gray-500"}>
+                            Prizes configured
+                          </span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              bracketExists ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span className={bracketExists ? "text-gray-300" : "text-gray-500"}>
+                            Bracket generated
+                          </span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              website || twitter || discord ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span
+                            className={
+                              website || twitter || discord ? "text-gray-300" : "text-gray-500"
+                            }
+                          >
+                            Social links added
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Links */}
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Links
+                      </span>
+                      {website || twitter || discord ? (
+                        <ul className="space-y-1.5 text-xs text-gray-400 break-all">
+                          {website && <li>{website}</li>}
+                          {twitter && <li>{twitter}</li>}
+                          {discord && <li>{discord}</li>}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-gray-600 italic">No links added yet</p>
+                      )}
+                    </div>
+
+                    {/* Prizes */}
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Prizes
+                      </span>
+                      {prizesLoaded && prizes.length > 0 ? (
+                        <ul className="space-y-1.5 text-xs">
+                          {prizes.slice(0, 5).map((p, i) => (
+                            <li key={i} className="flex justify-between gap-2">
+                              <span className="text-gray-500 shrink-0">{p.place || "—"}</span>
+                              <span className="text-gray-300 text-right">{p.reward || "—"}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-gray-600 italic">No prizes added yet</p>
+                      )}
+                    </div>
+
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Bracket
+                      </span>
+                      <p className="text-xs text-gray-400">
+                        {bracketExists === null
+                          ? "Checking…"
+                          : bracketExists
+                            ? "Generated ✓"
+                            : "Not generated yet"}
+                      </p>
+                    </div>
+                  </div>
+                </aside>
               </div>
-            </>
+            </div>
           )}
         </div>
       </section>
@@ -861,7 +1077,7 @@ function PlaceholderSection({
   note: string
 }) {
   return (
-    <div className="bg-black/30 border border-gold/10 rounded-lg p-6 mb-6 opacity-60">
+    <div className="bg-black/30 border border-gold/10 rounded-lg p-6 opacity-60">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-gray-500" />
