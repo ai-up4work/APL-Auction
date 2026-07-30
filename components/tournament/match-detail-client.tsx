@@ -65,7 +65,7 @@ const images = {
 // "Image not available" placeholder otherwise.
 function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   return (
-    <div className="relative h-20 w-20 bg-gradient-to-b from-white/10 to-black/40 backdrop-blur-md rounded-2xl border border-gold/30 mb-3 flex items-center justify-center overflow-hidden shrink-0 shadow-[0_0_20px_rgba(245,166,35,0.15)]">
+    <div className="relative h-32 w-32 bg-gradient-to-b from-white/10 to-black/40 backdrop-blur-md rounded-2xl border border-gold/30 mb-3 flex items-center justify-center overflow-hidden shrink-0 shadow-[0_0_20px_rgba(245,166,35,0.15)]">
       {src ? (
         <Image src={src} alt={alt} fill className="object-cover" sizes="96px" />
       ) : (
@@ -339,26 +339,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         <div className="absolute inset-0 z-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
         <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-transparent to-transparent opacity-80" />
 
-        <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10 max-w-full">
-          <div className="relative mb-6 h-30 w-30 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center overflow-hidden backdrop-blur-sm shadow-[0_0_15px_rgba(245,166,35,0.2)] shrink-0">
-            {images.tournament ? (
-              <Image
-                src={images.tournament}
-                alt={`${match.tournamentName ?? "Match"} logo`}
-                fill
-                className="object-contain p-2"
-                sizes="80px"
-              />
-            ) : (
-              <span className="text-[10px] text-gray-500 font-cinzel text-center leading-tight uppercase">
-                Image
-                <br />
-                not
-                <br />
-                available
-              </span>
-            )}
-          </div>
+        <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10 max-w-full mb-20">
 
           <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
             <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
@@ -412,7 +393,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
           WinProbabilityBar), replacing the old
           standalone Stats tab.
       ═══════════════════════════════════════════ */}
-      <section className="px-4 relative z-10 -mt-8">
+      <section className="px-4 relative z-10 -mt-24">
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
