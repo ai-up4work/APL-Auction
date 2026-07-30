@@ -95,7 +95,7 @@ export async function getMembersForOrg(orgId: string): Promise<OrgMember[]> {
 
   // Fetch profiles for these users
   const { data: profiles } = await supabase
-    .from("profiles")
+    .from("user_profiles")
     .select("id, email, full_name")
     .in("id", userIds);
 
@@ -140,6 +140,11 @@ export interface InviteResult {
   ok: boolean;
   error?: string;
   invite?: OrgInvite;
+  /** True if the Supabase invite email actually went out. False (with the
+   *  invite still created) usually means the email already has an account
+   *  — Supabase only emails brand-new auth users this way. In that case,
+   *  share the /invite/[token] link with them directly instead. */
+  emailSent?: boolean;
 }
 
 /** Creates (or refreshes) a pending invite for an email+role. If a pending
@@ -174,7 +179,7 @@ export async function createInvite(
       org_id: orgId,
       email: normalizedEmail,
       role,
-      created_by: invitedBy,
+      invited_by: invitedBy,
     })
     .select("id, org_id, email, role, token, status, created_at, expires_at")
     .single();
@@ -184,22 +189,40 @@ export async function createInvite(
     return { ok: false, error: "Couldn't send that invite — please try again." };
   }
 
-  // TODO: Send invitation email here with link: /invite/${data.token}
-  // Example: await sendInviteEmail(data.email, data.token, role);
-
-  return {
-    ok: true,
-    invite: {
-      id: data.id,
-      orgId: data.org_id,
-      email: data.email,
-      role: data.role,
-      token: data.token,
-      status: data.status,
-      createdAt: data.created_at,
-      expiresAt: data.expires_at,
-    },
+  const invite: OrgInvite = {
+    id: data.id,
+    orgId: data.org_id,
+    email: data.email,
+    role: data.role,
+    token: data.token,
+    status: data.status,
+    createdAt: data.created_at,
+    expiresAt: data.expires_at,
   };
+
+  // Fire the actual email through Supabase's built-in invite flow. This is
+  // a server route because it needs the service role key, which must
+  // never live in client code. Best-effort: the invite row above already
+  // exists regardless of whether the email succeeds, so a failure here
+  // doesn't roll anything back — it just means the link needs to be
+  // shared by hand (surfaced to the caller via emailSent: false).
+  let emailSent = false;
+  try {
+    const res = await fetch("/api/invites/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: invite.email, token: invite.token, orgId, role }),
+    });
+    const sendResult = await res.json();
+    emailSent = !!sendResult.ok;
+    if (!emailSent) {
+      console.error("Invite email failed to send:", sendResult.error);
+    }
+  } catch (err) {
+    console.error("Invite email request failed:", err);
+  }
+
+  return { ok: true, invite, emailSent };
 }
 
 export async function revokeInvite(inviteId: string): Promise<boolean> {
@@ -271,7 +294,7 @@ export async function acceptInvite(token: string, userId: string, userEmail: str
 
   const { error: updateErr } = await supabase
     .from("org_invites")
-    .update({ status: "accepted", joined_at: new Date().toISOString() })
+    .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", invite.id);
 
   if (updateErr) {
