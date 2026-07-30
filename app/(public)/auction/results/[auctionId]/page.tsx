@@ -241,22 +241,25 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
           <section className="col-span-6 flex flex-col relative z-0 pointer-events-none" />
 
           {/* Team list */}
-          <aside ref={teamListRef} className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5">
-            <div className="flex items-center justify-between mb-4 pt-2">
-              <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
+          <aside
+            ref={teamListRef}
+            className="col-span-3 h-full flex flex-col justify-center overflow-hidden px-6 py-6 z-10 border-l border-white/5"
+            >
+            <div className="flex items-center justify-between mb-4 absolute top-[72px] right-6">
+                <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
                 Teams
-              </h3>
-              <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest">
+                </h3>
+                <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest ml-3">
                 {flowTeams.length}
-              </span>
+                </span>
             </div>
 
             {flowTeams.length === 0 ? (
-              <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
+                <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest text-center">
                 No teams added yet.
-              </p>
+                </p>
             ) : (
-              <div className="flex flex-col space-y-3 pb-20">
+                <div className="flex flex-col space-y-3">
                 {flowTeams.map((t) => {
                   const isHighlighted = activeTeam === t.id;
                   const isDimmed = activeTeam !== null && !isHighlighted;
