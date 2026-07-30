@@ -1,6 +1,6 @@
 import { AuctionConfig } from '@/types/sankeytype';
 
-export const AUCTION_CONFIG = {
+export const AUCTION_CONFIG: AuctionConfig = {
     players: [
         { id: 'p1', name: 'Marcus Vane', status: 'sold', price: '$2.4M', teamShortCode: 'KKR', img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBHA2u7p1Bsfc-isQBuMY6Tyy5w-w1VgmqlnqcgdmAPYUjT6X1Ya49i7v2J8E86APuRCQIJbgT2QU3FlZRMjumI3f7GnriJT8ArIahOfawvkDdY4tO01-ql0v6yKKpGWgjrprreCFw6qzHppBE3EGE_wcIK14EZtYv5KoxZ5H78uIYWDpREvheAcN2ucbF-2Uhtl1QPXsHbbxYHt9_2sFNABMg2p945DX94NqNQYQfMkiuwARZHDIoOa_B1UkS_aS_9hU0TbmQst3A' },
         { id: 'p2', name: 'Dominic Vance', status: 'sold', price: '$4.25M', teamShortCode: 'MI', img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCHv-1L_r_F-Isc6mR95V108179Vscv04M-o0xK1tOcl94jO5o_lM-f3hR2E_V8FvN7i2lZf4oN' },
@@ -33,4 +33,4 @@ export const AUCTION_CONFIG = {
         // { id: 't7', shortCode: 'LSG', name: 'Lucknow Super Giants', purse: '$12.0M', logoUrl: null },
         // { id: 't8', shortCode: 'GT', name: 'Gujarat Titans', purse: '$19.3M', logoUrl: null }
     ]
-} as unknown as AuctionConfig;
+};

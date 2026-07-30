@@ -232,6 +232,10 @@ export default function OwnerIndexPage() {
     { segment: "history", icon: "reorder",  label: "Bid History", sub: "Every transaction" },
   ];
 
+  const handleViewResults = () => {
+    window.open(`/auction/results/${auctionId}`, '_blank');
+  };
+
   // ── loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -521,6 +525,15 @@ export default function OwnerIndexPage() {
                 delay={`${0.21 + i * 0.07}s`}
               />
             ))}
+            {/* View Public Results Button */}
+            <button
+              onClick={handleViewResults}
+              className="anim-up-5 w-full px-4 py-3 rounded-2xl border border-gold/30 flex items-center gap-2.5 cursor-pointer font-inter text-sm font-medium uppercase tracking-[0.05em] text-gold bg-gold/5 hover:bg-gold/10 hover:border-gold/50 transition-all duration-200"
+              style={{ animationDelay: `${0.21 + NAV_ITEMS.length * 0.07}s` }}
+            >
+              <span className="ms ms-300 text-[18px]">open_in_new</span>
+              View Public Results
+            </button>
           </div>
 
         </main>

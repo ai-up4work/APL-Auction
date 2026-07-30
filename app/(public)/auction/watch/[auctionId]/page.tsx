@@ -33,10 +33,10 @@ type FlowPlayer = (typeof AUCTION_CONFIG.players)[number];
 type FlowTeam   = (typeof AUCTION_CONFIG.teams)[number];
 
 function buildFlowPlayer(overrides: {
-  id: string; name: string; img: string; price: string;
+  id: string; name: string; img: string | null; price: string;
   status: FlowPlayer["status"]; teamShortCode?: string | null;
 }): FlowPlayer {
-  return { ...AUCTION_CONFIG.players[0], ...overrides } as unknown as FlowPlayer;
+  return { ...AUCTION_CONFIG.players[0], ...overrides } as FlowPlayer;
 }
 
 function buildFlowTeam(overrides: {

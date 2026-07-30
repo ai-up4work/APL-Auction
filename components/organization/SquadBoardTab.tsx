@@ -14,6 +14,7 @@ import {
   Users,
   Crown,
   FolderOpen,
+  BarChart3,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -304,12 +305,21 @@ function FolderCard({
         </button>
 
         <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-double border-gold/15">
-          <button
-            onClick={onOpen}
-            className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
-          >
-            Open <FolderOpen className="h-3 w-3" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpen}
+              className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+            >
+              Open <FolderOpen className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => window.open(`/squad-board/results/${board.id}`, '_blank')}
+              title="View public results"
+              className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+            >
+              Results <BarChart3 className="h-3 w-3" />
+            </button>
+          </div>
           <button
             onClick={onDelete}
             disabled={deleting}

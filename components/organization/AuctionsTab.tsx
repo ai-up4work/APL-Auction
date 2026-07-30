@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy } from "lucide-react"
+import { Plus, Trash2, Loader2, AlertCircle, Landmark, ArrowRight, Trophy, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -55,12 +55,21 @@ function AuctionCard({
       )}
 
       <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-white/5">
-        <Link
-          href={`/auction/admin/${auction.id}`}
-          className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
-        >
-          Open in admin <ArrowRight className="h-3 w-3" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/auction/admin/${auction.id}`}
+            className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+          >
+            Open in admin <ArrowRight className="h-3 w-3" />
+          </Link>
+          <button
+            onClick={() => window.open(`/auction/results/${auction.id}`, '_blank')}
+            title="View public results"
+            className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold transition-colors"
+          >
+            Results <BarChart3 className="h-3 w-3" />
+          </button>
+        </div>
         <button
           onClick={onDelete}
           disabled={deleting}

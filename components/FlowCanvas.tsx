@@ -1,17 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { Player } from '@/types/sankeytype';
+import { Player, Team } from '@/types/sankeytype';
 
 interface FlowCanvasProps {
   players: Player[];
+  teams?: Team[];
   playerListRef: React.RefObject<HTMLDivElement | null>;
   teamListRef: React.RefObject<HTMLDivElement | null>;
   activePlayer: string | null;
   activeTeam: string | null;
 }
 
-export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, activeTeam }: FlowCanvasProps) {
+export function FlowCanvas({ players, teams, playerListRef, teamListRef, activePlayer, activeTeam }: FlowCanvasProps) {
+  // `teams` is unused by the drawing logic (team DOM nodes are looked up via
+  // p.teamShortCode instead). Kept optional so callers without team data
+  // (e.g. the watch page) aren't forced to pass it.
+  void teams;
+
   const svgRef = useRef<SVGSVGElement>(null);
   const [paths, setPaths] = useState<{ id: string; d: string; highlighted: boolean; dimmed: boolean }[]>([]);
 
@@ -22,7 +28,7 @@ export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, 
       const svgRect = svgRef.current.getBoundingClientRect();
       const pContainer = playerListRef.current;
       const tContainer = teamListRef.current;
-      
+
       const pContRect = pContainer.getBoundingClientRect();
       const tContRect = tContainer.getBoundingClientRect();
 
@@ -47,20 +53,19 @@ export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, 
           if (pVisible || tVisible) {
             const startX = pRect.right - svgRect.left;
             const startY = pRect.top + pRect.height / 2 - svgRect.top;
-            
+
             const endX = tRect.left - svgRect.left;
             const endY = tRect.top + tRect.height / 2 - svgRect.top;
 
-            // FIX: Convert p.id to string for comparison
-            const isHighlighted = hasSelection 
-              ? (activePlayer !== null 
-                  ? activePlayer === String(p.id) 
-                  : activeTeam !== null && activeTeam === p.teamShortCode) 
+            const isHighlighted = hasSelection
+              ? (activePlayer !== null
+                  ? activePlayer === String(p.id)
+                  : activeTeam !== null && activeTeam === p.teamShortCode)
               : false;
             const isDimmed = hasSelection && !isHighlighted;
 
             newPaths.push({
-              id: String(p.id), // Ensure id is string
+              id: String(p.id),
               d: `M ${startX} ${startY} C ${startX + (endX - startX) * 0.4} ${startY}, ${startX + (endX - startX) * 0.6} ${endY}, ${endX} ${endY}`,
               highlighted: isHighlighted,
               dimmed: isDimmed
@@ -86,9 +91,9 @@ export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, 
 
   return (
     <div className="absolute inset-0 pointer-events-none z-0 overflow-visible">
-      <svg 
+      <svg
         ref={svgRef}
-        className="w-full h-full overflow-visible pointer-events-none" 
+        className="w-full h-full overflow-visible pointer-events-none"
       >
         <defs>
           <linearGradient id="flow-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -108,19 +113,17 @@ export function FlowCanvas({ players, playerListRef, teamListRef, activePlayer, 
         </defs>
         {paths.map(path => (
           <g key={path.id}>
-            {/* Base solid line */}
             <path
               className="transition-all duration-300"
               d={path.d}
               fill="none"
               stroke="url(#flow-gradient)"
               strokeWidth={path.highlighted ? 8 : 4}
-              style={{ 
+              style={{
                 opacity: path.dimmed ? 0.3 : (path.highlighted ? 1 : 0.6),
                 filter: path.highlighted ? 'url(#glow)' : (path.dimmed ? 'blur(3px)' : 'none')
               }}
             />
-            {/* Aesthetic flow dots animation overlay */}
             <path
               className="flow-dots transition-all duration-300"
               d={path.d}
