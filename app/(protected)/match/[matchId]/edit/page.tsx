@@ -25,6 +25,7 @@ import { useScrollTop } from "@/hooks/use-scroll-top"
 import { AppHeader } from "@/components/app-header"
 import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
+import ImageUploadField from "@/components/Admin/ImageUploadField"
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -82,6 +83,18 @@ import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 // directly editable; it's still written into match_setup under the
 // same `toss` key so anything already reading that field as plain text
 // (the simulator, older overlay reads) keeps working unchanged.
+//
+// ── BANNER IMAGE (NEW) ──
+// `tournamentLogoUrl` (despite the name, this is actually the match
+// banner image shown on the live/overlay page — kept as-is to avoid a
+// migration) is now editable via ImageUploadField instead of a raw URL
+// text box, same upload pattern already used for team/player images in
+// TeamPoolTab/PlayerBankTab. Uploads use context="match" +
+// contextId={matchId} + subType="banner", which the /api/uploads route
+// already supports (see the `context === "match"` branch), landing at
+// matches/{matchId}/banner/{filename}. Manual URL paste is still
+// allowed alongside upload, same as everywhere else ImageUploadField
+// is used.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -1214,7 +1227,7 @@ export default function EditMatchPage() {
                         <p className="text-gray-600 text-xs mb-4">Set both fields above to generate the toss line.</p>
                       )}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                           <FieldLabel>Tournament (ref / slug)</FieldLabel>
                           <TextInput
@@ -1223,14 +1236,29 @@ export default function EditMatchPage() {
                             placeholder="valiant-league-s1"
                           />
                         </div>
-                        <div>
-                          <FieldLabel>Match Banner URL</FieldLabel>
-                          <TextInput
-                            value={form.tournamentLogoUrl}
-                            onChange={(e) => update("tournamentLogoUrl", e.target.value)}
-                            placeholder="https://…"
-                          />
-                        </div>
+                      </div>
+
+                      {/* ── Match Banner — now an actual upload field
+                          (drag & drop or click), same component/pattern
+                          used for team logos and player photos elsewhere
+                          in the admin. Manual URL paste still works too.
+                          Uploads go through /api/uploads with
+                          context="match" + contextId={matchId} +
+                          subType="banner" → matches/{matchId}/banner/. ── */}
+                      <div>
+                        <ImageUploadField
+                          label="Match Banner"
+                          value={form.tournamentLogoUrl}
+                          onChange={(url) => update("tournamentLogoUrl", url)}
+                          context="match"
+                          contextId={matchId}
+                          subType="banner"
+                          allowManualUrl
+                          allowDelete
+                          onDelete={() => update("tournamentLogoUrl", "")}
+                          previewClassName="w-24 h-14"
+                          description="Upload a banner image or paste an image URL — shown on the live match/overlay page."
+                        />
                       </div>
                     </Panel>
                   )}
