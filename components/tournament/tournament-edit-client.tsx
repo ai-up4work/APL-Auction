@@ -1,3 +1,4 @@
+// app/components/tournament/tournament-edit-client.tsx
 "use client"
 
 import { useEffect, useState } from "react"
@@ -145,6 +146,23 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     setIsNavOpen(false)
   }
 
+  // ── Auto-advance: after a save/generate succeeds, move to the next tab
+  // in JUMP_SECTIONS. Delay defaults to 800ms so the "Saved ✓" state is
+  // still visible for a beat before the view swaps out from under it.
+  // No-ops on the last tab (Awards). ──────────────────────────────────────
+  const goToNextSection = (delayMs = 800) => {
+    const idx = JUMP_SECTIONS.findIndex((s) => s.id === activeSection)
+    if (idx === -1 || idx === JUMP_SECTIONS.length - 1) return
+    const nextId = JUMP_SECTIONS[idx + 1].id
+    if (delayMs <= 0) {
+      setActiveSection(nextId)
+      return
+    }
+    setTimeout(() => {
+      setActiveSection(nextId)
+    }, delayMs)
+  }
+
   // ── Auth + org-ownership gate ─────────────────────────────────────────
   useEffect(() => {
     if (authLoading) return
@@ -239,6 +257,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     setIsSaving(false)
     if (ok) {
       setSavedAt(Date.now())
+      goToNextSection()
     } else {
       setSaveError("Couldn't save — please try again.")
     }
@@ -291,6 +310,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       setPrizes(cleaned)
       setSavedPrizes(cleaned)
       setPrizesSavedAt(Date.now())
+      goToNextSection()
     } else {
       setPrizesSaveError("Couldn't save prizes — please try again.")
     }
@@ -305,6 +325,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     if (result.ok) {
       setBracketExists(true)
       setGenerateSuccess(true)
+      goToNextSection()
     } else {
       setGenerateError(result.error ?? "Couldn't generate the bracket.")
     }
@@ -328,6 +349,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     if (result.ok) {
       setBracketExists(true)
       setGenerateSuccess(true)
+      goToNextSection()
     } else {
       setGenerateError(result.error ?? "Couldn't generate the bracket.")
     }
@@ -356,8 +378,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
       <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        {/* Widened from max-w-3xl so the right rail has room to breathe on
-            desktop without the content column itself stretching uncomfortably wide. */}
         <div className="container mx-auto px-4 relative z-10 max-w-8xl">
           {gate === "checking" && (
             <p className="text-center text-gray-400">Checking access…</p>
@@ -402,9 +422,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 for now — see note below.
               </p>
 
-              {/* ── TOP NAV — full width, all breakpoints. Replaces the old
-                  left sidebar; the section tabs now sit above the content
-                  instead of stealing a column from it. ─────────────────── */}
               <nav className="flex flex-wrap gap-x-1 gap-y-2 mb-8 pb-4 border-b border-gold/10">
                 {JUMP_SECTIONS.map((s) => (
                   <button
@@ -422,18 +439,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 ))}
               </nav>
 
-              {/* ── CONTENT + LIVE PREVIEW. Content now takes the width the
-                  old left sidebar used to occupy. The Live Preview rail
-                  is never clipped — it renders at whatever height its own
-                  cards need. Grid's default stretch behavior then makes
-                  the main content column exactly that same height, and
-                  the main column scrolls internally (xl:overflow-y-auto)
-                  if its active section is taller than the preview. ────── */}
               <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-12 xl:items-stretch">
-                {/* MAIN CONTENT COLUMN — only the active section renders.
-                    xl:min-h-0 is required alongside overflow-y-auto here:
-                    without it, a stretched grid item won't actually clip
-                    content shorter than its own min-content height. */}
                 <div className="min-w-0 xl:sticky xl:top-28 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
                   {/* DETAILS */}
                   {activeSection === "details" && (
@@ -626,6 +632,15 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                             <AlertCircle className="h-4 w-4" /> {saveError}
                           </span>
                         )}
+                        {!dirty && (
+                          <button
+                            type="button"
+                            onClick={() => goToNextSection(0)}
+                            className="ml-auto text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                          >
+                            Edit Prizes →
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -695,6 +710,15 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                               <span className="flex items-center gap-1.5 text-red-500 text-sm">
                                 <AlertCircle className="h-4 w-4" /> {prizesSaveError}
                               </span>
+                            )}
+                            {!prizesDirty && (
+                              <button
+                                type="button"
+                                onClick={() => goToNextSection(0)}
+                                className="ml-auto text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                              >
+                                Edit Bracket →
+                              </button>
                             )}
                           </div>
                         </>
@@ -780,16 +804,23 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                         </span>
                       )}
 
-                      {bracketExists && (
-                        <div className="mt-6 pt-4 border-t border-gold/10">
+                      <div className="flex items-center justify-between mt-6 pt-4 border-t border-gold/10">
+                        {bracketExists && (
                           <Link href={`/tournaments/${tournament.id}/bracket/edit`}>
                             <Button className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30">
                               <Swords className="mr-2 h-4 w-4" />
                               Edit bracket
                             </Button>
                           </Link>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => goToNextSection(0)}
+                          className="ml-auto text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                        >
+                          Edit Teams →
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -813,6 +844,15 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           </span>
                         </p>
                       </div>
+                      <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={() => goToNextSection(0)}
+                          className="text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                        >
+                          Edit Schedule →
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -825,6 +865,15 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                         tournamentName={tournament.name}
                         orgId={tournament.orgId!}
                       />
+                      <div className="text-right mt-4 pt-4 border-t border-gold/10">
+                        <button
+                          type="button"
+                          onClick={() => goToNextSection(0)}
+                          className="text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                        >
+                          Edit Awards →
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -846,10 +895,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                   </div>
                 </div>
 
-                {/* ── RIGHT RAIL — xl-only live preview. Sticky to the
-                    viewport and stretched to the maximum height it can
-                    have (calc(100vh - top offset)), scrolling internally
-                    if its own content ever runs longer than that. ──────── */}
                 <aside className="hidden xl:flex xl:sticky xl:top-28">
                   <div className="space-y-4">
                     <div>
@@ -911,7 +956,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                       </div>
                     </div>
 
-                    {/* Setup checklist */}
                     <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Setup checklist
@@ -964,7 +1008,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                       </ul>
                     </div>
 
-                    {/* Links */}
                     <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Links
@@ -980,7 +1023,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                       )}
                     </div>
 
-                    {/* Prizes */}
                     <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Prizes
@@ -1019,7 +1061,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
         </div>
       </section>
 
-      {/* CONFIRM MODAL — same styling as the Bracket edit page's version */}
       {confirmDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
