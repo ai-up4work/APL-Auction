@@ -1181,9 +1181,7 @@ function BracketTeamRow({ team, isWinner }: { team: BracketTeam; isWinner: boole
 }
 
 // ─────────────────────────────────────────────────────────────
-// SQUADS PANEL — kept identical to the original/demo design
-// (name + captain + player chips). No logos, owner, or purse
-// fields here; that enhanced variant was intentionally reverted.
+// SQUADS PANEL
 // ─────────────────────────────────────────────────────────────
 function SquadsPanel({ squads }: { squads: Squad[] }) {
   return (
@@ -1222,20 +1220,9 @@ function SquadsPanel({ squads }: { squads: Squad[] }) {
               </div>
             </div>
             {hasRoster ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
                 {s.players.map((p, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 bg-white/[0.03] border border-gold/10 rounded-full pl-1 pr-3 py-1"
-                  >
-                    <span className="h-6 w-6 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
-                      {initials(p.name)}
-                    </span>
-                    <span className="text-gray-300 text-xs">
-                      {p.name}
-                      {p.isCaptain && <span className="text-gold ml-1">(C)</span>}
-                    </span>
-                  </div>
+                  <PlayerCard key={i} player={p} />
                 ))}
               </div>
             ) : (
@@ -1244,6 +1231,46 @@ function SquadsPanel({ squads }: { squads: Squad[] }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * Photo-forward player card: square headshot (or an initials avatar
+ * with a deterministic gold-tinted gradient when no image is set),
+ * a small captain armband badge overlaid on the corner when
+ * applicable, and the name/role beneath — mirrors the same
+ * "portrait card" language used for team logos elsewhere on the page
+ * rather than the flatter pill-chip treatment.
+ */
+function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean; image?: string; role?: string } }) {
+  return (
+    <div className="group flex flex-col items-center gap-2 text-center">
+      <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-gold/15 bg-white/[0.03] transition-all duration-300 group-hover:border-gold/50 group-hover:-translate-y-0.5">
+        {p.image ? (
+          <Image
+            src={p.image}
+            alt={p.name}
+            fill
+            className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gold/20 via-black/40 to-black/60">
+            <span className="text-gold text-lg font-bold font-cinzel">{initials(p.name)}</span>
+          </div>
+        )}
+        {/* subtle bottom scrim so any future overlaid text (role, jersey #) stays legible */}
+        <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+        {p.isCaptain && (
+          <span className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-gold text-black text-[10px] font-bold font-cinzel flex items-center justify-center shadow-md">
+            C
+          </span>
+        )}
+      </div>
+      <div className="w-full">
+        <p className="text-gray-200 text-xs font-semibold truncate leading-tight">{p.name}</p>
+        {p.role && <p className="text-gray-500 text-[10px] truncate">{p.role}</p>}
+      </div>
     </div>
   )
 }

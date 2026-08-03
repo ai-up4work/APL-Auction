@@ -85,6 +85,7 @@ export interface SquadMember {
    *  set it. */
   role?: string
   isCaptain?: boolean
+  image?: string
 }
 
 export interface Squad {

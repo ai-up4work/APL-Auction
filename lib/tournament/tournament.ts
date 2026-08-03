@@ -848,7 +848,7 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
         .eq("auction_id", auction.id),
       supabase
         .from("players")
-        .select("name, role, sold_to_team_id, owner_team_code")
+        .select("name, role, sold_to_team_id, owner_team_code", )
         .eq("auction_id", auction.id)
         .not("sold_to_team_id", "is", null),
       // rules.total_points is the per-team starting budget for this auction —
