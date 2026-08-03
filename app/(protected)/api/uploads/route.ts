@@ -46,14 +46,36 @@ function safeFileName(originalName: string): string {
   return `${rand}.${ext || "png"}`;
 }
 
+// Normalizes whatever variant of "kind" a caller sends (old or new naming)
+// into exactly "team" | "player" | "logo" for the legacy auctionId branch.
+// This keeps the legacy branch backward-compatible with callers that were
+// written against the newer subType-style naming ("team-images",
+// "team-logo", "player-images", "player-photo", etc.) without having to
+// track down and update every caller individually.
+function normalizeLegacyKind(raw: unknown): "team" | "player" | "logo" | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+
+  if (v === "team" || v === "team-images" || v === "team-image" || v === "team-logo" || v === "teams") {
+    return "team";
+  }
+  if (v === "player" || v === "player-images" || v === "player-image" || v === "player-photo" || v === "players") {
+    return "player";
+  }
+  if (v === "logo" || v === "logos") {
+    return "logo";
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
     const file      = formData.get("file");
     const auctionId = formData.get("auctionId");
-    const kind      = formData.get("kind"); // "team" | "player" | "logo" (legacy)
-    
+    const kindRaw   = formData.get("kind"); // "team" | "player" | "logo" (legacy) — normalized below
+
     // New multi-context fields (take precedence over legacy auctionId)
     const context   = formData.get("context"); // "auction" | "tournament" | "organization" | "award" | "match"
     const contextId = formData.get("contextId"); // auctionId, tournamentId, orgId, matchId, etc.
@@ -77,18 +99,18 @@ export async function POST(req: NextRequest) {
     }
 
     let path: string;
-    
+
     // Handle new multi-context API
     if (context && contextId) {
       const contextType = (context as string).toLowerCase();
       const finalSubType = (subType as string || "default").toLowerCase();
-      
+
       if (!["auction", "tournament", "organization", "award", "match"].includes(contextType)) {
         return NextResponse.json({ error: "Invalid context type" }, { status: 400 });
       }
-      
+
       const fileName = safeFileName(file.name);
-      
+
       if (contextType === "auction") {
         path = `${contextId}/Auction-Images/${finalSubType}/${fileName}`;
       } else if (contextType === "tournament") {
@@ -108,10 +130,15 @@ export async function POST(req: NextRequest) {
       if (typeof auctionId !== "string" || !auctionId.trim()) {
         return NextResponse.json({ error: "Missing auctionId" }, { status: 400 });
       }
-      if (kind !== "team" && kind !== "player" && kind !== "logo") {
-        return NextResponse.json({ error: "kind must be 'team', 'player', or 'logo'" }, { status: 400 });
+
+      const kind = normalizeLegacyKind(kindRaw);
+      if (!kind) {
+        return NextResponse.json(
+          { error: "kind must be 'team', 'player', or 'logo' (or a recognized variant like 'team-images', 'player-photo', etc.)" },
+          { status: 400 }
+        );
       }
-      
+
       const folder   = kind === "team" ? "team-images" : kind === "player" ? "player-images" : "logos";
       const fileName = safeFileName(file.name);
       path = `${auctionId}/Auction-Images/${folder}/${fileName}`;
