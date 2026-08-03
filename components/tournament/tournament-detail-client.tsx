@@ -1353,4 +1353,3 @@ function AwardsPanel({ awards }: { awards: AwardEntry[] }) {
     </div>
   )
 }
-
