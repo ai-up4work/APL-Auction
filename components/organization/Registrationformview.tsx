@@ -32,7 +32,7 @@ function GlobalStyle() {
 function Panel({ children, accent }: { children: React.ReactNode; accent: string | null }) {
   return (
     <div
-      className="bg-black/50 border border-gold/20 rounded-lg p-6 md:p-8 shadow-lg shadow-black/40 max-w-xl w-full mx-auto"
+      className="bg-black/50 border border-gold/20 rounded-lg p-6 md:p-8 shadow-lg shadow-black/40 max-w-3xl w-full mx-auto"
       style={accent ? { borderColor: `${accent}66` } : undefined}
     >
       {children}
@@ -232,7 +232,7 @@ export default function RegistrationFormView({
       <GlobalStyle />
 
       {form.bannerUrl ? (
-        <div className="max-w-xl mx-auto mb-6 relative h-64 md:h-80 rounded-lg overflow-hidden border border-gold/20">
+        <div className="max-w-3xl mx-auto mb-6 relative h-64 md:h-80 rounded-lg overflow-hidden border border-gold/20">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={form.bannerUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
           {/* Fade the image to black behind the text instead of blurring it —
@@ -251,7 +251,7 @@ export default function RegistrationFormView({
           </div>
         </div>
       ) : (
-        <div className="max-w-xl mx-auto mb-6 text-center">
+        <div className="max-w-3xl mx-auto mb-6 text-center">
           <span className="flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
             <Trophy className="w-3.5 h-3.5" /> {org.name}
           </span>
