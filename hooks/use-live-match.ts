@@ -38,6 +38,17 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
   const teamAFallback = useRef(initialMatch.teamA)
   const teamBFallback = useRef(initialMatch.teamB)
 
+  // Map of player name -> img, built once from the server-fetched squads
+  // (initialMatch.squads). buildSquads() below rebuilds squads from
+  // match_setup JSON on every live refresh, which doesn't carry player
+  // images, so this lookup is used to patch images back in rather than
+  // losing them the moment any live data comes in.
+  const playerImgByName = useRef(
+    new Map(
+      initialMatch.squads.flatMap((s) => s.players.map((p) => [p.name, (p as any).img] as const))
+    )
+  )
+
   const refresh = useCallback(async () => {
     setIsSyncing(true)
     try {
@@ -177,7 +188,15 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
           bowling: innings2Agg.bowling,
           fow: innings2Agg.fow,
         },
-        squads: setup.squads ? buildSquads(setup, teamA.name, teamB.name) : prev.squads,
+        squads: setup.squads
+          ? buildSquads(setup, teamA.name, teamB.name).map((s) => ({
+              ...s,
+              players: s.players.map((p) => ({
+                ...p,
+                img: (p as any).img ?? playerImgByName.current.get(p.name),
+              })),
+            }))
+          : prev.squads,
         matchStatus,
         isLive: matchStatus === "live",
         hasBallData,
