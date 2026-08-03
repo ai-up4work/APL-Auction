@@ -1250,14 +1250,8 @@ export default function EditMatchPage() {
                           label="Match Banner"
                           value={form.tournamentLogoUrl}
                           onChange={(url) => update("tournamentLogoUrl", url)}
-                          context="match"
-                          contextId={matchId}
-                          subType="banner"
-                          allowManualUrl
-                          allowDelete
-                          onDelete={() => update("tournamentLogoUrl", "")}
-                          previewClassName="w-24 h-14"
-                          description="Upload a banner image or paste an image URL — shown on the live match/overlay page."
+                          auctionId={matchId}
+                          kind="match"
                         />
                       </div>
                     </Panel>
