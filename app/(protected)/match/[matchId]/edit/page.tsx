@@ -1224,7 +1224,7 @@ export default function EditMatchPage() {
                           />
                         </div>
                         <div>
-                          <FieldLabel>Tournament Logo URL</FieldLabel>
+                          <FieldLabel>Match Banner URL</FieldLabel>
                           <TextInput
                             value={form.tournamentLogoUrl}
                             onChange={(e) => update("tournamentLogoUrl", e.target.value)}

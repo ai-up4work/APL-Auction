@@ -42,7 +42,9 @@ import {
 } from "@/lib/tournament/generateBracket"
 import TeamsManager from "@/components/tournament/TeamsManager"
 import MatchesManager from "@/components/tournament/MatchesManager"
+import AwardsManager from "@/components/tournament/AwardsManager"
 import { AppHeader } from "@/components/app-header"
+import ImageUploadField from "@/components/common/ImageUploadField"
 
 interface TournamentEditClientProps {
   tournament: TournamentEditData
@@ -521,65 +523,30 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           />
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="text-gray-400 text-sm block mb-1">Banner image URL</label>
-                            <div className="flex gap-3 items-start">
-                              <Input
-                                value={imageUrl}
-                                onChange={(e) => setImageUrl(e.target.value)}
-                                placeholder="https://…"
-                                className="bg-black/50 border-gold/30 text-white flex-1"
-                              />
-                              <div className="w-20 h-12 shrink-0 rounded-md border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
-                                {imageUrl && !imageBroken ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={imageUrl}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    onError={() => setImageBroken(true)}
-                                  />
-                                ) : (
-                                  <ImageOff className="h-4 w-4 text-gray-600" />
-                                )}
-                              </div>
-                            </div>
-                            <p className="text-gray-500 text-xs mt-1">
-                              Wide banner shown at the top of the tournament page.
-                            </p>
-                          </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                          <ImageUploadField
+                            label="Banner Image"
+                            value={imageUrl}
+                            onChange={setImageUrl}
+                            description="Wide banner shown at the top of the tournament page."
+                            previewClassName="w-20 h-12"
+                            context="tournament"
+                            contextId={tournament.id}
+                            subType="banner"
+                            allowManualUrl={true}
+                          />
 
-                          <div>
-                            <label className="text-gray-400 text-sm block mb-1">Tournament Banner</label>
-                            <div className="flex gap-3 items-start">
-                              <Input
-                                value={logoUrl}
-                                onChange={(e) => setLogoUrl(e.target.value)}
-                                placeholder="https://…"
-                                className="bg-black/50 border-gold/30 text-white flex-1"
-                              />
-                              <div className="w-12 h-12 shrink-0 rounded-full border border-gold/20 bg-black/60 flex items-center justify-center overflow-hidden">
-                                {logoUrl && !logoBroken ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <Image
-                                    src={logoUrl}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    onError={() => setLogoBroken(true)}
-                                    width={48}
-                                    height={48}
-                                  />
-                                ) : (
-                                  <ImageOff className="h-4 w-4 text-gray-600" />
-                                )}
-                              </div>
-                            </div>
-                            <p className="text-gray-500 text-xs mt-1">
-                              Square badge — used as the watermark behind the Final on the bracket.
-                              Falls back to your org's logo if left blank.
-                            </p>
-                          </div>
+                          <ImageUploadField
+                            label="Tournament Logo"
+                            value={logoUrl}
+                            onChange={setLogoUrl}
+                            description="Square badge — used as the watermark behind the Final on the bracket. Falls back to your org's logo if left blank."
+                            previewClassName="w-12 h-12 rounded-full"
+                            context="tournament"
+                            contextId={tournament.id}
+                            subType="logo"
+                            allowManualUrl={true}
+                          />
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -879,10 +846,8 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
                   {/* AWARDS */}
                   {activeSection === "awards" && (
-                    <PlaceholderSection
-                      icon={Award}
-                      title="Awards"
-                      note="Backed by tournament_awards — reading works, but there's no write function or UI yet. Usually filled in after the tournament ends."
+                    <AwardsManager
+                      tournamentId={tournament.id}
                     />
                   )}
 

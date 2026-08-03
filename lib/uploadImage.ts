@@ -11,7 +11,7 @@ export interface UploadResult {
   path: string; // storage path — keep this if you want to support deleting/replacing later
 }
 
-export type UploadKind = "team" | "player" | "logo";
+export type UploadKind = "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award";
 
 export async function uploadAuctionImage(
   auctionId: string,

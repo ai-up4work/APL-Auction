@@ -6,7 +6,7 @@ import { uploadAuctionImage, type UploadKind } from "@/lib/uploadImage";
 
 interface ImageUploadFieldProps {
   auctionId: string;
-  kind:      UploadKind; // "team" | "player" | "logo"
+  kind:      UploadKind; // "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award"
   value:     string;     // current image URL (empty string if none)
   onChange:  (url: string) => void;
   label?:    string;

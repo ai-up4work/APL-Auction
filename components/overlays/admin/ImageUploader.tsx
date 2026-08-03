@@ -3,6 +3,7 @@
 import React, { useRef, useState } from "react";
 import { FieldLabel, IconBtn } from "./ui";
 import Image from "next/image";
+import { type UploadKind } from "@/lib/uploadImage";
 
 export function ImageUploader({
   auctionId,
@@ -13,7 +14,7 @@ export function ImageUploader({
   compact,
 }: {
   auctionId: string;
-  kind: "team" | "player";
+  kind: UploadKind;
   value: string;
   onChange: (url: string) => void;
   label?: string;

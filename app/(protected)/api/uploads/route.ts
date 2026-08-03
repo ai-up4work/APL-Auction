@@ -1,8 +1,12 @@
 // app/api/uploads/route.ts
 //
-// Handles image uploads for the auction app. Used for both:
-//   - Team logos   → {auctionId}/Auction-Images/team-images/{filename}
-//   - Player photos → {auctionId}/Auction-Images/player-images/{filename}
+// Handles image uploads for the entire application. Supports multiple contexts:
+//   - Auction Images:     {auctionId}/Auction-Images/{team|player}-images/{filename}
+//   - Tournament:         tournaments/{tournamentId}/banner/{filename}
+//   - Tournament Logo:    tournaments/{tournamentId}/logo/{filename}
+//   - Organization:       organizations/{orgId}/logo/{filename}
+//   - Awards:             tournaments/{tournamentId}/awards/{awardId}/{filename}
+//   - Match Player:       matches/{matchId}/player-images/{filename}
 //
 // Runs server-side so we can use the Supabase SERVICE ROLE key — this lets
 // the bucket itself stay locked down (no public/anon INSERT policy needed)
@@ -48,17 +52,17 @@ export async function POST(req: NextRequest) {
 
     const file      = formData.get("file");
     const auctionId = formData.get("auctionId");
-    const kind      = formData.get("kind"); // "team" | "player"
+    const kind      = formData.get("kind"); // "team" | "player" | "logo" (legacy)
+    
+    // New multi-context fields (take precedence over legacy auctionId)
+    const context   = formData.get("context"); // "auction" | "tournament" | "organization" | "award" | "match"
+    const contextId = formData.get("contextId"); // auctionId, tournamentId, orgId, matchId, etc.
+    const subType   = formData.get("subType"); // "banner" | "logo" | "team-images" | "player-images" | "award-images" etc.
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
-    if (typeof auctionId !== "string" || !auctionId.trim()) {
-      return NextResponse.json({ error: "Missing auctionId" }, { status: 400 });
-    }
-    if (kind !== "team" && kind !== "player" && kind !== "logo") {
-      return NextResponse.json({ error: "kind must be 'team' or 'player'" }, { status: 400 });
-    }
+
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
         { error: `Unsupported file type: ${file.type}. Allowed: ${ALLOWED_TYPES.join(", ")}` },
@@ -72,9 +76,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const folder   = kind === "team" ? "team-images" : "player-images";
-    const fileName = safeFileName(file.name);
-    const path     = `${auctionId}/Auction-Images/${folder}/${fileName}`;
+    let path: string;
+    
+    // Handle new multi-context API
+    if (context && contextId) {
+      const contextType = (context as string).toLowerCase();
+      const finalSubType = (subType as string || "default").toLowerCase();
+      
+      if (!["auction", "tournament", "organization", "award", "match"].includes(contextType)) {
+        return NextResponse.json({ error: "Invalid context type" }, { status: 400 });
+      }
+      
+      const fileName = safeFileName(file.name);
+      
+      if (contextType === "auction") {
+        path = `${contextId}/Auction-Images/${finalSubType}/${fileName}`;
+      } else if (contextType === "tournament") {
+        path = `tournaments/${contextId}/${finalSubType}/${fileName}`;
+      } else if (contextType === "organization") {
+        path = `organizations/${contextId}/${finalSubType}/${fileName}`;
+      } else if (contextType === "award") {
+        const awardId = formData.get("awardId") as string || "default";
+        path = `tournaments/${contextId}/awards/${awardId}/${fileName}`;
+      } else if (contextType === "match") {
+        path = `matches/${contextId}/${finalSubType}/${fileName}`;
+      } else {
+        return NextResponse.json({ error: "Invalid context" }, { status: 400 });
+      }
+    } else if (auctionId) {
+      // Legacy API (backward compatibility)
+      if (typeof auctionId !== "string" || !auctionId.trim()) {
+        return NextResponse.json({ error: "Missing auctionId" }, { status: 400 });
+      }
+      if (kind !== "team" && kind !== "player" && kind !== "logo") {
+        return NextResponse.json({ error: "kind must be 'team', 'player', or 'logo'" }, { status: 400 });
+      }
+      
+      const folder   = kind === "team" ? "team-images" : kind === "player" ? "player-images" : "logos";
+      const fileName = safeFileName(file.name);
+      path = `${auctionId}/Auction-Images/${folder}/${fileName}`;
+    } else {
+      return NextResponse.json({ error: "Missing upload context (context + contextId) or legacy auctionId" }, { status: 400 });
+    }
 
     const supabase = admin();
     const arrayBuffer = await file.arrayBuffer();
@@ -93,7 +136,9 @@ export async function POST(req: NextRequest) {
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
     return NextResponse.json({
-      url:  publicUrlData.publicUrl,
+      success: true,
+      imageUrl: publicUrlData.publicUrl,
+      url: publicUrlData.publicUrl,
       path,
     });
   } catch (e: any) {

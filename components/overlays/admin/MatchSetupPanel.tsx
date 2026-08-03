@@ -794,7 +794,7 @@ export default function MatchSetupPanel({
         />
         <ImageUploader
           auctionId={auctionId ?? ""}
-          kind="team"
+          kind="tournament"
           value={matchSetup.tournamentLogoUrl}
           onChange={(url) => setMatchSetup((p) => ({ ...p, tournamentLogoUrl: url }))}
           label="Tournament Logo"

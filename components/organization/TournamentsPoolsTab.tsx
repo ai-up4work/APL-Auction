@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import ImageUploadField from "@/components/Admin/ImageUploadField"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   getTournamentsForOrg,
@@ -524,6 +525,9 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Use org.id as the context ID for image uploads in tournament pool context
+  const poolId = org.id
+
   const reload = () => getTeamPool(org.id).then((t) => setTeams(t))
 
   useEffect(() => {
@@ -664,29 +668,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <FieldLabel>Logo / Image URL (optional)</FieldLabel>
-            <div className="flex items-center gap-2">
-              <div
-                className="h-10 w-10 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60"
-                style={{ backgroundColor: logo ? undefined : color || "#e45d35" }}
-              >
-                {logo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <Image src={logo} alt="" className="h-full w-full object-cover" width={48} height={48} />
-                ) : (
-                  <Shield className="h-4 w-4 text-white/60" />
-                )}
-              </div>
-              <Input
-                value={logo}
-                onChange={(e) => setLogo(e.target.value)}
-                placeholder="https://…"
-                className="bg-black/50 border-gold/30 text-white flex-1"
-              />
-            </div>
-          </div>
+        <div className="space-y-4 mb-4">
           <div>
             <FieldLabel>Notes (optional)</FieldLabel>
             <Input
@@ -694,6 +676,20 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. contact info, sponsorship deal…"
               className="bg-black/50 border-gold/30 text-white"
+            />
+          </div>
+          <div>
+            <ImageUploadField
+              {...({
+                context: "tournament",
+                contextId: poolId || "",
+                subType: "team-logo",
+                value: logo,
+                onChange: setLogo,
+                label: "Team Logo (optional)",
+                allowManualUrl: true,
+                description: "Upload a team logo or paste an image URL",
+              } as any)}
             />
           </div>
         </div>
@@ -717,7 +713,7 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
 
       <Panel>
         <h2 className="text-lg font-bold text-white font-cinzel mb-4">Team Pool</h2>
-        <p className="text-gray-500 text-xs mb-4">
+        <p className="text-gray-500 text-xs mb-6">
           Add your teams once and reuse them across auctions and matches — pick a pool team directly when creating a
           match from the Matches tab, or from the auction admin panel when setting up an auction.
         </p>
@@ -726,7 +722,14 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : teams.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No teams in the pool yet — add one above.</p>
+          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
+            <Shield className="h-12 w-12 text-gold/40 mx-auto mb-3" />
+            <p className="text-gray-300 font-medium mb-2">No teams added yet</p>
+            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
+              Create your first team in the form above to get started. You can reuse these teams across all your tournaments and matches.
+            </p>
+            <p className="text-gray-600 text-xs">💡 Pro tip: Add team colors and logos for better visual identification</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {teams.map((t) => (
@@ -797,6 +800,9 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [notes, setNotes] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Use org.id as the context ID for image uploads in tournament pool context
+  const poolId = org.id
 
   const reload = () => getPlayerBank(org.id).then((p) => setPlayers(p))
 
@@ -923,24 +929,10 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             </select>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <FieldLabel>Country (optional)</FieldLabel>
             <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Sri Lanka" className="bg-black/50 border-gold/30 text-white" />
-          </div>
-          <div>
-            <FieldLabel>Photo URL (optional)</FieldLabel>
-            <div className="flex items-center gap-2">
-              <div className="h-10 w-10 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
-                {img ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <Image src={img} alt="" className="h-full w-full object-cover" width={48} height={48} />
-                ) : (
-                  <UserPlus className="h-4 w-4 text-white/40" />
-                )}
-              </div>
-              <Input value={img} onChange={(e) => setImg(e.target.value)} placeholder="https://…" className="bg-black/50 border-gold/30 text-white flex-1" />
-            </div>
           </div>
           <div className="flex items-end pb-2.5">
             <label className="flex items-center gap-2 text-sm text-gray-300">
@@ -948,6 +940,15 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
               Capped (international) player
             </label>
           </div>
+        </div>
+        <div className="mb-4">
+          <ImageUploadField
+            auctionId={poolId || ""}
+            kind="tournament"
+            value={img}
+            onChange={setImg}
+            label="Photo (optional)"
+          />
         </div>
         <div className="mb-4">
           <FieldLabel>Notes (optional)</FieldLabel>
@@ -983,7 +984,14 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : players.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">No players in the bank yet — add one above.</p>
+          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
+            <UserPlus className="h-12 w-12 text-gold/40 mx-auto mb-3" />
+            <p className="text-gray-300 font-medium mb-2">No players in your bank</p>
+            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
+              Add players to your bank in the form above. You can organize them by role, origin, and mark international players.
+            </p>
+            <p className="text-gray-600 text-xs">💡 Pro tip: Add player photos and notes to help identify them at a glance</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {players.map((p) => (

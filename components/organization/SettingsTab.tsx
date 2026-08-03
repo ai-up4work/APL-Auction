@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Panel, FieldLabel, StatusBadge, StyledSelect } from "@/components/organization/shared"
+import ImageUploadField from "@/components/Admin/ImageUploadField"
 import { updateOrganization, type OrgSummary } from "@/lib/organization/organization"
 import { useAuth } from "@/context/AuthContext"
 import {
@@ -111,29 +112,17 @@ export function SettingsTab({ org }: { org: OrgSummary }) {
           </div>
 
           <div>
-            <FieldLabel>Logo URL</FieldLabel>
-            <Input
+            <ImageUploadField
+              auctionId={org.id}
+              kind="organization"
               value={formData.logoUrl}
-              onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
-              placeholder="https://example.com/logo.png"
-              className="bg-black/50 border-gold/30 text-white"
+              onChange={(url) => setFormData({ ...formData, logoUrl: url })}
+              label="Organization Logo"
+              accentColor="var(--color-gold)"
             />
             <p className="text-gray-600 text-[11px] mt-1.5">
-              Direct link to your organization logo. Recommended: square image, at least 256x256px.
+              Recommended: square image, at least 256x256px.
             </p>
-            {formData.logoUrl && (
-              <div className="mt-3 flex items-center gap-2">
-                <img
-                  src={formData.logoUrl}
-                  alt="Logo preview"
-                  className="h-12 w-12 rounded border border-gold/20 object-cover"
-                  onError={(e) => {
-                    ;(e.currentTarget.style.display = "none")
-                  }}
-                />
-                <span className="text-gray-600 text-[11px]">Preview (if available)</span>
-              </div>
-            )}
           </div>
         </div>
 

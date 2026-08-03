@@ -24,6 +24,7 @@ import {
   Link2,
   Users2,
 } from "lucide-react"
+import ImageUploadField from "@/components/Admin/ImageUploadField"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -533,12 +534,16 @@ function FormEditorCard({
             </div>
           )}
         </div>
-        <Input
-          value={bannerUrl}
-          onChange={(e) => setBannerUrl(e.target.value)}
-          placeholder="https://…  (wide image works best, ~1200×300)"
-          className="bg-black/50 border-gold/30 text-white"
-        />
+        <div className="mt-2">
+          <ImageUploadField
+            auctionId={org.id}
+            kind="organization"
+            value={bannerUrl}
+            onChange={setBannerUrl}
+            label="Upload Banner"
+            accentColor={liveAccent}
+          />
+        </div>
       </div>
 
       {/* Branding — welcome message + accent color, with a live swatch that
