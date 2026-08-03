@@ -782,6 +782,11 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
     return "bg-blue-600 hover:bg-blue-700" // upcoming — moved off green, see note above
   }
 
+  // A match is "unconfirmed" if either side is still a TBD slot —
+  // these should sink to the bottom of their stage so the schedule
+  // reads "what's actually set to happen" first.
+  const isTBD = (f: Fixture) => f.team1 === "TBD" || f.team2 === "TBD"
+
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
       <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -814,7 +819,18 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
       ) : (
         <div className="space-y-10">
           {stages.map((stage) => {
-            const stageFixtures = stageGroups.get(stage)!
+            // Live matches float to the top of their stage; among the
+            // rest, matches with both teams already confirmed come
+            // before TBD placeholder slots.
+            const stageFixtures = [...stageGroups.get(stage)!].sort((a, b) => {
+              const liveRank = (f: Fixture) => (f.status === "live" ? 0 : 1)
+              const liveDiff = liveRank(a) - liveRank(b)
+              if (liveDiff !== 0) return liveDiff
+
+              const tbdRank = (f: Fixture) => (isTBD(f) ? 1 : 0)
+              return tbdRank(a) - tbdRank(b)
+            })
+
             // date sub-grouping within the stage, same logic as before
             const dateGroups: { date: string; items: Fixture[] }[] = []
             for (const f of stageFixtures) {
@@ -851,7 +867,7 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
                             team2Color={getTeamColor(f.team2, colorByTeam.get(f.team2))}
                             statusBadgeClass={statusBadgeClass}
                             slug={slug}
-                            matchNumber={fixtures.indexOf(f) + 1}
+                            matchNumber={stageFixtures.indexOf(f) + 1}
                           />
                         ))}
                       </div>

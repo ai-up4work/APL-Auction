@@ -260,48 +260,64 @@ function useRoundPairLayout(leftRound: Round | undefined, rightRound: Round | un
   // those computed centers, measure real rects and draw the connector
   // between each feeder and its target.
   useLayoutEffect(() => {
-    function recomputeConnectors() {
-      const containerEl = containerRef.current
-      if (!containerEl || !rightRound) {
-        setPaths([])
-        return
+      function recomputeConnectors() {
+        const containerEl = containerRef.current
+        if (!containerEl || !rightRound) {
+          setPaths([])
+          return
+        }
+        const containerRect = containerEl.getBoundingClientRect()
+        if (containerRect.width === 0) return
+        setSvgSize({ w: containerRect.width, h: containerRect.height })
+
+        const next: ConnectorPath[] = []
+        for (const match of rightRound.matches) {
+          // A feeder only counts toward "both feeders" if it's actually
+          // rendered in THIS round pair. A match can have both aFrom and
+          // bFrom set in the underlying data (e.g. an LB round 2 match
+          // fed by LB round 1 AND a WB drop-down), but if only one of
+          // those feeders is part of the currently-visible left column,
+          // the other's cardEl will never exist — so we'd otherwise draw
+          // a single line but still enter at the top/bottom edge (as if
+          // there were two), producing a needless elbow instead of a
+          // flat line.
+          const visibleFeederKeys = (["aFrom", "bFrom"] as const).filter(
+            (key) => !!match[key] && !!cardEls.current[match[key] as string]
+          )
+          const hasBothFeeders = visibleFeederKeys.length === 2
+
+          visibleFeederKeys.forEach((key, slotIdx) => {
+            const feederId = match[key] as string
+            const sourceEl = cardEls.current[feederId]
+            const targetEl = cardEls.current[match.id]
+            if (!sourceEl || !targetEl) return
+            const sRect = sourceEl.getBoundingClientRect()
+            const tRect = targetEl.getBoundingClientRect()
+            if (sRect.width === 0 || tRect.width === 0) return
+
+            const startX = sRect.right - containerRect.left
+            const startY = sRect.top + sRect.height / 2 - containerRect.top
+            const endX = tRect.left - containerRect.left
+
+            const endY = hasBothFeeders
+              ? (slotIdx === 0 ? tRect.top : tRect.bottom) - containerRect.top
+              : tRect.top + tRect.height / 2 - containerRect.top
+
+            next.push({ id: `${match.id}-${key === "aFrom" ? "A" : "B"}`, d: topEntryPath(startX, startY, endX, endY) })
+          })
+        }
+        setPaths(next)
       }
-      const containerRect = containerEl.getBoundingClientRect()
-      if (containerRect.width === 0) return
-      setSvgSize({ w: containerRect.width, h: containerRect.height })
-
-      const next: ConnectorPath[] = []
-      for (const match of rightRound.matches) {
-        ;(["aFrom", "bFrom"] as const).forEach((key, slotIdx) => {
-          const feederId = match[key]
-          if (!feederId) return
-          const sourceEl = cardEls.current[feederId]
-          const targetEl = cardEls.current[match.id]
-          if (!sourceEl || !targetEl) return
-          const sRect = sourceEl.getBoundingClientRect()
-          const tRect = targetEl.getBoundingClientRect()
-          if (sRect.width === 0 || tRect.width === 0) return
-
-          const startX = sRect.right - containerRect.left
-          const startY = sRect.top + sRect.height / 2 - containerRect.top
-          const endX = tRect.left - containerRect.left
-          const endY = (slotIdx === 0 ? tRect.top : tRect.bottom) - containerRect.top
-
-          next.push({ id: `${match.id}-${slotIdx === 0 ? "A" : "B"}`, d: topEntryPath(startX, startY, endX, endY) })
-        })
+      recomputeConnectors()
+      const raf = requestAnimationFrame(recomputeConnectors)
+      const ro = new ResizeObserver(recomputeConnectors)
+      if (containerRef.current) ro.observe(containerRef.current)
+      return () => {
+        cancelAnimationFrame(raf)
+        ro.disconnect()
       }
-      setPaths(next)
-    }
-    recomputeConnectors()
-    const raf = requestAnimationFrame(recomputeConnectors)
-    const ro = new ResizeObserver(recomputeConnectors)
-    if (containerRef.current) ro.observe(containerRef.current)
-    return () => {
-      cancelAnimationFrame(raf)
-      ro.disconnect()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [centerY, colHeight])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [centerY, colHeight])
 
   return { containerRef, leftColRef, getCardRef, centerY, colHeight, paths, svgSize }
 }
