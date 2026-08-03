@@ -846,11 +846,11 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
         .from("teams")
         .select("id, code, name, color, tier, owner, logo, remaining_purse")
         .eq("auction_id", auction.id),
-      supabase
-        .from("players")
-        .select("name, role, sold_to_team_id, owner_team_code", )
-        .eq("auction_id", auction.id)
-        .not("sold_to_team_id", "is", null),
+        supabase
+          .from("players")
+          .select("name, role, img, sold_to_team_id, owner_team_code")
+          .eq("auction_id", auction.id)
+          .not("sold_to_team_id", "is", null),
       // rules.total_points is the per-team starting budget for this auction —
       // teams.remaining_purse alone doesn't tell us how much was spent
       // without knowing what they started with.
@@ -914,11 +914,11 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
   const auctionIds = [...new Set(includedTeams.map((t) => t.auction_id))];
 
   const [{ data: players, error: playersErr }, { data: rulesRows, error: rulesErr }] = await Promise.all([
-    supabase
-      .from("players")
-      .select("name, role, sold_to_team_id, owner_team_code, auction_id")
-      .in("auction_id", auctionIds)
-      .not("sold_to_team_id", "is", null),
+  supabase
+    .from("players")
+    .select("name, role, img, sold_to_team_id, owner_team_code, auction_id")
+    .in("auction_id", auctionIds)
+    .not("sold_to_team_id", "is", null),
     supabase.from("rules").select("auction_id, total_points").in("auction_id", auctionIds),
   ]);
 
@@ -942,7 +942,7 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
  */
 function buildSquad(
   t: { id: string; code: string; name: string; color?: string | null; tier?: string | null; owner?: string | null; logo?: string | null; remaining_purse?: number | null },
-  roster: { name: string; role?: string | null; sold_to_team_id: string | null; owner_team_code?: string | null }[],
+  roster: { name: string; role?: string | null; img?: string | null; sold_to_team_id: string | null; owner_team_code?: string | null }[],
   totalPurse: number
 ): Squad {
   const captain = roster.find((p) => p.owner_team_code === t.code);
@@ -959,6 +959,7 @@ function buildSquad(
     players: roster.map((p) => ({
       name: p.name,
       role: p.role ?? undefined,
+      image: p.img || undefined,   // <-- this line was missing
       isCaptain: p.owner_team_code === t.code,
     })),
   };
