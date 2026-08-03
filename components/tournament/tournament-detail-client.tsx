@@ -95,9 +95,9 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
   const status = tournament.status || "Upcoming"
   const statusColor =
     status === "Live"
-      ? "bg-green-600 hover:bg-green-700"
+      ? "bg-yellow-600 hover:bg-yellow-700"
       : status === "Completed"
-        ? "bg-gray-600 hover:bg-gray-700"
+        ? "bg-green-600 hover:bg-green-700"
         : "bg-blue-600 hover:bg-blue-700"
 
   const hasLive = !!tournament.liveMatch
@@ -161,7 +161,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   <p className="text-gray-300 mt-2 text-sm md:text-base">{tournament.by}</p>
                 </div>
                 {hasLive && (
-                  <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-green-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-yellow-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
                     <Radio className="h-3 w-3" />
                     LIVE
                   </div>
@@ -516,7 +516,7 @@ function LiveScorePanel({ match }: { match: LiveMatch }) {
         </h2>
         {match.matchStatus === "live" && (
           <span className="flex items-center gap-1.5 text-green-500 text-xs font-bold font-cinzel">
-            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
             IN PROGRESS
           </span>
         )}
@@ -702,7 +702,7 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
                     <span
                       key={j}
                       className={`h-5 w-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
-                        f === "W" ? "bg-green-600 text-white" : f === "L" ? "bg-red-600/80 text-white" : "bg-gray-600 text-white"
+                        f === "W" ? "bg-yellow-600 text-white" : f === "L" ? "bg-red-600/80 text-white" : "bg-green-600 text-white"
                       }`}
                     >
                       {f}
@@ -756,8 +756,8 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   })
 
   const statusBadge = (s: Fixture["status"]) => {
-    if (s === "live") return <Badge className="bg-green-600 hover:bg-green-700">Live</Badge>
-    if (s === "completed") return <Badge className="bg-gray-600 hover:bg-gray-700">Completed</Badge>
+    if (s === "live") return <Badge className="bg-yellow-600 hover:bg-yellow-700">Live</Badge>
+    if (s === "completed") return <Badge className="bg-green-600 hover:bg-green-700">Completed</Badge>
     return <Badge className="bg-yellow-600 hover:bg-yellow-700">Upcoming</Badge>
   }
 
@@ -777,8 +777,8 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   ]
 
   const statusBadgeClass = (s: Fixture["status"], liveAccent: "red" | "green" = "red") => {
-    if (s === "live") return liveAccent === "green" ? "bg-green-600 hover:bg-green-700" : "bg-green-600 hover:bg-green-700"
-    if (s === "completed") return "bg-gray-600 hover:bg-gray-700"
+    if (s === "live") return liveAccent === "green" ? "bg-yellow-600 hover:bg-yellow-700" : "bg-yellow-600 hover:bg-yellow-700"
+    if (s === "completed") return "bg-green-600 hover:bg-green-700"
     return "bg-blue-600 hover:bg-blue-700" // upcoming — moved off green, see note above
   }
 
@@ -819,13 +819,14 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
       ) : (
         <div className="space-y-10">
           {stages.map((stage) => {
-            // Live matches float to the top of their stage; among the
-            // rest, matches with both teams already confirmed come
-            // before TBD placeholder slots.
+            // Completed matches first, then live, then upcoming.
+            // Within each status group, matches with both teams
+            // already confirmed come before TBD placeholder slots.
             const stageFixtures = [...stageGroups.get(stage)!].sort((a, b) => {
-              const liveRank = (f: Fixture) => (f.status === "live" ? 0 : 1)
-              const liveDiff = liveRank(a) - liveRank(b)
-              if (liveDiff !== 0) return liveDiff
+              const statusRank = (f: Fixture) =>
+                f.status === "completed" ? 0 : f.status === "live" ? 1 : 2
+              const statusDiff = statusRank(a) - statusRank(b)
+              if (statusDiff !== 0) return statusDiff
 
               const tbdRank = (f: Fixture) => (isTBD(f) ? 1 : 0)
               return tbdRank(a) - tbdRank(b)
