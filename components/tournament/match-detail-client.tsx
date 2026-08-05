@@ -194,8 +194,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
     setIsNavOpen(false)
   }
 
-  console.log("MatchDetailClient: initial match detail for matchId", initialMatch.id, ":", initialMatch.squads[0].players)
-
   // ── live state ──
   // Replaces the old 8s setInterval poll of /api/match/[id]/live. This
   // hook does an initial fetch + aggregation, then subscribes to
