@@ -67,11 +67,11 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
               </li>
               <li>
                 <div
-                  onClick={() => handleNavigation("/auth/login")}
+                  onClick={() => handleNavigation("/auth/register")}
                   className="text-gray-300 hover:text-gold transition-colors flex items-center cursor-pointer"
                 >
                   <Shield className="h-4 w-4 mr-2 text-gold" />
-                  Open the Console
+                  Start Your League
                 </div>
               </li>
             </ul>

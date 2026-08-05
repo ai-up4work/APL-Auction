@@ -85,7 +85,13 @@ export function SiteHeader({
                 className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel"
                 onClick={() => handleNavigation("/auth/login")}
               >
-                Open the Console
+                Login
+              </Button>
+              <Button
+                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel"
+                onClick={() => handleNavigation("/auth/register")}
+              > 
+                Register
               </Button>
             </div>
 
@@ -135,7 +141,16 @@ export function SiteHeader({
                 setIsNavOpen(false)
               }}
             >
-              Open the Console
+              Login
+            </Button>
+            <Button
+              className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start"
+              onClick={() => {
+                handleNavigation("/auth/register")
+                setIsNavOpen(false)
+              }}
+            >
+              Register
             </Button>
 
             <div className="pt-4 border-t border-gold/20 flex justify-center">

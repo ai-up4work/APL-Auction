@@ -20,7 +20,7 @@ const ValiantFooter = ({ onNavigate }: ValiantFooterProps) => {
   const router = useRouter()
 
   const handleConsole = () => {
-    router.push("/auth/login")
+    router.push("/auth/register")
     window.scrollTo(0, 0)
   }
 
@@ -88,7 +88,7 @@ const ValiantFooter = ({ onNavigate }: ValiantFooterProps) => {
                   className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer"
                 >
                   <ArrowRight className="h-4 w-4 mr-2 text-gold" />
-                  Open the Console
+                  Start Your League
                 </div>
               </li>
             </ul>

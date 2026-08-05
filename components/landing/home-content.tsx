@@ -162,10 +162,10 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               <Button
                 variant="outline"
                 className="border-gold text-gold hover:bg-gold/10 py-4 md:py-6 px-6 md:px-8 rounded-md text-base md:text-lg animate-slow-pulse hover:scale-105 transition-all duration-500 bg-transparent"
-                onClick={() => handleNavigation("/auth/login")}
+                onClick={() => handleNavigation("/auth/register")}
               >
                 <Shield className="mr-2 h-5 w-5" />
-                Open the Console
+                Start Your League
               </Button>
             </div>
           </div>
@@ -920,7 +920,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           <div className="text-center mt-12 fade-in-up stagger-4">
             <Button
               className="pulse inline-flex items-center bg-gold hover:bg-gold/90 text-black font-bold py-6 px-8 rounded-md text-lg"
-              onClick={() => handleNavigation("/auth/login")}
+              onClick={() => handleNavigation("/auth/register")}
             >
               Start Your League
               <ArrowRight className="ml-2 h-5 w-5" />
