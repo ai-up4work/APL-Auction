@@ -45,7 +45,7 @@ const HEADER_H = 34;
 // "Winners bracket" / "Losers bracket" banner). Bumped up from the old
 // thin-label height to fit the banner's padding comfortably.
 const LABEL_H = 44;
-const ROW_GAP = 56;
+const ROW_GAP = 160;
 // How far the section-header banner stops short of the canvas's own
 // right edge, so it never looks like it's touching/running into the
 // border of the scroll area.
@@ -558,6 +558,7 @@ export default function DoubleElimBoard({
               width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
             />
             {renderRow(data.winners, wbRowRef, wbLeafColRef, wbRowTop, wbRowHeight)}
+
             <SectionHeader
               icon={<RotateCcw className="w-3.5 h-3.5" />}
               label="Losers bracket · one more loss and you're out"
@@ -568,9 +569,6 @@ export default function DoubleElimBoard({
               top={lbLabelTop}
               width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
             />
-
-
-
             {renderRow(data.losers, lbRowRef, lbLeafColRef, lbRowTop, lbRowHeight)}
 
             {gfCenterY != null && (
