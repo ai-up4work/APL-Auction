@@ -558,7 +558,6 @@ export default function DoubleElimBoard({
               width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
             />
             {renderRow(data.winners, wbRowRef, wbLeafColRef, wbRowTop, wbRowHeight)}
-
             <SectionHeader
               icon={<RotateCcw className="w-3.5 h-3.5" />}
               label="Losers bracket · one more loss and you're out"
@@ -569,6 +568,9 @@ export default function DoubleElimBoard({
               top={lbLabelTop}
               width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
             />
+
+
+
             {renderRow(data.losers, lbRowRef, lbLeafColRef, lbRowTop, lbRowHeight)}
 
             {gfCenterY != null && (

@@ -286,15 +286,15 @@ export default function BracketEditClient({
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
 
-      <SiteHeader
+      {/* <SiteHeader
         activeSection="tournament"
         isNavOpen={isNavOpen}
         setIsNavOpen={setIsNavOpen}
         scrollToSection={scrollToSection}
         handleNavigation={handleNavigation}
-      />
+      /> */}
 
-      <section className="pt-20 sm:pt-24 pb-16 relative section-pattern">
+      <section className="pt-4 sm:pt-8 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 relative z-10">
           {gate === "checking" && (
