@@ -109,7 +109,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
       ? "bg-yellow-600 hover:bg-yellow-700"
       : status === "Completed"
         ? "bg-green-600 hover:bg-green-700"
-        : "bg-blue-600 hover:bg-blue-700"
+        : "bg-gold text-black hover:bg-gold/90"
 
   const hasLive = !!tournament.liveMatch
   const hasPoints = !!tournament.pointsTable?.length
@@ -793,7 +793,7 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   const statusBadgeClass = (s: Fixture["status"], liveAccent: "red" | "green" = "red") => {
     if (s === "live") return liveAccent === "green" ? "bg-yellow-600 hover:bg-yellow-700" : "bg-yellow-600 hover:bg-yellow-700"
     if (s === "completed") return "bg-green-600 hover:bg-green-700"
-    return "bg-blue-600 hover:bg-blue-700" // upcoming — moved off green, see note above
+    return "bg-gold text-black hover:bg-gold/90" // upcoming — matches the site's gold accent instead of blue
   }
 
   // A match is "unconfirmed" if either side is still a TBD slot —
