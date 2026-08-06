@@ -26,7 +26,7 @@ export default function InlineBottomNav() {
   const params   = useParams();
   const auctionId = params?.auctionId as string;
   const teamCode  = params?.teamCode  as string;
-  const base = `/owner/${auctionId}/${teamCode}`;
+  const base = `/auction/owner/${auctionId}/${teamCode}`;
 
   return (
     <>

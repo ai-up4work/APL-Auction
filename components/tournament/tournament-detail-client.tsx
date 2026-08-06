@@ -27,6 +27,7 @@ import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
 import RelatedTournaments from "@/components/tournament/related-tournaments"
 import BracketPreviewPanel from "@/components/tournament/BracketPreviewPanel"
+import AdvancedMarkdown from "@/components/tournament/AdvancedMarkdown"
 import { pageStyles } from "@/data/site-data"
 import {
   hasMatchDetail,
@@ -60,6 +61,16 @@ import {
 /*  isn't there yet, the tab trigger is disabled + shows a lock icon,   */
 /*  and its content renders a "coming soon" placeholder instead of      */
 /*  being hidden outright.                                              */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON DESCRIPTION:                                                */
+/*  `tournament.description` is treated as Markdown/MDX-flavored        */
+/*  source, not plain text — it's rendered through the shared           */
+/*  <AdvancedMarkdown /> component (same one used on /work/[slug]       */
+/*  project pages) so organizers can use headings, bold/italic,         */
+/*  lists, links, images, tables, code blocks, and Mermaid diagrams      */
+/*  in their tournament's "About" copy.                                 */
 /* ------------------------------------------------------------------ */
 
 interface TournamentDetailClientProps {
@@ -263,7 +274,10 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">ABOUT THE TOURNAMENT</h2>
                     {tournament.description ? (
-                      <p className="text-gray-300">{tournament.description}</p>
+                      <AdvancedMarkdown
+                        source={tournament.description}
+                        className="!max-w-none !p-0"
+                      />
                     ) : (
                       <p className="text-gray-500 italic text-sm">
                         No description has been added for this tournament yet.

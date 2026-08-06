@@ -389,7 +389,7 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
 
         setVerifyState("granted");
         setTimeout(() => {
-        router.push(`/owner/${auctionId}/${selectedCode.toLowerCase()}`);
+        router.push(`/auction/owner/${auctionId}/${selectedCode.toLowerCase()}`);
         }, 700);
     } catch {
         setVerifyState("error");

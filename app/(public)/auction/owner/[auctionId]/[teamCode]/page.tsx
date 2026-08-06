@@ -224,7 +224,7 @@ export default function OwnerIndexPage() {
   const rosterPct   = totalSlots  > 0 ? (roster / totalSlots) * 100 : 0;
   const spent       = totalPoints - purse;
   const theme       = getStatusTheme(status);
-  const base        = `/owner/${auctionId}/${teamCode}`;
+  const base        = `/auction/owner/${auctionId}/${teamCode}`;
 
   const NAV_ITEMS = [
     { segment: "squad",   icon: "groups",   label: "Squad",       sub: `${roster} of ${totalSlots} players` },

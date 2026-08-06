@@ -31,7 +31,7 @@ export default function BottomNavBar() {
 
   if (!auctionId || !teamCode) return null;
 
-  const base = `/owner/${auctionId}/${teamCode}`;
+  const base = `/auction/owner/${auctionId}/${teamCode}`;
 
   return (
     <>
