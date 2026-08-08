@@ -126,7 +126,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       >
         <div className="absolute inset-0 z-0">
           <Image
-            src="/images/website-background.png"
+            src="/images/landing-image.png"
             alt="Valiant League background"
             fill
             priority
