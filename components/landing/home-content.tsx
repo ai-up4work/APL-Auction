@@ -39,6 +39,7 @@ import {
   trustedClubs,
   knights,
 } from "@/data/site-data"
+import { HeroImageCarousel } from "@/components/landing/hero-image-carousel"
 
 const moduleIcons = { gavel: Gavel, trophy: Trophy, monitor: MonitorPlay } as const
 
@@ -124,7 +125,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
         className="relative h-screen min-h-[560px] flex items-center justify-center overflow-hidden"
         ref={heroRef}
       >
-        <div className="absolute inset-0 z-0">
+        {/* <div className="absolute inset-0 z-0">
           <Image
             src="/images/landing-image.png"
             alt="Valiant League background"
@@ -132,7 +133,8 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             priority
             className="object-cover object-center"
           />
-        </div>
+        </div> */}
+        <HeroImageCarousel />
         <div className="absolute inset-0 z-0 hero-gradient" />
 
         <motion.div
