@@ -1250,7 +1250,7 @@ export default function EditMatchPage() {
                           label="Match Banner"
                           value={form.tournamentLogoUrl}
                           onChange={(url) => update("tournamentLogoUrl", url)}
-                          auctionId={matchId}
+                          matchId={matchId}
                           kind="match"
                         />
                       </div>

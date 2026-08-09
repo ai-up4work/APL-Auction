@@ -942,13 +942,13 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
           </div>
         </div>
         <div className="mb-4">
-          <ImageUploadField
-            auctionId={poolId || ""}
-            kind="tournament"
-            value={img}
-            onChange={setImg}
-            label="Photo (optional)"
-          />
+            <ImageUploadField
+              auctionId={poolId || ""}
+              kind="tournament"
+              value={img}
+              onChange={setImg}
+              label="Photo (optional)"
+            />
         </div>
         <div className="mb-4">
           <FieldLabel>Notes (optional)</FieldLabel>

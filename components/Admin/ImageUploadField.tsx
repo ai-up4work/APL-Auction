@@ -4,13 +4,30 @@
 import { useRef, useState } from "react";
 import { uploadAuctionImage, type UploadKind } from "@/lib/uploadImage";
 
+// Kinds that still go through the legacy auctionId+kind path in
+// uploadAuctionImage / /api/uploads. Everything else (tournament,
+// organization, match, award) is "new-style" and identified by
+// matchId/contextId instead — see LEGACY_KINDS in lib/uploadImage.ts,
+// which this list mirrors.
+const LEGACY_KINDS: UploadKind[] = ["team", "player", "logo"];
+
 interface ImageUploadFieldProps {
-  auctionId: string;
-  kind:      UploadKind; // "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award"
-  value:     string;     // current image URL (empty string if none)
-  onChange:  (url: string) => void;
-  label?:    string;
-  disabled?: boolean;    // optional — existing callers that don't pass it keep working unchanged
+  // Legacy identifier — required only when `kind` is "team" | "player" | "logo".
+  auctionId?: string;
+  kind: UploadKind; // "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award"
+  value: string; // current image URL (empty string if none)
+  onChange: (url: string) => void;
+  label?: string;
+  disabled?: boolean; // optional — existing callers that don't pass it keep working unchanged
+  // New-style identifier — use this (or the more generic `contextId`)
+  // when kind === "match". Whichever of matchId/contextId/auctionId is
+  // present gets used as the id sent to uploadAuctionImage.
+  matchId?: string;
+  // Generic version of matchId, for tournament/organization/award kinds
+  // where "matchId" wouldn't read naturally at the call site.
+  contextId?: string;
+  // Only read when kind === "award" — forwarded through to the upload route.
+  awardId?: string;
   // Accent color for the upload affordance — pass the team color, or
   // omit to use the theme orange default.
   accentColor?: string;
@@ -23,25 +40,39 @@ export default function ImageUploadField({
   onChange,
   label = "Image",
   disabled = false,
+  matchId,
+  contextId,
+  awardId,
   accentColor = "var(--color-theme-orange)",
 }: ImageUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [dragOver,  setDragOver]  = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const isLegacyKind = LEGACY_KINDS.includes(kind);
+  // Legacy kinds (team/player/logo) key off auctionId, exactly as
+  // before. New-style kinds (match/tournament/organization/award) key
+  // off matchId, falling back to the more generic contextId, falling
+  // back to auctionId in case a caller still passes that name.
+  const effectiveId = isLegacyKind ? auctionId : matchId ?? contextId ?? auctionId;
 
   async function handleFile(file: File | undefined | null) {
     if (disabled || !file) return;
     setError(null);
 
-    if (!auctionId) {
-      setError("Auction not ready yet — try again in a moment.");
+    if (!effectiveId) {
+      setError(
+        isLegacyKind
+          ? "Auction not ready yet — try again in a moment."
+          : "Not ready to upload yet — try again in a moment."
+      );
       return;
     }
 
     setUploading(true);
     try {
-      const { url } = await uploadAuctionImage(auctionId, kind, file);
+      const { url } = await uploadAuctionImage(effectiveId, kind, file, awardId ? { awardId } : undefined);
       onChange(url);
     } catch (e: any) {
       setError(e?.message ?? "Upload failed");
@@ -106,6 +137,14 @@ export default function ImageUploadField({
                     return "shield";
                   case "logo":
                     return "workspace_premium";
+                  case "match":
+                    return "sports_cricket";
+                  case "tournament":
+                    return "emoji_events";
+                  case "organization":
+                    return "corporate_fare";
+                  case "award":
+                    return "military_tech";
                   default:
                     return "person";
                 }
