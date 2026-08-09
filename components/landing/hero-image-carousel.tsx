@@ -24,14 +24,14 @@ const SLIDES: HeroSlide[] = [
     alt: "Valiant League background",
   },
   {
-    desktop: "/images/landing-image-2.png",
-    mobile: "/images/landing-image-2-mobile.png",
-    alt: "Live auction in progress",
-  },
-  {
     desktop: "/images/landing-image-1.png",
     mobile: "/images/landing-image-1-mobile.png",
     alt: "Auctioneer at work",
+  },
+  {
+    desktop: "/images/landing-image-2.png",
+    mobile: "/images/landing-image-2-mobile.png",
+    alt: "Live auction in progress",
   },    
 
 
