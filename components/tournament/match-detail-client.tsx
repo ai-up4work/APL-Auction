@@ -971,8 +971,8 @@ function BattingCard({
       <div className="flex items-center justify-between mb-3">
         <p className="text-gold text-xs uppercase tracking-widest font-cinzel">{title}</p>
         {live && (
-          <span className="flex items-center gap-1.5 text-red-500 text-[10px] uppercase tracking-widest font-cinzel">
-            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> live
+          <span className="flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-300 animate-pulse" /> live
           </span>
         )}
       </div>
