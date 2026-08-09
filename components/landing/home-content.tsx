@@ -184,14 +184,14 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           </span>
         </div>
         <div className="relative w-full overflow-hidden marquee-mask" ref={marqueeRef}>
-          <div className="flex items-center gap-16 md:gap-24 w-max marquee-track">
+          <div className="flex items-center gap-8 md:gap-24 w-max marquee-track">
             {[...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs, ...trustedClubs].map((club, i) => (
               <div
                 key={`${club.name || "club"}-${i}`}
                 ref={(el) => {
                   logoRefs.current[i] = el
                 }}
-                className="flex-shrink-0 w-24 md:w-50 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
+                className="flex-shrink-0 w-30 md:w-50 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
               >
                 <Image
                   src={club.logo}
