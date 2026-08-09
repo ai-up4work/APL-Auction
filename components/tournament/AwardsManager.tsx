@@ -9,10 +9,13 @@ import ImageUploadField from "@/components/common/ImageUploadField"
 import {
   type AwardTemplate,
   type AwardInput,
+  type MatchOption,
+  type DerivationMethod,
   getAwardsForTournament,
   createAward,
   updateAward,
   deleteAward,
+  getMatchesForTournament,
 } from "@/lib/tournament/awards"
 
 interface AwardsManagerProps {
@@ -24,10 +27,10 @@ interface AwardsManagerProps {
 }
 
 const PRIZE_CATEGORIES = [
-  { value: "cash", label: "💰 Cash Prize", color: "bg-yellow-500/20 border-yellow-500/50" },
-  { value: "physical", label: "🎁 Physical Item", color: "bg-purple-500/20 border-purple-500/50" },
-  { value: "badge", label: "🏅 Badge", color: "bg-blue-500/20 border-blue-500/50" },
-  { value: "experience", label: "✨ Experience", color: "bg-pink-500/20 border-pink-500/50" },
+  { value: "cash", label: "Cash Prize", color: "bg-yellow-500/20 border-yellow-500/50" },
+  { value: "physical", label: "Physical Item", color: "bg-purple-500/20 border-purple-500/50" },
+  { value: "badge", label: "Badge", color: "bg-blue-500/20 border-blue-500/50" },
+  { value: "experience", label: "Experience", color: "bg-pink-500/20 border-pink-500/50" },
 ] as const
 
 const AWARD_TYPES = [
@@ -35,11 +38,48 @@ const AWARD_TYPES = [
   { value: "team", label: "Team" },
 ] as const
 
+// Tournament-wide: one instance for the whole tournament (Best Player,
+// 1st Place Team). Match-based: this award concept applies per match
+// (Man of the Match) — see MATCH_APPLICATIONS below for whether that
+// means every match or one specific match.
+const AWARD_LEVELS = [
+  { value: "tournament", label: "Tournament-wide (once per tournament)" },
+  { value: "match", label: "Match-based (Man of the Match, etc.)" },
+] as const
+
+// Only offered when awardLevel === "tournament" — a single match has
+// no "standings" to rank within.
+const DERIVATION_METHODS = [
+  { value: "stat_leader", label: "Statistic leaderboard (e.g. top run-scorer)" },
+  { value: "standings_position", label: "Final standings position (1st, 2nd, 3rd place)" },
+] as const
+
+const MATCH_APPLICATIONS = [
+  { value: "every", label: "Every match (e.g. Man of the Match)" },
+  { value: "specific", label: "One specific match only" },
+] as const
+
 const emptyFormData: Partial<AwardTemplate> = {
   awardType: "individual",
+  awardLevel: "tournament",
   prizeCategory: "cash",
   isDataDerived: false,
   overrideEnabled: true,
+}
+
+// Shared class string so every <select> renders identically to the
+// Input/Textarea components used elsewhere in this form (same height,
+// radius, border, and focus ring).
+const selectClassName =
+  "flex h-10 w-full rounded-md border border-gold/30 bg-black/50 px-3 py-2 text-sm text-white " +
+  "focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold/50 " +
+  "disabled:cursor-not-allowed disabled:opacity-50"
+
+function positionLabel(rank: number) {
+  if (rank === 1) return "1st Place"
+  if (rank === 2) return "2nd Place"
+  if (rank === 3) return "3rd Place"
+  return `${rank}th Place`
 }
 
 export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsManagerProps) {
@@ -57,9 +97,22 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
   const [formError, setFormError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
+  // UI-only: whether a match-level award applies to every match or is
+  // pinned to one. Derived from formData.matchId on load/edit, but
+  // tracked separately so "specific" can be selected in the UI before
+  // a match has actually been picked yet.
+  const [matchApplication, setMatchApplication] = useState<"every" | "specific">("every")
+
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [pendingDuplicateId, setPendingDuplicateId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
+
+  // ── Matches, for the match picker. Loaded lazily the first time it's
+  // needed so we don't pay for it on every AwardsManager mount. ──────
+  const [matches, setMatches] = useState<MatchOption[]>([])
+  const [matchesLoading, setMatchesLoading] = useState(false)
+  const [matchesError, setMatchesError] = useState<string | null>(null)
+  const [matchesLoaded, setMatchesLoaded] = useState(false)
 
   // ── Load from Supabase on mount ──
   useEffect(() => {
@@ -90,9 +143,28 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournamentId])
 
+  const ensureMatchesLoaded = () => {
+    if (matchesLoaded || matchesLoading || !tournamentId) return
+
+    setMatchesLoading(true)
+    setMatchesError(null)
+
+    getMatchesForTournament(tournamentId)
+      .then((data) => {
+        setMatches(data)
+        setMatchesLoaded(true)
+      })
+      .catch((err) => {
+        console.error("[AwardsManager] load matches failed:", err)
+        setMatchesError("Couldn't load matches — please try again.")
+      })
+      .finally(() => setMatchesLoading(false))
+  }
+
   const resetForm = () => {
     setFormData(emptyFormData)
     setFormError(null)
+    setMatchApplication("every")
   }
 
   const openNewForm = () => {
@@ -106,6 +178,10 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
     setFormData(award)
     setFormError(null)
     setShowForm(true)
+
+    const isSpecificMatch = award.awardLevel === "match" && !!award.matchId
+    setMatchApplication(isSpecificMatch ? "specific" : "every")
+    if (award.awardLevel === "match") ensureMatchesLoaded()
   }
 
   // ── Create / Update — writes straight to Supabase; local state only
@@ -116,15 +192,44 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
       return
     }
 
+    const awardLevel = formData.awardLevel || "tournament"
+    const method = formData.derivationConfig?.method
+
+    if (awardLevel === "match" && matchApplication === "specific" && !formData.matchId) {
+      setFormError("Pick which match this award is scoped to.")
+      return
+    }
+
+    if (formData.isDataDerived) {
+      if (!method) {
+        setFormError("Pick how the winner should be determined.")
+        return
+      }
+      if (method === "stat_leader" && !formData.derivationConfig?.statistic?.trim()) {
+        setFormError("Enter a statistic to derive this award from.")
+        return
+      }
+    }
+
     const payload: AwardInput = {
       title: formData.title.trim(),
       description: formData.description.trim(),
       awardType: formData.awardType || "individual",
+      awardLevel,
+      matchId:
+        awardLevel === "match" && matchApplication === "specific" ? formData.matchId : undefined,
       prizeCategory: formData.prizeCategory || "cash",
       prizeValue: formData.prizeValue,
       imageUrl: formData.imageUrl,
       isDataDerived: formData.isDataDerived || false,
-      derivationConfig: formData.isDataDerived ? formData.derivationConfig : undefined,
+      derivationConfig: formData.isDataDerived
+        ? {
+            method: method || "stat_leader",
+            statistic:
+              method === "stat_leader" ? formData.derivationConfig?.statistic || "" : undefined,
+            rank: formData.derivationConfig?.rank ?? 1,
+          }
+        : undefined,
       overrideEnabled: formData.overrideEnabled,
     }
 
@@ -192,6 +297,25 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
     onAwardsChange?.(updated)
   }
 
+  const matchLabelFor = (matchId?: string) => matches.find((m) => m.id === matchId)?.label
+
+  const derivationBadge = (award: AwardTemplate) => {
+    const levelBadge =
+      award.awardLevel === "match"
+        ? award.matchId
+          ? `Match · ${matchLabelFor(award.matchId) || "Specific match"}`
+          : "Match · Every match"
+        : "Tournament"
+
+    if (!award.isDataDerived || !award.derivationConfig) return `${levelBadge} · Manual`
+
+    const { method, rank } = award.derivationConfig
+    const methodBadge =
+      method === "standings_position" ? positionLabel(rank) : "Statistic leader"
+
+    return `${levelBadge} · ${methodBadge}`
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -236,7 +360,7 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
             <Input
               value={formData.title || ""}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="e.g., MVP Award, Most Wickets"
+              placeholder="e.g., MVP Award, Most Wickets, Man of the Match"
               className="bg-black/50 border-gold/30 text-white"
             />
           </div>
@@ -251,6 +375,107 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
             />
           </div>
 
+          <div>
+            <label className="text-gray-400 text-sm block mb-2 font-medium">Award Level</label>
+            <select
+              value={formData.awardLevel || "tournament"}
+              onChange={(e) => {
+                const awardLevel = e.target.value as "tournament" | "match"
+                setFormData({
+                  ...formData,
+                  awardLevel,
+                  matchId: undefined,
+                  // standings_position only makes sense tournament-wide —
+                  // drop it if switching to match-based.
+                  derivationConfig:
+                    formData.isDataDerived && formData.derivationConfig
+                      ? {
+                          ...formData.derivationConfig,
+                          method:
+                            awardLevel === "match" ? "stat_leader" : formData.derivationConfig.method,
+                        }
+                      : formData.derivationConfig,
+                })
+                setMatchApplication("every")
+                if (awardLevel === "match") ensureMatchesLoaded()
+              }}
+              className={selectClassName}
+            >
+              {AWARD_LEVELS.map((lvl) => (
+                <option key={lvl.value} value={lvl.value}>
+                  {lvl.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {formData.awardLevel === "match"
+                ? "This award is given out per match (or for one specific match)."
+                : "This award is given out once for the whole tournament."}
+            </p>
+          </div>
+
+          {/* Match scoping — independent of whether the winner is
+              auto-derived or manually picked; a hand-picked award can
+              still belong to one specific match. */}
+          {formData.awardLevel === "match" && (
+            <div className="bg-black/30 border border-gold/10 rounded p-3 space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Applies to</label>
+                <select
+                  value={matchApplication}
+                  onChange={(e) => {
+                    const value = e.target.value as "every" | "specific"
+                    setMatchApplication(value)
+                    setFormData({
+                      ...formData,
+                      matchId: value === "every" ? undefined : formData.matchId,
+                    })
+                    if (value === "specific") ensureMatchesLoaded()
+                  }}
+                  className={`${selectClassName} text-sm h-9`}
+                >
+                  {MATCH_APPLICATIONS.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {matchApplication === "specific" && (
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Match</label>
+                  {matchesLoading ? (
+                    <p className="flex items-center gap-2 text-gray-500 text-xs py-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading matches…
+                    </p>
+                  ) : matchesError ? (
+                    <p className="flex items-center gap-1.5 text-red-500 text-xs py-2">
+                      <AlertCircle className="h-3.5 w-3.5" /> {matchesError}
+                    </p>
+                  ) : matches.length === 0 ? (
+                    <p className="text-gray-500 text-xs py-2">
+                      No matches found for this tournament yet.
+                    </p>
+                  ) : (
+                    <select
+                      value={formData.matchId || ""}
+                      onChange={(e) => setFormData({ ...formData, matchId: e.target.value })}
+                      className={`${selectClassName} text-sm h-9`}
+                    >
+                      <option value="">Select a match…</option>
+                      {matches.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-gray-400 text-sm block mb-2 font-medium">Award Type</label>
@@ -262,7 +487,7 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                     awardType: e.target.value as "individual" | "team",
                   })
                 }
-                className="w-full bg-black/50 border border-gold/30 text-white rounded px-3 py-2"
+                className={selectClassName}
               >
                 {AWARD_TYPES.map((type) => (
                   <option key={type.value} value={type.value}>
@@ -282,7 +507,7 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                     prizeCategory: e.target.value as any,
                   })
                 }
-                className="w-full bg-black/50 border border-gold/30 text-white rounded px-3 py-2"
+                className={selectClassName}
               >
                 {PRIZE_CATEGORIES.map((cat) => (
                   <option key={cat.value} value={cat.value}>
@@ -323,36 +548,109 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                 type="checkbox"
                 id="datadriven"
                 checked={formData.isDataDerived || false}
-                onChange={(e) => setFormData({ ...formData, isDataDerived: e.target.checked })}
+                onChange={(e) => {
+                  const isDataDerived = e.target.checked
+                  setFormData({
+                    ...formData,
+                    isDataDerived,
+                    derivationConfig: isDataDerived
+                      ? {
+                          method: formData.derivationConfig?.method || "stat_leader",
+                          statistic: formData.derivationConfig?.statistic || "",
+                          rank: formData.derivationConfig?.rank ?? 1,
+                        }
+                      : undefined,
+                  })
+                }}
                 className="rounded"
               />
               <label htmlFor="datadriven" className="text-sm text-gray-400">
-                Derive from tournament statistics (auto-populate based on rankings)
+                Auto-determine winner from tournament data
               </label>
             </div>
 
+            {!formData.isDataDerived && (
+              <p className="text-xs text-gray-500">
+                Winner will be assigned manually each time this award is given.
+              </p>
+            )}
+
             {formData.isDataDerived && (
               <div className="bg-gold/5 border border-gold/20 rounded p-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Statistic</label>
-                    <Input
-                      value={formData.derivationConfig?.statistic || ""}
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">How is the winner picked?</label>
+                  {formData.awardLevel === "match" ? (
+                    <p className="text-sm text-gray-300 py-1.5">
+                      Statistic leaderboard (only option for match-based awards)
+                    </p>
+                  ) : (
+                    <select
+                      value={formData.derivationConfig?.method || "stat_leader"}
                       onChange={(e) =>
                         setFormData({
                           ...formData,
                           derivationConfig: {
-                            statistic: e.target.value,
+                            method: e.target.value as DerivationMethod,
+                            statistic: formData.derivationConfig?.statistic || "",
                             rank: formData.derivationConfig?.rank ?? 1,
                           },
                         })
                       }
-                      placeholder="runs, wickets, batting_avg"
-                      className="bg-black/50 border-gold/30 text-white text-sm"
-                    />
+                      className={`${selectClassName} text-sm h-9`}
+                    >
+                      {DERIVATION_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {(formData.derivationConfig?.method || "stat_leader") === "stat_leader" ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Statistic</label>
+                      <Input
+                        value={formData.derivationConfig?.statistic || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            derivationConfig: {
+                              method: formData.derivationConfig?.method || "stat_leader",
+                              statistic: e.target.value,
+                              rank: formData.derivationConfig?.rank ?? 1,
+                            },
+                          })
+                        }
+                        placeholder="runs, wickets, batting_avg"
+                        className="bg-black/50 border-gold/30 text-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Rank</label>
+                      <Input
+                        type="number"
+                        value={formData.derivationConfig?.rank ?? 1}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            derivationConfig: {
+                              method: formData.derivationConfig?.method || "stat_leader",
+                              statistic: formData.derivationConfig?.statistic || "",
+                              rank: parseInt(e.target.value) || 1,
+                            },
+                          })
+                        }
+                        min="1"
+                        max="10"
+                        className="bg-black/50 border-gold/30 text-white text-sm"
+                      />
+                    </div>
                   </div>
+                ) : (
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">Rank</label>
+                    <label className="text-xs text-gray-400 block mb-1">Final Position</label>
                     <Input
                       type="number"
                       value={formData.derivationConfig?.rank ?? 1}
@@ -360,8 +658,9 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                         setFormData({
                           ...formData,
                           derivationConfig: {
-                            statistic: formData.derivationConfig?.statistic || "",
+                            method: "standings_position",
                             rank: parseInt(e.target.value) || 1,
+                            statistic: undefined,
                           },
                         })
                       }
@@ -369,8 +668,11 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                       max="10"
                       className="bg-black/50 border-gold/30 text-white text-sm"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      {positionLabel(formData.derivationConfig?.rank ?? 1)} in the final standings
+                    </p>
                   </div>
-                </div>
+                )}
 
                 <label className="flex items-center gap-2 text-sm text-gray-400">
                   <input
@@ -513,11 +815,9 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
                         {award.prizeValue}
                       </span>
                     )}
-                    {award.isDataDerived && (
-                      <span className="px-2 py-1 rounded-full bg-purple-900/30 border border-purple-900/50 text-purple-300">
-                        Data-driven
-                      </span>
-                    )}
+                    <span className="px-2 py-1 rounded-full bg-purple-900/30 border border-purple-900/50 text-purple-300">
+                      {derivationBadge(award)}
+                    </span>
                   </div>
                 </div>
               </div>
