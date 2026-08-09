@@ -132,22 +132,40 @@ function determineWinner(match: MatchDetail): "a" | "b" | "tie" {
   return totalB > totalA ? "b" : "a"
 }
 
+/** Basic hex-color sanity check — mirrors the one in match-graphs.tsx,
+ *  so an empty string or malformed color in match_setup falls back to
+ *  the original gold/red defaults instead of breaking the bar. */
+function safeColor(value: string | undefined, fallback: string): string {
+  if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())) return value.trim()
+  return fallback
+}
+
 /** Compact win-probability bar, now shown inline in the score strip
  *  instead of behind its own Stats tab. Renders nothing if winProb isn't
  *  available yet (e.g. before the live match engine has published a
  *  reading), so the score strip degrades gracefully rather than showing
  *  an empty bar. Once the match is completed, `winProb` is expected to
  *  already be the snapped final value (100/0, or 50/50 on a tie) — this
- *  component just adjusts the label from "Win Probability" to "Final". */
+ *  component just adjusts the label from "Win Probability" to "Final".
+ *
+ *  Colors: teamAColor/teamBColor come from match.teamA.color /
+ *  match.teamB.color (see data/match-data.ts) so this bar matches
+ *  whatever team colors were set in the Match Editor, instead of the
+ *  previous fixed gold/red. Falls back to gold/red when a team has no
+ *  color set. */
 function WinProbabilityBar({
   winProb,
   teamAShort,
   teamBShort,
+  teamAColor,
+  teamBColor,
   completed,
 }: {
   winProb: { a: number; b: number } | undefined
   teamAShort: string
   teamBShort: string
+  teamAColor: string
+  teamBColor: string
   completed?: boolean
 }) {
   if (!winProb) return null
@@ -158,14 +176,20 @@ function WinProbabilityBar({
         {completed ? "Final" : "Win Probability"}
       </p>
       <div className="flex h-2 rounded-full overflow-hidden bg-white/10">
-        <div className="transition-all duration-700 bg-gold" style={{ width: `${winProb.a}%` }} />
-        <div className="transition-all duration-700 bg-red-600" style={{ width: `${winProb.b}%` }} />
+        <div
+          className="transition-all duration-700"
+          style={{ width: `${winProb.a}%`, background: teamAColor }}
+        />
+        <div
+          className="transition-all duration-700"
+          style={{ width: `${winProb.b}%`, background: teamBColor }}
+        />
       </div>
       <div className="flex justify-between mt-2 text-xs font-cinzel">
-        <span className="text-gold font-bold">
+        <span className="font-bold" style={{ color: teamAColor }}>
           {teamAShort} {winProb.a}%
         </span>
-        <span className="text-red-500 font-bold">
+        <span className="font-bold" style={{ color: teamBColor }}>
           {teamBShort} {winProb.b}%
         </span>
       </div>
@@ -399,8 +423,11 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <div className="flex items-center gap-2">
                 {status === "live" && (
-                  <span className="flex items-center gap-1.5 bg-red-600/90 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.4)]">
-                    <Radio className="h-3 w-3" />
+                  <span className="relative flex items-center gap-1.5 bg-gold text-black text-xs font-bold font-cinzel px-3 py-1.5 rounded-full shadow-[0_0_12px_rgba(245,166,35,0.5)]">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black/40" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-black" />
+                    </span>
                     LIVE
                   </span>
                 )}
@@ -499,6 +526,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   winProb={winProb}
                   teamAShort={match.teamA.short}
                   teamBShort={match.teamB.short}
+                  teamAColor={safeColor(match.teamA.color, "#F5A623")}
+                  teamBColor={safeColor(match.teamB.color, "#EF4444")}
                   completed={completed}
                 />
               </>

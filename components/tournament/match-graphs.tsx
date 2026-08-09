@@ -67,9 +67,22 @@ const GRAPH_TABS: { key: GraphTab; label: string }[] = [
   { key: "worm", label: "Worm" },
 ]
 
+// Fallback / neutral-UI colors — used whenever a team has no `color` set
+// on match.teamA/teamB (older matches, or matches created before the
+// Match Editor's per-team color picker existed), and for chart elements
+// that are intentionally team-neutral (the pre-chase flat line, general
+// tab styling) rather than tied to either team's identity.
 const GOLD = "#F5A623"
 const RED = "#EF4444"
 const GREY = "#6b7280"
+
+/** Basic hex-color sanity check — falls back to the default rather than
+ *  handing recharts/gradients something malformed if match_setup ever
+ *  has a stray empty string or non-hex value in team1Color/team2Color. */
+function safeColor(value: string | undefined, fallback: string): string {
+  if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())) return value.trim()
+  return fallback
+}
 
 function ballTone(b: string) {
   const isWicket = b.toUpperCase() === "W"
@@ -275,11 +288,15 @@ function WinProbabilityView({
   winProb,
   stepIndex,
   completed,
+  teamAColor,
+  teamBColor,
 }: {
   match: MatchDetail
   winProb: { a: number; b: number }
   stepIndex: number
   completed: boolean
+  teamAColor: string
+  teamBColor: string
 }) {
   const played = match.liveScript.slice(0, stepIndex)
   const startWpB = match.liveScript[0]?.wpB ?? 50
@@ -317,7 +334,7 @@ function WinProbabilityView({
   // Split into two visual layers so the graph itself communicates the
   // innings change, not just a tooltip: a muted grey "flat" line covers
   // the 1st-innings stretch (there's no chase pressure yet, so 50/50 is
-  // correct — not missing data), and the real gold/red team lines only
+  // correct — not missing data), and the real team-colored lines only
   // populate from the moment the chase actually starts. The point at
   // transitionIdx is included in both series so the two segments join
   // up with no visual gap.
@@ -372,7 +389,7 @@ function WinProbabilityView({
           <span className="inline-block h-1.5 w-3 rounded-full bg-gray-500 mr-1.5 align-middle" />
           Grey = 1st innings (no chase pressure yet)
           <span className="mx-2 text-gray-700">|</span>
-          <span className="inline-block h-1.5 w-3 rounded-full bg-gold mr-1.5 align-middle" />
+          <span className="inline-block h-1.5 w-3 rounded-full mr-1.5 align-middle" style={{ background: teamAColor }} />
           Colour = the chase, from the moment it began
         </p>
       ) : (
@@ -395,12 +412,12 @@ function WinProbabilityView({
           <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="wpA" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={GOLD} stopOpacity={0.5} />
-                <stop offset="100%" stopColor={GOLD} stopOpacity={0.05} />
+                <stop offset="0%" stopColor={teamAColor} stopOpacity={0.5} />
+                <stop offset="100%" stopColor={teamAColor} stopOpacity={0.05} />
               </linearGradient>
               <linearGradient id="wpB" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={RED} stopOpacity={0.5} />
-                <stop offset="100%" stopColor={RED} stopOpacity={0.05} />
+                <stop offset="0%" stopColor={teamBColor} stopOpacity={0.5} />
+                <stop offset="100%" stopColor={teamBColor} stopOpacity={0.05} />
               </linearGradient>
               <linearGradient id="wpFlat" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={GREY} stopOpacity={0.35} />
@@ -435,7 +452,7 @@ function WinProbabilityView({
             <Area
               type="monotone"
               dataKey={match.teamA.short}
-              stroke={GOLD}
+              stroke={teamAColor}
               fill="url(#wpA)"
               strokeWidth={2}
               connectNulls={false}
@@ -443,7 +460,7 @@ function WinProbabilityView({
             <Area
               type="monotone"
               dataKey={match.teamB.short}
-              stroke={RED}
+              stroke={teamBColor}
               fill="url(#wpB)"
               strokeWidth={2}
               connectNulls={false}
@@ -479,10 +496,10 @@ function WinProbabilityView({
         </ResponsiveContainer>
       </div>
       <div className="flex justify-between mt-4 text-xs font-cinzel px-2">
-        <span className="text-gold font-bold">
+        <span className="font-bold" style={{ color: teamAColor }}>
           {match.teamA.short} {winProb.a}%
         </span>
-        <span className="text-red-500 font-bold">
+        <span className="font-bold" style={{ color: teamBColor }}>
           {match.teamB.short} {winProb.b}%
         </span>
       </div>
@@ -490,7 +507,17 @@ function WinProbabilityView({
   )
 }
 
-function PartnershipsView({ match, innings2Started }: { match: MatchDetail; innings2Started: boolean }) {
+function PartnershipsView({
+  match,
+  innings2Started,
+  teamAColor,
+  teamBColor,
+}: {
+  match: MatchDetail
+  innings2Started: boolean
+  teamAColor: string
+  teamBColor: string
+}) {
   // Same reasoning as BallMapView: default to whichever innings is
   // actually current, and re-sync if that changes while this view is
   // already open (e.g. the chase starts while a visitor is looking at
@@ -501,6 +528,9 @@ function PartnershipsView({ match, innings2Started }: { match: MatchDetail; inni
   }, [innings2Started])
   const showLocked = inn === 2 && !innings2Started
   const fow = inn === 1 ? match.innings1.fow : match.innings2Partial.fow
+  // Partnership bars reflect whichever team is currently batting in the
+  // selected innings.
+  const battingTeamColor = inn === 1 ? teamAColor : teamBColor
 
   // FowEntry is ["wkt-score", "batterName", "over"], e.g. ["1-28", "Nuwan Dias", "4.2"].
   // The score lives in the part after the dash in index 0 — NOT index 1 (that's the name).
@@ -549,8 +579,8 @@ function PartnershipsView({ match, innings2Started }: { match: MatchDetail; inni
                 </div>
                 <div className="h-2 rounded-full bg-white/5 overflow-hidden">
                   <div
-                    className="h-full bg-gold rounded-full transition-all"
-                    style={{ width: `${(p.runs / maxRuns) * 100}%` }}
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${(p.runs / maxRuns) * 100}%`, background: battingTeamColor }}
                   />
                 </div>
                 <p className="text-[10.5px] text-gray-500 mt-2">
@@ -569,7 +599,17 @@ function PartnershipsView({ match, innings2Started }: { match: MatchDetail; inni
   )
 }
 
-function OversBarView({ match, oversChartData }: { match: MatchDetail; oversChartData: Record<string, any>[] }) {
+function OversBarView({
+  match,
+  oversChartData,
+  teamAColor,
+  teamBColor,
+}: {
+  match: MatchDetail
+  oversChartData: Record<string, any>[]
+  teamAColor: string
+  teamBColor: string
+}) {
   return (
     <div className="fade-in">
       <p className="text-gray-400 text-xs mb-4">Runs scored per over across both innings.</p>
@@ -580,24 +620,34 @@ function OversBarView({ match, oversChartData }: { match: MatchDetail; oversChar
             <XAxis dataKey="over" tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <Tooltip content={<GraphTooltip />} />
-            <Bar dataKey={match.teamA.short} fill={RED} radius={[3, 3, 0, 0]} />
-            <Bar dataKey={match.teamB.short} fill={GOLD} radius={[3, 3, 0, 0]} />
+            <Bar dataKey={match.teamA.short} fill={teamAColor} radius={[3, 3, 0, 0]} />
+            <Bar dataKey={match.teamB.short} fill={teamBColor} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
       <div className="flex gap-6 mt-3 text-xs font-cinzel justify-center">
         <span className="flex items-center gap-1.5 text-gray-400">
-          <span className="h-2 w-2 rounded-full" style={{ background: RED }} /> {match.teamA.short}
+          <span className="h-2 w-2 rounded-full" style={{ background: teamAColor }} /> {match.teamA.short}
         </span>
         <span className="flex items-center gap-1.5 text-gray-400">
-          <span className="h-2 w-2 rounded-full" style={{ background: GOLD }} /> {match.teamB.short}
+          <span className="h-2 w-2 rounded-full" style={{ background: teamBColor }} /> {match.teamB.short}
         </span>
       </div>
     </div>
   )
 }
 
-function RunRateView({ match, runRateChartData }: { match: MatchDetail; runRateChartData: Record<string, any>[] }) {
+function RunRateView({
+  match,
+  runRateChartData,
+  teamAColor,
+  teamBColor,
+}: {
+  match: MatchDetail
+  runRateChartData: Record<string, any>[]
+  teamAColor: string
+  teamBColor: string
+}) {
   return (
     <div className="fade-in">
       <p className="text-gray-400 text-xs mb-4">Cumulative run rate over the course of each innings.</p>
@@ -608,8 +658,8 @@ function RunRateView({ match, runRateChartData }: { match: MatchDetail; runRateC
             <XAxis dataKey="over" tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <Tooltip content={<GraphTooltip />} />
-            <Line type="monotone" dataKey={match.teamA.short} stroke={RED} strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey={match.teamB.short} stroke={GOLD} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey={match.teamA.short} stroke={teamAColor} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey={match.teamB.short} stroke={teamBColor} strokeWidth={2} dot={false} connectNulls />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -617,7 +667,17 @@ function RunRateView({ match, runRateChartData }: { match: MatchDetail; runRateC
   )
 }
 
-function WormView({ match, wormChartData }: { match: MatchDetail; wormChartData: Record<string, any>[] }) {
+function WormView({
+  match,
+  wormChartData,
+  teamAColor,
+  teamBColor,
+}: {
+  match: MatchDetail
+  wormChartData: Record<string, any>[]
+  teamAColor: string
+  teamBColor: string
+}) {
   return (
     <div className="fade-in">
       <p className="text-gray-400 text-xs mb-4">Score progression, over by over.</p>
@@ -628,8 +688,8 @@ function WormView({ match, wormChartData }: { match: MatchDetail; wormChartData:
             <XAxis dataKey="over" tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={{ stroke: "#ffffff20" }} />
             <Tooltip content={<GraphTooltip />} />
-            <Line type="monotone" dataKey={match.teamA.short} stroke={RED} strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey={match.teamB.short} stroke={GOLD} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey={match.teamA.short} stroke={teamAColor} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey={match.teamB.short} stroke={teamBColor} strokeWidth={2} dot={false} connectNulls />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -653,6 +713,16 @@ export default function MatchGraphs({
   completed,
 }: MatchGraphsProps) {
   const [graphTab, setGraphTab] = useState<GraphTab>("winprob")
+
+  // Per-match team colors — read straight from match.teamA.color /
+  // match.teamB.color (populated either from the real `teams` table for
+  // bracket-linked matches, or from match_setup.team1/team2.color for
+  // standalone matches, see data/match-data.ts). Falls back to the
+  // original gold/red defaults when a team has no color set, so older
+  // matches or matches without a color chosen still render sensibly
+  // instead of both teams defaulting to the same color or an invalid one.
+  const teamAColor = safeColor((match.teamA as { color?: string }).color, GOLD)
+  const teamBColor = safeColor((match.teamB as { color?: string }).color, RED)
 
   const teamAOverRuns = match.innings1.overRuns
   const teamBOverRuns = live ? overRunsB : match.innings2Final.overRuns
@@ -712,11 +782,34 @@ export default function MatchGraphs({
           <BallMapView match={match} overs1={overs1} overs2={overs2} innings2Started={innings2Started} />
         )}
         {graphTab === "winprob" && (
-          <WinProbabilityView match={match} winProb={winProb} stepIndex={stepIndex} completed={completed} />
+          <WinProbabilityView
+            match={match}
+            winProb={winProb}
+            stepIndex={stepIndex}
+            completed={completed}
+            teamAColor={teamAColor}
+            teamBColor={teamBColor}
+          />
         )}
-        {graphTab === "partnerships" && <PartnershipsView match={match} innings2Started={innings2Started} />}
-        {graphTab === "runrate" && <RunRateView match={match} runRateChartData={runRateChartData} />}
-        {graphTab === "worm" && <WormView match={match} wormChartData={wormChartData} />}
+        {graphTab === "partnerships" && (
+          <PartnershipsView
+            match={match}
+            innings2Started={innings2Started}
+            teamAColor={teamAColor}
+            teamBColor={teamBColor}
+          />
+        )}
+        {graphTab === "runrate" && (
+          <RunRateView
+            match={match}
+            runRateChartData={runRateChartData}
+            teamAColor={teamAColor}
+            teamBColor={teamBColor}
+          />
+        )}
+        {graphTab === "worm" && (
+          <WormView match={match} wormChartData={wormChartData} teamAColor={teamAColor} teamBColor={teamBColor} />
+        )}
       </div>
     </div>
   )
