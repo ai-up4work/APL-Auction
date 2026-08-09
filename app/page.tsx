@@ -79,40 +79,24 @@ export default function Home() {
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
 
-      {/* ---- fixed smooth-scroll section indicator — desktop: vertical rail on the right ---- */}
-      <div className="fixed right-6 top-1/2 -translate-y-1/2 z-50 hidden lg:block">
-        <div className="flex flex-col items-center space-y-4">
-          {SECTIONS.map((section) => (
-            <button
-              key={section}
-              onClick={() => scrollToSection(section)}
-              className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                activeSection === section ? "bg-gold w-4 h-4 shadow-lg shadow-gold/30" : "bg-gray-400 hover:bg-gold/50"
-              }`}
-              aria-label={`Scroll to ${section} section`}
-            />
-          ))}
-          <div className="mt-2 text-gold">
-            <Shield className="h-5 w-5" />
-          </div>
-        </div>
-      </div>
-
-      {/* ---- fixed smooth-scroll section indicator — mobile: horizontal bar at the bottom ---- */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 lg:hidden">
-        <div className="flex items-center gap-3 bg-black/70 backdrop-blur-md border border-gold/25 rounded-full px-4 py-2.5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.8)]">
+      {/* ---- fixed smooth-scroll section indicator — same rail on every screen size ---- */}
+      <div className="fixed right-3 sm:right-4 lg:right-6 top-1/2 -translate-y-1/2 z-50">
+        <div className="flex flex-col items-center space-y-3 lg:space-y-4">
           {SECTIONS.map((section) => (
             <button
               key={section}
               onClick={() => scrollToSection(section)}
               className={`rounded-full transition-all duration-300 ${
                 activeSection === section
-                  ? "bg-gold w-4 h-2 shadow-md shadow-gold/40"
-                  : "bg-gray-500 w-2 h-2 hover:bg-gold/50"
+                  ? "bg-gold w-3 h-3 lg:w-4 lg:h-4 shadow-lg shadow-gold/30"
+                  : "bg-gray-400 w-2 h-2 lg:w-3 lg:h-3 hover:bg-gold/50"
               }`}
               aria-label={`Scroll to ${section} section`}
             />
           ))}
+          <div className="mt-2 text-gold">
+            <Shield className="h-4 w-4 lg:h-5 lg:w-5" />
+          </div>
         </div>
       </div>
 
