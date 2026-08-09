@@ -61,6 +61,18 @@
 //   getMatchDetailById returns a MatchLookupResult — either
 //   { ok: true, match } or a typed failure with a human-readable reason —
 //   instead of `null`, so the page can render a real diagnostic.
+//
+// TEAM LOGO/COLOR (STANDALONE MATCHES):
+//   `match_setup.team1` / `team2` can carry `logo` / `color` — written by
+//   the Match Editor's Details section (see the ImageUploadField/
+//   ColorInput fields there, and toRawSetup's
+//   `team1: { name, short, logo, color }` on save). Previously
+//   `MatchSetupTeam` only declared `name`/`short`, so these were invisible
+//   to the fallback teamA/teamB construction below — meaning standalone
+//   matches (no bracket_matches row) never showed a team logo/color no
+//   matter what was saved in the editor, even though bracket-linked
+//   matches (which resolve teamA/teamB from the real `teams` table
+//   instead) worked fine. Both are now read through.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -113,7 +125,8 @@ export interface MatchTeamRef {
   id: string
   name: string
   short: string
-  /** Only populated when resolved via bracket_matches → teams. */
+  /** Populated either via bracket_matches → teams, or from the embedded
+   *  match_setup.team1/team2 fallback (standalone matches). */
   logo?: string
   color?: string
 }
@@ -209,6 +222,14 @@ interface MatchSetupSquad {
 interface MatchSetupTeam {
   name: string
   short: string
+  /** Written by the Match Editor's team logo upload (ImageUploadField)
+   *  and color picker for standalone matches — see toRawSetup's
+   *  `team1: { name, short, logo, color }` on save. Optional since older
+   *  rows / auction-seeded matches may not have set these directly here
+   *  (auction-seeded ones are usually superseded by the bracket_matches
+   *  → teams lookup anyway). */
+  logo?: string
+  color?: string
 }
 
 interface MatchSetup {
@@ -601,9 +622,24 @@ export async function getMatchDetailById(
   }
 
   // ── team identity: prefer real teams rows via bracket_matches, else
-  //    fall back to the embedded match_setup.team1/team2 ──
-  let teamA: MatchTeamRef = { id: setup.team1.short, name: setup.team1.name, short: setup.team1.short }
-  let teamB: MatchTeamRef = { id: setup.team2.short, name: setup.team2.name, short: setup.team2.short }
+  //    fall back to the embedded match_setup.team1/team2 (this is the
+  //    ONLY path standalone/friendly matches ever take, since they have
+  //    no bracket_matches row at all — so logo/color here now come
+  //    straight from what the Match Editor saved into match_setup). ──
+  let teamA: MatchTeamRef = {
+    id: setup.team1.short,
+    name: setup.team1.name,
+    short: setup.team1.short,
+    logo: setup.team1.logo || undefined,
+    color: setup.team1.color || undefined,
+  }
+  let teamB: MatchTeamRef = {
+    id: setup.team2.short,
+    name: setup.team2.name,
+    short: setup.team2.short,
+    logo: setup.team2.logo || undefined,
+    color: setup.team2.color || undefined,
+  }
 
   if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
     const { data: teamRows } = await supabase
