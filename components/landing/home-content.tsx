@@ -191,12 +191,14 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                 ref={(el) => {
                   logoRefs.current[i] = el
                 }}
-                className="flex-shrink-0 w-24 md:w-32 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
+                className="flex-shrink-0 w-24 md:w-50 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
               >
-                <img
+                <Image
                   src={club.logo}
                   alt={`${club.name} logo`}
                   className="w-full h-auto object-contain"
+                  width={128}
+                  height={128}
                   loading="lazy"
                 />
               </div>

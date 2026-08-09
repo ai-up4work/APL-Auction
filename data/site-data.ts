@@ -239,12 +239,12 @@ export const knights = [
 ]
 
 export const trustedClubs = [
-  // { name: "Moon Knight League", logo: "/trusted-clubs/moon-knight.png" },
-  { name: "Iron Knights CC", logo: "/trusted-clubs/iron-knights.png" },
-  { name: "Royal Strikers", logo: "/trusted-clubs/royal-strikers.png" },
-  { name: "Silver Hawks", logo: "/trusted-clubs/silver-hawks.png" },
-  { name: "Golden Lions", logo: "/trusted-clubs/golden-lions.png" },
-  { name: "Crimson Wardens", logo: "/trusted-clubs/crimson-wardens.png" }
+  { name: "Moon Knight League", logo: "/trusted-clubs/moon-knight.png" },
+  { name: "Colombo Royals", logo: "/trusted-clubs/colombo-royals.png" },
+  { name: "Colombo Maritime Cricket Club", logo: "/trusted-clubs/colombo-maritime-cricket-club.png" },
+  { name: "Kandy Royal Tuskers Cricket Club", logo: "/trusted-clubs/kandy-royal-tuskers-cricket-club.png" },
+  { name: "Galle Fortress Cricket Club", logo: "/trusted-clubs/galle-fortress-cricket-club.png" },
+  { name: "Dambulla Rock Lions", logo: "/trusted-clubs/dambulla-rock-lions.png" }
 ]
 
 export const stats = [
