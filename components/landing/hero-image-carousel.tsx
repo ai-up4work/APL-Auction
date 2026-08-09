@@ -33,7 +33,11 @@ const SLIDES: HeroSlide[] = [
     mobile: "/images/landing-image-2-mobile.png",
     alt: "Live auction in progress",
   },    
-
+  {
+    desktop: "/images/landing-image-3.png",
+    mobile: "/images/landing-image-3-mobile.png",
+    alt: "Overlay showing live match data",
+  }
 
  
   // Add more slides here later, e.g.:
@@ -45,7 +49,7 @@ const SLIDES: HeroSlide[] = [
 ]
 
 // Milliseconds between transitions.
-const INTERVAL_MS = 2000
+const INTERVAL_MS = 12000
 // Pause auto-advance while the tab is hidden.
 const PAUSE_WHEN_HIDDEN = true
 
