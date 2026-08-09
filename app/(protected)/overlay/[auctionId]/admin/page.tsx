@@ -878,7 +878,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
             )}
           </div>
 
-          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
+          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh + 3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
             <ProgramMonitor overlayUrl={overlayUrl} />
 
               <Section
