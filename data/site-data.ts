@@ -244,7 +244,14 @@ export const trustedClubs = [
   { name: "Colombo Maritime Cricket Club", logo: "/trusted-clubs/colombo-maritime-cricket-club.png" },
   { name: "Kandy Royal Tuskers Cricket Club", logo: "/trusted-clubs/kandy-royal-tuskers-cricket-club.png" },
   { name: "Galle Fortress Cricket Club", logo: "/trusted-clubs/galle-fortress-cricket-club.png" },
-  { name: "Dambulla Rock Lions", logo: "/trusted-clubs/dambulla-rock-lions.png" }
+  { name: "Dambulla Rock Lions", logo: "/trusted-clubs/dambulla-rock-lions.png" },
+  { name: "Moratuwa Thundersharks", logo: "/trusted-clubs/moratuwa-thunder-sharks.png" },
+  // { name: "Thihariya Cricket Club", logo: "/trusted-clubs/thihariya-cricket-club.png" },
+  // { name: "Nuwara Highlanders Cricket Club", logo: "/trusted-clubs/nuwara-highlanders-cricket-club.png" },
+  // { name: "Kilinochchi Tigers Cricket Club", logo: "/trusted-clubs/kilinochchi-tigers-cricket-club.png" },
+  // { name: "Anuradhapura Kings Cricket Club", logo: "/trusted-clubs/anuradhapura-kings-cricket-club.png" },
+  // { name: "Matara Sea Eagles Cricket Club", logo: "/trusted-clubs/matara-sea-eagles-cricket-club.png" },
+  // { name: "Mount Lavinia Spartans", logo: "/trusted-clubs/mount-lavinia-spartans.png" }, 
 ]
 
 export const stats = [
