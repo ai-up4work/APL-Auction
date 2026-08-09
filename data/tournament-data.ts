@@ -118,6 +118,18 @@ export interface AwardEntry {
   label: string
   name: string
   note: string
+  /**
+   * Everything below is optional and only populated when this award came
+   * from a real `tournament_award_templates` row (via getTournamentById
+   * -> getAwardsForTournament in lib/tournament/tournament.ts, which maps
+   * the richer AwardTemplate shape from lib/tournament/awards.ts down to
+   * this thin display shape) — NOT from the static showcase demo data in
+   * `tournamentExtras` below, which only ever sets label/name/note.
+   */
+  imageUrl?: string
+  prizeCategory?: "cash" | "physical" | "badge" | "experience"
+  prizeValue?: string
+  awardType?: "individual" | "team"
 }
 
 // Extras layered onto a ShowcaseSlide to make the full tournament detail page.

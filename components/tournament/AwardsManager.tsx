@@ -1,31 +1,25 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, Trash2, Copy, Award } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Plus, Trash2, Copy, Award, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import ImageUploadField from "@/components/common/ImageUploadField"
-
-interface AwardTemplate {
-  id: string
-  title: string
-  description: string
-  awardType: "individual" | "team"
-  prizeCategory: "cash" | "physical" | "badge" | "experience"
-  prizeValue?: string
-  imageUrl?: string
-  isDataDerived: boolean
-  derivationConfig?: {
-    statistic: string
-    rank: number
-  }
-  overrideEnabled?: boolean
-}
+import {
+  type AwardTemplate,
+  type AwardInput,
+  getAwardsForTournament,
+  createAward,
+  updateAward,
+  deleteAward,
+} from "@/lib/tournament/awards"
 
 interface AwardsManagerProps {
   tournamentId: string
-  initialAwards?: AwardTemplate[]
+  // Fired after every successful load/create/update/delete so the parent
+  // (Tournament Edit page) can mirror the current list into its sidebar
+  // preview + setup checklist without owning the data itself.
   onAwardsChange?: (awards: AwardTemplate[]) => void
 }
 
@@ -41,85 +35,161 @@ const AWARD_TYPES = [
   { value: "team", label: "Team" },
 ] as const
 
-export default function AwardsManager({
-  tournamentId,
-  initialAwards = [],
-  onAwardsChange,
-}: AwardsManagerProps) {
-  const [awards, setAwards] = useState<AwardTemplate[]>(initialAwards)
+const emptyFormData: Partial<AwardTemplate> = {
+  awardType: "individual",
+  prizeCategory: "cash",
+  isDataDerived: false,
+  overrideEnabled: true,
+}
+
+export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsManagerProps) {
+  // ── Loaded list — this is the source of truth once loaded; every
+  // mutation below updates it optimistically only after Supabase
+  // confirms the write, so the UI never shows an award that isn't
+  // actually persisted. ─────────────────────────────────────────────
+  const [awards, setAwards] = useState<AwardTemplate[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [formData, setFormData] = useState<Partial<AwardTemplate>>({
-    awardType: "individual",
-    prizeCategory: "cash",
-    isDataDerived: false,
-    overrideEnabled: true,
-  })
+  const [formData, setFormData] = useState<Partial<AwardTemplate>>(emptyFormData)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
-  const handleAddAward = () => {
-    if (!formData.title || !formData.description) {
-      alert("Title and description are required")
-      return
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [pendingDuplicateId, setPendingDuplicateId] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<string | null>(null)
+
+  // ── Load from Supabase on mount ──
+  useEffect(() => {
+    if (!tournamentId) return
+    let cancelled = false
+
+    setIsLoading(true)
+    setLoadError(null)
+
+    getAwardsForTournament(tournamentId)
+      .then((data) => {
+        if (cancelled) return
+        setAwards(data)
+        onAwardsChange?.(data)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.error("[AwardsManager] load failed:", err)
+        setLoadError("Couldn't load awards — please refresh the page.")
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournamentId])
 
-    if (editingId) {
-      setAwards(
-        awards.map((a) =>
-          a.id === editingId
-            ? { ...a, ...formData, id: editingId }
-            : a
-        )
-      )
-      setEditingId(null)
-    } else {
-      const newAward: AwardTemplate = {
-        id: `award-${Date.now()}`,
-        title: formData.title || "",
-        description: formData.description || "",
-        awardType: formData.awardType || "individual",
-        prizeCategory: formData.prizeCategory || "cash",
-        prizeValue: formData.prizeValue,
-        imageUrl: formData.imageUrl,
-        isDataDerived: formData.isDataDerived || false,
-        derivationConfig: formData.derivationConfig,
-        overrideEnabled: formData.overrideEnabled,
-      }
-      setAwards([...awards, newAward])
-    }
+  const resetForm = () => {
+    setFormData(emptyFormData)
+    setFormError(null)
+  }
 
-    setShowForm(false)
-    setFormData({
-      awardType: "individual",
-      prizeCategory: "cash",
-      isDataDerived: false,
-      overrideEnabled: true,
-    })
-
-    onAwardsChange?.([
-      ...awards,
-      ...(editingId ? [] : [{ id: `award-${Date.now()}`, ...(formData as any) }]),
-    ])
+  const openNewForm = () => {
+    setEditingId(null)
+    resetForm()
+    setShowForm(true)
   }
 
   const handleEditAward = (award: AwardTemplate) => {
     setEditingId(award.id)
     setFormData(award)
+    setFormError(null)
     setShowForm(true)
   }
 
-  const handleDeleteAward = (id: string) => {
+  // ── Create / Update — writes straight to Supabase; local state only
+  // updates once that write succeeds. ────────────────────────────────
+  const handleSubmit = async () => {
+    if (!formData.title?.trim() || !formData.description?.trim()) {
+      setFormError("Title and description are required.")
+      return
+    }
+
+    const payload: AwardInput = {
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      awardType: formData.awardType || "individual",
+      prizeCategory: formData.prizeCategory || "cash",
+      prizeValue: formData.prizeValue,
+      imageUrl: formData.imageUrl,
+      isDataDerived: formData.isDataDerived || false,
+      derivationConfig: formData.isDataDerived ? formData.derivationConfig : undefined,
+      overrideEnabled: formData.overrideEnabled,
+    }
+
+    setIsSaving(true)
+    setFormError(null)
+
+    if (editingId) {
+      const ok = await updateAward(editingId, payload)
+      setIsSaving(false)
+      if (!ok) {
+        setFormError("Couldn't update award — please try again.")
+        return
+      }
+      const updated = awards.map((a) => (a.id === editingId ? { ...payload, id: editingId } : a))
+      setAwards(updated)
+      onAwardsChange?.(updated)
+    } else {
+      const created = await createAward(tournamentId, payload)
+      setIsSaving(false)
+      if (!created) {
+        setFormError("Couldn't create award — please try again.")
+        return
+      }
+      const updated = [...awards, created]
+      setAwards(updated)
+      onAwardsChange?.(updated)
+    }
+
+    setShowForm(false)
+    setEditingId(null)
+    resetForm()
+  }
+
+  const handleDeleteAward = async (id: string) => {
+    setRowError(null)
+    setPendingDeleteId(id)
+    const ok = await deleteAward(id)
+    setPendingDeleteId(null)
+
+    if (!ok) {
+      setRowError("Couldn't delete that award — please try again.")
+      return
+    }
+
     const updated = awards.filter((a) => a.id !== id)
     setAwards(updated)
     onAwardsChange?.(updated)
   }
 
-  const handleDuplicateAward = (award: AwardTemplate) => {
-    const newAward: AwardTemplate = {
-      ...award,
-      id: `award-${Date.now()}`,
+  const handleDuplicateAward = async (award: AwardTemplate) => {
+    setRowError(null)
+    setPendingDuplicateId(award.id)
+
+    const { id, ...rest } = award
+    const created = await createAward(tournamentId, { ...rest, title: `${award.title} (Copy)` })
+    setPendingDuplicateId(null)
+
+    if (!created) {
+      setRowError("Couldn't duplicate that award — please try again.")
+      return
     }
-    setAwards([...awards, newAward])
-    onAwardsChange?.([...awards, newAward])
+
+    const updated = [...awards, created]
+    setAwards(updated)
+    onAwardsChange?.(updated)
   }
 
   return (
@@ -132,26 +202,31 @@ export default function AwardsManager({
             Awards Bank
           </h3>
           <p className="text-sm text-gray-400">
-            Create a rich library of individual and team awards with images, prize categories, and database-driven automation.
+            Create a rich library of individual and team awards with images, prize categories.
+            Changes save directly to Supabase.
           </p>
         </div>
         <Button
-          onClick={() => {
-            setEditingId(null)
-            setFormData({
-              awardType: "individual",
-              prizeCategory: "cash",
-              isDataDerived: false,
-              overrideEnabled: true,
-            })
-            setShowForm(true)
-          }}
-          className="bg-gold hover:bg-gold/90 text-black font-bold"
+          onClick={openNewForm}
+          disabled={isLoading}
+          className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
         >
           <Plus className="h-4 w-4 mr-2" />
           New Award
         </Button>
       </div>
+
+      {isLoading && (
+        <p className="flex items-center gap-2 text-gray-500 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading awards…
+        </p>
+      )}
+
+      {loadError && (
+        <p className="flex items-center gap-2 text-red-500 text-sm">
+          <AlertCircle className="h-4 w-4" /> {loadError}
+        </p>
+      )}
 
       {/* Award Form */}
       {showForm && (
@@ -312,20 +387,37 @@ export default function AwardsManager({
             )}
           </div>
 
+          {formError && (
+            <p className="flex items-center gap-1.5 text-red-500 text-sm">
+              <AlertCircle className="h-4 w-4" /> {formError}
+            </p>
+          )}
+
           <div className="flex gap-3 pt-4">
             <Button
-              onClick={handleAddAward}
-              className="flex-1 bg-gold hover:bg-gold/90 text-black font-bold"
+              onClick={handleSubmit}
+              disabled={isSaving}
+              className="flex-1 bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
             >
-              {editingId ? "Update Award" : "Create Award"}
+              {isSaving ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+                </span>
+              ) : editingId ? (
+                "Update Award"
+              ) : (
+                "Create Award"
+              )}
             </Button>
             <Button
               onClick={() => {
                 setShowForm(false)
                 setEditingId(null)
+                resetForm()
               }}
+              disabled={isSaving}
               variant="outline"
-              className="flex-1 border-gold/30 text-gold hover:bg-gold/10"
+              className="flex-1 border-gold/30 text-gold hover:bg-gold/10 disabled:opacity-50"
             >
               Cancel
             </Button>
@@ -333,9 +425,15 @@ export default function AwardsManager({
         </div>
       )}
 
+      {rowError && (
+        <p className="flex items-center gap-1.5 text-red-500 text-sm">
+          <AlertCircle className="h-4 w-4" /> {rowError}
+        </p>
+      )}
+
       {/* Awards List */}
       <div className="space-y-3">
-        {awards.length === 0 ? (
+        {!isLoading && awards.length === 0 ? (
           <p className="text-gray-500 text-sm text-center py-8">
             No awards yet. Create one to get started.
           </p>
@@ -371,19 +469,29 @@ export default function AwardsManager({
                       </Button>
                       <Button
                         onClick={() => handleDuplicateAward(award)}
+                        disabled={pendingDuplicateId === award.id}
                         variant="ghost"
                         size="sm"
-                        className="text-green-400 hover:text-green-300 hover:bg-green-900/20"
+                        className="text-green-400 hover:text-green-300 hover:bg-green-900/20 disabled:opacity-50"
                       >
-                        <Copy className="h-4 w-4" />
+                        {pendingDuplicateId === award.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
                       </Button>
                       <Button
                         onClick={() => handleDeleteAward(award.id)}
+                        disabled={pendingDeleteId === award.id}
                         variant="ghost"
                         size="sm"
-                        className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-900/20 disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        {pendingDeleteId === award.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
                       </Button>
                     </div>
                   </div>

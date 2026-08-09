@@ -1,3 +1,4 @@
+// app/components/tournament/tournament-detail-client.tsx
 "use client"
 
 import { useState } from "react"
@@ -22,6 +23,10 @@ import {
   Award,
   Shield,
   Lock,
+  DollarSign,
+  Gift,
+  BadgeCheck,
+  Sparkles,
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
@@ -71,6 +76,19 @@ import {
 /*  project pages) so organizers can use headings, bold/italic,         */
 /*  lists, links, images, tables, code blocks, and Mermaid diagrams      */
 /*  in their tournament's "About" copy.                                 */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON PRIZES & AWARDS:                                            */
+/*  These now live together in one tab ("Prizes & Awards") instead of   */
+/*  awards being buried in Overview. `tournament.prizes` is the legacy  */
+/*  place/reward list (tournament_prizes — "1st Place" -> "$500"),      */
+/*  still editable from a dedicated card on the edit page. `tournament  */
+/*  .awards` is the richer per-award data (tournament_award_templates,  */
+/*  edited via AwardsManager) — title, description, award type, prize   */
+/*  category, prize value, and an optional image per award. Both show   */
+/*  in the same card on the public page since they're conceptually the  */
+/*  same "what do winners get" information.                             */
 /* ------------------------------------------------------------------ */
 
 interface TournamentDetailClientProps {
@@ -123,6 +141,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
   const hasSquads = !!tournament.squads?.length
   const hasLeaderboard = !!(tournament.runsLeaderboard?.length || tournament.wicketsLeaderboard?.length)
   const hasAwards = !!tournament.awards?.length
+  const hasPrizes = !!tournament.prizes?.length
 
   return (
     <main className="overflow-hidden">
@@ -284,7 +303,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                       </p>
                     )}
                   </div>
-                  {hasAwards && <AwardsPanel awards={tournament.awards!} />}
                 </TabsContent>
 
                 {/* POINTS TABLE */}
@@ -363,29 +381,45 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   )}
                 </TabsContent>
 
+                {/* PRIZES & AWARDS */}
                 <TabsContent value="prizes" className="mt-0">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">PRIZE POOL</h2>
+                    <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
+                      <Award className="h-5 w-5 text-gold" />
+                      PRIZES & AWARDS
+                    </h2>
+
                     {tournament.prizePool && (
                       <p className="text-gray-300 mb-4">
-                        <span className="text-gold font-semibold">Total: </span>
+                        <span className="text-gold font-semibold">Total Prize Pool: </span>
                         {tournament.prizePool}
                       </p>
                     )}
-                    {tournament.prizes && tournament.prizes.length > 0 ? (
-                      <div className="space-y-3">
-                        {tournament.prizes.map((p) => (
+
+                    {/* Legacy place/reward list — tournament_prizes, still
+                        editable from its own card on the edit page. Shown
+                        above the awards grid, inside the same card, rather
+                        than as a separate tab. */}
+                    {hasPrizes && (
+                      <div className="space-y-3 mb-6 pb-6 border-b border-gold/10">
+                        {tournament.prizes!.map((p) => (
                           <div
                             key={p.place}
-                            className="flex items-center justify-between border-b border-gold/10 pb-2"
+                            className="flex items-center justify-between border-b border-gold/10 pb-2 last:border-b-0 last:pb-0"
                           >
                             <span className="text-white font-semibold">{p.place}</span>
                             <span className="text-gray-300">{p.reward}</span>
                           </div>
                         ))}
                       </div>
+                    )}
+
+                    {hasAwards ? (
+                      <AwardsGrid awards={tournament.awards!} />
                     ) : (
-                      <p className="text-gray-400 text-sm">Prize breakdown to be announced.</p>
+                      !hasPrizes && (
+                        <p className="text-gray-400 text-sm">Prize and award breakdown to be announced.</p>
+                      )
                     )}
                   </div>
                 </TabsContent>
@@ -1347,24 +1381,95 @@ function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: 
 }
 
 // ─────────────────────────────────────────────────────────────
-// AWARDS PANEL
+// AWARDS GRID — rendered inside the Prizes & Awards tab's card
+// alongside the legacy place/reward list, not as its own separate
+// card/section. Mirrors the same award-type / prize-category badge
+// language AwardsManager uses in the admin UI, so every field an
+// organizer sets (title, description, award type, prize category,
+// prize value, image) actually shows up here instead of being
+// silently dropped. Awards come from tournament_award_templates (via
+// getAwardsForTournament in lib/tournament/tournament.ts), same data
+// AwardsManager edits — plus the static showcase demo data in
+// tournament-data.ts, which only ever sets label/name/note and simply
+// renders fewer badges as a result (no error, just less shown).
 // ─────────────────────────────────────────────────────────────
-function AwardsPanel({ awards }: { awards: AwardEntry[] }) {
+const PUBLIC_PRIZE_CATEGORY_META: Record<
+  NonNullable<AwardEntry["prizeCategory"]>,
+  {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    color: string;
+  }
+> = {
+  cash: {
+    label: "Cash Prize",
+    icon: DollarSign,
+    color: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+  },
+  physical: {
+    label: "Physical Item",
+    icon: Gift,
+    color: "bg-violet-500/10 border-violet-500/30 text-violet-300",
+  },
+  badge: {
+    label: "Badge",
+    icon: BadgeCheck,
+    color: "bg-sky-500/10 border-sky-500/30 text-sky-300",
+  },
+  experience: {
+    label: "Experience",
+    icon: Sparkles,
+    color: "bg-rose-500/10 border-rose-500/30 text-rose-300",
+  },
+};
+
+function AwardsGrid({ awards }: { awards: AwardEntry[] }) {
   return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-      <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
-        <Award className="h-5 w-5 text-gold" />
-        AWARDS & MILESTONES
-      </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {awards.map((a) => (
-          <div key={a.label} className="border border-gold/10 rounded-md p-4 bg-white/[0.02] text-center">
-            <p className="text-gray-400 text-[10px] uppercase tracking-widest mb-2">{a.label}</p>
-            <p className="text-white font-bold font-cinzel">{a.name}</p>
-            <p className="text-gray-400 text-xs mt-1">{a.note}</p>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {awards.map((a, i) => {
+        const categoryMeta = a.prizeCategory ? PUBLIC_PRIZE_CATEGORY_META[a.prizeCategory] : undefined
+        const CategoryIcon = categoryMeta?.icon
+
+        return (
+          <div
+            key={`${a.label}-${i}`}
+            className="border border-gold/10 rounded-md p-4 bg-white/[0.02] flex flex-col items-center text-center"
+          >
+            {a.imageUrl && (
+              <img
+                src={a.imageUrl}
+                alt={a.label}
+                className="w-16 h-16 rounded-lg object-cover mb-3"
+              />
+            )}
+
+            <p className="text-gray-400 text-[10px] uppercase tracking-widest mb-1.5">{a.label}</p>
+            <p className="text-white font-bold font-cinzel mb-1">{a.name}</p>
+            {a.note && <p className="text-gray-400 text-xs mb-3">{a.note}</p>}
+
+            <div className="flex flex-wrap gap-1.5 justify-center mt-auto">
+              {a.awardType && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/10 border border-gold/30 text-gold text-[10px] font-medium">
+                  {a.awardType === "team" ? "Team" : "Individual"}
+                </span>
+              )}
+              {categoryMeta && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${categoryMeta.color}`}
+                >
+                  {CategoryIcon && <CategoryIcon className="h-3 w-3" />}
+                  {categoryMeta.label}
+                </span>
+              )}
+              {a.prizeValue && (
+                <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-300 text-[10px] font-medium">
+                  {a.prizeValue}
+                </span>
+              )}
+            </div>
           </div>
-        ))}
-      </div>
+        )
+      })}
     </div>
   )
 }

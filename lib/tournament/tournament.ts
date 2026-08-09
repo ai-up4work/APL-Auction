@@ -22,6 +22,7 @@ import type { Tournament, BracketMatch, Squad } from "@/data/tournament-data";
 import { slugify } from "@/data/tournament-data";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
+import { getAwardsForTournament as getAwardTemplatesForTournament } from "@/lib/tournament/awards";
 // Tournament = ShowcaseSlide & TournamentExtras. ShowcaseSlide only requires
 // tag, slug, title, by, image — everything else on it (and all of
 // TournamentExtras) is optional, so a partial DB mapping is a valid
@@ -341,19 +342,35 @@ export async function getPrizesForTournament(
   return data ?? [];
 }
 
+/**
+ * Maps rich `tournament_award_templates` rows — the SAME data
+ * `AwardsManager` edits, fetched via the correctly-wired
+ * getAwardsForTournament in lib/tournament/awards.ts — down to the
+ * AwardEntry shape the public tournament page's AwardsGrid renders.
+ * Every field AwardsManager captures (title, description, award type,
+ * prize category, prize value, image) is preserved here so the public
+ * page can show all of it, not just image + title + one text line.
+ */
 async function getAwardsForTournament(tournamentId: string) {
-  const { data, error } = await supabase
-    .from("tournament_awards")
-    .select("label, player_name, note")
-    .eq("tournament_id", tournamentId);
-
-  if (error) {
-    console.error("getAwardsForTournament failed:", error.message);
+  try {
+    const templates = await getAwardTemplatesForTournament(tournamentId);
+    return templates.map((t) => ({
+      label: t.title,
+      name: t.description,
+      note: t.awardType === "team" ? "Team Award" : "Individual Award",
+      imageUrl: t.imageUrl,
+      prizeCategory: t.prizeCategory,
+      prizeValue: t.prizeValue,
+      awardType: t.awardType,
+    }));
+  } catch (err) {
+    console.error(
+      "getAwardsForTournament failed:",
+      err instanceof Error ? err.message : err
+    );
     return [];
   }
-  return (data ?? []).map((a) => ({ label: a.label, name: a.player_name, note: a.note ?? "" }));
 }
-
 /**
  * Points table, read directly from `standings` — it already carries a
  * direct tournament_id FK plus computed nrr/form, no join through auctions
@@ -622,7 +639,9 @@ async function getBracketChartDataForTournament(
  *     separate fixtures table; bracket_matches already supports
  *     bracket_type='round_robin'.
  *   - prizes: mapped ✅ via tournament_prizes.tournament_id
- *   - awards: mapped ✅ via tournament_awards.tournament_id
+ *   - awards: mapped ✅ via tournament_award_templates.tournament_id (the
+ *     rich AwardsManager data, reused from lib/tournament/awards.ts — see
+ *     getAwardsForTournament above)
  *   - pointsTable: mapped ✅ via standings.tournament_id (direct FK —
  *     no join through auctions needed; nrr/form are precomputed columns)
  *   - squads: mapped ✅ — derived from the linked auction's results

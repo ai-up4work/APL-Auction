@@ -10,15 +10,14 @@ import {
   Save,
   CheckCircle2,
   AlertCircle,
-  Plus,
-  Trash2,
   Settings2,
-  Trophy,
   Swords,
   Users,
   CalendarClock,
-  Award,
   ImageOff,
+  Trophy,
+  Plus,
+  Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +39,7 @@ import {
   deleteBracketForTournament,
   type SeedingMethod,
 } from "@/lib/tournament/generateBracket"
+import type { AwardTemplate } from "@/lib/tournament/awards"
 import TeamsManager from "@/components/tournament/TeamsManager"
 import MatchesManager from "@/components/tournament/MatchesManager"
 import AwardsManager from "@/components/tournament/AwardsManager"
@@ -52,15 +52,21 @@ interface TournamentEditClientProps {
 
 type GateState = "checking" | "denied" | "allowed"
 
-type SectionId = "details" | "prizes" | "bracket" | "teams" | "schedule" | "awards"
+// ── The "awards" section now covers BOTH place-by-place prize rows
+// (tournament_prizes, via getPrizesForTournament/savePrizesForTournament
+// — a simple replace-all list with its own explicit Save button) AND the
+// richer per-award templates AwardsManager edits (tournament_award_templates,
+// which persists immediately per action). They're shown together in one
+// section since they're conceptually the same "what do winners get" info,
+// just two different data shapes/save flows underneath. ──────────────────
+type SectionId = "details" | "bracket" | "teams" | "schedule" | "awards"
 
 const JUMP_SECTIONS: { id: SectionId; label: string }[] = [
   { id: "details", label: "Details" },
-  { id: "prizes", label: "Prizes" },
   { id: "bracket", label: "Bracket" },
   { id: "teams", label: "Teams" },
   { id: "schedule", label: "Schedule" },
-  { id: "awards", label: "Awards" },
+  { id: "awards", label: "Prizes & Awards" },
 ]
 
 function SectionHeading({
@@ -113,20 +119,28 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
 
-  // ── Prizes — separate table, separate save flow ──────────────────────
-  const [prizes, setPrizes] = useState<{ place: string; reward: string }[]>([])
-  const [savedPrizes, setSavedPrizes] = useState<{ place: string; reward: string }[]>([])
-  const [prizesLoaded, setPrizesLoaded] = useState(false)
-  const [isSavingPrizes, setIsSavingPrizes] = useState(false)
-  const [prizesSaveError, setPrizesSaveError] = useState<string | null>(null)
-  const [prizesSavedAt, setPrizesSavedAt] = useState<number | null>(null)
-
   // ── Bracket — generated from the linked auction's teams, its own flow ─
   const [bracketExists, setBracketExists] = useState<boolean | null>(null)
   const [seedingMethod, setSeedingMethod] = useState<SeedingMethod>("random")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [generateSuccess, setGenerateSuccess] = useState(false)
+
+  // ── Prizes — place/reward rows (tournament_prizes). Loaded once on
+  // gate-allowed, edited locally, and explicitly saved as a full
+  // replace-all list (same pattern the old standalone Prizes tab used),
+  // separate from Awards' immediate-persist-per-action flow below. ─────
+  const [prizes, setPrizes] = useState<{ place: string; reward: string }[]>([])
+  const [prizesLoading, setPrizesLoading] = useState(true)
+  const [prizesDirty, setPrizesDirty] = useState(false)
+  const [prizesSaving, setPrizesSaving] = useState(false)
+  const [prizesSaveError, setPrizesSaveError] = useState<string | null>(null)
+  const [prizesSavedAt, setPrizesSavedAt] = useState<number | null>(null)
+
+  // ── Awards — AwardsManager owns loading/saving to Supabase itself;
+  // this is just a mirror of its current list so the sidebar preview
+  // and setup checklist can reflect it without this page re-fetching. ──
+  const [awardsList, setAwardsList] = useState<AwardTemplate[]>([])
 
   // ── Confirm modal — replaces window.confirm() so destructive actions
   // (format change wiping an existing bracket, delete & regenerate) match
@@ -151,7 +165,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
   // ── Auto-advance: after a save/generate succeeds, move to the next tab
   // in JUMP_SECTIONS. Delay defaults to 800ms so the "Saved ✓" state is
   // still visible for a beat before the view swaps out from under it.
-  // No-ops on the last tab (Awards). ──────────────────────────────────────
+  // No-ops on the last tab (Prizes & Awards). ─────────────────────────────
   const goToNextSection = (delayMs = 800) => {
     const idx = JUMP_SECTIONS.findIndex((s) => s.id === activeSection)
     if (idx === -1 || idx === JUMP_SECTIONS.length - 1) return
@@ -180,15 +194,14 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       const allowed = !!orgId && orgId === tournament.orgId
       setGate(allowed ? "allowed" : "denied")
       if (allowed) {
-        getPrizesForTournament(tournament.id).then((p) => {
-          if (cancelled) return
-          setPrizes(p)
-          setSavedPrizes(p)
-          setPrizesLoaded(true)
-        })
         hasBracketGenerated(tournament.id).then((exists) => {
           if (cancelled) return
           setBracketExists(exists)
+        })
+        getPrizesForTournament(tournament.id).then((data) => {
+          if (cancelled) return
+          setPrizes(data)
+          setPrizesLoading(false)
         })
       }
     })
@@ -294,30 +307,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
     saveDetails()
   }
 
-  const prizesDirty = JSON.stringify(prizes) !== JSON.stringify(savedPrizes)
-
-  const addPrizeRow = () => setPrizes((prev) => [...prev, { place: "", reward: "" }])
-  const removePrizeRow = (i: number) => setPrizes((prev) => prev.filter((_, idx) => idx !== i))
-  const updatePrizeRow = (i: number, field: "place" | "reward", value: string) =>
-    setPrizes((prev) => prev.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)))
-
-  const handleSavePrizes = async () => {
-    if (!prizesDirty) return
-    setIsSavingPrizes(true)
-    setPrizesSaveError(null)
-    const cleaned = prizes.filter((p) => p.place.trim() || p.reward.trim())
-    const ok = await savePrizesForTournament(tournament.id, cleaned)
-    setIsSavingPrizes(false)
-    if (ok) {
-      setPrizes(cleaned)
-      setSavedPrizes(cleaned)
-      setPrizesSavedAt(Date.now())
-      goToNextSection()
-    } else {
-      setPrizesSaveError("Couldn't save prizes — please try again.")
-    }
-  }
-
   const handleGenerateBracket = async () => {
     setIsGenerating(true)
     setGenerateError(null)
@@ -366,6 +355,45 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
       destructive: true,
       onConfirm: regenerateBracket,
     })
+  }
+
+  // ── Prizes handlers — local edits, explicit save (replace-all). ───────
+  const addPrizeRow = () => {
+    setPrizes((prev) => [...prev, { place: "", reward: "" }])
+    setPrizesDirty(true)
+    setPrizesSavedAt(null)
+  }
+
+  const updatePrizeRow = (index: number, field: "place" | "reward", value: string) => {
+    setPrizes((prev) => prev.map((p, i) => (i === index ? { ...p, [field]: value } : p)))
+    setPrizesDirty(true)
+    setPrizesSavedAt(null)
+  }
+
+  const removePrizeRow = (index: number) => {
+    setPrizes((prev) => prev.filter((_, i) => i !== index))
+    setPrizesDirty(true)
+    setPrizesSavedAt(null)
+  }
+
+  const handleSavePrizes = async () => {
+    setPrizesSaving(true)
+    setPrizesSaveError(null)
+
+    // Drop empty rows rather than saving blanks — a row someone added
+    // then abandoned shouldn't persist as a blank "—" on the public page.
+    const cleaned = prizes.filter((p) => p.place.trim() && p.reward.trim())
+
+    const ok = await savePrizesForTournament(tournament.id, cleaned)
+    setPrizesSaving(false)
+
+    if (ok) {
+      setPrizes(cleaned)
+      setPrizesDirty(false)
+      setPrizesSavedAt(Date.now())
+    } else {
+      setPrizesSaveError("Couldn't save prizes — please try again.")
+    }
   }
 
   // ── Tab button — shared by the top pill nav on every breakpoint. Just
@@ -420,8 +448,9 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
               </div>
 
               <p className="text-gray-400 text-sm mb-6 max-w-2xl">
-                Details, Prizes, Bracket, and Matches save immediately. Awards is read-only here
-                for now — see note below.
+                Details, Bracket, and Matches save immediately. In Prizes &amp; Awards, the prize
+                breakdown saves with its own button below, while each award saves to Supabase as
+                soon as you add, edit, or remove it.
               </p>
 
               <nav className="flex flex-wrap gap-x-1 gap-y-2 mb-8 pb-4 border-b border-gold/10">
@@ -605,91 +634,10 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                             onClick={() => goToNextSection(0)}
                             className="ml-auto text-gold text-xs underline underline-offset-4 hover:text-gold/80"
                           >
-                            Edit Prizes →
+                            Edit Bracket →
                           </button>
                         )}
                       </div>
-                    </div>
-                  )}
-
-                  {/* PRIZES */}
-                  {activeSection === "prizes" && (
-                    <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
-                      <SectionHeading icon={Trophy} title="Prizes" />
-
-                      {!prizesLoaded ? (
-                        <p className="text-gray-500 text-sm">Loading…</p>
-                      ) : (
-                        <>
-                          <div className="space-y-3">
-                            {prizes.length === 0 && (
-                              <p className="text-gray-500 text-sm italic">No prizes added yet.</p>
-                            )}
-                            {prizes.map((p, i) => (
-                              <div key={i} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-                                <Input
-                                  value={p.place}
-                                  onChange={(e) => updatePrizeRow(i, "place", e.target.value)}
-                                  placeholder="e.g. 1st Place"
-                                  className="bg-black/50 border-gold/30 text-white sm:w-1/3"
-                                />
-                                <Input
-                                  value={p.reward}
-                                  onChange={(e) => updatePrizeRow(i, "reward", e.target.value)}
-                                  placeholder="e.g. $2,500 + trophy"
-                                  className="bg-black/50 border-gold/30 text-white flex-1"
-                                />
-                                <Button
-                                  type="button"
-                                  onClick={() => removePrizeRow(i)}
-                                  className="bg-transparent hover:bg-red-600/20 text-red-500 border border-red-500/30 px-3"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-
-                          <Button
-                            type="button"
-                            onClick={addPrizeRow}
-                            className="mt-4 bg-transparent hover:bg-gold/10 text-gold border border-gold/30"
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add prize
-                          </Button>
-
-                          <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gold/10">
-                            <Button
-                              onClick={handleSavePrizes}
-                              disabled={!prizesDirty || isSavingPrizes}
-                              className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
-                            >
-                              <Save className="mr-2 h-4 w-4" />
-                              {isSavingPrizes ? "Saving…" : "Save prizes"}
-                            </Button>
-                            {prizesSavedAt && !prizesDirty && (
-                              <span className="flex items-center gap-1.5 text-green-500 text-sm">
-                                <CheckCircle2 className="h-4 w-4" /> Saved
-                              </span>
-                            )}
-                            {prizesSaveError && (
-                              <span className="flex items-center gap-1.5 text-red-500 text-sm">
-                                <AlertCircle className="h-4 w-4" /> {prizesSaveError}
-                              </span>
-                            )}
-                            {!prizesDirty && (
-                              <button
-                                type="button"
-                                onClick={() => goToNextSection(0)}
-                                className="ml-auto text-gold text-xs underline underline-offset-4 hover:text-gold/80"
-                              >
-                                Edit Bracket →
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      )}
                     </div>
                   )}
 
@@ -838,17 +786,95 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           onClick={() => goToNextSection(0)}
                           className="text-gold text-xs underline underline-offset-4 hover:text-gold/80"
                         >
-                          Edit Awards →
+                          Edit Prizes & Awards →
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* AWARDS */}
+                  {/* PRIZES & AWARDS — place/reward rows save via their own
+                      explicit button (tournament_prizes, replace-all list);
+                      AwardsManager below persists straight to Supabase per
+                      action (tournament_award_templates). Two different
+                      data shapes and save flows, shown together since
+                      they're both "what winners get" from an organizer's
+                      point of view. */}
                   {activeSection === "awards" && (
-                    <AwardsManager
-                      tournamentId={tournament.id}
-                    />
+                    <div className="space-y-5">
+                      <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
+                        <SectionHeading icon={Trophy} title="Prize Breakdown" />
+                        <p className="text-gray-400 text-sm mb-4">
+                          Place-by-place rewards shown on the tournament's Prizes &amp; Awards tab
+                          — e.g. "1st Place" → "$500 + Trophy". Saved separately from the awards
+                          below, with its own Save button.
+                        </p>
+
+                        {prizesLoading ? (
+                          <p className="text-gray-500 text-sm">Loading…</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {prizes.length === 0 && (
+                              <p className="text-gray-500 text-sm italic">No prize rows yet.</p>
+                            )}
+                            {prizes.map((p, i) => (
+                              <div key={i} className="flex gap-3 items-center">
+                                <Input
+                                  value={p.place}
+                                  onChange={(e) => updatePrizeRow(i, "place", e.target.value)}
+                                  placeholder="1st Place"
+                                  className="bg-black/50 border-gold/30 text-white flex-1"
+                                />
+                                <Input
+                                  value={p.reward}
+                                  onChange={(e) => updatePrizeRow(i, "reward", e.target.value)}
+                                  placeholder="$500 + Trophy"
+                                  className="bg-black/50 border-gold/30 text-white flex-1"
+                                />
+                                <Button
+                                  onClick={() => removePrizeRow(i)}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-900/20 shrink-0"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-3 mt-4 pt-4 border-t border-gold/10 flex-wrap">
+                          <Button
+                            onClick={addPrizeRow}
+                            variant="outline"
+                            className="border-gold/30 text-gold hover:bg-gold/10"
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Prize Row
+                          </Button>
+                          <Button
+                            onClick={handleSavePrizes}
+                            disabled={!prizesDirty || prizesSaving || prizesLoading}
+                            className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50"
+                          >
+                            <Save className="mr-2 h-4 w-4" />
+                            {prizesSaving ? "Saving…" : "Save prizes"}
+                          </Button>
+                          {prizesSavedAt && !prizesDirty && (
+                            <span className="flex items-center gap-1.5 text-green-500 text-sm">
+                              <CheckCircle2 className="h-4 w-4" /> Saved
+                            </span>
+                          )}
+                          {prizesSaveError && (
+                            <span className="flex items-center gap-1.5 text-red-500 text-sm">
+                              <AlertCircle className="h-4 w-4" /> {prizesSaveError}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <AwardsManager tournamentId={tournament.id} onAwardsChange={setAwardsList} />
+                    </div>
                   )}
 
                   <div className="text-center xl:hidden mt-8">
@@ -861,7 +887,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                 </div>
 
                 <aside className="hidden xl:flex xl:sticky xl:top-28">
-                  <div className="space-y-4">
+                  <div className="space-y-4 w-full">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Live Preview
@@ -939,21 +965,25 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                         <li className="flex items-center gap-2">
                           <span
                             className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                              prizes.length ? "bg-green-500" : "bg-gray-600"
-                            }`}
-                          />
-                          <span className={prizes.length ? "text-gray-300" : "text-gray-500"}>
-                            Prizes configured
-                          </span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
                               bracketExists ? "bg-green-500" : "bg-gray-600"
                             }`}
                           />
                           <span className={bracketExists ? "text-gray-300" : "text-gray-500"}>
                             Bracket generated
+                          </span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              prizes.length || awardsList.length ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span
+                            className={
+                              prizes.length || awardsList.length ? "text-gray-300" : "text-gray-500"
+                            }
+                          >
+                            Prizes or awards configured
                           </span>
                         </li>
                         <li className="flex items-center gap-2">
@@ -992,17 +1022,39 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Prizes
                       </span>
-                      {prizesLoaded && prizes.length > 0 ? (
+                      {prizes.length > 0 ? (
                         <ul className="space-y-1.5 text-xs">
                           {prizes.slice(0, 5).map((p, i) => (
                             <li key={i} className="flex justify-between gap-2">
-                              <span className="text-gray-500 shrink-0">{p.place || "—"}</span>
-                              <span className="text-gray-300 text-right">{p.reward || "—"}</span>
+                              <span className="text-gray-500 truncate">{p.place || "—"}</span>
+                              <span className="text-gray-300 text-right shrink-0 truncate">
+                                {p.reward || "—"}
+                              </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <p className="text-xs text-gray-600 italic">No prizes added yet</p>
+                        <p className="text-xs text-gray-600 italic">No prize rows added yet</p>
+                      )}
+                    </div>
+
+                    <div className="bg-black/50 border border-gold/20 rounded-lg p-4">
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
+                        Awards
+                      </span>
+                      {awardsList.length > 0 ? (
+                        <ul className="space-y-1.5 text-xs">
+                          {awardsList.slice(0, 5).map((a) => (
+                            <li key={a.id} className="flex justify-between gap-2">
+                              <span className="text-gray-500 truncate">{a.title || "—"}</span>
+                              <span className="text-gray-300 text-right shrink-0">
+                                {a.prizeValue || "—"}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-gray-600 italic">No awards added yet</p>
                       )}
                     </div>
 

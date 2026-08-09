@@ -19,6 +19,7 @@ import {
   Shield,
   Lock,
   Info,
+  ImageOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useScrollTop } from "@/hooks/use-scroll-top"
@@ -26,6 +27,7 @@ import { AppHeader } from "@/components/app-header"
 import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import ImageUploadField from "@/components/Admin/ImageUploadField"
+import Image from "next/image"
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -788,6 +790,7 @@ export default function EditMatchPage() {
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
   const [form, setForm] = useState<EditableSetup>(emptySetup())
   const [showImportedHint, setShowImportedHint] = useState(false)
+  const [bannerBroken, setBannerBroken] = useState(false)
   const rawSetupRef = useRef<Record<string, any> | null>(null)
 
   // ── load existing match_setup ──
@@ -822,6 +825,10 @@ export default function EditMatchPage() {
       cancelled = true
     }
   }, [matchId])
+
+  useEffect(() => {
+    setBannerBroken(false)
+  }, [form.tournamentLogoUrl])
 
   function update<K extends keyof EditableSetup>(key: K, value: EditableSetup[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -975,7 +982,7 @@ export default function EditMatchPage() {
 
       <AppHeader title="Match Editor" />
 
-      <section className="pt-28 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-20 sm:pt-32 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         {/* Widened from max-w-4xl so the right rail has room to breathe on
             desktop without the content column itself stretching uncomfortably wide. */}
@@ -1039,12 +1046,16 @@ export default function EditMatchPage() {
               </nav>
 
               {/* ── CONTENT + LIVE PREVIEW ── */}
-              <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-12 xl:items-stretch">
-                {/* MAIN CONTENT COLUMN — only the active section renders */}
-                <div className="min-w-0 xl:sticky xl:top-28 xl:min-h-0 xl:overflow-y-auto xl:pr-2 space-y-6 pb-6">
+              <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-12 xl:items-stretch">
+                {/* MAIN CONTENT COLUMN — only the active section renders.
+                    xl:flex + xl:flex-col so the active Panel below can be
+                    told to grow (flex-1) and actually fill the height the
+                    grid's items-stretch gives this column, matching the
+                    right rail instead of just sharing its outer height. */}
+                <div className="min-w-0 xl:sticky xl:top-28 xl:min-h-0 xl:flex xl:flex-col xl:overflow-y-auto xl:pr-2 space-y-6">
                   {/* DETAILS */}
                   {activeSection === "details" && (
-                    <Panel>
+                    <Panel className="xl:flex-1 xl:flex xl:flex-col">
                       <SectionHeading icon={MapPin} title="Match Details" />
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -1160,7 +1171,7 @@ export default function EditMatchPage() {
 
                   {/* INFO (additional details) */}
                   {activeSection === "info" && (
-                    <Panel>
+                    <Panel className="xl:flex-1 xl:flex xl:flex-col">
                       <SectionHeading icon={Info} title="Additional Details" />
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -1259,7 +1270,7 @@ export default function EditMatchPage() {
 
                   {/* OFFICIALS & FORMAT */}
                   {activeSection === "officials" && (
-                    <Panel>
+                    <Panel className="xl:flex-1 xl:flex xl:flex-col">
                       <SectionHeading icon={Gavel} title="Officials & Format" />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -1300,7 +1311,7 @@ export default function EditMatchPage() {
 
                   {/* SQUADS */}
                   {activeSection === "squads" && (
-                    <div className="space-y-5">
+                    <div className="space-y-5 xl:flex-1 xl:flex xl:flex-col">
                       {showImportedHint && (
                         <div className="flex items-start gap-3 bg-gold/[0.05] border border-gold/25 rounded-lg p-4">
                           <Sparkles className="h-4 w-4 text-gold shrink-0 mt-0.5" />
@@ -1324,7 +1335,7 @@ export default function EditMatchPage() {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 xl:flex-1">
                         {form.squads.map((squad, squadIndex) => {
                           const teamName = squadIndex === 0 ? form.team1Name || "Team 1" : form.team2Name || "Team 2"
                           const teamLogo = squadIndex === 0 ? form.team1Logo : form.team2Logo
@@ -1332,7 +1343,7 @@ export default function EditMatchPage() {
                           const xi = xiCount(squadIndex)
                           const locked = form.rosterLocked
                           return (
-                            <Panel key={squad.teamId}>
+                            <Panel key={squad.teamId} className="h-full flex flex-col">
                               <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <TeamAvatar logo={teamLogo} />
@@ -1365,7 +1376,7 @@ export default function EditMatchPage() {
                                 </datalist>
                               </div>
 
-                              <div className="space-y-2 mb-4">
+                              <div className="space-y-2 mb-4 xl:flex-1">
                                 {squad.players.length === 0 && (
                                   <p className="text-gray-500 text-xs text-center py-6 border border-dashed border-gold/10 rounded-md">
                                     No players yet — add the squad below.
@@ -1454,57 +1465,81 @@ export default function EditMatchPage() {
                 {/* ── RIGHT RAIL — xl-only live preview, mirrors the
                     Tournament Edit page's sticky rail. ─────────────────── */}
                 <aside className="hidden xl:flex xl:sticky xl:top-28">
-                  <div className="space-y-4">
+                  <div className="space-y-4 w-full">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-3 font-cinzel block">
                         Live Preview
                       </span>
-                      <div className="bg-black/50 border border-gold/20 rounded-lg overflow-hidden p-4">
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <TeamAvatar logo={form.team1Logo} />
-                            <span className="text-white font-cinzel font-bold text-sm truncate">
-                              {form.team1Short || form.team1Name || "TM1"}
-                            </span>
-                          </div>
-                          <span className="text-gray-500 text-xs font-cinzel shrink-0">vs</span>
-                          <div className="flex items-center gap-2 min-w-0 justify-end">
-                            <span className="text-white font-cinzel font-bold text-sm truncate">
-                              {form.team2Short || form.team2Name || "TM2"}
-                            </span>
-                            <TeamAvatar logo={form.team2Logo} />
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5 mb-3">
-                          <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-gold/30 text-gold bg-gold/5">
-                            {form.format} · {form.overs} ov
-                          </span>
-                          {form.tournamentName && (
-                            <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-white/15 text-gray-300 truncate max-w-[9rem]">
-                              {form.tournamentName}
-                            </span>
+                      <div className="bg-black/50 border border-gold/20 rounded-lg overflow-hidden">
+                        {/* Match banner — form.tournamentLogoUrl is the
+                            match banner field (see the BANNER IMAGE note
+                            near the top of this file), same treatment as
+                            the tournament editor's imageUrl strip. */}
+                        <div className="relative h-24 bg-black/60 border-b border-gold/10">
+                          {form.tournamentLogoUrl && !bannerBroken ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <Image
+                              src={form.tournamentLogoUrl}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={() => setBannerBroken(true)}
+                              width={600}
+                              height={400}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <ImageOff className="h-5 w-5 text-gray-700" />
+                            </div>
                           )}
                         </div>
 
-                        <dl className="space-y-1.5 text-xs">
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-gray-500">Venue</dt>
-                            <dd className="text-gray-300 text-right truncate max-w-[9rem]">{form.venue || "—"}</dd>
+                        <div className="p-4">
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <TeamAvatar logo={form.team1Logo} />
+                              <span className="text-white font-cinzel font-bold text-sm truncate">
+                                {form.team1Short || form.team1Name || "TM1"}
+                              </span>
+                            </div>
+                            <span className="text-gray-500 text-xs font-cinzel shrink-0">vs</span>
+                            <div className="flex items-center gap-2 min-w-0 justify-end">
+                              <span className="text-white font-cinzel font-bold text-sm truncate">
+                                {form.team2Short || form.team2Name || "TM2"}
+                              </span>
+                              <TeamAvatar logo={form.team2Logo} />
+                            </div>
                           </div>
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-gray-500">Date</dt>
-                            <dd className="text-gray-300">
-                              {[form.date, form.time].filter(Boolean).join(" · ") || "—"}
-                            </dd>
+
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-gold/30 text-gold bg-gold/5">
+                              {form.format} · {form.overs} ov
+                            </span>
+                            {form.tournamentName && (
+                              <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-white/15 text-gray-300 truncate max-w-[9rem]">
+                                {form.tournamentName}
+                              </span>
+                            )}
                           </div>
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-gray-500">Toss</dt>
-                            <dd className="text-gray-300 text-right truncate max-w-[9rem]">
-                              {form.toss ? `${form.tossWinner} — ${form.tossDecision}` : "—"}
-                            </dd>
-                          </div>
-                        </dl>
+
+                          <dl className="space-y-1.5 text-xs">
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-gray-500">Venue</dt>
+                              <dd className="text-gray-300 text-right truncate max-w-[9rem]">{form.venue || "—"}</dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-gray-500">Date</dt>
+                              <dd className="text-gray-300">
+                                {[form.date, form.time].filter(Boolean).join(" · ") || "—"}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-gray-500">Toss</dt>
+                              <dd className="text-gray-300 text-right truncate max-w-[9rem]">
+                                {form.toss ? `${form.tossWinner} — ${form.tossDecision}` : "—"}
+                              </dd>
+                            </div>
+                          </dl>
+                        </div>
                       </div>
                     </div>
 
@@ -1541,6 +1576,16 @@ export default function EditMatchPage() {
                         <li className="flex items-center gap-2">
                           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${officialsSet ? "bg-green-500" : "bg-gray-600"}`} />
                           <span className={officialsSet ? "text-gray-300" : "text-gray-500"}>Officials set</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              form.tournamentLogoUrl ? "bg-green-500" : "bg-gray-600"
+                            }`}
+                          />
+                          <span className={form.tournamentLogoUrl ? "text-gray-300" : "text-gray-500"}>
+                            Match banner set
+                          </span>
                         </li>
                       </ul>
                     </div>
