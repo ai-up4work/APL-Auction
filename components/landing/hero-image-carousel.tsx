@@ -19,15 +19,21 @@ interface HeroSlide {
 // ─────────────────────────────────────────────────────────────
 const SLIDES: HeroSlide[] = [
   {
-    desktop: "/images/landing-image-1.png",
-    mobile: "/images/landing-image-1-mobile.png",
-    alt: "Auctioneer at work",
-  },    
+    desktop: "/images/landing-image-2.png",
+    mobile: "/images/landing-image-2-mobile.png",
+    alt: "Live auction in progress",
+  },
     {
     desktop: "/images/landing-image.png",
     mobile: "/images/landing-image-mobile.png",
     alt: "Valiant League background",
   },
+  {
+    desktop: "/images/landing-image-1.png",
+    mobile: "/images/landing-image-1-mobile.png",
+    alt: "Auctioneer at work",
+  },    
+
 
  
   // Add more slides here later, e.g.:
@@ -39,7 +45,7 @@ const SLIDES: HeroSlide[] = [
 ]
 
 // Milliseconds between transitions.
-const INTERVAL_MS = 15000
+const INTERVAL_MS = 10000
 // Pause auto-advance while the tab is hidden.
 const PAUSE_WHEN_HIDDEN = true
 
