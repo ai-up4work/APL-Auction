@@ -825,9 +825,9 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   ]
 
   const statusBadgeClass = (s: Fixture["status"], liveAccent: "red" | "green" = "red") => {
-    if (s === "live") return liveAccent === "green" ? "bg-yellow-600 hover:bg-yellow-700" : "bg-yellow-600 hover:bg-yellow-700"
+    if (s === "live") return liveAccent === "green" ? "bg-green-600 hover:bg-green-700" : "bg-yellow-600 hover:bg-yellow-700"
     if (s === "completed") return "bg-green-600 hover:bg-green-700"
-    return "bg-gold text-black hover:bg-gold/90" // upcoming — matches the site's gold accent instead of blue
+    return "bg-blue-600 text-black hover:bg-blue-700/90" // upcoming — matches the site's gold accent instead of blue
   }
 
   // A match is "unconfirmed" if either side is still a TBD slot —
