@@ -23,6 +23,11 @@ const SLIDES: HeroSlide[] = [
     mobile: "/images/landing-image-mobile.png",
     alt: "Valiant League background",
   },
+  {
+    desktop: "/images/landing-image-1.png",
+    mobile: "/images/landing-image-1-mobile.png",
+    alt: "Auctioneer at work",
+  }
   // Add more slides here later, e.g.:
   // {
   //   desktop: "/images/landing-image-2.png",
