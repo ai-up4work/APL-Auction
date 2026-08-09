@@ -16,7 +16,13 @@
 // description, type, prize category, image, data-derivation config).
 // Reusing `tournament_awards` would violate its `player_name NOT NULL`
 // constraint on every insert here, so this writes to a separate table
-// instead — see the CREATE TABLE migration provided alongside this file.
+// instead.
+//
+// SCHEMA STATUS: `award_level`, `match_id`, and `derivation_method`
+// were added via migration_add_award_template_columns.sql to match
+// what this file already reads/writes — see that migration for the
+// column definitions/comments. If it hasn't been applied yet,
+// createAward/updateAward will fail on every call.
 //
 //   tournament_award_templates
 //   id                    uuid primary key default gen_random_uuid()
@@ -25,49 +31,16 @@
 //   description           text not null default ''
 //   award_type            text not null default 'individual'  ('individual' | 'team')
 //   award_level           text not null default 'tournament'  ('tournament' | 'match')
-//     -- 'tournament' = one instance of this award for the whole
-//     -- tournament (Best Player, 1st Place Team). 'match' = this award
-//     -- concept applies per-match (Man of the Match) — see match_id
-//     -- below for whether that means "every match" or "one specific
-//     -- match". This is independent of is_data_derived: a manually
-//     -- assigned award (picked by hand each time) can still be scoped
-//     -- to a specific match.
 //   match_id               uuid references matches(id)  (nullable)
-//     -- Only meaningful when award_level = 'match'. NULL means this
-//     -- award recurs for every match in the tournament (the normal
-//     -- "Man of the Match" case). A set value pins this award
-//     -- template to that one specific match only (a one-off special
-//     -- award for a single game — e.g. "Best Catch, Final"). Applies
-//     -- equally whether the winner is auto-derived or manually
-//     -- assigned. Always NULL when award_level = 'tournament'.
 //   prize_category        text not null default 'cash'  ('cash' | 'physical' | 'badge' | 'experience')
 //   prize_value            text  (nullable)
 //   image_url              text  (nullable)
 //   is_data_derived        boolean not null default false
 //   derivation_method      text  (nullable)  ('stat_leader' | 'standings_position')
-//     -- 'stat_leader' = winner is whoever ranks Nth in a chosen
-//     -- statistic (Top Scorer, Best Bowler, Man of the Match by
-//     -- runs...). 'standings_position' = winner is the team sitting
-//     -- Nth in the final points table (1st/2nd/3rd place) — only valid
-//     -- when award_level = 'tournament', since a single match has no
-//     -- "standings".
 //   derivation_statistic   text  (nullable)  -- only meaningful when derivation_method = 'stat_leader'
 //   derivation_rank        integer (nullable)  -- stat rank OR standings position, depending on derivation_method
 //   override_enabled       boolean not null default true
 //   created_at             timestamptz not null default now()
-//
-// If your actual table/columns differ, this is the only file that
-// needs to change — AwardsManager only ever calls the functions
-// exported below.
-//
-// ── ASSUMPTION FLAGGED ──
-// getMatchesForTournament() below guesses at a `matches` table shape
-// (id, tournament_id, team_a_name, team_b_name, round, match_date) so
-// the Awards form can offer a match picker. I don't have your actual
-// matches schema/lib in context — please check the SELECT below
-// against your real `matches` table (or point me at
-// lib/tournament/matches.ts / wherever match data already lives, and
-// I'll swap this out to reuse it instead of duplicating the query).
 //
 // ── NOT COVERED HERE ──
 // This file only persists award *templates* (the rules for how a
@@ -136,9 +109,7 @@ interface AwardRow {
   created_at?: string
 }
 
-// Lightweight shape for populating the match picker dropdown. Trim or
-// extend the SELECT in getMatchesForTournament to match your real
-// `matches` table.
+// Lightweight shape for populating the match picker dropdown.
 export interface MatchOption {
   id: string
   label: string
@@ -250,14 +221,44 @@ export async function deleteAward(id: string): Promise<boolean> {
 }
 
 // Powers the match picker that appears whenever award level is
-// "match". See the ASSUMPTION FLAGGED note at the top of this file —
-// verify column names against your real `matches` table.
+// "match".
+//
+// CORRECTED against the real schema: `matches` has no team_a_name /
+// team_b_name / round / match_date columns — those never existed and
+// this query 404'd (Postgres rejects a SELECT on unknown columns),
+// which is what surfaced as "Couldn't load matches — please try
+// again." in AwardsManager. `matches` only carries a `match_setup`
+// jsonb blob plus a `bracket_match_id` FK.
+//
+// Rather than guess at match_setup's internal key names, this joins
+// through bracket_match_id -> bracket_matches, which already has
+// team_a_id/team_b_id -> teams.name and a real `round` integer — the
+// same rows the Bracket tab renders (see toMatchNode in
+// lib/tournament/tournament.ts). That gives a real "Team A vs Team B"
+// label for any match created from a tournament bracket slot.
+//
+// FALLBACK: a `matches` row can exist without a linked bracket slot
+// (e.g. a standalone/auction-only match never wired into a bracket).
+// For those, bracket_match_id and everything joined through it comes
+// back null, so the label falls back to the match's created_at date,
+// and finally to a truncated id if even that's unavailable.
 export async function getMatchesForTournament(tournamentId: string): Promise<MatchOption[]> {
   const { data, error } = await supabase
     .from(MATCHES_TABLE)
-    .select("id, team_a_name, team_b_name, round, match_date")
+    .select(
+      `
+      id,
+      created_at,
+      bracket_match_id,
+      bracket:bracket_match_id (
+        round,
+        team_a:team_a_id ( name ),
+        team_b:team_b_id ( name )
+      )
+      `
+    )
     .eq("tournament_id", tournamentId)
-    .order("match_date", { ascending: true })
+    .order("created_at", { ascending: true })
 
   if (error) {
     console.error("[awards] load matches failed:", error)
@@ -265,10 +266,19 @@ export async function getMatchesForTournament(tournamentId: string): Promise<Mat
   }
 
   return (data ?? []).map((row: any) => {
-    const teams =
-      row.team_a_name && row.team_b_name ? `${row.team_a_name} vs ${row.team_b_name}` : null
-    const roundLabel = row.round ? `Round ${row.round}` : null
-    const label = teams || roundLabel || `Match ${String(row.id).slice(0, 8)}`
+    const bracket = Array.isArray(row.bracket) ? row.bracket[0] : row.bracket
+    const teamA = bracket ? (Array.isArray(bracket.team_a) ? bracket.team_a[0] : bracket.team_a) : null
+    const teamB = bracket ? (Array.isArray(bracket.team_b) ? bracket.team_b[0] : bracket.team_b) : null
+
+    const teams = teamA?.name && teamB?.name ? `${teamA.name} vs ${teamB.name}` : null
+    const roundLabel = bracket?.round ? `Round ${bracket.round}` : null
+    const dateLabel = row.created_at
+      ? new Date(row.created_at).toLocaleDateString()
+      : null
+
+    const label =
+      teams || roundLabel || dateLabel || `Match ${String(row.id).slice(0, 8)}`
+
     return { id: row.id, label }
   })
 }

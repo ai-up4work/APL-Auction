@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Plus, Trash2, Copy, Award, Loader2, AlertCircle } from "lucide-react"
+import { Plus, Trash2, Copy, Award, Loader2, AlertCircle, Sparkles as SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -33,6 +33,8 @@ const PRIZE_CATEGORIES = [
   { value: "experience", label: "Experience", color: "bg-pink-500/20 border-pink-500/50" },
 ] as const
 
+type PrizeCategory = (typeof PRIZE_CATEGORIES)[number]["value"]
+
 const AWARD_TYPES = [
   { value: "individual", label: "Individual" },
   { value: "team", label: "Team" },
@@ -58,6 +60,58 @@ const MATCH_APPLICATIONS = [
   { value: "every", label: "Every match (e.g. Man of the Match)" },
   { value: "specific", label: "One specific match only" },
 ] as const
+
+type AwardTypeValue = (typeof AWARD_TYPES)[number]["value"]
+
+interface TitlePreset {
+  title: string
+  // Which award type(s) this preset makes sense for. A player-scoped
+  // name like "Best Batter" doesn't belong under Team, and a
+  // team-scoped name like "Champions Trophy" doesn't belong under
+  // Individual — so each preset declares where it's valid instead of
+  // one flat list being shown regardless of the Award Type selected.
+  types: AwardTypeValue[]
+}
+
+// Quick-pick title presets, grouped by prize category, then further
+// filtered by award type (individual vs team) at render time. Purely a
+// typing shortcut — clicking a chip just fills the Title field,
+// everything stays fully editable afterward, and nothing here is
+// persisted or validated; it's UI sugar only.
+const AWARD_TITLE_PRESETS: Record<PrizeCategory, TitlePreset[]> = {
+  cash: [
+    { title: "Most Valuable Player", types: ["individual"] },
+    { title: "Best Batter", types: ["individual"] },
+    { title: "Best Bowler", types: ["individual"] },
+    { title: "Best All-Rounder", types: ["individual"] },
+    { title: "Man of the Series", types: ["individual"] },
+    { title: "Best Wicketkeeper", types: ["individual"] },
+    { title: "Champion Team Prize", types: ["team"] },
+    { title: "Runner-Up Team Prize", types: ["team"] },
+  ],
+  physical: [
+    { title: "Champions Trophy", types: ["team"] },
+    { title: "Runner-Up Trophy", types: ["team"] },
+    { title: "Best Fielder", types: ["individual"] },
+    { title: "Golden Bat", types: ["individual"] },
+    { title: "Golden Ball", types: ["individual"] },
+    { title: "Man of the Match Mementos", types: ["individual"] },
+  ],
+  badge: [
+    { title: "Fair Play Award", types: ["individual", "team"] },
+    { title: "Rising Star", types: ["individual"] },
+    { title: "Most Improved Player", types: ["individual"] },
+    { title: "Hat-Trick Badge", types: ["individual"] },
+    { title: "Spirit of Cricket", types: ["team"] },
+    { title: "Century Club", types: ["individual"] },
+  ],
+  experience: [
+    { title: "VIP Meet & Greet", types: ["individual", "team"] },
+    { title: "Training Camp Invite", types: ["individual", "team"] },
+    { title: "Season Pass", types: ["individual", "team"] },
+    { title: "Behind-the-Scenes Tour", types: ["individual", "team"] },
+  ],
+}
 
 const emptyFormData: Partial<AwardTemplate> = {
   awardType: "individual",
@@ -316,6 +370,16 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
     return `${levelBadge} · ${methodBadge}`
   }
 
+  // Presets for whatever prize category AND award type are currently
+  // selected in the form — e.g. switching Award Type to "Team" hides
+  // player-scoped presets like "Best Batter" and surfaces team-scoped
+  // ones like "Champions Trophy" instead. Falls back to "cash" /
+  // "individual" if either field somehow isn't set yet.
+  const activeAwardType: AwardTypeValue = (formData.awardType as AwardTypeValue) || "individual"
+  const activePresets = AWARD_TITLE_PRESETS[(formData.prizeCategory as PrizeCategory) || "cash"].filter(
+    (p) => p.types.includes(activeAwardType)
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -363,6 +427,44 @@ export default function AwardsManager({ tournamentId, onAwardsChange }: AwardsMa
               placeholder="e.g., MVP Award, Most Wickets, Man of the Match"
               className="bg-black/50 border-gold/30 text-white"
             />
+
+            {/* Quick-pick presets, filtered to the currently selected
+                Prize Category AND Award Type — e.g. "Best Batter"
+                only shows under Individual, "Champions Trophy" only
+                under Team. Purely a shortcut — clicking one just
+                fills the Title field above; nothing here is saved
+                directly and the title stays fully editable
+                afterward. */}
+            <div className="mt-2.5">
+              <p className="text-[11px] text-gray-500 flex items-center gap-1 mb-1.5">
+                <SparklesIcon className="h-3 w-3 text-gold/60" />
+                Quick picks for {PRIZE_CATEGORIES.find((c) => c.value === formData.prizeCategory)?.label || "Cash Prize"}
+                {" · "}
+                {AWARD_TYPES.find((t) => t.value === activeAwardType)?.label}
+              </p>
+              {activePresets.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {activePresets.map((preset) => (
+                    <button
+                      key={preset.title}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, title: preset.title })}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        formData.title === preset.title
+                          ? "bg-gold text-black border-gold font-semibold"
+                          : "border-gold/20 text-gray-300 hover:border-gold/50 hover:text-gold"
+                      }`}
+                    >
+                      {preset.title}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-600 italic">
+                  No presets for this combination yet — just type a title.
+                </p>
+              )}
+            </div>
           </div>
 
           <div>
