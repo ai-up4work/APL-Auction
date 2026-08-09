@@ -178,7 +178,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           TRUSTED BY — logo marquee, auto color-in near center
       ═══════════════════════════════════════════════════════════ */}
       <section className="py-10 md:py-14 relative bg-black border-y border-gold/10">
-        <div className="container mx-auto px-4 text-center mb-6 fade-in">
+        <div className="container mx-auto px-4 text-center mb-12 fade-in">
           <span className="font-cinzel text-xs md:text-sm tracking-[3px] text-gray-300">
             TRUSTED BY CLUBS LIKE
           </span>
