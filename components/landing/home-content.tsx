@@ -191,7 +191,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                 ref={(el) => {
                   logoRefs.current[i] = el
                 }}
-                className="flex-shrink-0 w-30 md:w-50 flex items-center justify-center transition-[filter,opacity] duration-150 ease-linear"
+                className="flex-shrink-0 w-30 md:w-50 flex items-center justify-center transition-[filter,opacity] duration-300 ease-linear"
               >
                 <Image
                   src={club.logo}

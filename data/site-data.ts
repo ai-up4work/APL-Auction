@@ -145,7 +145,7 @@ h1, h2, h3, h4, h5, h6 { font-family: "Cinzel", serif; }
 
 /* ── logo marquee ── */
 @keyframes scrollMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.marquee-track { animation: scrollMarquee 28s linear infinite; }
+.marquee-track { animation: scrollMarquee 56s linear infinite; }
 .marquee-mask {
   -webkit-mask-image: linear-gradient(
     to right,
@@ -255,10 +255,10 @@ export const trustedClubs = [
 ]
 
 export const stats = [
-  { value: "500+", label: "Leagues Run" },
+  { value: "8", label: "Leagues Run" },
   { value: "99.9%", label: "Uptime SLA" },
   { value: "15s", label: "Auction Shot Clock" },
-  { value: "200+", label: "Tournaments Drawn" },
+  { value: "10+", label: "Auctions Conducted" },
 ]
 
 export const testimonials = [
