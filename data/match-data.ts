@@ -73,6 +73,15 @@
 //   matter what was saved in the editor, even though bracket-linked
 //   matches (which resolve teamA/teamB from the real `teams` table
 //   instead) worked fine. Both are now read through.
+//
+// MATCH BANNER FALLBACK:
+//   `tournamentLogoUrl` (the match hero banner) previously fell back to
+//   `bracketRow?.tournament_id` when the match itself had no banner set
+//   — a raw UUID, not an image URL, which rendered as a broken image.
+//   It now falls back to the tournament's own banner (`image_url`),
+//   then its logo (`logo_url`), then finally `undefined` so the hero's
+//   own "not available" placeholder background kicks in — see
+//   resolvedTournamentBannerUrl below.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -183,6 +192,8 @@ export interface MatchDetail {
   currentInnings: 1 | 2
   /** From match_state.live_state, when the engine populates it. */
   winProb?: { a: number; b: number }
+  /** Match's own banner if set, else the parent tournament's banner/logo
+   *  as a fallback — see MATCH BANNER FALLBACK note above. */
   tournamentLogoUrl?: string
 }
 
@@ -254,6 +265,8 @@ interface MatchSetup {
   }
   squads?: MatchSetupSquad[]
   currentInnings?: 1 | 2
+  /** Set by the Match Editor's banner upload field — see toRawSetup. */
+  tournamentLogoUrl?: string
 }
 
 interface BallRow {
@@ -593,12 +606,16 @@ export async function getMatchDetailById(
 
   let resolvedTournamentSlug: string | undefined
   let resolvedTournamentName: string | undefined
+  // Tournament's own banner/logo — used as a fallback for the match hero
+  // when the match itself has no tournamentLogoUrl set (see MATCH
+  // BANNER FALLBACK note at the top of this file).
+  let resolvedTournamentBannerUrl: string | undefined
   const tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId
 
   if (tournamentIdToResolve) {
     const { data: tournamentRow } = await supabase
       .from("tournaments")
-      .select("name")
+      .select("name, image_url, logo_url")
       .eq("id", tournamentIdToResolve)
       .maybeSingle()
 
@@ -606,6 +623,10 @@ export async function getMatchDetailById(
       resolvedTournamentName = tournamentRow.name
       resolvedTournamentSlug = slugify(tournamentRow.name)
     }
+    // Prefer the tournament's banner image; fall back to its logo if no
+    // banner was ever set, so the match hero still shows *something*
+    // tournament-branded rather than nothing.
+    resolvedTournamentBannerUrl = tournamentRow?.image_url || tournamentRow?.logo_url || undefined
   }
 
   if (tournamentSlug !== undefined) {
@@ -746,7 +767,12 @@ export async function getMatchDetailById(
 
   const squads = await buildSquads(setup, teamA.name, teamB.name)
 
-  const tournamentLogoUrl = matchRow.match_setup?.tournamentLogoUrl || bracketRow?.tournament_id
+  // Match's own banner first; otherwise the parent tournament's banner
+  // or logo (resolvedTournamentBannerUrl); otherwise undefined so the
+  // hero section's own "not available" placeholder background is used
+  // instead of a broken image src (this used to fall back to
+  // bracketRow?.tournament_id — a raw UUID, not an image URL).
+  const tournamentLogoUrl = setup.tournamentLogoUrl || resolvedTournamentBannerUrl || undefined
 
   const match: MatchDetail = {
     id: matchRow.id,
