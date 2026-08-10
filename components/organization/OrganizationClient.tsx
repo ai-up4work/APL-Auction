@@ -185,7 +185,7 @@ export default function OrganizationClient() {
 
       <AppHeader title="Organization" />
 
-      <section className="pt-28 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-26 sm:pt-30 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10 max-w-7xl">
           {gate === "checking" && <p className="text-center text-gray-400">Checking access…</p>}
