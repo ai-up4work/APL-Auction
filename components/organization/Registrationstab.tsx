@@ -60,9 +60,36 @@ const DEFAULT_ACCENT = "#d4af37"
 const SAVE_COLLAPSE_DELAY_MS = 900
 
 /* ────────────────────────────────────────────────────────────────── */
+/*  TYPE STYLING — a single source of truth for "what does Team vs        */
+/*  Player look like" so the registration card, its badge, and its        */
+/*  avatar all agree instead of drifting out of sync.                     */
+/* ────────────────────────────────────────────────────────────────── */
+
+const TYPE_STYLES = {
+  team: {
+    label: "Team",
+    badgeClass: "border-sky-400/40 text-sky-300 bg-sky-400/10",
+    ringClass: "ring-1 ring-sky-400/40",
+    railClass: "bg-sky-400/70",
+    iconClass: "text-sky-300/80",
+  },
+  player: {
+    label: "Player",
+    badgeClass: "border-violet-400/40 text-violet-300 bg-violet-400/10",
+    ringClass: "ring-1 ring-violet-400/40",
+    railClass: "bg-violet-400/70",
+    iconClass: "text-violet-300/80",
+  },
+} as const
+
+/* ────────────────────────────────────────────────────────────────── */
 /*  REGISTRATION CARD — approve is one click; reject expands an inline    */
 /*  reason field in place, same "edit-in-place" pattern used elsewhere    */
 /*  in this app rather than a separate modal.                            */
+/*                                                                        */
+/*  Team and Player cards are now visually distinct at a glance: a        */
+/*  colored left rail, a colored/outlined type badge, and a matching      */
+/*  tint on the fallback avatar icon, all driven from TYPE_STYLES above.  */
 /* ────────────────────────────────────────────────────────────────── */
 
 function RegistrationCard({
@@ -89,14 +116,19 @@ function RegistrationCard({
   const payload = reg.payload as any
   const image = isTeam ? payload.logo : payload.img
   const selectable = reg.status === "pending"
+  const typeStyle = isTeam ? TYPE_STYLES.team : TYPE_STYLES.player
 
   return (
     <div
       onClick={() => selectable && onToggleSelect()}
-      className={`h-full flex flex-col bg-white/[0.02] border rounded-lg p-4 transition-colors ${
+      className={`relative h-full flex flex-col bg-white/[0.02] border rounded-lg pl-5 pr-4 py-4 transition-colors overflow-hidden ${
         selectable ? "cursor-pointer" : ""
       } ${selected ? "border-gold/60 bg-gold/[0.04]" : "border-gold/10 hover:border-gold/40"}`}
     >
+      {/* Left rail — the fastest possible visual cue for team vs player,
+          readable even at a glance across a dense grid of cards. */}
+      <span className={`absolute left-0 top-0 bottom-0 w-1 ${typeStyle.railClass}`} aria-hidden />
+
       <div className="flex items-start justify-between gap-3 flex-1">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           {selectable && (
@@ -112,7 +144,7 @@ function RegistrationCard({
             </button>
           )}
           <div
-            className="h-11 w-11 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60"
+            className={`h-11 w-11 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60 ${typeStyle.ringClass}`}
             style={isTeam ? { backgroundColor: payload.color || "#e45d35" } : undefined}
           >
             {image ? (
@@ -120,7 +152,7 @@ function RegistrationCard({
             ) : isTeam ? (
               <Shield className="h-4 w-4 text-white/70" />
             ) : (
-              <UserPlus className="h-4 w-4 text-white/40" />
+              <UserPlus className={`h-4 w-4 ${typeStyle.iconClass}`} />
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -131,7 +163,12 @@ function RegistrationCard({
                 : `${payload.role} · ${payload.origin}${payload.country ? ` · ${payload.country}` : ""}`}
             </p>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <StatusBadge tone="neutral">{isTeam ? "Team" : "Player"}</StatusBadge>
+              <span
+                className={`flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded-full border ${typeStyle.badgeClass}`}
+              >
+                {isTeam ? <Shield className="h-2.5 w-2.5" /> : <UserPlus className="h-2.5 w-2.5" />}
+                {typeStyle.label}
+              </span>
               <StatusBadge tone={reg.status === "approved" ? "success" : reg.status === "rejected" ? "danger" : "warn"}>
                 {reg.status}
               </StatusBadge>
@@ -224,6 +261,12 @@ function SectionLabel({ icon, children }: { icon: React.ReactNode; children: Rea
 /*  "Edit form" button. This is what's always shown in the grid; editing   */
 /*  now opens FormEditorCard as an overlay on top rather than replacing    */
 /*  this card in place.                                                   */
+/*                                                                        */
+/*  Each of the three links (general/team/individual) now tracks its own  */
+/*  "copied" state and copies its own URL — previously they all shared    */
+/*  one `copied` flag and every button copied `baseLink`, so clicking      */
+/*  "copy" on the team or individual link silently copied the wrong URL   */
+/*  and lit up all three checkmarks at once.                              */
 /* ────────────────────────────────────────────────────────────────── */
 
 function FormSummaryCard({
@@ -239,15 +282,23 @@ function FormSummaryCard({
   isEditing: boolean
   onEdit: () => void
 }) {
-  const [copied, setCopied] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<"" | "base" | "team" | "individual">("")
   const origin = typeof window !== "undefined" ? window.location.origin : ""
   const baseLink = `${origin}/register/${org.slug}/${form.slug}`
+  const teamLink = `${baseLink}?type=team`
+  const individualLink = `${baseLink}?type=individual`
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(baseLink)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+  const copyLink = (key: "base" | "team" | "individual", url: string) => {
+    navigator.clipboard.writeText(url)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey((prev) => (prev === key ? "" : prev)), 1500)
   }
+
+  const linkRows: { key: "base" | "team" | "individual"; label: string; url: string }[] = [
+    { key: "base", label: "Registration link", url: baseLink },
+    { key: "team", label: "Team only Registration link", url: teamLink },
+    { key: "individual", label: "Individual Registration link", url: individualLink },
+  ]
 
   return (
     <div
@@ -279,31 +330,37 @@ function FormSummaryCard({
         </div>
       </div>
 
-      {/* Link: label + copy/open icon buttons only, inline — no raw URL
-          text shown here, to keep the card compact and scannable. */}
-      <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/5">
-        <span className="text-gray-500 text-xs truncate">Registration link</span>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <a
-            href={baseLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open link"
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50 transition-colors"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          <button
-            onClick={copyLink}
-            title="Copy link"
-            className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
-              copied ? "border-green-500/40 text-green-400" : "border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50"
-            }`}
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
+      {/* Link rows: label + copy/open icon buttons only, inline — no raw
+          URL text shown here, to keep the card compact and scannable.
+          Each row now owns its own copied state so they never fire in
+          sync with each other. */}
+      {linkRows.map((row) => (
+        <div key={row.key} className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/5 first:border-t-0">
+          <span className="text-gray-500 text-xs truncate">{row.label}</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <a
+              href={row.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open link"
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50 transition-colors"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            <button
+              onClick={() => copyLink(row.key, row.url)}
+              title="Copy link"
+              className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
+                copiedKey === row.key
+                  ? "border-green-500/40 text-green-400"
+                  : "border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50"
+              }`}
+            >
+              {copiedKey === row.key ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
-      </div>
+      ))}
 
       <Button
         onClick={onEdit}
@@ -677,7 +734,7 @@ function FormDetailsPanel({
 
       {/* Branding — welcome message + accent color, with a live swatch that
           shows the accent as it'll actually appear on a button. */}
-      <div className="mb-5 pt-5 border-t border-white/5">
+      <div className="mb-0 pt-5 border-t border-white/5">
         <SectionLabel icon={<Palette className="h-3 w-3" />}>Branding</SectionLabel>
         <div className="mb-3">
           <FieldLabel>Welcome message (optional)</FieldLabel>
@@ -804,10 +861,12 @@ function FormEditorCard({
   // just be a redundant duplicate of the same URL.
   const showSplitLinks = teamOpen && playerOpen
 
+  // Each link tracks its own key and self-clears, so copying the team
+  // link doesn't light up the player link's checkmark too.
   const copyLink = (key: "base" | "team" | "player", value: string) => {
     navigator.clipboard.writeText(value)
     setCopiedKey(key)
-    setTimeout(() => setCopiedKey(""), 1500)
+    setTimeout(() => setCopiedKey((prev) => (prev === key ? "" : prev)), 1500)
   }
 
   const handleSave = async () => {
@@ -1188,7 +1247,13 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
             key={f}
             onClick={() => setTypeFilter(f)}
             className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
-              typeFilter === f ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+              typeFilter === f
+                ? f === "team"
+                  ? "bg-sky-400 text-black border-sky-400"
+                  : f === "player"
+                  ? "bg-violet-400 text-black border-violet-400"
+                  : "bg-gold text-black border-gold"
+                : "border-gold/30 text-gray-300 hover:text-gold"
             }`}
           >
             {f === "all" ? "All types" : f === "team" ? "Teams" : "Players"}
@@ -1314,6 +1379,7 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
                 form={form}
                 org={org}
                 pendingCount={pendingCountByForm[form.id] ?? 0}
+                isEditing={editingFormId === form.id}
                 onEdit={() => setEditingFormId(form.id)}
               />
             )
