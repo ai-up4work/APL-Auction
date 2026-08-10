@@ -1,11 +1,9 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { Menu, Shield, Twitter, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { navLinks } from "@/data/site-data"
 
 interface SiteHeaderProps {
   activeSection: string
@@ -37,23 +35,13 @@ export function SiteHeader({
       )}
     >
       <div className="w-full max-w-[1600px] mx-auto px-4">
-        {/* Desktop Layout — grid for control */}
-        <div className="grid grid-cols-[auto_1fr_auto] items-center justify-items-center">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center h-16 lg:h-[72px]">
+
           {/* Logo */}
           <div
             onClick={() => scrollToSection("home")}
             className="flex items-center gap-2.5 z-20 justify-self-start cursor-pointer group"
           >
-            <div className="relative w-14 h-16 lg:w-16 lg:h-20 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
-              <Image
-                src="/valiant-league-logo.png"
-                alt="Valiant League Logo"
-                fill
-                className="object-contain"
-                priority
-              />
-            </div>
-
             <span className="font-cinzel font-bold text-xl lg:text-2xl text-white tracking-wide">
               VALIANT{" "}
               <span className="text-gold transition-colors duration-300 group-hover:text-gold/80">
@@ -64,22 +52,103 @@ export function SiteHeader({
 
           {/* Navigation */}
           <nav className="hidden lg:flex items-center justify-center flex-wrap gap-1.5">
-            {navLinks.map((link) => (
-              <Button
-                key={link.name}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
-                  activeSection === link.id
-                    ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
-                    : "text-gray-300 hover:text-gold hover:bg-white/5"
-                )}
-                onClick={() => scrollToSection(link.id)}
-              >
-                {link.name}
-              </Button>
-            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "home"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("home")}
+            >
+              Home
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "tournaments"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("tournaments")}
+            >
+              All Tournaments
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "matches"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("matches")}
+            >
+              All Matches
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "players"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("players")}
+            >
+              Players
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "teams"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("teams")}
+            >
+              Teams
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "standings"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("standings")}
+            >
+              Standings
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "font-cinzel text-sm xl:text-base rounded-full px-4 transition-all duration-300",
+                activeSection === "stats"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => scrollToSection("stats")}
+            >
+              Stats
+            </Button>
           </nav>
 
           {/* Right Side */}
@@ -104,6 +173,7 @@ export function SiteHeader({
               >
                 Login
               </Button>
+
               <Button
                 className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel shadow-[0_0_0_1px_rgba(212,175,55,0.3),0_4px_14px_-4px_rgba(212,175,55,0.5)] hover:shadow-[0_0_0_1px_rgba(212,175,55,0.5),0_6px_18px_-4px_rgba(212,175,55,0.65)] transition-shadow"
                 onClick={() => handleNavigation("/auth/register")}
@@ -129,7 +199,9 @@ export function SiteHeader({
       {/* Mobile Navigation */}
       <div
         className={`lg:hidden absolute top-full left-0 w-full bg-black/95 backdrop-blur-md border-t border-gold/20 shadow-[0_16px_32px_-16px_rgba(0,0,0,0.9)] transition-all duration-300 ${
-          isNavOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 -translate-y-4 pointer-events-none"
+          isNavOpen
+            ? "opacity-100 translate-y-0 pointer-events-auto"
+            : "opacity-0 -translate-y-4 pointer-events-none"
         }`}
       >
         <div className="container mx-auto px-4 py-6">
@@ -141,21 +213,96 @@ export function SiteHeader({
           </div>
 
           <nav className="flex flex-col space-y-2.5">
-            {navLinks.map((link) => (
-              <Button
-                key={link.name}
-                variant="ghost"
-                className={cn(
-                  "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
-                  activeSection === link.id
-                    ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
-                    : "text-gray-300 hover:text-gold hover:bg-white/5"
-                )}
-                onClick={() => handleMobileNav(link.id)}
-              >
-                {link.name}
-              </Button>
-            ))}
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "home"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("home")}
+            >
+              Home
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "tournaments"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("tournaments")}
+            >
+              All Tournaments
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "matches"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("matches")}
+            >
+              All Matches
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "players"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("players")}
+            >
+              Players
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "teams"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("teams")}
+            >
+              Teams
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "standings"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("standings")}
+            >
+              Standings
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={cn(
+                "font-cinzel text-base w-full justify-start rounded-lg transition-all duration-300",
+                activeSection === "stats"
+                  ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/5"
+              )}
+              onClick={() => handleMobileNav("stats")}
+            >
+              Stats
+            </Button>
 
             <div className="pt-3 mt-1 border-t border-gold/15 flex flex-col gap-2.5">
               <Button
@@ -168,6 +315,7 @@ export function SiteHeader({
               >
                 Login
               </Button>
+
               <Button
                 className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start shadow-[0_0_0_1px_rgba(212,175,55,0.3)]"
                 onClick={() => {
@@ -180,7 +328,12 @@ export function SiteHeader({
             </div>
 
             <div className="pt-4 flex justify-center">
-              <Link href="#" target="_blank" rel="noopener noreferrer" onClick={() => setIsNavOpen(false)}>
+              <Link
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsNavOpen(false)}
+              >
                 <Button
                   variant="ghost"
                   size="icon"
