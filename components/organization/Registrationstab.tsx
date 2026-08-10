@@ -691,7 +691,23 @@ function FormDetailsPanel({
               className="hidden sm:flex shrink-0 h-10 px-3 items-center rounded-md text-xs font-bold font-cinzel"
               style={{ backgroundColor: liveAccent, color: "#0a0a0a" }}
             >
-              Register
+              <Button
+                onClick={onSave}
+                disabled={isSaving || saved}
+                className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-70 mt-5 flex items-center gap-1.5"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+                  </>
+                ) : saved ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" /> Saved — closing…
+                  </>
+                ) : (
+                  "Save form"
+                )}
+              </Button>
             </span>
           </div>
           <p className="text-gray-600 text-[11px] mt-1.5">
@@ -705,23 +721,6 @@ function FormDetailsPanel({
           <AlertCircle className="h-4 w-4" /> {saveError}
         </p>
       )}
-      <Button
-        onClick={onSave}
-        disabled={isSaving || saved}
-        className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-70 mt-5 flex items-center gap-1.5"
-      >
-        {isSaving ? (
-          <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
-          </>
-        ) : saved ? (
-          <>
-            <Check className="h-3.5 w-3.5" /> Saved — closing…
-          </>
-        ) : (
-          "Save form"
-        )}
-      </Button>
     </Panel>
   )
 }
