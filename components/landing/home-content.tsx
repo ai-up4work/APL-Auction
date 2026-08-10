@@ -401,10 +401,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                 <div className="relative h-40 md:h-48 border-b border-gold/20">
                   <Image src={t.image || "/placeholder.svg"} alt={`Tournament: ${t.title}`} fill className="object-cover" />
                 </div>
-                <div className="p-5 md:p-6">
-                  <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
-                    {t.tag}
-                  </span>
+                <div className="p-5 md:p-6">               
                   <h3 className="text-lg font-bold text-white font-cinzel mt-3 mb-1">{t.title}</h3>
                   <p className="text-gray-300 text-xs">{t.by}</p>
                 </div>
