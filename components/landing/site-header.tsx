@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Menu, Shield, Twitter, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import Image from "next/image"
 
 interface SiteHeaderProps {
   activeSection: string
@@ -35,13 +36,23 @@ export function SiteHeader({
       )}
     >
       <div className="w-full max-w-[1600px] mx-auto px-4">
-        <div className="grid grid-cols-[auto_1fr_auto] items-center h-16 lg:h-[72px]">
-
+        {/* Desktop Layout — grid for control */}
+        <div className="grid grid-cols-[auto_1fr_auto] items-center justify-items-center">
           {/* Logo */}
           <div
             onClick={() => scrollToSection("home")}
             className="flex items-center gap-2.5 z-20 justify-self-start cursor-pointer group"
           >
+            <div className="relative w-14 h-14 lg:w-16 lg:h-16 py-0 my-1 transition-transform duration-300 group-hover:scale-105">
+              <Image
+                src="/valiant-league-logo.png"
+                alt="Valiant League Logo"
+                fill
+                className="object-contain"
+                priority
+              />
+            </div>
+
             <span className="font-cinzel font-bold text-xl lg:text-2xl text-white tracking-wide">
               VALIANT{" "}
               <span className="text-gold transition-colors duration-300 group-hover:text-gold/80">
