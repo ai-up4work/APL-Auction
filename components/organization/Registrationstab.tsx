@@ -221,19 +221,22 @@ function SectionLabel({ icon, children }: { icon: React.ReactNode; children: Rea
 /* ────────────────────────────────────────────────────────────────── */
 /*  FORM SUMMARY CARD — the default, collapsed view of a form: a small    */
 /*  thumbnail, its name, active/pending status, a copyable link, and an   */
-/*  "Edit form" button. This is what's shown until the user asks to       */
-/*  edit a specific form, at which point FormEditorCard takes its place.  */
+/*  "Edit form" button. This is what's always shown in the grid; editing   */
+/*  now opens FormEditorCard as an overlay on top rather than replacing    */
+/*  this card in place.                                                   */
 /* ────────────────────────────────────────────────────────────────── */
 
 function FormSummaryCard({
   form,
   org,
   pendingCount,
+  isEditing,
   onEdit,
 }: {
   form: RegistrationForm
   org: OrgSummary
   pendingCount: number
+  isEditing: boolean
   onEdit: () => void
 }) {
   const [copied, setCopied] = useState(false)
@@ -247,7 +250,11 @@ function FormSummaryCard({
   }
 
   return (
-    <div className="h-full flex flex-col bg-white/[0.02] border border-gold/10 rounded-lg p-4 transition-all duration-200 hover:border-gold/40 hover:bg-white/[0.03] hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30">
+    <div
+      className={`h-full flex flex-col bg-white/[0.02] border rounded-lg p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30 ${
+        isEditing ? "border-gold/60 bg-white/[0.03]" : "border-gold/10 hover:border-gold/40 hover:bg-white/[0.03]"
+      }`}
+    >
       <div className="flex items-start gap-3">
         <div className="h-10 w-10 rounded-md flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
           {form.bannerUrl ? (
@@ -272,33 +279,43 @@ function FormSummaryCard({
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-white/5">
-        <Input
-          readOnly
-          value={baseLink}
-          onFocus={(e) => e.target.select()}
-          className="bg-black/50 border-gold/30 text-white flex-1 min-w-0 font-mono text-[11px] h-8"
-        />
-        <button
-          onClick={copyLink}
-          title="Copy link"
-          className={`shrink-0 h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
-            copied ? "border-green-500/40 text-green-400" : "border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50"
-          }`}
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </button>
+      {/* Link: label + copy/open icon buttons only, inline — no raw URL
+          text shown here, to keep the card compact and scannable. */}
+      <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/5">
+        <span className="text-gray-500 text-xs truncate">Registration link</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <a
+            href={baseLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open link"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50 transition-colors"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <button
+            onClick={copyLink}
+            title="Copy link"
+            className={`h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
+              copied ? "border-green-500/40 text-green-400" : "border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50"
+            }`}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+        </div>
       </div>
 
       <Button
         onClick={onEdit}
         className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30 font-bold text-xs mt-3 w-full flex items-center justify-center gap-1.5"
       >
-        <Pencil className="h-3.5 w-3.5" /> Edit form
+        <Pencil className="h-3.5 w-3.5" /> {isEditing ? "Editing…" : "Edit form"}
       </Button>
     </div>
   )
 }
+
+
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  CAPACITY CARD — open/closed + optional cap, now with a type icon and   */
@@ -689,12 +706,11 @@ function FormDetailsPanel({
             />
             <span
               className="hidden sm:flex shrink-0 h-10 px-3 items-center rounded-md text-xs font-bold font-cinzel"
-              style={{ backgroundColor: liveAccent, color: "#0a0a0a" }}
             >
               <Button
                 onClick={onSave}
                 disabled={isSaving || saved}
-                className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-70 mt-5 flex items-center gap-1.5"
+                style={{ backgroundColor: liveAccent, color: "#0a0a0a" }}
               >
                 {isSaving ? (
                   <>
