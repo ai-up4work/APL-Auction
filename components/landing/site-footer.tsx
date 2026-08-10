@@ -3,7 +3,6 @@
 import Image from "next/image"
 import Link from "next/link"
 import { ArrowRight, Mail, Shield, Twitter } from "lucide-react"
-import { navLinks } from "@/data/site-data"
 
 interface SiteFooterProps {
   scrollToSection: (sectionId: string) => void
@@ -12,8 +11,8 @@ interface SiteFooterProps {
 
 export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProps) {
   return (
-    <footer className="bg-black border-t border-gold/20">
-      <div className="container mx-auto px-6 py-12 lg:py-16">
+    <footer className="bg-black border-t border-gold/20 ">
+      <div className="container mx-auto px-0 py-12 lg:py-16">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
           {/* Brand */}
           <div className="space-y-5 text-center lg:text-left">
@@ -58,18 +57,23 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
             </div>
           </div>
 
-          {/* Navigation — hidden below lg */}
+          {/* Navigation — hidden below lg (Hardcoded navigation items matching Header) */}
           <div className="hidden lg:block">
             <h3 className="font-cinzel font-bold text-xl text-white mb-6">NAVIGATION</h3>
             <ul className="space-y-4">
-              {navLinks.map((link) => (
-                <li key={link.id}>
+              {[
+                { id: "tournaments", label: "All Tournaments" },
+                { id: "matches", label: "All Matches" },
+                { id: "standings", label: "Standings" },
+                { id: "stats", label: "Stats" },
+              ].map((item) => (
+                <li key={item.id}>
                   <div
-                    onClick={() => scrollToSection(link.id)}
+                    onClick={() => scrollToSection(item.id)}
                     className="text-gray-400 hover:text-gold transition-colors flex items-center cursor-pointer group"
                   >
                     <ArrowRight className="h-4 w-4 mr-2 text-gold transition-transform group-hover:translate-x-0.5" />
-                    {link.name.charAt(0) + link.name.slice(1).toLowerCase()}
+                    {item.label}
                   </div>
                 </li>
               ))}
