@@ -416,6 +416,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             <Button
               variant="outline"
               className="border-gold text-gold hover:bg-gold/10"
+              disabled
               onClick={() => handleNavigation("/all-tournaments")}
             >
               View All Tournaments
