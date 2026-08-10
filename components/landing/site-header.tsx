@@ -26,9 +26,9 @@ export function SiteHeader({
     setIsNavOpen(false)
   }
 
-  // Desktop clip path: Full height on left (Logo), angled drop down to shorter height on right
+  // Desktop clip path: Reduced left side height to 68px, angled drop down to 54px on right
   const desktopClipPath =
-    "polygon(0 0, 100% 0, 100% 54px,340px 54px, 290px 100%, 0 100%)"
+    "polygon(0 0, 100% 0, 100% 54px, 340px 54px, 290px 68px, 0 68px)"
 
   return (
     <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500">
@@ -42,14 +42,14 @@ export function SiteHeader({
           style={{ clipPath: desktopClipPath }}
         />
         
-        {/* Exact SVG Bottom Outline matching the clip-path coordinates */}
+        {/* Exact SVG Bottom Outline matching the updated clip-path coordinates */}
         <svg 
           className="absolute inset-0 w-full h-full overflow-visible pointer-events-none z-10" 
           xmlns="http://www.w3.org/2000/svg"
         >
           <path 
-            // Traces exactly along the bottom edge: (0,80) -> (290,80) -> (340,54) -> (End of screen,54)
-            d="M 0 80 L 290 80 L 340 54 L 9999 54" 
+            // Traces along the bottom edge: (0,68) -> (290,68) -> (340,54) -> (End of screen,54)
+            d="M 0 68 L 290 68 L 340 54 L 9999 54" 
             stroke="rgba(212, 175, 55, 0.6)" 
             strokeWidth="1.5" 
             fill="none" 
@@ -62,13 +62,13 @@ export function SiteHeader({
       <div className="lg:hidden absolute inset-0 bg-black shadow-[0_1px_0_0_rgba(212,175,55,0.4),0_8px_24px_-12px_rgba(0,0,0,0.9)]" />
 
       {/* Main Header Content */}
-      <div className="relative z-10 container mx-auto px-4 h-20 flex items-start justify-between w-full max-w-[1600px]">
-        {/* Left Side: Logo & Brand Name (Full Height Area: 80px) */}
+      <div className="relative z-10 container mx-auto px-4 h-[68px] flex items-start justify-between w-full max-w-[1600px]">
+        {/* Left Side: Logo & Brand Name (Reduced Height Area: 68px) */}
         <div
           onClick={() => scrollToSection("home")}
-          className="flex items-center gap-3 h-20 cursor-pointer group pr-6 z-20"
+          className="flex items-center gap-3 h-[68px] cursor-pointer group pr-6 z-20"
         >
-          <div className="relative w-14 h-14 lg:w-16 lg:h-16 py-0 my-1 transition-transform duration-300 group-hover:scale-105">
+          <div className="relative w-14 h-14 lg:w-16 lg:h-16 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
             <Image
               src="/valiant-league-logo.png"
               alt="Valiant League Logo"
@@ -115,7 +115,7 @@ export function SiteHeader({
         </nav>
 
         {/* Right Side Controls (Shorter Height Section: 54px) */}
-        <div className="flex items-center justify-end gap-3 h-20 lg:h-[54px]">
+        <div className="flex items-center justify-end gap-3 h-[68px] lg:h-[54px]">
           <div className="hidden lg:flex items-center gap-3">
             <Link href="#" target="_blank" rel="noopener noreferrer">
               <Button
