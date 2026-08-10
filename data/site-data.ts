@@ -343,7 +343,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Dambulla Rock Lions — 6 teams, round robin",
     image: "/images/showcase/dambulla-rock-lions-series.png",
     screenshot: "/images/showcase/dambulla-rock-lions-series.png",
-        featured: true,
+    featured: true,
   },
   {
     tag: "Auction",
@@ -352,8 +352,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Moratuwa Thundersharks — 58 players moved in one night",
     image: "/images/showcase/moratuwa-thundersharks-draft-night.png",
     screenshot: "/images/showcase/moratuwa-thundersharks-draft-night.png",
-        featured: true,
-
+    featured: true,
   },
 ]
 
