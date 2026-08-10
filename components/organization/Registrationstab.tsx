@@ -54,6 +54,11 @@ type TypeFilter = "all" | "team" | "player"
 
 const DEFAULT_ACCENT = "#d4af37"
 
+// How long the "Saved ✓" confirmation stays visible before the editor
+// auto-collapses back to its summary card. Long enough to register as
+// feedback, short enough not to feel like a stall.
+const SAVE_COLLAPSE_DELAY_MS = 900
+
 /* ────────────────────────────────────────────────────────────────── */
 /*  REGISTRATION CARD — approve is one click; reject expands an inline    */
 /*  reason field in place, same "edit-in-place" pattern used elsewhere    */
@@ -242,7 +247,7 @@ function FormSummaryCard({
   }
 
   return (
-    <div className="bg-white/[0.02] border border-gold/10 rounded-lg p-4 hover:border-gold/30 transition-colors flex flex-col">
+    <div className="h-full flex flex-col bg-white/[0.02] border border-gold/10 rounded-lg p-4 transition-all duration-200 hover:border-gold/40 hover:bg-white/[0.03] hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30">
       <div className="flex items-start gap-3">
         <div className="h-10 w-10 rounded-md flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
           {form.bannerUrl ? (
@@ -429,7 +434,8 @@ function LinkRow({ label, url, copied, onCopy }: { label: string; url: string; c
 /*  All state lives in the parent FormEditorCard and is passed down, so    */
 /*  the two panels stay in sync exactly as the single card used to be.    */
 /*  The whole thing only renders when the user clicks "Edit form" on the  */
-/*  matching FormSummaryCard — see RegistrationsTab.                      */
+/*  matching FormSummaryCard, and auto-collapses back to it a moment      */
+/*  after a successful save — see RegistrationsTab.                       */
 /* ────────────────────────────────────────────────────────────────── */
 
 function FormCapsAndLinksPanel({
@@ -699,8 +705,22 @@ function FormDetailsPanel({
           <AlertCircle className="h-4 w-4" /> {saveError}
         </p>
       )}
-      <Button onClick={onSave} disabled={isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-5">
-        {isSaving ? "Saving…" : saved ? "Saved ✓" : "Save form"}
+      <Button
+        onClick={onSave}
+        disabled={isSaving || saved}
+        className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-70 mt-5 flex items-center gap-1.5"
+      >
+        {isSaving ? (
+          <>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+          </>
+        ) : saved ? (
+          <>
+            <Check className="h-3.5 w-3.5" /> Saved — closing…
+          </>
+        ) : (
+          "Save form"
+        )}
       </Button>
     </Panel>
   )
@@ -795,8 +815,6 @@ function FormEditorCard({
       setSaveError(result.error ?? "Couldn't save changes.")
       return
     }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
     onSaved({
       ...form,
       name,
@@ -809,6 +827,13 @@ function FormEditorCard({
       playerOpen,
       isActive,
     })
+    // Show a brief "Saved ✓" confirmation, then collapse back to the
+    // summary card automatically — saving is the signal that the user
+    // is done editing, so there's no need to make them collapse by hand.
+    setSaved(true)
+    setTimeout(() => {
+      onDone()
+    }, SAVE_COLLAPSE_DELAY_MS)
   }
 
   const handleDelete = async () => {
@@ -829,11 +854,12 @@ function FormEditorCard({
     onDeleted()
   }
 
-  // Spans both columns of the parent grid and lays out its own two panels
-  // side by side, so exactly one form's full editor can be open at a time
-  // while the rest of the forms stay collapsed as summary cards.
+  // Spans the full width of the parent grid (all breakpoints) and lays
+  // out its own two panels side by side, so exactly one form's full
+  // editor can be open at a time while the rest of the forms stay
+  // collapsed as summary cards.
   return (
-    <div className="lg:col-span-2">
+    <div className="col-span-1 md:col-span-2 lg:col-span-3">
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-xs font-cinzel uppercase tracking-widest text-gray-500">
           Editing <span className="text-gold">{form.name}</span>
@@ -961,8 +987,9 @@ function CreateFormPanel({
 /*  REGISTRATIONS TAB                                                    */
 /*                                                                        */
 /*  Layout: create-form panel, then a grid of form cards — collapsed as   */
-/*  compact FormSummaryCards by default, with at most one expanded into    */
-/*  the full FormEditorCard (spanning both columns) at a time — then the   */
+/*  compact FormSummaryCards by default (1 col on mobile, 2 on tablet,    */
+/*  3 on laptop and up), with at most one expanded into the full          */
+/*  FormEditorCard (spanning the full row) at a time — then the           */
 /*  registrations list as its own full-width panel underneath.            */
 /* ────────────────────────────────────────────────────────────────── */
 
@@ -1247,7 +1274,10 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
           </p>
         </Panel>
       ) : forms.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        // 1 column on mobile, 2 on tablet, 3 on laptop+ — a single open
+        // FormEditorCard spans the full row at every breakpoint so it
+        // never gets squeezed beside a summary card.
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
           {forms.map((form) =>
             editingFormId === form.id ? (
               <FormEditorCard
