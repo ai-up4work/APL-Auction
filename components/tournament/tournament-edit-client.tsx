@@ -406,7 +406,7 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
 
       <AppHeader title="Tournament Editor" />
 
-      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-26 sm:pt-30 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10 max-w-8xl">
           {gate === "checking" && (

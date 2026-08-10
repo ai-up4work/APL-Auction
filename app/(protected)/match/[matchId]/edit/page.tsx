@@ -982,7 +982,7 @@ export default function EditMatchPage() {
 
       <AppHeader title="Match Editor" />
 
-      <section className="pt-20 sm:pt-32 pb-16 relative section-pattern">
+      <section className="pt-26 sm:pt-30 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         {/* Widened from max-w-4xl so the right rail has room to breathe on
             desktop without the content column itself stretching uncomfortably wide. */}

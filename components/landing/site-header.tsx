@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { Menu, Shield, Twitter, X } from "lucide-react"
+import { Menu, Twitter, X, LogOut, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Image from "next/image"
+import { useState } from "react"
+import { useAuth } from "@/context/AuthContext"
 
 interface SiteHeaderProps {
   activeSection: string
@@ -14,6 +16,15 @@ interface SiteHeaderProps {
   handleNavigation: (path: string) => void
 }
 
+/** Best-effort display name helper */
+function displayNameFor(user: { email?: string | null; user_metadata?: Record<string, any> } | null): string {
+  if (!user) return ""
+  const metaName = user.user_metadata?.full_name || user.user_metadata?.name
+  if (typeof metaName === "string" && metaName.trim()) return metaName
+  if (user.email) return user.email.split("@")[0]
+  return "Account"
+}
+
 export function SiteHeader({
   activeSection,
   isNavOpen,
@@ -21,9 +32,25 @@ export function SiteHeader({
   scrollToSection,
   handleNavigation,
 }: SiteHeaderProps) {
+  const { user, loading, signOut } = useAuth()
+  const [loggingOut, setLoggingOut] = useState(false)
+
   const handleMobileNav = (id: string) => {
     scrollToSection(id)
     setIsNavOpen(false)
+  }
+
+  const handleLogout = async () => {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await signOut()
+      setLoggingOut(false)
+      setIsNavOpen(false)
+    } catch (err) {
+      console.error("Logout failed:", err)
+      setLoggingOut(false)
+    }
   }
 
   // Desktop clip path: Reduced left side height to 68px, angled drop down to 54px on right
@@ -129,22 +156,59 @@ export function SiteHeader({
 
             <div className="w-px h-5 bg-gold/20" />
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className="font-cinzel text-xs xl:text-sm h-8 font-semibold text-white/90 hover:text-gold hover:bg-white/5"
-              onClick={() => handleNavigation("/auth/login")}
-            >
-              Login
-            </Button>
+            {/* --- AUTHENTICATION STATE --- */}
+            {loading ? (
+              // Loading Skeleton
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-20 bg-white/10 rounded animate-pulse" />
+                <div className="h-8 w-24 bg-white/10 rounded animate-pulse" />
+              </div>
+            ) : user ? (
+              // Logged In: User Profile & Premium Logout
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-end justify-center min-w-0 max-w-[120px] xl:max-w-[150px]">
+                  <p className="text-xs xl:text-[13px] text-white/95 font-semibold truncate w-full text-right tracking-wide">
+                    {displayNameFor(user)}
+                  </p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  aria-label="Log out"
+                  className="group relative flex items-center gap-2 px-3 xl:px-4 py-1.5 rounded-md bg-black/40 border border-gold/20 text-gold/90 hover:bg-red-950/40 hover:border-red-500/50 hover:text-red-400 hover:shadow-[0_0_12px_rgba(239,68,68,0.15)] overflow-hidden transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-red-500/0 via-red-500/5 to-red-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                  {loggingOut ? (
+                    <Loader2 className="w-3.5 h-3.5 xl:w-4 xl:h-4 animate-spin relative z-10" />
+                  ) : (
+                    <LogOut className="w-3.5 h-3.5 xl:w-4 xl:h-4 transition-transform duration-300 group-hover:-translate-x-0.5 relative z-10" />
+                  )}
+                  <span className="text-[11px] xl:text-[12px] font-cinzel font-bold tracking-wider relative z-10 pt-0.5">
+                    {loggingOut ? "LOGGING OUT" : "LOGOUT"}
+                  </span>
+                </button>
+              </div>
+            ) : (
+              // Logged Out: Login/Register Buttons
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="font-cinzel text-xs xl:text-sm h-8 font-semibold text-white/90 hover:text-gold hover:bg-white/5"
+                  onClick={() => handleNavigation("/auth/login")}
+                >
+                  Login
+                </Button>
 
-            <Button
-              size="sm"
-              className="h-8 bg-gold hover:bg-gold/90 text-black text-xs xl:text-sm font-bold font-cinzel shadow-[0_0_0_1px_rgba(212,175,55,0.3),0_4px_14px_-4px_rgba(212,175,55,0.5)] transition-shadow"
-              onClick={() => handleNavigation("/auth/register")}
-            >
-              Register
-            </Button>
+                <Button
+                  size="sm"
+                  className="h-8 bg-gold hover:bg-gold/90 text-black text-xs xl:text-sm font-bold font-cinzel shadow-[0_0_0_1px_rgba(212,175,55,0.3),0_4px_14px_-4px_rgba(212,175,55,0.5)] transition-shadow"
+                  onClick={() => handleNavigation("/auth/register")}
+                >
+                  Register
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Mobile Toggle Button */}
@@ -169,12 +233,6 @@ export function SiteHeader({
         }`}
       >
         <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-center gap-2 mb-5 text-gold/50">
-            <div className="h-px w-10 bg-gold/25" />
-            <Shield className="h-3.5 w-3.5" />
-            <div className="h-px w-10 bg-gold/25" />
-          </div>
-
           <nav className="flex flex-col space-y-2.5">
             {[
               { id: "home", label: "Home" },
@@ -201,26 +259,49 @@ export function SiteHeader({
             ))}
 
             <div className="pt-3 mt-1 border-t border-gold/15 flex flex-col gap-2.5">
-              <Button
-                variant="ghost"
-                className="font-cinzel font-semibold w-full justify-start text-white/90 hover:text-gold hover:bg-white/5"
-                onClick={() => {
-                  handleNavigation("/auth/login")
-                  setIsNavOpen(false)
-                }}
-              >
-                Login
-              </Button>
+              {/* MOBILE AUTHENTICATION STATE */}
+              {loading ? (
+                <div className="h-20 w-full bg-white/5 rounded-lg animate-pulse" />
+              ) : user ? (
+                <div className="flex flex-col gap-2 p-3 bg-white/5 border border-gold/10 rounded-lg">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-white/90">{displayNameFor(user)}</span>
+                    {user.email && <span className="text-[11px] text-gold/60">{user.email}</span>}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className="mt-2 w-full font-cinzel font-bold text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-900/30 transition-all justify-center h-9"
+                  >
+                    {loggingOut ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogOut className="w-4 h-4 mr-2" />}
+                    {loggingOut ? "LOGGING OUT" : "LOGOUT"}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Button
+                    variant="ghost"
+                    className="font-cinzel font-semibold w-full justify-start text-white/90 hover:text-gold hover:bg-white/5"
+                    onClick={() => {
+                      handleNavigation("/auth/login")
+                      setIsNavOpen(false)
+                    }}
+                  >
+                    Login
+                  </Button>
 
-              <Button
-                className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start shadow-[0_0_0_1px_rgba(212,175,55,0.3)]"
-                onClick={() => {
-                  handleNavigation("/auth/register")
-                  setIsNavOpen(false)
-                }}
-              >
-                Register
-              </Button>
+                  <Button
+                    className="bg-gold hover:bg-gold/90 text-black font-bold font-cinzel w-full justify-start shadow-[0_0_0_1px_rgba(212,175,55,0.3)]"
+                    onClick={() => {
+                      handleNavigation("/auth/register")
+                      setIsNavOpen(false)
+                    }}
+                  >
+                    Register
+                  </Button>
+                </>
+              )}
             </div>
 
             <div className="pt-4 flex justify-center">
