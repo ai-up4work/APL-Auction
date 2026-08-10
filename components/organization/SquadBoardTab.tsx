@@ -274,10 +274,23 @@ function FolderCard({
   deleting: boolean
 }) {
   return (
-    <div className="relative group">
+    <div className="relative group pt-3">
+      {/* Unified hover outline — a ring drawn slightly LARGER than the card
+          (offset outward on all sides), not the same size sitting behind
+          it. It has to be bigger: the card is opaque (bg-black/50 + its
+          own border) and paints on top, so a same-size overlay behind it
+          gets completely hidden except for a sliver the ribbon then
+          covers too — which is why the first version showed nothing on
+          hover. Sized outward, the ring's border always falls outside the
+          card's opaque area, so it stays visible. The top offset is
+          pulled up further than the sides/bottom to clear the ribbon tab
+          (positioned at -top-3 on its own), so the ring wraps ribbon +
+          card as one shape instead of just the card. */}
+      <div className="pointer-events-none absolute -top-4 -left-1.5 -right-1.5 -bottom-1.5 rounded-lg border-2 border-transparent group-hover:border-gold/40 group-hover:shadow-[0_0_20px_rgba(201,151,31,0.15)] transition-all duration-300" />
+
       <RibbonTab index={index} />
 
-      <div className="relative bg-black/50 border border-gold/20 group-hover:border-gold/50 transition-all duration-300 rounded-lg rounded-tl-none p-5 shadow-lg shadow-black/40 group-hover:shadow-gold/10 group-hover:-translate-y-0.5">
+      <div className="relative bg-black/50 border border-gold/20 transition-all duration-300 rounded-lg rounded-tl-none p-5 shadow-lg shadow-black/40 group-hover:-translate-y-0.5">
         <button onClick={onOpen} className="w-full text-left">
           <div className="flex items-start justify-between gap-3 mb-4">
             <LogoFan logos={board.teamLogos} />
