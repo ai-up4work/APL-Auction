@@ -396,6 +396,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               <Link
                 key={t.title}
                 href={`/all-tournaments/${slugify(t.title)}`}
+                onClick={(e) => e.preventDefault()}
                 className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1} hover:border-gold/80 transition-all duration-300`}
               >
                 <div className="relative h-40 md:h-48 border-b border-gold/20">
