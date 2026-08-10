@@ -578,7 +578,11 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             {showcaseVisible.map((s, i) => (
               <div key={s.title} className={`rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1}`}>
                 <div className="h-40 md:h-48 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20">
-                  <span className="font-mono text-[10px] text-gray-400 tracking-[2px]">[ SCREENSHOT PLACEHOLDER ]</span>
+                  {s.screenshot ? (
+                    <Image src={s.screenshot} alt={s.title} className="w-full h-full object-cover" width={400} height={240} />
+                  ) : (
+                    <span className="font-mono text-[10px] text-gray-400 tracking-[2px]">[ SCREENSHOT PLACEHOLDER ]</span>
+                  )}
                 </div>
                 <div className="p-5 md:p-6">
                   <div className="flex items-center justify-between mb-3">

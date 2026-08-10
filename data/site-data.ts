@@ -305,48 +305,54 @@ export const comparisonColumns = [
 export const showcaseSlides: ShowcaseSlide[] = [
   {
     tag: "Auction",
-    slug: "iron-knights-season-opener",
-    title: "Iron Knights Season Opener",
-    by: "Run by The Wardens CC — 8 teams, 96 players",
-    image: "https://images.pexels.com/photos/9071736/pexels-photo-9071736.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "colombo-royals-season-opener",
+    title: "Colombo Royals Season Opener",
+    by: "Run by Colombo Royals — 8 teams, 96 players",
+    image: "/images/showcase/colombo-royals-season-opener-auction.png",
+    screenshot: "/images/showcase/colombo-royals-season-opener-auction.png",
     featured: true,
   },
   {
     tag: "Bracket",
-    slug: "silver-cup-knockout",
-    title: "Silver Cup Knockout",
-    by: "Run by Royal Strikers — double-elimination, 16 teams",
-    image: "https://images.pexels.com/photos/9072212/pexels-photo-9072212.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "colombo-maritime-knockout-cup",
+    title: "Colombo Maritime Knockout Cup",
+    by: "Run by Colombo Maritime Cricket Club — double-elimination, 12 teams",
+    image: "/images/showcase/colombo-maritime-knockout-cup.jpg",
+    screenshot: "/images/showcase/colombo-maritime-knockout-cup.jpg",
     featured: true,
   },
   {
     tag: "Overlay",
-    slug: "golden-lions-broadcast",
-    title: "Golden Lions Broadcast",
-    by: "Streamed live — 12,000 viewers peak",
-    image: "https://images.pexels.com/photos/7862505/pexels-photo-7862505.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "kandy-tuskers-broadcast",
+    title: "Kandy Royal Tuskers Broadcast",
+    by: "Streamed live — 8,500 viewers peak",
+    image: "/images/showcase/kandy-tuskers-broadcast.png",
+    screenshot: "/images/showcase/kandy-tuskers-broadcast.png",
   },
   {
     tag: "League",
-    slug: "crimson-cup-full-season",
-    title: "Crimson Cup Full Season",
-    by: "Run by Valiant Originals — three months, one trophy",
-    image: "https://images.pexels.com/photos/6532362/pexels-photo-6532362.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "galle-fortress-full-season",
+    title: "Galle Fortress Full Season",
+    by: "Run by Galle Fortress Cricket Club — ten weeks, one trophy",
+    image: "/images/showcase/galle-fortress-full-season.png",
+    screenshot: "/images/showcase/galle-fortress-full-season.png",
     featured: true,
   },
   {
     tag: "League",
-    slug: "bronze-trophy-series",
-    title: "Bronze Trophy Series",
-    by: "Run by Bronze Trophy Alliance — 5 teams, round robin",
-    image: "https://images.pexels.com/photos/34412339/pexels-photo-34412339.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "dambulla-rock-lions-series",
+    title: "Dambulla Rock Lions Series",
+    by: "Run by Dambulla Rock Lions — 6 teams, round robin",
+    image: "/images/showcase/dambulla-rock-lions-series.png",
+    screenshot: "/images/showcase/dambulla-rock-lions-series.png",
   },
   {
     tag: "Auction",
-    slug: "wardens-winter-sale",
-    title: "Wardens Winter Sale",
-    by: "Run by The Wardens CC — 64 players moved in one night",
-    image: "https://images.pexels.com/photos/9072205/pexels-photo-9072205.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    slug: "moratuwa-thundersharks-draft-night",
+    title: "Moratuwa Thundersharks Draft Night",
+    by: "Run by Moratuwa Thundersharks — 58 players moved in one night",
+    image: "/images/showcase/moratuwa-thundersharks-draft-night.png",
+    screenshot: "/images/showcase/moratuwa-thundersharks-draft-night.png",
   },
 ]
 
@@ -395,6 +401,7 @@ export type ShowcaseSlide = {
   title: string
   by: string
   image: string
+  screenshot?: string
   // Optional extras for the tournament detail page — safe to omit
   description?: string
   featured?: boolean
