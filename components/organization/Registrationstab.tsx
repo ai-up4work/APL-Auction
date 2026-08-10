@@ -23,6 +23,8 @@ import {
   Palette,
   Link2,
   Users2,
+  Pencil,
+  ChevronUp,
 } from "lucide-react"
 import ImageUploadField from "@/components/Admin/ImageUploadField"
 import { Button } from "@/components/ui/button"
@@ -47,7 +49,7 @@ import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus"
 import { Panel, FieldLabel, StatusBadge, StyledSelect, CollapsibleCreatePanel } from "@/components/organization/shared"
 import Image from "next/image"
 
-type StatusFilter = "pending" | "approved" | "rejected" | "all"
+type StatusFilter = "all" | "approved" | "rejected" | "pending"
 type TypeFilter = "all" | "team" | "player"
 
 const DEFAULT_ACCENT = "#d4af37"
@@ -212,6 +214,88 @@ function SectionLabel({ icon, children }: { icon: React.ReactNode; children: Rea
 }
 
 /* ────────────────────────────────────────────────────────────────── */
+/*  FORM SUMMARY CARD — the default, collapsed view of a form: a small    */
+/*  thumbnail, its name, active/pending status, a copyable link, and an   */
+/*  "Edit form" button. This is what's shown until the user asks to       */
+/*  edit a specific form, at which point FormEditorCard takes its place.  */
+/* ────────────────────────────────────────────────────────────────── */
+
+function FormSummaryCard({
+  form,
+  org,
+  pendingCount,
+  onEdit,
+}: {
+  form: RegistrationForm
+  org: OrgSummary
+  pendingCount: number
+  onEdit: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  const baseLink = `${origin}/register/${org.slug}/${form.slug}`
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(baseLink)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="bg-white/[0.02] border border-gold/10 rounded-lg p-4 hover:border-gold/30 transition-colors flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-md flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
+          {form.bannerUrl ? (
+            <Image src={form.bannerUrl} alt="" className="h-full w-full object-cover" width={40} height={40} />
+          ) : (
+            <ImageIcon className="h-4 w-4 text-white/30" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-white text-sm font-cinzel font-bold truncate">{form.name}</p>
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <span
+              className={`flex items-center gap-1 text-[10px] uppercase tracking-widest font-cinzel px-2 py-0.5 rounded-full border ${
+                form.isActive ? "border-gold/40 text-gold" : "border-white/15 text-gray-500"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${form.isActive ? "bg-gold" : "bg-gray-600"}`} aria-hidden />
+              {form.isActive ? "Active" : "Inactive"}
+            </span>
+            {pendingCount > 0 && <StatusBadge tone="warn">{pendingCount} pending</StatusBadge>}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-white/5">
+        <Input
+          readOnly
+          value={baseLink}
+          onFocus={(e) => e.target.select()}
+          className="bg-black/50 border-gold/30 text-white flex-1 min-w-0 font-mono text-[11px] h-8"
+        />
+        <button
+          onClick={copyLink}
+          title="Copy link"
+          className={`shrink-0 h-8 w-8 flex items-center justify-center rounded-md border transition-colors ${
+            copied ? "border-green-500/40 text-green-400" : "border-gold/30 text-gray-300 hover:text-gold hover:border-gold/50"
+          }`}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+
+      <Button
+        onClick={onEdit}
+        className="bg-transparent hover:bg-gold/10 text-gold border border-gold/30 font-bold text-xs mt-3 w-full flex items-center justify-center gap-1.5"
+      >
+        <Pencil className="h-3.5 w-3.5" /> Edit form
+      </Button>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────── */
 /*  CAPACITY CARD — open/closed + optional cap, now with a type icon and   */
 /*  a filled progress bar so "37 of 40" reads at a glance instead of       */
 /*  needing to be parsed as text. The bar tints with the form's own        */
@@ -337,140 +421,162 @@ function LinkRow({ label, url, copied, onCopy }: { label: string; url: string; c
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  FORM EDITOR CARD — one registration form's full settings. Grouped     */
-/*  into three zones (link, branding, capacity) with dividers so the      */
-/*  card reads as a short document instead of one long stack of fields.   */
-/*  The banner preview and accent swatch now double as a live preview of  */
-/*  what an applicant will actually see on this form's page.              */
+/*  FORM EDITOR — one registration form's settings, rendered as TWO       */
+/*  sibling panels (not one long card) so they can sit in their own       */
+/*  grid columns:                                                        */
+/*    Column 1 → FormCapsAndLinksPanel  (League Setup & Caps, Share)      */
+/*    Column 2 → FormDetailsPanel       (name, banner, branding, save)    */
+/*  All state lives in the parent FormEditorCard and is passed down, so    */
+/*  the two panels stay in sync exactly as the single card used to be.    */
+/*  The whole thing only renders when the user clicks "Edit form" on the  */
+/*  matching FormSummaryCard — see RegistrationsTab.                      */
 /* ────────────────────────────────────────────────────────────────── */
 
-function FormEditorCard({
+function FormCapsAndLinksPanel({
+  teamOpen,
+  setTeamOpen,
+  playerOpen,
+  setPlayerOpen,
+  teamCap,
+  setTeamCap,
+  playerCap,
+  setPlayerCap,
+  teamCount,
+  playerCount,
+  countsLoaded,
+  liveAccent,
+  isActive,
+  baseLink,
+  teamLink,
+  playerLink,
+  showSplitLinks,
+  copiedKey,
+  copyLink,
+}: {
+  teamOpen: boolean
+  setTeamOpen: (fn: (v: boolean) => boolean) => void
+  playerOpen: boolean
+  setPlayerOpen: (fn: (v: boolean) => boolean) => void
+  teamCap: string
+  setTeamCap: (v: string) => void
+  playerCap: string
+  setPlayerCap: (v: string) => void
+  teamCount: number
+  playerCount: number
+  countsLoaded: boolean
+  liveAccent: string
+  isActive: boolean
+  baseLink: string
+  teamLink: string
+  playerLink: string
+  showSplitLinks: boolean
+  copiedKey: "" | "base" | "team" | "player"
+  copyLink: (key: "base" | "team" | "player", value: string) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <Panel>
+        <SectionLabel icon={<Users2 className="h-3 w-3" />}>League Setup &amp; Caps</SectionLabel>
+        <div className="grid grid-cols-1 gap-4">
+          <CapacityCard
+            label="Team registration"
+            icon={<Shield className="h-3.5 w-3.5" />}
+            open={teamOpen}
+            onToggleOpen={() => setTeamOpen((v) => !v)}
+            cap={teamCap}
+            onCapChange={setTeamCap}
+            count={countsLoaded ? teamCount : 0}
+            accentColor={liveAccent}
+          />
+          <CapacityCard
+            label="Player registration"
+            icon={<UserPlus className="h-3.5 w-3.5" />}
+            open={playerOpen}
+            onToggleOpen={() => setPlayerOpen((v) => !v)}
+            cap={playerCap}
+            onCapChange={setPlayerCap}
+            count={countsLoaded ? playerCount : 0}
+            accentColor={liveAccent}
+          />
+        </div>
+      </Panel>
+
+      <Panel>
+        <SectionLabel icon={<Link2 className="h-3 w-3" />}>Shareable Links</SectionLabel>
+        <div className="space-y-3">
+          <LinkRow
+            label={showSplitLinks ? "General link (shows both options)" : "Shareable link"}
+            url={baseLink}
+            copied={copiedKey === "base"}
+            onCopy={() => copyLink("base", baseLink)}
+          />
+
+          {showSplitLinks && (
+            <>
+              <LinkRow label="Team-only link" url={teamLink} copied={copiedKey === "team"} onCopy={() => copyLink("team", teamLink)} />
+              <LinkRow
+                label="Player-only link"
+                url={playerLink}
+                copied={copiedKey === "player"}
+                onCopy={() => copyLink("player", playerLink)}
+              />
+            </>
+          )}
+
+          {!isActive && (
+            <p className="text-yellow-400/80 text-[11px] flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" /> Inactive forms 404 on these links — flip it back to Active to accept submissions again.
+            </p>
+          )}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function FormDetailsPanel({
   form,
   org,
   pendingCount,
-  onSaved,
-  onDeleted,
+  name,
+  setName,
+  bannerUrl,
+  setBannerUrl,
+  welcomeMessage,
+  setWelcomeMessage,
+  accentColor,
+  setAccentColor,
+  liveAccent,
+  isActive,
+  setIsActive,
+  isSaving,
+  saved,
+  saveError,
+  isDeleting,
+  onSave,
+  onDelete,
 }: {
   form: RegistrationForm
   org: OrgSummary
   pendingCount: number
-  onSaved: (updated: RegistrationForm) => void
-  onDeleted: () => void
+  name: string
+  setName: (v: string) => void
+  bannerUrl: string
+  setBannerUrl: (v: string) => void
+  welcomeMessage: string
+  setWelcomeMessage: (v: string) => void
+  accentColor: string
+  setAccentColor: (v: string) => void
+  liveAccent: string
+  isActive: boolean
+  setIsActive: (fn: (v: boolean) => boolean) => void
+  isSaving: boolean
+  saved: boolean
+  saveError: string | null
+  isDeleting: boolean
+  onSave: () => void
+  onDelete: () => void
 }) {
-  const { confirm, ConfirmDialogElement } = useConfirmDialog()
-
-  const [name, setName] = useState(form.name)
-  const [bannerUrl, setBannerUrl] = useState(form.bannerUrl ?? "")
-  const [welcomeMessage, setWelcomeMessage] = useState(form.welcomeMessage ?? "")
-  const [accentColor, setAccentColor] = useState(form.accentColor ?? "")
-  const [teamOpen, setTeamOpen] = useState(form.teamOpen)
-  const [playerOpen, setPlayerOpen] = useState(form.playerOpen)
-  const [teamCap, setTeamCap] = useState(form.teamCap != null ? String(form.teamCap) : "")
-  const [playerCap, setPlayerCap] = useState(form.playerCap != null ? String(form.playerCap) : "")
-  const [isActive, setIsActive] = useState(form.isActive)
-
-  const [teamCount, setTeamCount] = useState(0)
-  const [playerCount, setPlayerCount] = useState(0)
-  const [countsLoaded, setCountsLoaded] = useState(false)
-
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-  const [copiedKey, setCopiedKey] = useState<"" | "base" | "team" | "player">("")
-  const [isDeleting, setIsDeleting] = useState(false)
-
-  useEffect(() => {
-    Promise.all([getRegistrationCount(form.id, "team"), getRegistrationCount(form.id, "player")]).then(
-      ([tCount, pCount]) => {
-        setTeamCount(tCount)
-        setPlayerCount(pCount)
-        setCountsLoaded(true)
-      }
-    )
-  }, [form.id])
-
-  const origin = typeof window !== "undefined" ? window.location.origin : ""
-  const baseLink = `${origin}/register/${org.slug}/${form.slug}`
-  const teamLink = `${baseLink}?type=team`
-  const playerLink = `${baseLink}?type=player`
-
-  // The accent color drives every live-preview surface in this editor
-  // (banner overlay, accent swatch, capacity bars) so a form's identity
-  // is visible while editing it, not just after visiting its live link.
-  const liveAccent = accentColor || DEFAULT_ACCENT
-
-  // The team/player split only means anything when a form actually has
-  // both types open — on a form where only one is open, the base link
-  // already goes straight to that type, so a separate ?type= link would
-  // just be a redundant duplicate of the same URL.
-  //
-  // BUGFIX: this must read the live local state (teamOpen/playerOpen),
-  // not the original `form` prop — otherwise toggling Open/Closed on a
-  // CapacityCard won't update the link section until after Save, which
-  // is inconsistent with every other field in this editor (banner
-  // preview, accent swatch, cap counts) all reacting live to state.
-  const showSplitLinks = teamOpen && playerOpen
-
-  const copyLink = (key: "base" | "team" | "player", value: string) => {
-    navigator.clipboard.writeText(value)
-    setCopiedKey(key)
-    setTimeout(() => setCopiedKey(""), 1500)
-  }
-
-  const handleSave = async () => {
-    setIsSaving(true)
-    setSaveError(null)
-    setSaved(false)
-    const result = await updateRegistrationForm(form.id, {
-      name,
-      bannerUrl,
-      welcomeMessage,
-      accentColor,
-      teamCap: teamCap.trim() ? Number(teamCap) : null,
-      playerCap: playerCap.trim() ? Number(playerCap) : null,
-      teamOpen,
-      playerOpen,
-      isActive,
-    })
-    setIsSaving(false)
-    if (!result.ok) {
-      setSaveError(result.error ?? "Couldn't save changes.")
-      return
-    }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
-    onSaved({
-      ...form,
-      name,
-      bannerUrl: bannerUrl || null,
-      welcomeMessage: welcomeMessage || null,
-      accentColor: accentColor || null,
-      teamCap: teamCap.trim() ? Number(teamCap) : null,
-      playerCap: playerCap.trim() ? Number(playerCap) : null,
-      teamOpen,
-      playerOpen,
-      isActive,
-    })
-  }
-
-  const handleDelete = async () => {
-    const ok = await confirm({
-      title: `Delete "${form.name}"?`,
-      description: "This can't be undone. If registrations have already been submitted through this form, deactivate it instead.",
-      confirmText: "Delete",
-      tone: "danger",
-    })
-    if (!ok) return
-    setIsDeleting(true)
-    const result = await deleteRegistrationForm(form.id)
-    setIsDeleting(false)
-    if (!result.ok) {
-      setSaveError(result.error ?? "Couldn't delete this form.")
-      return
-    }
-    onDeleted()
-  }
-
   return (
     <Panel>
       {/* Header — name, live status, delete */}
@@ -498,7 +604,7 @@ function FormEditorCard({
             {isActive ? "Active" : "Inactive"}
           </button>
           <button
-            onClick={handleDelete}
+            onClick={onDelete}
             disabled={isDeleting}
             title="Delete form"
             className="text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
@@ -588,75 +694,204 @@ function FormEditorCard({
         </div>
       </div>
 
-      {/* Capacity — one card per type, each with an icon and fill bar */}
-      <div className="mb-5 pt-5 border-t border-white/5">
-        <SectionLabel icon={<Users2 className="h-3 w-3" />}>Capacity</SectionLabel>
-        <div className="grid grid-cols-1 gap-4">
-          <CapacityCard
-            label="Team registration"
-            icon={<Shield className="h-3.5 w-3.5" />}
-            open={teamOpen}
-            onToggleOpen={() => setTeamOpen((v) => !v)}
-            cap={teamCap}
-            onCapChange={setTeamCap}
-            count={countsLoaded ? teamCount : 0}
-            accentColor={liveAccent}
-          />
-          <CapacityCard
-            label="Player registration"
-            icon={<UserPlus className="h-3.5 w-3.5" />}
-            open={playerOpen}
-            onToggleOpen={() => setPlayerOpen((v) => !v)}
-            cap={playerCap}
-            onCapChange={setPlayerCap}
-            count={countsLoaded ? playerCount : 0}
-            accentColor={liveAccent}
-          />
-        </div>
-      </div>
-
-      {/* Links */}
-      <div className="pt-5 border-t border-white/5">
-        <SectionLabel icon={<Link2 className="h-3 w-3" />}>Share</SectionLabel>
-        <div className="space-y-3">
-          <LinkRow
-            label={showSplitLinks ? "General link (shows both options)" : "Shareable link"}
-            url={baseLink}
-            copied={copiedKey === "base"}
-            onCopy={() => copyLink("base", baseLink)}
-          />
-
-          {showSplitLinks && (
-            <>
-              <LinkRow label="Team-only link" url={teamLink} copied={copiedKey === "team"} onCopy={() => copyLink("team", teamLink)} />
-              <LinkRow
-                label="Player-only link"
-                url={playerLink}
-                copied={copiedKey === "player"}
-                onCopy={() => copyLink("player", playerLink)}
-              />
-            </>
-          )}
-
-          {!isActive && (
-            <p className="text-yellow-400/80 text-[11px] flex items-center gap-1">
-              <AlertCircle className="h-3 w-3" /> Inactive forms 404 on these links — flip it back to Active to accept submissions again.
-            </p>
-          )}
-        </div>
-      </div>
-
       {saveError && (
         <p className="flex items-center gap-1.5 text-red-500 text-sm mt-5">
           <AlertCircle className="h-4 w-4" /> {saveError}
         </p>
       )}
-      <Button onClick={handleSave} disabled={isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-5">
+      <Button onClick={onSave} disabled={isSaving} className="bg-gold hover:bg-gold/90 text-black font-bold disabled:opacity-50 mt-5">
         {isSaving ? "Saving…" : saved ? "Saved ✓" : "Save form"}
       </Button>
-
-      {ConfirmDialogElement}
     </Panel>
+  )
+}
+
+function FormEditorCard({
+  form,
+  org,
+  pendingCount,
+  onSaved,
+  onDeleted,
+  onDone,
+}: {
+  form: RegistrationForm
+  org: OrgSummary
+  pendingCount: number
+  onSaved: (updated: RegistrationForm) => void
+  onDeleted: () => void
+  onDone: () => void
+}) {
+  const { confirm, ConfirmDialogElement } = useConfirmDialog()
+
+  const [name, setName] = useState(form.name)
+  const [bannerUrl, setBannerUrl] = useState(form.bannerUrl ?? "")
+  const [welcomeMessage, setWelcomeMessage] = useState(form.welcomeMessage ?? "")
+  const [accentColor, setAccentColor] = useState(form.accentColor ?? "")
+  const [teamOpen, setTeamOpen] = useState(form.teamOpen)
+  const [playerOpen, setPlayerOpen] = useState(form.playerOpen)
+  const [teamCap, setTeamCap] = useState(form.teamCap != null ? String(form.teamCap) : "")
+  const [playerCap, setPlayerCap] = useState(form.playerCap != null ? String(form.playerCap) : "")
+  const [isActive, setIsActive] = useState(form.isActive)
+
+  const [teamCount, setTeamCount] = useState(0)
+  const [playerCount, setPlayerCount] = useState(0)
+  const [countsLoaded, setCountsLoaded] = useState(false)
+
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<"" | "base" | "team" | "player">("")
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  useEffect(() => {
+    Promise.all([getRegistrationCount(form.id, "team"), getRegistrationCount(form.id, "player")]).then(
+      ([tCount, pCount]) => {
+        setTeamCount(tCount)
+        setPlayerCount(pCount)
+        setCountsLoaded(true)
+      }
+    )
+  }, [form.id])
+
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  const baseLink = `${origin}/register/${org.slug}/${form.slug}`
+  const teamLink = `${baseLink}?type=team`
+  const playerLink = `${baseLink}?type=player`
+
+  // The accent color drives every live-preview surface in this editor
+  // (banner overlay, accent swatch, capacity bars) so a form's identity
+  // is visible while editing it, not just after visiting its live link.
+  const liveAccent = accentColor || DEFAULT_ACCENT
+
+  // The team/player split only means anything when a form actually has
+  // both types open — on a form where only one is open, the base link
+  // already goes straight to that type, so a separate ?type= link would
+  // just be a redundant duplicate of the same URL.
+  const showSplitLinks = teamOpen && playerOpen
+
+  const copyLink = (key: "base" | "team" | "player", value: string) => {
+    navigator.clipboard.writeText(value)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(""), 1500)
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    setSaveError(null)
+    setSaved(false)
+    const result = await updateRegistrationForm(form.id, {
+      name,
+      bannerUrl,
+      welcomeMessage,
+      accentColor,
+      teamCap: teamCap.trim() ? Number(teamCap) : null,
+      playerCap: playerCap.trim() ? Number(playerCap) : null,
+      teamOpen,
+      playerOpen,
+      isActive,
+    })
+    setIsSaving(false)
+    if (!result.ok) {
+      setSaveError(result.error ?? "Couldn't save changes.")
+      return
+    }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+    onSaved({
+      ...form,
+      name,
+      bannerUrl: bannerUrl || null,
+      welcomeMessage: welcomeMessage || null,
+      accentColor: accentColor || null,
+      teamCap: teamCap.trim() ? Number(teamCap) : null,
+      playerCap: playerCap.trim() ? Number(playerCap) : null,
+      teamOpen,
+      playerOpen,
+      isActive,
+    })
+  }
+
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: `Delete "${form.name}"?`,
+      description: "This can't be undone. If registrations have already been submitted through this form, deactivate it instead.",
+      confirmText: "Delete",
+      tone: "danger",
+    })
+    if (!ok) return
+    setIsDeleting(true)
+    const result = await deleteRegistrationForm(form.id)
+    setIsDeleting(false)
+    if (!result.ok) {
+      setSaveError(result.error ?? "Couldn't delete this form.")
+      return
+    }
+    onDeleted()
+  }
+
+  // Spans both columns of the parent grid and lays out its own two panels
+  // side by side, so exactly one form's full editor can be open at a time
+  // while the rest of the forms stay collapsed as summary cards.
+  return (
+    <div className="lg:col-span-2">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-xs font-cinzel uppercase tracking-widest text-gray-500">
+          Editing <span className="text-gold">{form.name}</span>
+        </p>
+        <button
+          onClick={onDone}
+          className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-widest text-gray-400 hover:text-gold transition-colors"
+        >
+          <ChevronUp className="h-3.5 w-3.5" /> Collapse
+        </button>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <FormCapsAndLinksPanel
+          teamOpen={teamOpen}
+          setTeamOpen={setTeamOpen}
+          playerOpen={playerOpen}
+          setPlayerOpen={setPlayerOpen}
+          teamCap={teamCap}
+          setTeamCap={setTeamCap}
+          playerCap={playerCap}
+          setPlayerCap={setPlayerCap}
+          teamCount={teamCount}
+          playerCount={playerCount}
+          countsLoaded={countsLoaded}
+          liveAccent={liveAccent}
+          isActive={isActive}
+          baseLink={baseLink}
+          teamLink={teamLink}
+          playerLink={playerLink}
+          showSplitLinks={showSplitLinks}
+          copiedKey={copiedKey}
+          copyLink={copyLink}
+        />
+        <FormDetailsPanel
+          form={form}
+          org={org}
+          pendingCount={pendingCount}
+          name={name}
+          setName={setName}
+          bannerUrl={bannerUrl}
+          setBannerUrl={setBannerUrl}
+          welcomeMessage={welcomeMessage}
+          setWelcomeMessage={setWelcomeMessage}
+          accentColor={accentColor}
+          setAccentColor={setAccentColor}
+          liveAccent={liveAccent}
+          isActive={isActive}
+          setIsActive={setIsActive}
+          isSaving={isSaving}
+          saved={saved}
+          saveError={saveError}
+          isDeleting={isDeleting}
+          onSave={handleSave}
+          onDelete={handleDelete}
+        />
+      </div>
+      {ConfirmDialogElement}
+    </div>
   )
 }
 
@@ -674,7 +909,7 @@ function CreateFormPanel({
   org: OrgSummary
   userId: string
   hasForms: boolean
-  onCreated: () => void
+  onCreated: (newFormId?: string) => void
 }) {
   const [name, setName] = useState("")
   const [isCreating, setIsCreating] = useState(false)
@@ -693,7 +928,7 @@ function CreateFormPanel({
       return
     }
     setName("")
-    onCreated()
+    onCreated(result.id)
   }
 
   return (
@@ -724,6 +959,11 @@ function CreateFormPanel({
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  REGISTRATIONS TAB                                                    */
+/*                                                                        */
+/*  Layout: create-form panel, then a grid of form cards — collapsed as   */
+/*  compact FormSummaryCards by default, with at most one expanded into    */
+/*  the full FormEditorCard (spanning both columns) at a time — then the   */
+/*  registrations list as its own full-width panel underneath.            */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -731,6 +971,7 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
 
   const [forms, setForms] = useState<RegistrationForm[]>([])
   const [formsLoaded, setFormsLoaded] = useState(false)
+  const [editingFormId, setEditingFormId] = useState<string | null>(null)
 
   const [regs, setRegs] = useState<PendingRegistration[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -868,9 +1109,136 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
     }
   }
 
+  const registrationsPanel = (
+    <Panel>
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2 flex-wrap">
+          <Inbox className="h-4 w-4 text-gold" /> Registrations
+          {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
+          {pendingCount > 0 && <StatusBadge tone="warn">{pendingCount} pending</StatusBadge>}
+        </h2>
+        <div className="relative w-full sm:w-64">
+          <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, email…"
+            className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {(["all", "pending", "rejected", "approved"] as StatusFilter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setStatusFilter(f)}
+            className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
+              statusFilter === f ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+        <span className="w-px h-5 bg-white/10 mx-1" />
+        {(["all", "team", "player"] as TypeFilter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setTypeFilter(f)}
+            className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
+              typeFilter === f ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
+            }`}
+          >
+            {f === "all" ? "All types" : f === "team" ? "Teams" : "Players"}
+          </button>
+        ))}
+        {forms.length > 1 && (
+          <StyledSelect
+            value={formFilter}
+            onChange={(e) => setFormFilter(e.target.value)}
+            placeholder="All forms"
+            className="w-44 ml-auto"
+          >
+            {forms.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </StyledSelect>
+        )}
+      </div>
+
+      {actionError && (
+        <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
+          <AlertCircle className="h-4 w-4" /> {actionError}
+        </p>
+      )}
+
+      {!loaded ? (
+        <p className="text-gray-500 text-sm flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </p>
+      ) : filtered.length === 0 ? (
+        <p className="text-gray-500 text-sm italic">
+          No {statusFilter === "all" ? "" : `${statusFilter} `}registrations{query ? ` match "${query}"` : ""}.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {selectableIds.length > 0 && (
+            <div className="flex items-center justify-between gap-3 px-1 pb-1 flex-wrap">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
+              >
+                {allSelectableChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                {allSelectableChecked ? "Deselect all" : "Select all pending"}
+              </button>
+              {selected.size > 0 && (
+                <button
+                  onClick={handleBulkApprove}
+                  disabled={bulkApproving}
+                  className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-green-400 hover:text-green-300 disabled:opacity-50"
+                >
+                  {bulkApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  Approve {selected.size} selected
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Full-width row now that this panel sits below the form editors
+              instead of squeezed into a third column, so cards can run up
+              to four across instead of three. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+            {filtered.map((r) => (
+              <RegistrationCard
+                key={r.id}
+                reg={r}
+                selected={selected.has(r.id)}
+                onToggleSelect={() => toggleSelectOne(r.id)}
+                onApprove={() => handleApprove(r)}
+                onReject={(reason) => handleReject(r, reason)}
+                approving={busyId === r.id && busyAction === "approve"}
+                rejecting={busyId === r.id && busyAction === "reject"}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+
   return (
     <div className="space-y-6">
-      <CreateFormPanel org={org} userId={userId} hasForms={forms.length > 0} onCreated={reloadForms} />
+      <CreateFormPanel
+        org={org}
+        userId={userId}
+        hasForms={forms.length > 0}
+        onCreated={(newFormId) => {
+          reloadForms()
+          if (newFormId) setEditingFormId(newFormId)
+        }}
+      />
 
       {!formsLoaded ? (
         <Panel>
@@ -880,135 +1248,38 @@ export function RegistrationsTab({ org, userId }: { org: OrgSummary; userId: str
         </Panel>
       ) : forms.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          {forms.map((form) => (
-            <FormEditorCard
-              key={form.id}
-              form={form}
-              org={org}
-              pendingCount={pendingCountByForm[form.id] ?? 0}
-              onSaved={(updated) => setForms((prev) => prev.map((f) => (f.id === updated.id ? updated : f)))}
-              onDeleted={() => {
-                setForms((prev) => prev.filter((f) => f.id !== form.id))
-                if (formFilter === form.id) setFormFilter("")
-              }}
-            />
-          ))}
+          {forms.map((form) =>
+            editingFormId === form.id ? (
+              <FormEditorCard
+                key={form.id}
+                form={form}
+                org={org}
+                pendingCount={pendingCountByForm[form.id] ?? 0}
+                onSaved={(updated) => setForms((prev) => prev.map((f) => (f.id === updated.id ? updated : f)))}
+                onDeleted={() => {
+                  setForms((prev) => prev.filter((f) => f.id !== form.id))
+                  if (formFilter === form.id) setFormFilter("")
+                  setEditingFormId(null)
+                }}
+                onDone={() => setEditingFormId(null)}
+              />
+            ) : (
+              <FormSummaryCard
+                key={form.id}
+                form={form}
+                org={org}
+                pendingCount={pendingCountByForm[form.id] ?? 0}
+                onEdit={() => setEditingFormId(form.id)}
+              />
+            )
+          )}
         </div>
       ) : null}
 
-      <Panel>
-        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2 flex-wrap">
-            <Inbox className="h-4 w-4 text-gold" /> Registrations
-            {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
-            {pendingCount > 0 && <StatusBadge tone="warn">{pendingCount} pending</StatusBadge>}
-          </h2>
-          <div className="relative w-full sm:w-64">
-            <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, email…"
-              className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          {(["pending", "approved", "rejected", "all"] as StatusFilter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
-                statusFilter === f ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-          <span className="w-px h-5 bg-white/10 mx-1" />
-          {(["all", "team", "player"] as TypeFilter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setTypeFilter(f)}
-              className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors ${
-                typeFilter === f ? "bg-gold text-black border-gold" : "border-gold/30 text-gray-300 hover:text-gold"
-              }`}
-            >
-              {f === "all" ? "All types" : f === "team" ? "Teams" : "Players"}
-            </button>
-          ))}
-          {forms.length > 1 && (
-            <StyledSelect
-              value={formFilter}
-              onChange={(e) => setFormFilter(e.target.value)}
-              placeholder="All forms"
-              className="w-44 ml-auto"
-            >
-              {forms.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </StyledSelect>
-          )}
-        </div>
-
-        {actionError && (
-          <p className="flex items-center gap-1.5 text-red-500 text-sm mb-3">
-            <AlertCircle className="h-4 w-4" /> {actionError}
-          </p>
-        )}
-
-        {!loaded ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : filtered.length === 0 ? (
-          <p className="text-gray-500 text-sm italic">
-            No {statusFilter === "all" ? "" : `${statusFilter} `}registrations{query ? ` match "${query}"` : ""}.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {selectableIds.length > 0 && (
-              <div className="flex items-center justify-between gap-3 px-1 pb-1 flex-wrap">
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
-                >
-                  {allSelectableChecked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-                  {allSelectableChecked ? "Deselect all" : "Select all pending"}
-                </button>
-                {selected.size > 0 && (
-                  <button
-                    onClick={handleBulkApprove}
-                    disabled={bulkApproving}
-                    className="flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-wide text-green-400 hover:text-green-300 disabled:opacity-50"
-                  >
-                    {bulkApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                    Approve {selected.size} selected
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
-              {filtered.map((r) => (
-                <RegistrationCard
-                  key={r.id}
-                  reg={r}
-                  selected={selected.has(r.id)}
-                  onToggleSelect={() => toggleSelectOne(r.id)}
-                  onApprove={() => handleApprove(r)}
-                  onReject={(reason) => handleReject(r, reason)}
-                  approving={busyId === r.id && busyAction === "approve"}
-                  rejecting={busyId === r.id && busyAction === "reject"}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </Panel>
+      {/* Registrations list now sits below the form editor(s) as its own
+          full-width row, instead of being pinned alongside them in a
+          third column. */}
+      {registrationsPanel}
 
       {ConfirmDialogElement}
     </div>

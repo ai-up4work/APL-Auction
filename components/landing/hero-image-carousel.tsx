@@ -49,7 +49,7 @@ const SLIDES: HeroSlide[] = [
 ]
 
 // Milliseconds between transitions.
-const INTERVAL_MS = 12000
+const INTERVAL_MS = 8000
 // Pause auto-advance while the tab is hidden.
 const PAUSE_WHEN_HIDDEN = true
 
