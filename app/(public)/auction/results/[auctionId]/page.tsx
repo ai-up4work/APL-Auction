@@ -2,13 +2,14 @@
 
 import React, { use, useEffect, useMemo, useRef, useState } from "react";
 import { FlowCanvas } from "@/components/FlowCanvas";
+import { FlowPlayerCard } from "@/components/FlowPlayerCard";
+import { FlowTeamCard } from "@/components/FlowTeamCard";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 interface AuctionData {
   id: string;
-  name: string;
 }
 
 interface TeamData {
@@ -52,40 +53,22 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
   const { auctionId } = use(params);
   const playerListRef = useRef<HTMLDivElement>(null);
   const teamListRef = useRef<HTMLDivElement>(null);
-  const teamListInnerRef = useRef<HTMLDivElement>(null);
 
   const [auction, setAuction] = useState<AuctionData | null>(null);
+  const [auctionName, setAuctionName] = useState<string>("Auction");
+  const [auctionLogo, setAuctionLogo] = useState<string | null>(null);
   const [teams, setTeams] = useState<Record<string, TeamData>>({});
   const [players, setPlayers] = useState<PlayerData[]>([]);
   const [loading, setLoading] = useState(true);
   const [activePlayer, setActivePlayer] = useState<string | null>(null);
   const [activeTeam, setActiveTeam] = useState<string | null>(null);
 
-  // ── Team list fit detection ────────────────────────────────────────────
-  // When all teams fit within the viewport, we center them + lock scroll
-  // (matches the squad-board look). When they don't fit, we switch to a
-  // normal top-aligned, scrollable list so nothing gets clipped.
-  const [teamsOverflow, setTeamsOverflow] = useState(false);
-
-  useEffect(() => {
-    const checkOverflow = () => {
-      if (!teamListRef.current || !teamListInnerRef.current) return;
-      const containerHeight = teamListRef.current.clientHeight;
-      const contentHeight = teamListInnerRef.current.scrollHeight;
-      setTeamsOverflow(contentHeight > containerHeight);
-    };
-
-    checkOverflow();
-    window.addEventListener("resize", checkOverflow);
-    return () => window.removeEventListener("resize", checkOverflow);
-  });
-
   useEffect(() => {
     async function loadData() {
       try {
         const { data: auctionData, error: auctionErr } = await supabase
           .from("auctions")
-          .select("id, name")
+          .select("id")
           .eq("id", auctionId)
           .maybeSingle();
 
@@ -94,12 +77,29 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
         if (auctionData) {
           setAuction(auctionData);
 
+          // Name + logo both live on session_config, not auctions.
+          // Fetched separately so a missing session_config row doesn't
+          // block the rest of the page.
+          const { data: sessionData, error: sessionErr } = await supabase
+            .from("session_config")
+            .select("auction_name, auction_logo")
+            .eq("auction_id", auctionId)
+            .maybeSingle();
+
+          if (sessionErr) console.error("Failed to load session config:", sessionErr.message);
+          if (sessionData?.auction_name) setAuctionName(sessionData.auction_name);
+          if (sessionData?.auction_logo) setAuctionLogo(sessionData.auction_logo);
+
           const { data: teamsData, error: teamsErr } = await supabase
             .from("teams")
             .select("id, name, code, logo")
             .eq("auction_id", auctionId);
 
           if (teamsErr) console.error("Failed to load teams:", teamsErr.message);
+          // DEBUG — remove once confirmed. An empty array with no error
+          // printed above almost always means RLS is silently filtering
+          // these rows out for the current (likely anonymous) client.
+          console.log("[results] teams fetched:", teamsData?.length ?? 0, teamsData);
 
           const teamsMap = (teamsData ?? []).reduce((acc, t) => {
             acc[t.id] = { id: t.id, name: t.name, code: t.code, logo: t.logo || "" };
@@ -114,6 +114,8 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
             .eq("auction_id", auctionId);
 
           if (playersErr) console.error("Failed to load players:", playersErr.message);
+          // DEBUG — remove once confirmed.
+          console.log("[results] players fetched:", playersData?.length ?? 0, playersData);
 
           setPlayers(
             (playersData ?? []).map((p: any) => ({
@@ -150,20 +152,45 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
       country: "",
     }));
 
-    const ft: FlowTeam[] = Object.values(teams).map((t) => ({
-      id: t.id,
-      name: t.name,
-      shortCode: t.code,
-      logoUrl: t.logo,
-      purse: "0",
-    }));
+    const ft: FlowTeam[] = Object.values(teams).map((t) => {
+      const roster = fp.filter((p) => p.teamShortCode === t.code).length;
+      return {
+        id: t.id,
+        name: t.name,
+        shortCode: t.code,
+        logoUrl: t.logo,
+        purse: `${roster} PLAYER${roster !== 1 ? "S" : ""}`,
+      };
+    });
 
     return { flowPlayers: fp, flowTeams: ft };
   }, [players, teams]);
 
+  const togglePlayer = (p: FlowPlayer) => {
+    if (activePlayer === p.id) {
+      setActivePlayer(null);
+      setActiveTeam(null);
+    } else {
+      setActivePlayer(p.id);
+      setActiveTeam(p.teamShortCode || null);
+    }
+  };
+
+  const toggleTeam = (t: FlowTeam) => {
+    if (activeTeam === t.shortCode && !activePlayer) {
+      setActiveTeam(null);
+    } else {
+      setActiveTeam(t.shortCode);
+      setActivePlayer(null);
+    }
+  };
+
+  const hasSelection = activePlayer !== null || activeTeam !== null;
+  const soldCount = flowPlayers.filter((p) => p.status === "sold").length;
+
   if (loading) {
     return (
-      <div className="h-screen bg-background flex items-center justify-center">
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
         <div className="text-center">
           <div className="w-10 h-10 border-[3px] border-theme-orange/15 border-t-theme-orange rounded-full animate-spin mx-auto mb-4" />
           <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading results…</p>
@@ -173,158 +200,160 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
   }
 
   return (
-    <div className="font-inter bg-background text-on-background fixed inset-0 flex flex-col overflow-hidden select-none">
-      {/* HEADER */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center gap-4 px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
-        <Link href={`/auction/owner/${auctionId}`} className="text-theme-orange hover:text-theme-orange/80 transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div>
-          <div className="font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">
-            {auction?.name ?? "Auction"}
-          </div>
-          <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">
-            Auction Results Flow
-          </div>
-        </div>
-      </header>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
-      {/* MAIN */}
-      <main className="flex-1 mt-14 flex overflow-hidden min-h-0 relative">
-        <div className="w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
-          <FlowCanvas
-            players={flowPlayers}
-            teams={flowTeams}
-            playerListRef={playerListRef}
-            teamListRef={teamListRef}
-            activePlayer={activePlayer}
-            activeTeam={activeTeam}
-          />
+        .ms { font-family:'Material Symbols Outlined'; font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; font-style:normal; line-height:1; display:inline-block; text-transform:none; letter-spacing:normal; user-select:none; }
+        .glass-panel { background:var(--color-surface-glass); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px); }
+        .font-archivo { font-family:'Archivo Narrow',sans-serif; }
+        .font-mono-geist { font-family:'Geist Mono',monospace; }
+        .font-inter { font-family:'Inter',sans-serif; }
+        .header-blur { backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
 
-          {/* Player list */}
-          <aside ref={playerListRef} className="col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5">
-            <div className="flex items-center justify-between mb-4 pt-2">
-              <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
-                Players
-              </h3>
-              <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest">
-                {flowPlayers.length}
+        @media (max-width:639px) {
+          .flow-view-grid{display:flex!important;flex-direction:column!important;overflow-y:auto!important}
+          .flow-pool,.flow-franchises{width:100%!important;border:none!important;height:auto!important;max-height:400px!important}
+          .flow-canvas-container{display:none!important}
+        }
+      `}</style>
+
+      <div className="font-inter bg-background text-on-background fixed inset-0 flex flex-col overflow-hidden select-none">
+        {/* HEADER — styled to match the watch page's broadcast header */}
+        <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between py-2px px-[20px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
+          <div className="flex items-center gap-[13px]">
+            <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
+              <img
+                src={auctionLogo || "/moon-knight-logo.png"}
+                alt="Auction logo"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div>
+              <div className="header-logo-text font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">
+                {auctionName}
+              </div>
+              <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">
+                Broadcast Feed • {soldCount} of {flowPlayers.length} Sold
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-[16px] sm:gap-[30px]">
+            <div className="live-badge flex items-center gap-[9px] bg-[rgba(0,80,30,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(34,197,94,0.30)]">
+              <div className="w-[6px] h-[6px] rounded-full bg-green-500" style={{ boxShadow: "0 0 7px #22c55e" }} />
+              <span className="live-badge-text font-mono-geist text-green-400 font-bold tracking-[0.18em] text-[9px]">
+                COMPLETED
               </span>
             </div>
+          </div>
+        </header>
 
-            {flowPlayers.length === 0 ? (
-              <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
-                No players recorded yet.
-              </p>
-            ) : (
-              <div className="flex flex-col space-y-3 pb-20">
-                {flowPlayers.map((p) => {
-                  const isSoldP = p.status === "sold";
-                  const isHighlighted = activePlayer
-                    ? activePlayer === p.id
-                    : activeTeam !== null && activeTeam === p.teamShortCode;
-                  const isDimmed = (activePlayer !== null || activeTeam !== null) && !isHighlighted;
+        {/* MAIN — flow view, matching the watch page's flow layout */}
+        <main className="main-layout flex-1 mt-14 flex overflow-hidden min-h-0 relative">
+          <div className="flow-view-grid w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
+            <FlowCanvas
+              players={flowPlayers}
+              teams={flowTeams}
+              playerListRef={playerListRef}
+              teamListRef={teamListRef}
+              activePlayer={activePlayer}
+              activeTeam={activeTeam}
+            />
 
-                  return (
-                    <div
-                      key={p.id}
-                      id={`player-${p.id}`}
-                      onClick={() => setActivePlayer((prev) => (prev === p.id ? null : p.id))}
-                      className={[
-                        "glass-panel p-3 rounded-xl flex items-center gap-3 cursor-pointer transition-all duration-300",
-                        isHighlighted
-                          ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
-                          : "border border-white/5 hover:border-theme-orange/40",
-                        isDimmed ? "opacity-30" : "",
-                        isSoldP && !isHighlighted ? "border-r-2 border-r-green-500/50" : "",
-                      ].filter(Boolean).join(" ")}
-                    >
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container-highest flex-shrink-0">
-                        {p.img && <img src={p.img} alt={p.name} className="w-full h-full object-cover" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-archivo font-semibold text-sm truncate text-white">{p.name}</p>
-                        <p
-                          className={`text-[10px] font-mono-geist font-medium mt-0.5 uppercase ${
-                            isSoldP ? "text-green-400" : "text-amber-400"
-                          }`}
-                        >
-                          {isSoldP ? `SOLD • ${p.teamShortCode}` : "UNSOLD"} • {p.price}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+            {/* PLAYER POOL */}
+            <aside
+              ref={playerListRef}
+              className="flow-pool col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5"
+            >
+              <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
+                    Player Pool
+                  </h3>
+                  <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest">
+                    {flowPlayers.length}
+                  </span>
+                </div>
+
+                {flowPlayers.length === 0 ? (
+                  <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
+                    No players recorded yet.
+                  </p>
+                ) : (
+                  flowPlayers.map((p) => {
+                    const isHighlighted = activePlayer
+                      ? activePlayer === p.id
+                      : activeTeam !== null && activeTeam === p.teamShortCode;
+                    const isDimmed = hasSelection && !isHighlighted;
+
+                    return (
+                      <FlowPlayerCard
+                        key={p.id}
+                        id={p.id}
+                        name={p.name}
+                        img={p.img}
+                        status={p.status}
+                        price={p.price}
+                        teamShortCode={p.teamShortCode}
+                        isHighlighted={isHighlighted}
+                        isDimmed={isDimmed}
+                        onClick={() => togglePlayer(p)}
+                      />
+                    );
+                  })
+                )}
               </div>
-            )}
-          </aside>
+            </aside>
 
-          {/* Canvas gap */}
-          <section className="col-span-6 flex flex-col relative z-0 pointer-events-none" />
+            {/* CANVAS GAP */}
+            <section className="flow-canvas-container col-span-6 flex flex-col relative z-0 pointer-events-none" />
 
-          {/* Team list */}
-          <aside
-            ref={teamListRef}
-            className={[
-              "col-span-3 h-full flex flex-col px-6 py-6 z-10 border-l border-white/5",
-              teamsOverflow ? "overflow-y-auto no-scrollbar justify-start" : "overflow-hidden justify-center",
-            ].join(" ")}
-          >
-            <div className={teamsOverflow ? "mb-4 pt-2 flex items-center justify-between" : "flex items-center justify-between mb-4 absolute top-[72px] right-6"}>
-              <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
-                Teams
-              </h3>
-              <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest ml-3">
-                {flowTeams.length}
-              </span>
-            </div>
+            {/* FRANCHISES */}
+            <aside
+              ref={teamListRef}
+              className="flow-franchises col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5"
+            >
+              <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
+                    Franchises
+                  </h3>
+                  <span className="font-mono-geist text-[9px] text-[rgba(198,198,205,0.55)] uppercase tracking-widest">
+                    {flowTeams.length}
+                  </span>
+                </div>
 
-            {flowTeams.length === 0 ? (
-              <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest text-center">
-                No teams added yet.
-              </p>
-            ) : (
-              <div
-                ref={teamListInnerRef}
-                className={["flex flex-col space-y-3", teamsOverflow ? "pb-20" : ""].join(" ")}
-              >
-                {flowTeams.map((t) => {
-                  const isHighlighted = activeTeam === t.shortCode;
-                  const isDimmed = activeTeam !== null && !isHighlighted;
-                  const memberCount = flowPlayers.filter((p) => p.teamShortCode === t.shortCode).length;
+                {flowTeams.length === 0 ? (
+                  <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
+                    No teams added yet.
+                  </p>
+                ) : (
+                  flowTeams.map((t) => {
+                    const isHighlighted = activeTeam === t.shortCode;
+                    const isDimmed = hasSelection && !isHighlighted;
 
-                  return (
-                    <div
-                      key={t.id}
-                      id={`team-${t.shortCode}`}
-                      onClick={() => setActiveTeam((prev) => (prev === t.shortCode ? null : t.shortCode))}
-                      className={[
-                        "glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300",
-                        isHighlighted
-                          ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
-                          : "border border-white/5 hover:border-theme-orange/40",
-                        isDimmed ? "opacity-30" : "",
-                      ].filter(Boolean).join(" ")}
-                    >
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
-                        {t.logoUrl && <img src={t.logoUrl} alt={t.name} className="w-full h-full object-cover" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-archivo font-bold text-xs truncate uppercase tracking-tight text-white">
-                          {t.name}
-                        </p>
-                        <p className="text-[10px] font-mono-geist text-theme-orange mt-0.5 tracking-wider">
-                          Players: {memberCount}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+                    return (
+                      <FlowTeamCard
+                        key={t.id}
+                        id={t.id}
+                        name={t.name}
+                        shortCode={t.shortCode}
+                        logoUrl={t.logoUrl}
+                        purseLabel={t.purse}
+                        isHighlighted={isHighlighted}
+                        isDimmed={isDimmed}
+                        onClick={() => toggleTeam(t)}
+                      />
+                    );
+                  })
+                )}
               </div>
-            )}
-          </aside>
-        </div>
-      </main>
-    </div>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </>
   );
 }

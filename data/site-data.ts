@@ -265,20 +265,20 @@ export const testimonials = [
   {
     quote:
       "Valiant League is the first platform that actually respects match day. We ran three auctions in six weeks without touching a spreadsheet.",
-    name: "Marcus Fielding",
-    role: "Founder, Iron Knights CC",
+    name: "Kavindu Gamage",
+    role: "Manager, Colombo Royals",
   },
   {
     quote:
       "Finally a system that doesn't fight us. The overlays are flawless and there's zero setup required on stream day.",
-    name: "Devon Ashworth",
-    role: "Stream Producer, Royal Strikers",
+    name: "Afzal Mohamed",
+    role: "Stream Producer, Galle Fortress Cricket Club",
   },
   {
     quote:
       "We replaced four spreadsheets and a Discord bot. Owner onboarding dropped from two weeks to two days.",
-    name: "Priya Nandan",
-    role: "League Ops, Golden Lions",
+    name: "Rohan Perera",
+    role: "League Ops, Maritime Knockout Cup",
   },
 ]
 
@@ -342,7 +342,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     title: "Galle Fortress Full Season",
     by: "Run by Galle Fortress Cricket Club — ten weeks, one trophy",
     image: "/images/showcase/galle-fortress-full-season.png",
-    // screenshot: "/images/showcase/galle-fortress-full-season.png",
+    screenshot: "/images/showcase/galle-fortress-player-form-screenshot.png",
     featured: true,
   },
   {
