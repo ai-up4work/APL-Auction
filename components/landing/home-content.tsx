@@ -579,7 +579,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                   {s.screenshot ? (
                     <Image src={s.screenshot} alt={s.title} className="w-full h-full object-cover" width={400} height={240} />
                   ) : (
-                    <span className="font-mono text-[10px] text-gray-400 tracking-[2px]">[ SCREENSHOT PLACEHOLDER ]</span>
+                    <span className="font-mono text-[10px] text-gray-400 tracking-[2px]">[ SCREENSHOT NOT AVAILABLE ]</span>
                   )}
                 </div>
                 <div className="p-5 md:p-6">
