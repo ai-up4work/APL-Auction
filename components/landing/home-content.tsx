@@ -49,6 +49,55 @@ function ComparisonCell({ value }: { value: CellValue }) {
   return <Minus className="h-4 w-4 text-gray-400 mx-auto" />
 }
 
+/* ────────────────────────────────────────────────────────────────── */
+/*  SCREENSHOT LIGHTBOX — click a showcase screenshot to blow it up.    */
+/*  On mobile the image is rotated 90° and its box dimensions swapped   */
+/*  (width becomes viewport height, height becomes viewport width) so   */
+/*  a landscape screenshot fills a portrait phone screen edge-to-edge   */
+/*  instead of shrinking to fit a portrait box. Desktop just centers    */
+/*  it, no rotation needed since there's already room to breathe.       */
+/* ────────────────────────────────────────────────────────────────── */
+
+function ScreenshotLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        aria-label="Close"
+        className="fixed top-4 right-4 z-[101] h-11 w-11 rounded-full bg-black/60 border border-gold/40 flex items-center justify-center text-gold hover:bg-gold/10 hover:border-gold transition-colors"
+      >
+        <XIcon className="h-5 w-5" />
+      </button>
+
+      {/* Rotated on mobile so a landscape screenshot maximizes into a
+          portrait viewport; unrotated on md+ where there's already
+          enough width to show it large without rotating. */}
+      <div
+        className="relative w-[92vh] h-[92vw] rotate-90 md:w-[90vw] md:h-[90vh] md:rotate-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Image src={src} alt={alt} fill className="object-contain" sizes="100vw" priority />
+      </div>
+    </div>
+  )
+}
+
 interface HomeContentProps {
   scrollToSection: (sectionId: string) => void
   handleNavigation: (path: string) => void
@@ -71,6 +120,9 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
   )
   const showcasePrev = () => setShowcasePage((p) => (p === 0 ? showcaseTotalPages - 1 : p - 1))
   const showcaseNext = () => setShowcasePage((p) => (p === showcaseTotalPages - 1 ? 0 : p + 1))
+
+  // ---- showcase screenshot lightbox ----
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
 
   const heroRef = useRef<HTMLDivElement>(null)
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] })
@@ -288,95 +340,8 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
         </div>
       </section>
 
-      {/* Creators */}
-      {/* <section id="creators" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              <TypeText text="Knights of " speed={40} />
-              <TypeText text="Valiant League" speed={40} delay={400} className="text-gold" />
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              The people building Valiant League — swap these placeholder profiles for your real team before launch.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 max-w-6xl mx-auto">
-            {knights.map((k, index) => (
-              <div key={k.name} className={`rounded-lg overflow-hidden creator-card fade-in-up stagger-${index + 1} bg-black/70`}>
-                <div className="relative h-64 bg-[#0d0d0d]">
-                  <Image src={k.image} alt={k.name} fill className="object-cover" />
-                </div>
-                <div className="p-6 border-t border-gold/20 text-center">
-                  <h3 className="text-xl font-bold text-white font-cinzel">{k.name}</h3>
-                  <p className="text-gray-300 text-sm mb-4">{k.role}</p>
-                  <Link
-                    href={k.twitter}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center h-9 w-9 rounded-full bg-gold/10 hover:bg-gold/20 transition-colors"
-                  >
-                    <Twitter className="h-4 w-4 text-gold" />
-                  </Link>
-                </div>
-              </div>
-            ))}
-          <div>
-        </div>/
-      </section> */}
-
       {/* ═══════════════════════════════════════════════════════════
-      HOW IT WORKS — the Auction → Bracket → Overlay pipeline
-      ═══════════════════════════════════════════════════════════ */}
-      {/* <section id="how-it-works" className="py-16 relative section-pattern">
-        <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-16 fade-in">
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-8 section-title inline-block">
-              <TypeText text="How It " speed={45} />
-              <TypeText text="Works" speed={45} delay={200} className="text-gold" />
-            </h2>
-            <p className="text-lg text-gray-300 max-w-3xl mx-auto mt-4">
-              One flow, three stages — from drafting teams to broadcasting the final.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {[
-              {
-                step: "01",
-                title: "Draft Your Teams",
-                desc: "Run a live, points-based auction. Owners bid from their phones, purses are enforced automatically, and squads are built in real time.",
-                accent: "#F5A623",
-              },
-              {
-                step: "02",
-                title: "Build the Bracket",
-                desc: "Generate a single or double-elimination tournament from the teams you just drafted. Results advance winners automatically.",
-                accent: "#CD7F32",
-              },
-              {
-                step: "03",
-                title: "Go Live",
-                desc: "Score matches ball-by-ball with automatic milestone detection, and broadcast a stream-ready overlay straight into OBS.",
-                accent: "#C0C0C0",
-              },
-            ].map((s, i) => (
-              <div key={s.step} className={`rounded-lg border border-gold/20 bg-black/70 p-8 box-hover-effect fade-in-up stagger-${i + 1}`}>
-                <span className="font-cinzel text-4xl font-bold" style={{ color: s.accent }}>
-                  {s.step}
-                </span>
-                <h3 className="text-xl font-bold text-white font-cinzel mt-4 mb-3">{s.title}</h3>
-                <p className="text-gray-300 text-sm leading-relaxed">{s.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section> */}
-
-      {/* ═══════════════════════════════════════════════════════════
-      FEATURED TOURNAMENTS — small teaser, full list lives on /tournament
+          FEATURED TOURNAMENTS — small teaser, full list lives on /tournament
       ═══════════════════════════════════════════════════════════ */}
       <section id="tournaments" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
@@ -540,7 +505,8 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          SHOWCASE — 3-up grid, paged
+          SHOWCASE — 3-up grid, paged. Click a screenshot to open the
+          lightbox (rotated + resized to landscape on mobile).
       ═══════════════════════════════════════════════════════════ */}
       <section id="showcase" className="py-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
@@ -576,7 +542,12 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-6xl mx-auto">
             {showcaseVisible.map((s, i) => (
               <div key={s.title} className={`rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1}`}>
-                <div className="h-40 md:h-48 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20">
+                <div
+                  className={`h-40 md:h-48 bg-[#0d0d0d] flex items-center justify-center border-b border-gold/20 ${
+                    s.screenshot ? "cursor-zoom-in" : ""
+                  }`}
+                  onClick={() => s.screenshot && setLightbox({ src: s.screenshot, alt: s.title })}
+                >
                   {s.screenshot ? (
                     <Image src={s.screenshot} alt={s.title} className="w-full h-full object-cover" width={400} height={240} />
                   ) : (
@@ -618,6 +589,10 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
           </div>
         </div>
       </section>
+
+      {lightbox && (
+        <ScreenshotLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      )}
 
       {/* ═══════════════════════════════════════════════════════════
           FAQ — two-column on desktop, numbered accent, gold divider

@@ -346,12 +346,12 @@ export const showcaseSlides: ShowcaseSlide[] = [
     featured: true,
   },
   {
-    tag: "League",
+    tag: "Squad Board",
     slug: "dambulla-rock-lions-series",
     title: "Dambulla Rock Lions Series",
     by: "Run by Dambulla Rock Lions — 6 teams, round robin",
     image: "/images/showcase/dambulla-rock-lions-series.png",
-    // screenshot: "/images/showcase/dambulla-rock-lions-series.png",
+    screenshot: "/images/showcase/dambulla-rock-lions-series-screenshot.png",
     featured: true,
   },
 ]
