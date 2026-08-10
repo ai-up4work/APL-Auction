@@ -310,7 +310,6 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Colombo Royals — 8 teams, 96 players",
     image: "/images/showcase/colombo-royals-season-opener-auction.png",
     screenshot: "/images/showcase/colombo-royals-season-opener-auction.png",
-    featured: true,
   },
   {
     tag: "Bracket",
@@ -319,7 +318,6 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Colombo Maritime Cricket Club — double-elimination, 12 teams",
     image: "/images/showcase/colombo-maritime-knockout-cup.jpg",
     screenshot: "/images/showcase/colombo-maritime-knockout-cup.jpg",
-    featured: true,
   },
   {
     tag: "Overlay",
@@ -345,6 +343,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Dambulla Rock Lions — 6 teams, round robin",
     image: "/images/showcase/dambulla-rock-lions-series.png",
     screenshot: "/images/showcase/dambulla-rock-lions-series.png",
+        featured: true,
   },
   {
     tag: "Auction",
@@ -353,6 +352,8 @@ export const showcaseSlides: ShowcaseSlide[] = [
     by: "Run by Moratuwa Thundersharks — 58 players moved in one night",
     image: "/images/showcase/moratuwa-thundersharks-draft-night.png",
     screenshot: "/images/showcase/moratuwa-thundersharks-draft-night.png",
+        featured: true,
+
   },
 ]
 
