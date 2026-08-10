@@ -656,7 +656,7 @@ function AssignTeamPanel({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-3 max-h-64 overflow-y-auto pr-1">
+          <div className="grid p-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-3 max-h-64 overflow-y-auto pr-1">
             {availableTeams.map((t) => (
               <PoolTeamPickerCard
                 key={t.id}
