@@ -46,6 +46,13 @@ export interface UploadOptions {
   subType?: string;
   // Only read when kind === "award" — forwarded as awardId to the route.
   awardId?: string;
+  // The image this upload is replacing — pass the field's current
+  // `value` (public URL) or a raw storage path here. When present, the
+  // API deletes exactly that file after the new upload succeeds. This is
+  // what makes "replace" auto-clean-up work even for team-images /
+  // player-images folders that hold many different entities at once,
+  // since it targets the specific file rather than the whole folder.
+  oldImageUrl?: string;
 }
 
 export async function uploadAuctionImage(
@@ -78,6 +85,10 @@ export async function uploadAuctionImage(
     }
   }
 
+  if (options?.oldImageUrl) {
+    formData.append("oldImageUrl", options.oldImageUrl);
+  }
+
   const res = await fetch("/api/uploads", { method: "POST", body: formData });
   const data = await res.json();
 
@@ -88,11 +99,16 @@ export async function uploadAuctionImage(
   return data as UploadResult;
 }
 
-export async function deleteAuctionImage(path: string): Promise<void> {
+export async function deleteAuctionImage(pathOrUrl: string): Promise<void> {
+  // The route's DELETE handler accepts either a raw storage path or a
+  // full public URL (it resolves either into a storage path internally),
+  // so callers can pass whichever they have on hand — no need to have
+  // kept the original `path` around if only the public `url` was stored.
+  const isUrl = /^https?:\/\//i.test(pathOrUrl);
   const res = await fetch("/api/uploads", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(isUrl ? { imageUrl: pathOrUrl } : { path: pathOrUrl }),
   });
 
   if (!res.ok) {
