@@ -146,6 +146,43 @@ function ActionButton({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Mobile controls toggle — a small pill button that collapses the    */
+/*  entire control deck (size / format / actions / watermark / roster) */
+/*  on narrow viewports. On md+ screens the deck is force-shown via a  */
+/*  CSS override (md:!max-h-none etc. on the deck wrapper), so this    */
+/*  button is hidden there and desktop behavior is unaffected.         */
+/* ------------------------------------------------------------------ */
+
+function ControlsToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-controls="bracket-control-deck"
+      className="md:hidden flex items-center gap-1.5 px-2.5 py-1 rounded-[3px] transition-colors hover:brightness-110"
+      style={{
+        fontFamily: "var(--font-label-mono)",
+        letterSpacing: "0.08em",
+        background: open
+          ? "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)"
+          : "rgba(255,255,255,0.03)",
+        border: `1px solid ${
+          open
+            ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
+            : "var(--color-border-overlay)"
+        }`,
+        color: open ? "var(--color-theme-orange)" : "var(--color-on-surface)",
+        cursor: "pointer",
+      }}
+    >
+      {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+      <span className="text-[8px] uppercase">Controls</span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Bot cursor — same visual job as the auction sandbox's simulated    */
 /*  pointer: a colored dot + label bubble that glides to whatever the  */
 /*  orchestrator is about to act on. Rendered inside the data-demo-    */
@@ -339,6 +376,12 @@ export default function BracketSandboxPage() {
   const [showAdminOverlay, setShowAdminOverlay] = useState(false);
   const [rosterExpanded, setRosterExpanded] = useState(false);
 
+  // Mobile-only: collapses the whole control deck (size / format / actions /
+  // watermark / roster) to reclaim vertical space. Defaults closed — on
+  // md+ screens the deck ignores this state entirely via a CSS override on
+  // its wrapper, so desktop always shows it expanded regardless.
+  const [controlsOpen, setControlsOpen] = useState(false);
+
   // Starts in demo (bot-driven) mode. Switching modes tears down whichever
   // driver was running so the two never fight over the shared model.
   useEffect(() => {
@@ -448,9 +491,9 @@ export default function BracketSandboxPage() {
           boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
         }}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 min-w-0 overflow-hidden">
           <div
-            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
             style={{
               background: "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)",
               border: "1px solid color-mix(in srgb, var(--color-theme-orange) 45%, transparent)",
@@ -472,9 +515,9 @@ export default function BracketSandboxPage() {
             </span>
           </div>
 
-          <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
+          <span className="w-px h-5 shrink-0 hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Trophy className="w-3 h-3" style={{ color: "var(--color-outline)" }} />
             <span
               className="text-[12px] px-1.5 py-0.5 rounded-[2px]"
@@ -492,9 +535,20 @@ export default function BracketSandboxPage() {
             </span>
           </div>
 
+          {/* Compact context chip — only shown on mobile while the deck is
+              collapsed, so team count is still visible at a glance. */}
+          {!controlsOpen && (
+            <span
+              className="md:hidden text-[10px] tabular-nums truncate"
+              style={{ fontFamily: FONT_BODY, color: "var(--color-outline)" }}
+            >
+              {snap.teamCount} teams
+            </span>
+          )}
+
           {total > 0 && (
             <div
-              className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+              className="hidden sm:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
               style={{
                 background: "rgba(0,0,0,0.22)",
                 border: `1px solid color-mix(in srgb, ${
@@ -520,13 +574,18 @@ export default function BracketSandboxPage() {
           )}
         </div>
 
-        {/* ── Right: pause (autopilot only) + restart + mode toggle ── */}
-        <div className="flex items-center gap-3">
+        {/* ── Right: controls toggle (mobile) + pause (autopilot only) + */}
+        {/*    restart + mode toggle ──────────────────────────────────── */}
+        <div className="flex items-center gap-3 shrink-0">
+          <ControlsToggle open={controlsOpen} onClick={() => setControlsOpen((v) => !v)} />
+
+          <span className="w-px h-5 md:hidden" style={{ background: "var(--color-border-overlay)" }} />
+
           {isDemo && (
             <button
               onClick={handleTogglePause}
               disabled={snap.status === "completed"}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
               style={{
                 fontFamily: "var(--font-label-mono)",
                 letterSpacing: "0.08em",
@@ -549,10 +608,10 @@ export default function BracketSandboxPage() {
           )}
 
           <ActionButton onClick={handleRestart} icon={<RotateCcw className="w-2.5 h-2.5" />}>
-            Restart
+            <span className="hidden sm:inline">Restart</span>
           </ActionButton>
 
-          <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
+          <span className="w-px h-5 hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
 
           <button
             onClick={handleToggleMode}
@@ -572,7 +631,7 @@ export default function BracketSandboxPage() {
               <span className="rounded-full bg-black/70" style={{ width: 6, height: 6 }} />
             </span>
             <span
-              className="text-[8px] uppercase"
+              className="hidden md:inline text-[8px] uppercase"
               style={{
                 fontFamily: "var(--font-label-mono)",
                 letterSpacing: "0.1em",
@@ -591,9 +650,23 @@ export default function BracketSandboxPage() {
       {/*    `dimmed` flag now). Watermark stays interactive in either   */}
       {/*    mode and lives in the same row so it wraps naturally with  */}
       {/*    the rest instead of dropping to its own line.              */}
+      {/*                                                                */}
+      {/*    On mobile this entire block collapses via `controlsOpen`   */}
+      {/*    (max-height/opacity/pointer-events driven by state). The   */}
+      {/*    `md:!...` classes force it fully open on md+ screens       */}
+      {/*    regardless of state, so desktop is unaffected.             */}
       <div
-        className="shrink-0 relative z-10"
-        style={{ background: "rgba(10,10,10,0.35)", borderBottom: "1px solid var(--color-border-overlay)" }}
+        id="bracket-control-deck"
+        className="shrink-0 relative z-10 md:!max-h-none md:!opacity-100 md:!pointer-events-auto"
+        style={{
+          background: "rgba(10,10,10,0.35)",
+          borderBottom: "1px solid var(--color-border-overlay)",
+          maxHeight: controlsOpen ? 2000 : 0,
+          opacity: controlsOpen ? 1 : 0,
+          overflow: "hidden",
+          pointerEvents: controlsOpen ? "auto" : "none",
+          transition: "max-height 280ms cubic-bezier(0.22,1,0.36,1), opacity 200ms ease",
+        }}
       >
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
           <ControlCluster label="Bracket size" dimmed={isDemo}>
@@ -770,28 +843,38 @@ export default function BracketSandboxPage() {
 
       {/* ── Bracket board — data-demo-panel is the coordinate space the */}
       {/*    bot cursor's positions are computed against.               */}
-      <div data-demo-panel="bracket" className="flex-1 min-h-0 overflow-auto relative z-10">
+      <div
+        data-demo-panel="bracket"
+        className="flex-1 min-h-0 overflow-auto relative z-10 flex flex-col"
+      >
         <BotCursor cursor={snap.cursor} />
 
-        {snap.format === "single_elimination" && snap.singleRounds && (
-          <TournamentBracket
-            rounds={snap.singleRounds}
-            onRecordResult={handleSingleResult}
-            hideHeader
-            className="!min-h-0"
-            logoSrc={snap.logoSrc ?? undefined}
-          />
-        )}
+        {/* Vertically centers the bracket when it's shorter than the panel
+            (e.g. R16 with the deck collapsed) instead of leaving dead space
+            below it. `min-h-0` lets this flex item shrink so overflow-auto
+            on the panel above still kicks in normally when the bracket is
+            taller than the available height. */}
+        <div className="flex-1 flex flex-col justify-center min-h-0">
+          {snap.format === "single_elimination" && snap.singleRounds && (
+            <TournamentBracket
+              rounds={snap.singleRounds}
+              onRecordResult={handleSingleResult}
+              hideHeader
+              className="!min-h-0"
+              logoSrc={snap.logoSrc ?? undefined}
+            />
+          )}
 
-        {snap.format === "double_elimination" && snap.doubleData && (
-          <DoubleElimBoard
-            data={snap.doubleData}
-            onRecordResult={handleDoubleResult}
-            hideHeader
-            className="!min-h-0"
-            logoSrc={snap.logoSrc ?? undefined}
-          />
-        )}
+          {snap.format === "double_elimination" && snap.doubleData && (
+            <DoubleElimBoard
+              data={snap.doubleData}
+              onRecordResult={handleDoubleResult}
+              hideHeader
+              className="!min-h-0"
+              logoSrc={snap.logoSrc ?? undefined}
+            />
+          )}
+        </div>
       </div>
 
       {snap.status === "completed" && (

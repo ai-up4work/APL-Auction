@@ -19,7 +19,12 @@ export interface TournamentBracketEditableProps {
    *  bracket inside a page that already has its own compact toolbar
    *  covering the same info (e.g. the bracket sandbox). Everything else —
    *  desktop canvas, mobile round-pager — renders unchanged. Defaults to
-   *  false so every existing usage keeps its header exactly as before. */
+   *  false so every existing usage keeps its header exactly as before.
+   *
+   *  Also switches the root's height strategy from `min-h-screen` to
+   *  `h-full`: hideHeader implies this bracket is embedded in a page that
+   *  already controls its own viewport height (e.g. a flex panel), so the
+   *  bracket should fill *that* rather than force its own 100vh floor. */
   hideHeader?: boolean;
 }
 
@@ -391,7 +396,11 @@ export default function TournamentBracketEditable({
   }
 
   return (
-    <div className={`min-h-screen w-full bg-background text-on-surface p-2 md:p-2 ${className}`}>
+    <div
+      className={`${
+        hideHeader ? "h-full" : "min-h-screen"
+      } w-full bg-background text-on-surface p-2 md:p-2 flex flex-col ${className}`}
+    >
       <style>{`
         html {
           scrollbar-width: thin;
@@ -450,8 +459,8 @@ export default function TournamentBracketEditable({
         </div>
       )}
 
-      <div className="hidden md:block max-w-[1600px] mx-auto relative">
-        <div className="w-full overflow-x-hidden">
+      <div className="hidden md:flex md:flex-col flex-1 min-h-0 max-w-[1600px] mx-auto relative w-full">
+        <div className="w-full overflow-x-hidden flex-1 min-h-0 flex flex-col justify-center">
           {useMirroredLayout ? (
             <div ref={desktopContainerRef} className="relative flex items-start gap-0 w-full pb-6">
               {finalCenter && logoSrc && (
@@ -619,7 +628,7 @@ export default function TournamentBracketEditable({
         </div>
       </div>
 
-      <div className="md:hidden max-w-xl mx-auto flex flex-col gap-4">
+      <div className="md:hidden max-w-xl mx-auto flex flex-col gap-4 flex-1 min-h-0">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -667,11 +676,11 @@ export default function TournamentBracketEditable({
         )}
         <div
           ref={mobileScrollRef}
-          className="flex overflow-x-auto snap-x snap-mandatory bracket-scrollbar-hidden"
+          className="flex overflow-x-auto snap-x snap-mandatory ..."
           style={{ touchAction: "pan-x" }}
         >
           {rounds.map((round) => (
-            <div key={round.id} className="w-full flex-shrink-0 snap-start">
+            <div key={round.id} className="w-full flex-shrink-0 snap-start flex flex-col">
               <h2 className="font-label-mono text-[11px] font-black uppercase tracking-widest text-on-surface-variant text-center mb-3">
                 {round.name}
               </h2>
@@ -679,7 +688,7 @@ export default function TournamentBracketEditable({
                 ref={(el) => {
                   mobileVerticalRefs.current[round.id] = el;
                 }}
-                className="h-[65vh] overflow-y-auto bracket-scrollbar"
+                className="flex-1 min-h-0 overflow-y-auto bracket-scrollbar"
                 style={{ touchAction: "pan-y", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
               >
                 <div className="min-h-full flex flex-col justify-center gap-3 py-2 px-1">
