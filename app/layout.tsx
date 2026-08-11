@@ -8,7 +8,7 @@ import { AuthProvider } from "@/context/AuthContext";
 // TODO: swap in your real production domain — this is what Next.js uses to
 // turn every relative URL below (icons, og-image, canonical link) into the
 // absolute URL that social crawlers and search engines require.
-const SITE_URL = "https://valiantleague.app";
+const SITE_URL = "https://apl-auction-ochre.vercel.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
