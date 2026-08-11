@@ -9,35 +9,60 @@
 //   - Match Player:       matches/{matchId}/player-images/{filename}
 //
 // Runs server-side so we can use the Supabase SERVICE ROLE key — this lets
-// the bucket itself stay locked down (no public/anon INSERT policy needed)
-// while still allowing uploads from the admin UI. The bucket should be
-// PUBLIC for read (so the stored URLs work directly in <img>/<Image>),
-// but write access should NOT be granted to the anon key — that's the
-// whole point of doing this server-side.
+// the bucket itself stay locked down (no public/anon INSERT/DELETE policy
+// needed) while still allowing uploads/deletes from the admin UI. The bucket
+// should be PUBLIC for read (so stored URLs work directly in <img>/<Image>),
+// but write access should NOT be granted to the anon key.
 //
 // Required env vars (server-only, do NOT prefix with NEXT_PUBLIC_):
 //   SUPABASE_SERVICE_ROLE_KEY
 // Already-existing public env vars reused:
 //   NEXT_PUBLIC_SUPABASE_URL
+//
+// AUTOMATIC OLD-IMAGE CLEANUP:
+// Two complementary mechanisms:
+//
+// 1. `oldImageUrl` / `oldPath` (optional form fields) — the client already
+//    holds the current image's URL as its `value` state before uploading a
+//    replacement. Pass it along and the API deletes exactly that file
+//    after the new upload succeeds. This works for EVERY context,
+//    including auction team-images / player-images / match player-images,
+//    since it identifies the specific file being replaced rather than
+//    guessing based on folder contents.
+//
+// 2. Folder-clear fallback — for contexts where a folder inherently holds
+//    exactly one image (tournament banner/logo, organization logo, award
+//    image, auction logo), the API also wipes that folder before writing
+//    the new file. This is a safety net for callers that haven't been
+//    updated to send oldImageUrl yet; it's only safe because nothing else
+//    is ever stored alongside it in that folder. It is NOT applied to
+//    team-images / player-images / match player-images, since those
+//    folders hold many different entities' images together — clearing
+//    them would delete images that were never meant to be replaced.
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-const { supabase } = await import("@/lib/supabase");
 
 const BUCKET = "Valiant-League-Images";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"];
 
+// Context/subType combinations where the destination folder is guaranteed
+// to hold exactly one logical image, so it's safe to clear-then-write.
+// (Legacy auctionId+kind team/player folders and match player-images are
+// deliberately NOT here — see comment above.)
+const SINGLETON_FOLDER_TYPES = new Set(["tournament", "organization", "award"]);
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  if (!url || !supabaseAnon) {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
     throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY env vars"
+      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars"
     );
   }
-  return createClient(url, supabaseAnon, { auth: { persistSession: false } });
+  return createClient(url, serviceRoleKey, { auth: { persistSession: false } });
 }
 
 function safeFileName(originalName: string): string {
@@ -46,12 +71,27 @@ function safeFileName(originalName: string): string {
   return `${rand}.${ext || "png"}`;
 }
 
+// Given either a raw storage path ("auctionId/Auction-Images/logos/xyz.png")
+// or a full Supabase public URL for this bucket, return the storage path.
+// Returns null if it can't confidently resolve one (never guess — a wrong
+// path could delete an unrelated file).
+function resolveStoragePath(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const value = raw.trim();
+
+  if (!/^https?:\/\//i.test(value)) {
+    return value.replace(/^\/+/, "");
+  }
+
+  const marker = `/storage/v1/object/public/${BUCKET}/`;
+  const idx = value.indexOf(marker);
+  if (idx === -1) return null;
+
+  return decodeURIComponent(value.slice(idx + marker.length));
+}
+
 // Normalizes whatever variant of "kind" a caller sends (old or new naming)
 // into exactly "team" | "player" | "logo" for the legacy auctionId branch.
-// This keeps the legacy branch backward-compatible with callers that were
-// written against the newer subType-style naming ("team-images",
-// "team-logo", "player-images", "player-photo", etc.) without having to
-// track down and update every caller individually.
 function normalizeLegacyKind(raw: unknown): "team" | "player" | "logo" | null {
   if (typeof raw !== "string") return null;
   const v = raw.trim().toLowerCase();
@@ -68,6 +108,22 @@ function normalizeLegacyKind(raw: unknown): "team" | "player" | "logo" | null {
   return null;
 }
 
+// Deletes every existing file directly inside `folder`. Only ever called
+// for folders known to hold a single logical image (see
+// SINGLETON_FOLDER_TYPES). Best-effort: a listing/delete failure here
+// should not block the new upload from proceeding.
+async function clearFolder(supabase: ReturnType<typeof admin>, folder: string) {
+  const { data, error } = await supabase.storage.from(BUCKET).list(folder);
+  if (error || !data || data.length === 0) return;
+
+  // list() can return a placeholder entry for "empty" folders; filter to
+  // real files only (they have an id in supabase-js's storage response).
+  const toRemove = data.filter((f) => f.id).map((f) => `${folder}/${f.name}`);
+  if (toRemove.length > 0) {
+    await supabase.storage.from(BUCKET).remove(toRemove);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -80,6 +136,12 @@ export async function POST(req: NextRequest) {
     const context   = formData.get("context"); // "auction" | "tournament" | "organization" | "award" | "match"
     const contextId = formData.get("contextId"); // auctionId, tournamentId, orgId, matchId, etc.
     const subType   = formData.get("subType"); // "banner" | "logo" | "team-images" | "player-images" | "award-images" etc.
+
+    // Precise old-image reference, when the caller has one (this is the
+    // component's current `value` — see comment at top of file).
+    const oldStoragePath =
+      resolveStoragePath(formData.get("oldPath")) ??
+      resolveStoragePath(formData.get("oldImageUrl"));
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
@@ -98,7 +160,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let path: string;
+    let folder: string;
+    let clearOldBeforeUpload = false;
 
     // Handle new multi-context API
     if (context && contextId) {
@@ -109,22 +172,27 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid context type" }, { status: 400 });
       }
 
-      const fileName = safeFileName(file.name);
-
       if (contextType === "auction") {
-        path = `${contextId}/Auction-Images/${finalSubType}/${fileName}`;
+        folder = `${contextId}/Auction-Images/${finalSubType}`;
+        // Multi-item folder (many teams/players share it) — do NOT clear.
       } else if (contextType === "tournament") {
-        path = `tournaments/${contextId}/${finalSubType}/${fileName}`;
+        folder = `tournaments/${contextId}/${finalSubType}`;
+        clearOldBeforeUpload = true;
       } else if (contextType === "organization") {
-        path = `organizations/${contextId}/${finalSubType}/${fileName}`;
+        folder = `organizations/${contextId}/${finalSubType}`;
+        clearOldBeforeUpload = true;
       } else if (contextType === "award") {
         const awardId = formData.get("awardId") as string || "default";
-        path = `tournaments/${contextId}/awards/${awardId}/${fileName}`;
+        folder = `tournaments/${contextId}/awards/${awardId}`;
+        clearOldBeforeUpload = true;
       } else if (contextType === "match") {
-        path = `matches/${contextId}/${finalSubType}/${fileName}`;
+        folder = `matches/${contextId}/${finalSubType}`;
+        // Multi-item folder (many players share it) — do NOT clear.
       } else {
         return NextResponse.json({ error: "Invalid context" }, { status: 400 });
       }
+
+      clearOldBeforeUpload = clearOldBeforeUpload && SINGLETON_FOLDER_TYPES.has(contextType);
     } else if (auctionId) {
       // Legacy API (backward compatibility)
       if (typeof auctionId !== "string" || !auctionId.trim()) {
@@ -139,14 +207,27 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const folder   = kind === "team" ? "team-images" : kind === "player" ? "player-images" : "logos";
-      const fileName = safeFileName(file.name);
-      path = `${auctionId}/Auction-Images/${folder}/${fileName}`;
+      if (kind === "logo") {
+        // A single auction logo — safe to treat as singleton.
+        folder = `${auctionId}/Auction-Images/logos`;
+        clearOldBeforeUpload = true;
+      } else {
+        // team-images / player-images hold many entities — do NOT clear.
+        const legacyFolder = kind === "team" ? "team-images" : "player-images";
+        folder = `${auctionId}/Auction-Images/${legacyFolder}`;
+      }
     } else {
       return NextResponse.json({ error: "Missing upload context (context + contextId) or legacy auctionId" }, { status: 400 });
     }
 
     const supabase = admin();
+
+    if (clearOldBeforeUpload) {
+      await clearFolder(supabase, folder);
+    }
+
+    const fileName = safeFileName(file.name);
+    const path = `${folder}/${fileName}`;
     const arrayBuffer = await file.arrayBuffer();
 
     const { error: uploadErr } = await supabase.storage
@@ -162,28 +243,49 @@ export async function POST(req: NextRequest) {
 
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
+    // Best-effort precise cleanup: delete the exact old file the caller
+    // told us about, as long as it isn't the file we just wrote. This runs
+    // AFTER the new upload succeeds, so a failure here never leaves the
+    // user without an image — it just leaves an orphaned file.
+    let oldImageDeleted = false;
+    let oldImageDeleteError: string | undefined;
+
+    if (oldStoragePath && oldStoragePath !== path) {
+      const { error: deleteErr } = await supabase.storage.from(BUCKET).remove([oldStoragePath]);
+      if (deleteErr) {
+        oldImageDeleteError = deleteErr.message;
+      } else {
+        oldImageDeleted = true;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       imageUrl: publicUrlData.publicUrl,
       url: publicUrlData.publicUrl,
       path,
+      oldImageCleared: clearOldBeforeUpload,
+      ...(oldStoragePath ? { oldImageDeleted, oldImageDeleteError } : {}),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Unknown upload error" }, { status: 500 });
   }
 }
 
-// Optional: delete an image (e.g. when replacing a logo/photo).
-// Body: { path: string }  — the storage path returned by POST above.
+// Delete an image directly (e.g. the field's "remove image" button).
+// Body: { path: string } | { imageUrl: string } — either the storage path
+// or the full public URL returned by POST above both work.
 export async function DELETE(req: NextRequest) {
   try {
-    const { path } = await req.json();
-    if (typeof path !== "string" || !path.trim()) {
-      return NextResponse.json({ error: "Missing path" }, { status: 400 });
+    const body = await req.json();
+    const storagePath = resolveStoragePath(body?.path) ?? resolveStoragePath(body?.imageUrl);
+
+    if (!storagePath) {
+      return NextResponse.json({ error: "Missing or unresolvable path/imageUrl" }, { status: 400 });
     }
 
     const supabase = admin();
-    const { error } = await supabase.storage.from(BUCKET).remove([path]);
+    const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
 
     if (error) {
       return NextResponse.json({ error: `Delete failed: ${error.message}` }, { status: 500 });

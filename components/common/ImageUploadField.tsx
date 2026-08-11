@@ -1,3 +1,4 @@
+// app/components/common/ImageUploadField.tsx
 "use client"
 
 import { useState } from "react"
@@ -41,6 +42,7 @@ export default function ImageUploadField({
   onDelete,
 }: ImageUploadFieldProps) {
   const [isUploading, setIsUploading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [imageBroken, setImageBroken] = useState(false)
 
@@ -62,6 +64,12 @@ export default function ImageUploadField({
       formData.append("subType", subType)
       if (awardId) {
         formData.append("awardId", awardId)
+      }
+      // Tell the API precisely which existing image this upload replaces,
+      // so it can delete it after the new one lands — works even for
+      // team/player-style folders that hold many images at once.
+      if (value) {
+        formData.append("oldImageUrl", value)
       }
 
       // Use provided handler or default API
@@ -106,6 +114,31 @@ export default function ImageUploadField({
     const file = e.dataTransfer.files?.[0]
     if (file && file.type.startsWith("image/")) {
       handleUpload(file)
+    }
+  }
+
+  const handleDeleteClick = async () => {
+    if (!value || isDeleting) return
+    setIsDeleting(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/uploads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: value }),
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || "Delete failed")
+      }
+      onChange("")
+      setImageBroken(false)
+      onDelete?.()
+    } catch (err: any) {
+      console.error("[v0] Delete error:", err)
+      setError(err.message || "Failed to delete image")
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -186,10 +219,11 @@ export default function ImageUploadField({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onDelete}
+            onClick={handleDeleteClick}
+            disabled={isDeleting}
             className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
           >
-            <Trash2 className="h-4 w-4" />
+            {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           </Button>
         )}
       </div>

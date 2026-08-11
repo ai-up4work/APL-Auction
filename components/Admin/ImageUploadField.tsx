@@ -63,6 +63,7 @@ export default function ImageUploadField({
 }: ImageUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [imageBroken, setImageBroken] = useState(false)
@@ -86,6 +87,10 @@ export default function ImageUploadField({
         formData.append("contextId", contextId!)
         formData.append("subType", subType)
         if (awardId) formData.append("awardId", awardId)
+        // Precise old-image reference so the API can delete it after the
+        // new upload succeeds — safe even for folders shared by many
+        // teams/players, since this identifies THIS field's own image.
+        if (value) formData.append("oldImageUrl", value)
 
         let result: any
         if (onImageUpload) {
@@ -129,7 +134,14 @@ export default function ImageUploadField({
 
     setUploading(true)
     try {
-      const { url } = await uploadAuctionImage(effectiveId, kind, file, awardId ? { awardId } : undefined)
+      // Pass the current value through as the old-image reference so
+      // uploadAuctionImage can forward it to the API as oldImageUrl.
+      // (See lib/uploadImage.ts — its options param needs an `oldImageUrl`
+      // field threaded into the upload FormData for this to take effect.)
+      const { url } = await uploadAuctionImage(effectiveId, kind, file, {
+        ...(awardId ? { awardId } : {}),
+        ...(value ? { oldImageUrl: value } : {}),
+      })
       onChange(url)
     } catch (e: any) {
       setError(e?.message ?? "Upload failed")
@@ -142,6 +154,30 @@ export default function ImageUploadField({
     e.preventDefault()
     setDragOver(false)
     if (!disabled) handleFile(e.dataTransfer.files?.[0])
+  }
+
+  async function handleDeleteClick() {
+    if (!value || deleting || disabled) return
+    setDeleting(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/uploads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: value }),
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || "Delete failed")
+      }
+      onChange("")
+      setImageBroken(false)
+      onDelete?.()
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to delete image")
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const canUpload = useDirectContext || !!kind
@@ -216,10 +252,11 @@ export default function ImageUploadField({
         {allowDelete && value && (
           <button
             type="button"
-            onClick={onDelete}
+            onClick={handleDeleteClick}
+            disabled={deleting}
             className="p-1.5 rounded-md text-red-400 hover:text-red-300 hover:bg-red-900/20 shrink-0"
           >
-            <Trash2 className="h-4 w-4" />
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           </button>
         )}
       </div>
