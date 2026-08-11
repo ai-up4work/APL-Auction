@@ -1575,10 +1575,16 @@ export default function OverlaySandboxPage() {
           inningsCards={inningsCards}
         />
 
+        {/* NEW: z-[10001] — one above RotateDeviceOverlay's z-[10000], so
+            "Back to Controls" stays visible and tappable even while the
+            rotate-device prompt is covering the rest of the Live view on
+            mobile portrait. Everything else under the overlay (the video,
+            BroadcastSurface, the Sandbox Feed badge) stays blocked, which
+            is intentional — only the escape hatch needs to survive it. */}
         <button
           type="button"
           onClick={backToControls}
-          className="fixed top-1/2 left-3 -translate-y-1/2 z-[9999] flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all opacity-70 hover:opacity-100 hover:brightness-110"
+          className="fixed top-1/2 left-3 -translate-y-1/2 z-[10001] flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all opacity-70 hover:opacity-100 hover:brightness-110"
           style={{
             fontFamily: "var(--font-label-mono)",
             background: "rgba(13,17,23,0.9)",
