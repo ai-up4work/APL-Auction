@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useOwner } from "@/context/OwnerContext";
 import BottomNavBar from "@/components/BottomNavBar";
+import Image from "next/image";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
@@ -292,10 +293,12 @@ export default function OwnerIndexPage() {
             width: 50, height: 50, borderRadius: 8, overflow: "hidden",
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}>
-            <img
+            <Image
                 src={auction?.logo || "/moon-knight-logo.png"}
                 alt="Auction logo"
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                width={50}
+                height={50}
             />
             </div>
             <div>

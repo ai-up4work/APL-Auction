@@ -1,8 +1,12 @@
-// redirect to /join
+import { redirect } from "next/navigation";
 
-import { redirect } from "next/dist/client/components/navigation";
+interface AuctionOwnerPageProps {
+  params: Promise<{
+    auctionId: string;
+  }>;
+}
 
-
-export default function AuctionOwnerPage() {
-  redirect('/join');
+export default async function AuctionOwnerPage({ params }: AuctionOwnerPageProps) {
+  const { auctionId } = await params;
+  redirect(`/auction/owner/${auctionId}/join`);
 }

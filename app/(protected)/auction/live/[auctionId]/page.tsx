@@ -28,6 +28,7 @@ import { ensureTeamPurses, fmtPts, type TeamPurse } from "@/lib/auctionLiveUtils
 import { supabase } from "@/lib/supabase";
 import type { Player } from "@/types/auction";
 import { FeedbackModal } from "@/components/FeedbackModal";
+import Image from "next/image";
 
 type SoldState = "pending" | "sold" | "unsold";
 
@@ -855,12 +856,14 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
         )}
 
         {/* ══════════ TOP BAR ══════════ */}
-        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-8 h-16 glass-panel border-b border-white/10">
+        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-16 glass-panel border-b border-white/10">
           <div className="flex items-center gap-4">
-            <img
+            <Image
               src={auction.session.auctionLogo || "/valiant-league-logo.png"}
               alt="Auction logo"
               className="w-15 h-15 object-contain"
+              width={60}
+              height={60}
             />
             <h1 className="font-archivo text-2xl font-bold italic tracking-tighter text-theme-orange uppercase">
               {auction.session.auctionName}
@@ -1034,10 +1037,12 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                 <div className="relative group/img">
                   <div className="w-64 h-64 rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl relative">
                     {currentLot?.playerImg ? (
-                      <img
+                      <Image
                         alt={currentLot.playerName}
                         className={`w-full h-full object-cover object-top transition-all duration-500 ${isShuffling ? "blur-md grayscale" : "grayscale-[0.2] group-hover/img:grayscale-0"}`}
                         src={currentLot.playerImg}
+                        width={64}
+                        height={64}
                       />
                     ) : (
                       <div className="w-full h-full bg-surface-container flex items-center justify-center">
@@ -1367,7 +1372,7 @@ function AuctioneerContent({ auctionId }: { auctionId: string }) {
                           style={{ background: team.color || "#888", color: "#fff" }}
                         >
                           {team.logo ? (
-                            <img src={team.logo} alt={team.code} className="w-full h-full object-cover" />
+                            <Image src={team.logo} alt={team.code} className="w-full h-full object-cover" width={40} height={40} />
                           ) : (
                             team.code.slice(0, 2)
                           )}

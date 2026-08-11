@@ -5,6 +5,7 @@ import React, { use, useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MobileOnlyWrapper from "@/components/MobileOnlyWrapper";
 import { supabase } from "@/lib/supabase";
+import Image from "next/image";
 
 interface TeamOption {
   id:    string;
@@ -142,10 +143,12 @@ function TeamCarousel({
                   >
                     {team.logo ? (
                       <div className="relative w-full h-full">
-                        <img
+                        <Image
                           src={team.logo}
                           alt={team.code}
                           className="w-full h-full object-cover"
+                          width={64}
+                          height={64}
                           style={{ filter: isActive ? "none" : "grayscale(0.4)" }}
                         />
                       </div>
@@ -459,10 +462,12 @@ function JoinFlow({ auctionId }: { auctionId: string }) {
       <header className="shrink-0 h-14 flex items-center justify-between px-4 border-b z-50 bg-[#0b0f10]/90 backdrop-blur-2xl border-white/[0.06]">
         <div className="flex items-center gap-2.5">
           <div className="w-13 h-13 overflow-hidden flex items-center justify-center shrink-0">
-            <img
+            <Image
               src={auctionLogo || "/valiant-league-logo.png"}
               alt="Auction logo"
               className="w-full h-full object-cover"
+              width={52}
+              height={52}
             />
           </div>
           <div className="flex flex-col">
