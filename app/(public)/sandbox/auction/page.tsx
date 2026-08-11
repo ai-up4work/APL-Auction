@@ -891,6 +891,7 @@ function MobilePanelSlot({
   h,
   ready,
   isSyncing,
+  align = "center",
   children,
 }: {
   cellRef: (el: HTMLDivElement | null) => void;
@@ -898,19 +899,28 @@ function MobilePanelSlot({
   h: number;
   ready: boolean;
   isSyncing: boolean;
+  // Cross-axis (vertical) alignment of the scaled frame within its slot.
+  // "center" is the normal case (owner bid pages). For the Auctioneer /
+  // Watch pairing we use "end" on top and "start" on bottom so the two
+  // frames pull toward the shared middle seam instead of each centering
+  // independently within its own half — that's what closes the gap
+  // between them and makes the pair read as one centered group.
+  align?: "start" | "center" | "end";
   children: React.ReactNode;
 }) {
+  const alignItems = align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center";
   return (
     <div
-      className={`min-w-0 min-h-0 h-full w-full flex items-center justify-center overflow-hidden ${
+      className={`min-w-0 min-h-0 h-full w-full flex justify-center overflow-hidden ${
         isSyncing ? "panel-sync-ring" : ""
       }`}
       style={{
+        alignItems,
         opacity: ready ? 1 : 0,
         transition: `opacity ${ZOOM_TRANSITION}`,
       }}
     >
-      <div ref={cellRef} className="w-full h-full flex items-center justify-center overflow-hidden">
+      <div ref={cellRef} className="w-full h-full flex overflow-hidden" style={{ alignItems, justifyContent: "center" }}>
         <div
           style={{ width: w, height: h }}
           className="overflow-hidden flex items-center justify-center shrink-0"
@@ -938,53 +948,79 @@ function MobileMultiview({
   cellReady: Record<PanelKey, boolean>;
 }) {
   const activeOwners = (["ownerA", "ownerB"] as const).filter((k) => highlighted.includes(k));
+  // As soon as it's "owner time" (either owner spotlighted), show BOTH bid
+  // pages side by side in the bottom half — the bottom half splits cleanly
+  // in two, so there's no reason to show just the one that happens to be
+  // highlighted upstream.
   const showOwners = activeOwners.length > 0;
+  const OWNER_KEYS: readonly ("ownerA" | "ownerB")[] = ["ownerA", "ownerB"];
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative z-10">
-      {/* Top half — Auctioneer, always anchored here on mobile */}
-      <div className="min-h-0" style={{ flex: "1 1 50%" }}>
-        <MobilePanelSlot
-          cellRef={cellRefs.auctioneer}
-          w={cellDims.auctioneer.w}
-          h={cellDims.auctioneer.h}
-          ready={cellReady.auctioneer}
-          isSyncing={syncPanels.includes("auctioneer")}
-        >
-          {frames.auctioneer}
-        </MobilePanelSlot>
-      </div>
+      {showOwners ? (
+        <>
+          {/* Top half — Auctioneer, always anchored here on mobile */}
+          <div className="min-h-0" style={{ flex: "1 1 50%" }}>
+            <MobilePanelSlot
+              cellRef={cellRefs.auctioneer}
+              w={cellDims.auctioneer.w}
+              h={cellDims.auctioneer.h}
+              ready={cellReady.auctioneer}
+              isSyncing={syncPanels.includes("auctioneer")}
+            >
+              {frames.auctioneer}
+            </MobilePanelSlot>
+          </div>
 
-      {/* Bottom half — Watch by default, or the active bid page(s) */}
-      <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
-        {showOwners ? (
-          activeOwners.map((key) => (
-            <div key={key} className="flex-1 min-w-0 h-full">
-              <MobilePanelSlot
-                cellRef={cellRefs[key]}
-                w={cellDims[key].w}
-                h={cellDims[key].h}
-                ready={cellReady[key]}
-                isSyncing={syncPanels.includes(key)}
-              >
-                {frames[key]}
-              </MobilePanelSlot>
-            </div>
-          ))
-        ) : (
-          <div className="flex-1 min-w-0 h-full">
+          {/* Bottom half — both bid pages, split evenly side by side */}
+          <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
+            {OWNER_KEYS.map((key) => (
+              <div key={key} className="flex-1 min-w-0 h-full">
+                <MobilePanelSlot
+                  cellRef={cellRefs[key]}
+                  w={cellDims[key].w}
+                  h={cellDims[key].h}
+                  ready={cellReady[key]}
+                  isSyncing={syncPanels.includes(key)}
+                >
+                  {frames[key]}
+                </MobilePanelSlot>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Auctioneer + Watch: pull both toward the shared middle seam
+              (instead of each centering independently in its own 50%)
+              with a small fixed gap, so the pair reads as one group
+              centered in the viewport rather than two halves. */}
+          <div className="min-h-0 pb-1.5" style={{ flex: "1 1 50%" }}>
+            <MobilePanelSlot
+              cellRef={cellRefs.auctioneer}
+              w={cellDims.auctioneer.w}
+              h={cellDims.auctioneer.h}
+              ready={cellReady.auctioneer}
+              isSyncing={syncPanels.includes("auctioneer")}
+              align="end"
+            >
+              {frames.auctioneer}
+            </MobilePanelSlot>
+          </div>
+          <div className="min-h-0 pt-1.5" style={{ flex: "1 1 50%" }}>
             <MobilePanelSlot
               cellRef={cellRefs.watch}
               w={cellDims.watch.w}
               h={cellDims.watch.h}
               ready={cellReady.watch}
               isSyncing={syncPanels.includes("watch")}
+              align="start"
             >
               {frames.watch}
             </MobilePanelSlot>
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
