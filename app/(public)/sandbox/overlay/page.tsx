@@ -157,18 +157,74 @@
 // for free.
 //
 // FIX (mobile header too tall): the console header now collapses on
-// mobile. A compact strip (badge + score + a chevron toggle) always
-// stays visible at a fixed height; the rest (team codes, innings pill,
-// hint text, Restart/Flip buttons) lives in a second row that
-// animates its max-height open/closed via `headerExpanded`. Desktop
-// (`md:` and up) overrides the collapse entirely — `md:!max-h-none
-// md:!opacity-100` on the detail row — so nothing about the existing
-// desktop header layout or behavior changes; only mobile's height
-// responds to the toggle. The two small action buttons are duplicated
-// (once for desktop's compact strip, once for mobile's detail row)
-// rather than shared across breakpoints with `order-*`, since moving
-// the same DOM node across the two rows on resize would remount it.
-
+// short screens. A compact strip (badge + score + a chevron toggle)
+// always stays visible at a fixed height; the rest (team codes,
+// innings pill, hint text, Restart/Flip buttons) lives in a second row
+// that animates its max-height open/closed via `headerExpanded`.
+//
+// IMPORTANT: this is keyed off viewport HEIGHT, not width. The first
+// version used Tailwind's `md:` (a min-width breakpoint), which broke
+// on landscape phones: ForceLandscapeOnMobile rotates the page so a
+// phone that's 932px WIDE but only 430px TALL blows straight past
+// `md`'s 768px width threshold and gets treated as "desktop" — full
+// header rendered, chevron hidden — even though there's barely any
+// vertical room to spare. A phone in landscape is wide and short; a
+// desktop window is wide and tall. Width alone can't tell them apart,
+// so the breakpoint here is `[@media(min-height:640px)]:`, a custom
+// Tailwind arbitrary-variant that only treats the screen as "desktop
+// enough" once there's real height to spend, regardless of how wide it
+// is. Below 640px of height, the header collapses — landscape phone or
+// otherwise. The two small action buttons are duplicated (once for the
+// expanded compact strip, once for the collapsible detail row) rather
+// than shared across breakpoints with `order-*`, since moving the same
+// DOM node between the two rows on a breakpoint change would remount
+// it.
+//
+// FIX (mobile: hide Event Feed / Live Preview Monitor / LiveScoreBar):
+// on a real phone there isn't room for the Event Feed strip, the
+// corner Live Preview Monitor, AND the big bottom-left LiveScoreBar
+// alongside the actual scoring pad — they were fine on a laptop where
+// there's plenty of width/height to spare, but on mobile they mostly
+// just cover the controls the scorer is trying to tap. These three are
+// now skipped entirely on mobile via the `isMobileLayout` flag from
+// useIsMobileOverlayLayout() below, reusing the exact same
+// pointer/orientation/width condition already driving the rotation +
+// viewport-widening behavior, so "mobile" means the same thing in all
+// three places. Desktop (mouse/trackpad pointer, or a wide/tall touch
+// window that never matches that condition) renders exactly as before
+// — nothing here changes the desktop layout.
+//
+// FIX (mobile in PHYSICAL portrait rendered as a squashed, sideways
+// column — see the phone screenshot that motivated this): the two
+// mobile hooks below used to be gated on opposite conditions and never
+// actually fired together.
+//
+//   - ForceLandscapeOnMobile is a pure CSS media query:
+//     `(max-width: 900px) and (orientation: portrait)`. It rotates the
+//     <html> element visually, but a CSS transform does NOT change what
+//     `window.matchMedia("(orientation: ...)")` reports in JS — the
+//     browser still sees the physical device as portrait, because the
+//     device itself was never rotated.
+//   - useForceDesktopSiteInLandscape only widened the viewport meta tag
+//     when `matchMedia("(orientation: landscape) and (pointer: coarse)")`
+//     matched — i.e. only on a device *physically* held sideways.
+//
+//   So on a phone held upright in portrait (the common case, and what
+//   the screenshot showed): the CSS rotation fired and visually rotated
+//   the page, but the JS orientation check never matched, so the
+//   viewport <meta> tag was never widened — it stayed at the phone's
+//   real narrow `width=device-width`. The browser then laid the whole
+//   app out at ~390px of "width" (now displayed as the vertical
+//   dimension after rotation), which is exactly the tiny, squeezed,
+//   sideways-text column in the screenshot.
+//
+//   Fixed by widening the media query inside
+//   useForceDesktopSiteInLandscape so it matches in BOTH of the cases
+//   ForceLandscapeOnMobile's CSS can fire in: real landscape, OR narrow
+//   portrait (same `900px` cutoff as the CSS rotation, kept as
+//   MOBILE_ROTATE_MAX_WIDTH_PX below so the two can't drift out of
+//   sync). Everything else about the hook (the swap/restore logic,
+//   cleanup, DESKTOP_LAYOUT_WIDTH) is unchanged.
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
@@ -263,6 +319,13 @@ const AUTO_OFF_CHANNEL_DURATIONS: Partial<Record<keyof SandboxChannels, number>>
   matchIntro: MATCH_INTRO_AUTO_OFF_MS,
   matchScorecard: MATCH_SCORECARD_AUTO_OFF_MS,
 };
+
+// Shared cutoff between the CSS rotation media query
+// (ForceLandscapeOnMobile) and the JS orientation check
+// (useForceDesktopSiteInLandscape) — kept as one constant so the two
+// mechanisms can't silently drift apart again the way they did before
+// this fix (see the FIX comment above the imports).
+const MOBILE_ROTATE_MAX_WIDTH_PX = 900;
 
 // Native size of the broadcast "stage" — the /preview route (and the
 // real Live view) are authored against this frame. The monitor iframe
@@ -360,10 +423,133 @@ function ScrollbarTheme() {
 // wouldn't touch them. Rotating <html> rotates its entire subtree,
 // body-portaled content included, so Control and Live both get it for
 // free without being wired in separately.
+// ── Force "desktop site" while rotated on mobile ─────────────────────
+// A phone rotated (physically OR via the CSS transform above) is still,
+// physically, a phone in most cases — the browser's viewport meta tag
+// still reports its narrow native device-width, so it keeps rendering
+// the phone-optimized layout (collapsed header, wrapped pills, etc.)
+// rather than the real desktop one. This mirrors what a browser's own
+// "Request Desktop Site" toggle does: swap the <meta name="viewport">
+// tag's `content` to a fixed, desktop-sized layout width instead of
+// `width=device-width`. The browser then treats the page as 1280 CSS px
+// wide regardless of the phone's actual screen size and zooms the whole
+// render out to fit — which is also why this needs no extra CSS of its
+// own: once the browser believes it has 1280px of width, `lg:` classes
+// and the header's `[@media(min-height:640px)]:` breakpoint (that width
+// scales proportionally to more effective height too) both satisfy on
+// their own, the same way they would in a real desktop window.
+//
+// FIX: this used to only match `(orientation: landscape) and
+// (pointer: coarse)` — i.e. only a device physically held sideways.
+// But ForceLandscapeOnMobile's CSS rotation fires on physical PORTRAIT
+// (narrow width), and a CSS transform never changes what
+// matchMedia("orientation: ...") reports — the browser still sees the
+// untouched physical device orientation. So on a phone held upright
+// (the common case), the page got visually rotated by CSS but this
+// hook never widened the viewport meta tag, leaving the rotated layout
+// stuck at the phone's real ~390px width — a squashed, sideways column.
+// The query below now also matches physical portrait at/under the same
+// MOBILE_ROTATE_MAX_WIDTH_PX cutoff the CSS rotation uses, so the
+// viewport widens in every case the CSS can actually rotate in.
+//
+// Gated on `(pointer: coarse)` alongside the orientation/width check —
+// real desktop browsers already have plenty of width and don't need
+// this, and more importantly desktop browsers largely ignore the
+// viewport meta tag entirely, so this is a no-op there regardless.
+// `pointer: coarse` is what keeps it scoped to touch devices
+// specifically (phones/tablets) rather than any wide-but-mouse-driven
+// window some environment might report as landscape/narrow.
+//
+// Only ever touches the viewport <meta> tag's `content` attribute — no
+// component layout depends on this running, and the original content
+// is restored on cleanup / when the query stops matching.
+function useForceDesktopSiteInLandscape() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Matches the layout width most mobile browsers' own "Request
+    // Desktop Site" toggles target — wide enough that desktop-only UI
+    // (`lg:` classes, the header's expanded state) renders instead of
+    // the phone-optimized one.
+    const DESKTOP_LAYOUT_WIDTH = 1280;
+
+    let meta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
+    let createdMeta = false;
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "viewport");
+      document.head.appendChild(meta);
+      createdMeta = true;
+    }
+    const original = meta.getAttribute("content");
+
+    // Matches BOTH cases ForceLandscapeOnMobile's CSS rotation can
+    // fire in: real physical landscape, OR narrow physical portrait
+    // (same cutoff as the CSS media query, via
+    // MOBILE_ROTATE_MAX_WIDTH_PX) — see the FIX comment above.
+    const mql = window.matchMedia(
+      `(pointer: coarse) and ((orientation: landscape) or ((orientation: portrait) and (max-width: ${MOBILE_ROTATE_MAX_WIDTH_PX}px)))`
+    );
+
+    function apply() {
+      if (!meta) return;
+      if (mql.matches) {
+        meta.setAttribute("content", `width=${DESKTOP_LAYOUT_WIDTH}`);
+      } else if (original) {
+        meta.setAttribute("content", original);
+      }
+    }
+
+    apply();
+    mql.addEventListener("change", apply);
+
+    return () => {
+      mql.removeEventListener("change", apply);
+      if (!meta) return;
+      if (original) {
+        meta.setAttribute("content", original);
+      } else if (createdMeta) {
+        meta.remove();
+      }
+    };
+  }, []);
+}
+
+// ── Mobile layout detector ───────────────────────────────────────────
+// Returns true exactly when the page is in the "mobile broadcast
+// console" case — same condition useForceDesktopSiteInLandscape widens
+// the viewport for, and the same width/orientation pairing
+// ForceLandscapeOnMobile's CSS rotates on. Reusing this one condition
+// (rather than a fresh width check) is what keeps "mobile" meaning the
+// same thing everywhere on this page — a desktop browser (mouse/
+// trackpad pointer) never matches this regardless of window size, so
+// none of the elements gated on it are touched there.
+function useIsMobileOverlayLayout() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mql = window.matchMedia(
+      `(pointer: coarse) and ((orientation: landscape) or ((orientation: portrait) and (max-width: ${MOBILE_ROTATE_MAX_WIDTH_PX}px)))`
+    );
+
+    function apply() {
+      setIsMobile(mql.matches);
+    }
+
+    apply();
+    mql.addEventListener("change", apply);
+    return () => mql.removeEventListener("change", apply);
+  }, []);
+
+  return isMobile;
+}
+
 function ForceLandscapeOnMobile() {
   return (
     <style jsx global>{`
-      @media screen and (max-width: 900px) and (orientation: portrait) {
+      @media screen and (max-width: ${MOBILE_ROTATE_MAX_WIDTH_PX}px) and (orientation: portrait) {
         html {
           transform: rotate(-90deg);
           transform-origin: left top;
@@ -725,6 +911,19 @@ const DISMISSAL_SHORT: Record<string, string> = {
 export default function OverlaySandboxPage() {
   const matchSetup = HARDCODED_MATCH_SETUP;
 
+  // Swaps the page into "desktop site" mode whenever a touch device is
+  // in landscape, or in narrow portrait (the CSS-rotated case) — see
+  // the hook's own comment above for why this needs to be a viewport-
+  // meta swap rather than more CSS, and for the fix that made it match
+  // the rotated-portrait case too.
+  useForceDesktopSiteInLandscape();
+
+  // Drives hiding the Event Feed strip, the Live Preview Monitor, and
+  // the control-view LiveScoreBar on mobile — see the FIX comment near
+  // the top of the file. Desktop is entirely unaffected: this is false
+  // there regardless of window width.
+  const isMobileLayout = useIsMobileOverlayLayout();
+
   const [view, setView] = useState<ViewMode>("control");
 
   const [liveState, setLiveState] = useState(emptyLiveState);
@@ -738,10 +937,10 @@ export default function OverlaySandboxPage() {
   const [firedMoment, setFiredMoment] = useState<FiredMoment | null>(null);
   const momentIdRef = useRef(0);
 
-  // Mobile-only: header starts collapsed to save vertical space on
-  // small screens. Ignored on desktop (md:) via the CSS override on the
-  // detail row below — the header there stays exactly as it always
-  // was, single row, always expanded.
+  // Short-viewport-only: header starts collapsed to save vertical
+  // space. Ignored once the viewport has real height to spare (see the
+  // `[@media(min-height:640px)]:` overrides below) — there the header
+  // stays exactly as it always was, single row, always expanded.
   const [headerExpanded, setHeaderExpanded] = useState(false);
 
   // FIX: revert timer for the big floating chyron — previously only
@@ -1176,12 +1375,15 @@ export default function OverlaySandboxPage() {
           boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
         }}
       >
-        {/* Compact strip — always visible, always this height. On
-            desktop (md:) this row also carries the full info +
-            buttons, same as before; on mobile it's trimmed down to
-            just the essentials + a chevron that reveals the rest. */}
+        {/* Compact strip — always visible, always this height. Once
+            the viewport has real height to spare (min-height:640px)
+            this row also carries the full info + buttons, same as
+            before; below that it's trimmed down to just the
+            essentials + a chevron that reveals the rest — this is
+            what keeps a short landscape phone from getting the "full
+            desktop" header despite being plenty wide. */}
         <div className="h-11 flex items-center justify-between px-4 gap-3">
-          <div className="flex items-center gap-3 md:gap-4 min-w-0">
+          <div className="flex items-center gap-3 [@media(min-height:640px)]:gap-4 min-w-0">
             <div
               className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
               style={{
@@ -1207,11 +1409,12 @@ export default function OverlaySandboxPage() {
 
             <span className="w-px h-5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
 
-            {/* Team code line — hidden on mobile's compact strip, shown
-                in the collapsible row instead so mobile's top strip
-                stays short. Desktop shows it here same as always. */}
+            {/* Team code line — hidden on the collapsed compact strip,
+                shown in the collapsible row instead so the top strip
+                stays short on a short viewport. Tall-enough viewports
+                show it here same as always. */}
             <span
-              className="hidden md:inline text-[12px] shrink-0"
+              className="hidden [@media(min-height:640px)]:inline text-[12px] shrink-0"
               style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
             >
               {matchSetup.teamA.shortCode} vs {matchSetup.teamB.shortCode}
@@ -1233,7 +1436,7 @@ export default function OverlaySandboxPage() {
             </span>
 
             <div
-              className="hidden md:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
+              className="hidden [@media(min-height:640px)]:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
               style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
             >
               <span
@@ -1249,6 +1452,12 @@ export default function OverlaySandboxPage() {
               </span>
             </div>
 
+            {/* lg (1024px width) is intentionally left as a plain
+                width breakpoint, not a height one — it's a "got a wide
+                desktop window" nicety, not part of the collapse logic,
+                and 1024px is comfortably past the 932px width of the
+                landscape phone this fix targets, so it stays hidden
+                there regardless. */}
             <span
               className="hidden lg:inline text-[10px] truncate"
               style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
@@ -1257,10 +1466,11 @@ export default function OverlaySandboxPage() {
             </span>
           </div>
 
-          {/* Desktop action buttons live here, same spot as always.
-              On mobile they move into the collapsible row below so the
+          {/* Action buttons live here once the viewport has real
+              height to spare, same spot as always. Below the height
+              threshold they move into the collapsible row below so the
               compact strip only needs to fit the chevron. */}
-          <div className="hidden md:flex items-center gap-2 shrink-0">
+          <div className="hidden [@media(min-height:640px)]:flex items-center gap-2 shrink-0">
             <ConsoleActionButton onClick={restartMatch} icon={<RotateCcw className="w-2.5 h-2.5" />}>
               Restart
             </ConsoleActionButton>
@@ -1274,13 +1484,14 @@ export default function OverlaySandboxPage() {
             </ConsoleActionButton>
           </div>
 
-          {/* Collapse toggle — mobile only. Desktop never renders this
-              and never respects headerExpanded (see the md: override
-              on the panel below), so nothing changes there. */}
+          {/* Collapse toggle — only shown below the 640px height
+              threshold. Taller viewports never render this and never
+              respect headerExpanded (see the height-based override on
+              the panel below), so nothing changes there. */}
           <button
             type="button"
             onClick={() => setHeaderExpanded((e) => !e)}
-            className="md:hidden flex items-center justify-center w-7 h-7 rounded-full shrink-0 transition-colors"
+            className="[@media(min-height:640px)]:hidden flex items-center justify-center w-7 h-7 rounded-full shrink-0 transition-colors"
             style={{
               background: "rgba(255,255,255,0.03)",
               boxShadow: "inset 0 0 0 1px var(--color-border-overlay)",
@@ -1296,22 +1507,26 @@ export default function OverlaySandboxPage() {
           </button>
         </div>
 
-        {/* Collapsible detail row — mobile only in practice. The
-            md:!max-h-none / md:!opacity-100 override means desktop
-            always renders this fully expanded regardless of
-            headerExpanded, so nothing about the existing desktop
-            header behavior changes; only mobile's height responds to
-            the toggle. overflow-hidden + max-height transition (rather
-            than conditional rendering) keeps this a smooth collapse
-            instead of an abrupt cut. */}
+        {/* Collapsible detail row — only actually collapses below the
+            640px height threshold. The
+            [@media(min-height:640px)]:!max-h-none /
+            [@media(min-height:640px)]:!opacity-100 override means any
+            viewport with real height to spare always renders this
+            fully expanded regardless of headerExpanded, so nothing
+            about the original always-expanded header behavior changes
+            there — including on a WIDE-but-short landscape phone,
+            which is exactly the case a width-only breakpoint got
+            wrong. overflow-hidden + max-height transition (rather than
+            conditional rendering) keeps this a smooth collapse instead
+            of an abrupt cut. */}
         <div
-          className="overflow-hidden transition-[max-height,opacity] duration-300 ease-out md:!max-h-none md:!opacity-100"
+          className="overflow-hidden transition-[max-height,opacity] duration-300 ease-out [@media(min-height:640px)]:!max-h-none [@media(min-height:640px)]:!opacity-100"
           style={{
             maxHeight: headerExpanded ? 160 : 0,
             opacity: headerExpanded ? 1 : 0,
           }}
         >
-          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1 md:hidden">
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1 [@media(min-height:640px)]:hidden">
             <span
               className="text-[12px] shrink-0"
               style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
@@ -1397,37 +1612,42 @@ export default function OverlaySandboxPage() {
           </ControlCluster>
         </div>
 
-        <div
-          className="flex items-start gap-3 px-5 py-2.5"
-          style={{ background: "rgba(0,0,0,0.22)", borderTop: "1px solid var(--color-border-overlay)" }}
-        >
-          <span
-            className="text-[9px] font-semibold uppercase shrink-0 pt-0.5"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em", color: "var(--color-outline)" }}
+        {/* FIX: Event Feed hidden on mobile — see the FIX comment near
+            the top of the file. Desktop keeps rendering it exactly as
+            before; this only skips it when isMobileLayout is true. */}
+        {!isMobileLayout && (
+          <div
+            className="flex items-start gap-3 px-5 py-2.5"
+            style={{ background: "rgba(0,0,0,0.22)", borderTop: "1px solid var(--color-border-overlay)" }}
           >
-            Event Feed
-          </span>
-          <div className="flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
-            {log.length === 0 ? (
-              <span
-                className="text-[10px]"
-                style={{ fontFamily: FONT_BODY, color: "var(--color-outline)" }}
-              >
-                Nothing fired yet — tap the ball pad to start scoring.
-              </span>
-            ) : (
-              log.slice(0, 6).map((l, i) => (
+            <span
+              className="text-[9px] font-semibold uppercase shrink-0 pt-0.5"
+              style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em", color: "var(--color-outline)" }}
+            >
+              Event Feed
+            </span>
+            <div className="flex-1 flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+              {log.length === 0 ? (
                 <span
-                  key={i}
-                  className="text-[10px] truncate max-w-[280px]"
-                  style={{ fontFamily: "var(--font-label-mono)", color: i === 0 ? "var(--color-on-surface)" : "var(--color-outline)" }}
+                  className="text-[10px]"
+                  style={{ fontFamily: FONT_BODY, color: "var(--color-outline)" }}
                 >
-                  {l}
+                  Nothing fired yet — tap the ball pad to start scoring.
                 </span>
-              ))
-            )}
+              ) : (
+                log.slice(0, 6).map((l, i) => (
+                  <span
+                    key={i}
+                    className="text-[10px] truncate max-w-[280px]"
+                    style={{ fontFamily: "var(--font-label-mono)", color: i === 0 ? "var(--color-on-surface)" : "var(--color-outline)" }}
+                  >
+                    {l}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <MomentChyron fired={firedMoment} />
@@ -1443,9 +1663,15 @@ export default function OverlaySandboxPage() {
           Figures tiles) sits directly underneath it once scrolled all
           the way down. SCORE_BAR_BOTTOM_CLEARANCE keeps that last row
           fully visible above the bar instead of tucking behind it. */}
+      {/* FIX: bottom clearance is only needed to keep content clear of
+          the big LiveScoreBar, which is now skipped entirely on mobile
+          (see the FIX comment near the top of the file) — so on mobile
+          this padding collapses back to the normal top/side padding
+          instead of leaving dead space under the scoring console.
+          Desktop is unaffected (isMobileLayout is always false there). */}
       <div
         className="flex-1 min-h-0 overflow-auto relative z-10 px-5 pt-5"
-        style={{ paddingBottom: SCORE_BAR_BOTTOM_CLEARANCE }}
+        style={{ paddingBottom: isMobileLayout ? 20 : SCORE_BAR_BOTTOM_CLEARANCE }}
       >
         <div
           className="rounded-xl p-5"
@@ -1480,7 +1706,9 @@ export default function OverlaySandboxPage() {
         </div>
       </div>
 
-      <LivePreviewMonitor featuredMoment={featuredMoment} />
+      {/* FIX: Live Preview Monitor hidden on mobile — see the FIX
+          comment near the top of the file. Desktop is unaffected. */}
+      {!isMobileLayout && <LivePreviewMonitor featuredMoment={featuredMoment} />}
 
       {/* FIX: BigScoreBarPositionOverride + the control-view's
           LiveScoreBar are now fully unmounted (not just toggled via
@@ -1494,8 +1722,11 @@ export default function OverlaySandboxPage() {
           no DOM relationship distinguishing them. Conditionally
           rendering removes the override CSS from the document entirely
           while Live is showing, so BroadcastSurface's LiveScoreBar
-          renders at its real, full broadcast size. */}
-      {view === "control" && (
+          renders at its real, full broadcast size.
+          FIX: also skipped entirely on mobile now — see the FIX
+          comment near the top of the file. Desktop keeps this exactly
+          as before (still gated on `view === "control"` only). */}
+      {view === "control" && !isMobileLayout && (
         <>
           <BigScoreBarPositionOverride />
           <LiveScoreBar
