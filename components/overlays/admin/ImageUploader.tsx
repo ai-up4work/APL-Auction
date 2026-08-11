@@ -22,6 +22,7 @@ export function ImageUploader({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -33,6 +34,11 @@ export function ImageUploader({
       fd.append("file", file);
       fd.append("auctionId", auctionId);
       fd.append("kind", kind);
+      // Precise old-image reference so the API can delete it after the
+      // new upload succeeds — safe even though team-images/player-images
+      // folders hold many entities, since this targets exactly the file
+      // this field previously pointed to.
+      if (value) fd.append("oldImageUrl", value);
       const res = await fetch("/api/uploads", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
@@ -41,6 +47,26 @@ export function ImageUploader({
       setError(e?.message ?? "Upload failed");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!value || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/uploads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+      onChange("");
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to delete image");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -72,7 +98,7 @@ export function ImageUploader({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          disabled={uploading}
+          disabled={uploading || deleting}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
           className="flex-1 min-w-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all"
@@ -90,7 +116,14 @@ export function ImageUploader({
           {uploading ? "Uploading…" : value ? "Replace" : "Upload"}
         </button>
 
-        {value && !uploading && <IconBtn icon="close" title="Remove image" danger onClick={() => onChange("")} />}
+        {value && !uploading && (
+          <IconBtn
+            icon={deleting ? "progress_activity" : "close"}
+            title="Remove image"
+            danger
+            onClick={handleRemove}
+          />
+        )}
       </div>
 
       <input
