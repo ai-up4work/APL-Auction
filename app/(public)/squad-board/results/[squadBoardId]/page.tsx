@@ -197,10 +197,26 @@ export default function SquadBoardResultsPage() {
         .font-inter { font-family:'Inter',sans-serif; }
         .header-blur { backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
 
-        @media (max-width:639px) {
-          .flow-view-grid{display:flex!important;flex-direction:column!important;overflow-y:auto!important}
-          .flow-pool,.flow-franchises{width:100%!important;border:none!important;height:auto!important;max-height:400px!important}
-          .flow-canvas-container{display:none!important}
+        /* Mobile: keep the 12-col grid (flow-view-grid stays untouched, it's
+           Tailwind's grid grid-cols-12 from the JSX) — just narrow the
+           three sections so the member list / canvas gutter / team list
+           sit side-by-side instead of stacking. This is the ONLY mobile
+           rule block — do not add a second one, and do not touch
+           .flow-view-grid here or you'll re-break the layout back to a
+           flex column stack. */
+        @media (max-width: 639px) {
+          .flow-pool,
+          .flow-franchises {
+            grid-column: span 5 / span 5 !important;
+            height: 100% !important;
+            max-height: none !important;
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+          }
+          .flow-canvas-container {
+            grid-column: span 2 / span 2 !important;
+            display: block !important;
+          }
         }
       `}</style>
 
@@ -254,7 +270,10 @@ export default function SquadBoardResultsPage() {
               ref={playerListRef}
               className="flow-pool col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5"
             >
-              <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+              {/* Title row stays outside the card list so it always spans
+                  the full width regardless of the icon-only compact cards
+                  below it on mobile. */}
+              <div className="pt-6 pb-20 relative">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
                     Squad Members
@@ -264,33 +283,41 @@ export default function SquadBoardResultsPage() {
                   </span>
                 </div>
 
-                {flowPlayers.length === 0 ? (
-                  <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
-                    No players assigned to any team yet.
-                  </p>
-                ) : (
-                  flowPlayers.map((p) => {
-                    const isHighlighted = activePlayer
-                      ? activePlayer === p.id
-                      : activeTeam !== null && activeTeam === p.teamShortCode;
-                    const isDimmed = hasSelection && !isHighlighted;
+                {/* items-end on mobile: icon-only cards shrink to content
+                    width (instead of stretching full column width via the
+                    flex-col default align-items:stretch) and hug the right
+                    edge of this column, closest to the canvas gutter, so
+                    connector lines stay as short as possible. sm: and up
+                    falls back to the original full-width stacked list. */}
+                <div className="flex flex-col items-start sm:items-stretch gap-2 sm:gap-0 sm:space-y-3">
+                  {flowPlayers.length === 0 ? (
+                    <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
+                      No players assigned to any team yet.
+                    </p>
+                  ) : (
+                    flowPlayers.map((p) => {
+                      const isHighlighted = activePlayer
+                        ? activePlayer === p.id
+                        : activeTeam !== null && activeTeam === p.teamShortCode;
+                      const isDimmed = hasSelection && !isHighlighted;
 
-                    return (
-                      <FlowPlayerCard
-                        key={p.id}
-                        id={p.id}
-                        name={p.name}
-                        img={p.img}
-                        status={p.status}
-                        price={p.price}
-                        teamShortCode={p.teamShortCode}
-                        isHighlighted={isHighlighted}
-                        isDimmed={isDimmed}
-                        onClick={() => togglePlayer(p)}
-                      />
-                    );
-                  })
-                )}
+                      return (
+                        <FlowPlayerCard
+                          key={p.id}
+                          id={p.id}
+                          name={p.name}
+                          img={p.img}
+                          status={p.status}
+                          price={p.price}
+                          teamShortCode={p.teamShortCode}
+                          isHighlighted={isHighlighted}
+                          isDimmed={isDimmed}
+                          onClick={() => togglePlayer(p)}
+                        />
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </aside>
 
@@ -302,7 +329,7 @@ export default function SquadBoardResultsPage() {
               ref={teamListRef}
               className="flow-franchises col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5"
             >
-              <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+              <div className="pt-6 pb-20 relative">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">
                     Teams
@@ -312,30 +339,36 @@ export default function SquadBoardResultsPage() {
                   </span>
                 </div>
 
-                {flowTeams.length === 0 ? (
-                  <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
-                    No teams assigned to this board yet.
-                  </p>
-                ) : (
-                  flowTeams.map((t) => {
-                    const isHighlighted = activeTeam === t.shortCode;
-                    const isDimmed = hasSelection && !isHighlighted;
+                {/* items-end on mobile: pushes team icons to the outer/right
+                    edge of the screen (away from the canvas gutter), same
+                    treatment used on the auction results page, so the lines
+                    get the full middle width to fan out into. */}
+                <div className="flex flex-col items-end sm:items-stretch gap-2 sm:gap-0 sm:space-y-3">
+                  {flowTeams.length === 0 ? (
+                    <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
+                      No teams assigned to this board yet.
+                    </p>
+                  ) : (
+                    flowTeams.map((t) => {
+                      const isHighlighted = activeTeam === t.shortCode;
+                      const isDimmed = hasSelection && !isHighlighted;
 
-                    return (
-                      <FlowTeamCard
-                        key={t.id}
-                        id={t.id}
-                        name={t.name}
-                        shortCode={t.shortCode}
-                        logoUrl={t.logoUrl}
-                        purseLabel={t.purse}
-                        isHighlighted={isHighlighted}
-                        isDimmed={isDimmed}
-                        onClick={() => toggleTeam(t)}
-                      />
-                    );
-                  })
-                )}
+                      return (
+                        <FlowTeamCard
+                          key={t.id}
+                          id={t.id}
+                          name={t.name}
+                          shortCode={t.shortCode}
+                          logoUrl={t.logoUrl}
+                          purseLabel={t.purse}
+                          isHighlighted={isHighlighted}
+                          isDimmed={isDimmed}
+                          onClick={() => toggleTeam(t)}
+                        />
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </aside>
           </div>

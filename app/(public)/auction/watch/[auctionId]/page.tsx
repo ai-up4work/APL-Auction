@@ -1,1286 +1,1172 @@
+// app/watch/[auctionId]/page.tsx
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
-import { Gavel, XCircle, TrendingUp, Radio, Shuffle, Megaphone, Pause, Play, PartyPopper, RotateCcw, MousePointerClick } from "lucide-react";
-import { demoOrchestrator } from "@/lib/demo/demoOrchestrator";
-import { demoInteractiveController } from "@/lib/demo/demoInteractiveController";
-import { demoModel, getDemoSnapshot, type DemoLot } from "@/lib/demo/demoModel";
-import { DesktopFrame, MobileFrame } from "@/components/demo/DeviceFrames";
-import DemoAuctioneerPage from "@/components/demo/DemoAuctioneerPage";
-import DemoOwnerBidPage from "@/components/demo/DemoOwnerBidPage";
-import DemoWatchPage from "@/components/demo/DemoWatchPage";
+import React, { use, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { FlowCanvas } from "@/components/FlowCanvas";
+import { AUCTION_CONFIG } from "./data";
+import { ShuffleOverlay } from "@/components/ShuffleOverlay";
+import { AuctionProvider, useAuction } from "@/context/AuctionContext";
+import { ShotClockProvider, useShotClock } from "@/context/ShotClockContext";
+import {
+  AuctionStatusOverlay,
+  CompletedContent,
+  type AuctionStatus,
+  type AuctionStats,
+} from "@/components/AuctionStatusOverlay";
+import {
+  loadLiveState,
+  subscribeToLot,
+  subscribeToBids,
+  subscribeToTeamPurses,
+  subscribeToPlayers,
+  getNextBidAmount,
+  completeLotReveal,
+  type AuctionLot,
+  type BidEntry,
+} from "@/lib/auctionLiveDb";
+import { ensureTeamPurses, shuffleArray, fmtPts, type TeamPurse } from "@/lib/auctionLiveUtils";
+import type { Player } from "@/types/auction";
+import Image from 'next/image';
 
-type PanelKey = "auctioneer" | "watch" | "ownerA" | "ownerB";
-const DESKTOP: PanelKey[] = ["auctioneer", "watch"];
-const MOBILE: PanelKey[] = ["ownerA", "ownerB"];
-const PANEL_ORDER: PanelKey[] = ["auctioneer", "watch", "ownerA", "ownerB"];
 
-// Watch is spectator-only in every mode — nothing to click there, so it's
-// excluded from the clickable-chip behavior even in interactive mode.
-const CONTROLLABLE: PanelKey[] = ["auctioneer", "ownerA", "ownerB"];
+type FlowPlayer = (typeof AUCTION_CONFIG.players)[number];
+type FlowTeam   = (typeof AUCTION_CONFIG.teams)[number];
 
-const OWNER_DISPLAY_NAME: Record<"ownerA" | "ownerB", string> = {
-  ownerA: "Owner A",
-  ownerB: "Owner B",
-};
-
-const DESKTOP_W = 1350;
-const DESKTOP_H = 800;
-const DESKTOP_CHROME_H = 26;
-const MOBILE_W = 400;
-const MOBILE_H = 750;
-const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
-
-// Below this real viewport width we switch from the side-by-side
-// multiview row (needs ~1350px+ for the desktop frame alone) to a
-// stacked layout that actually fits a phone screen. This is about the
-// visitor's own device, not the DESKTOP/MOBILE panel-frame groupings
-// above — those are simulated device chrome inside the page.
-const MOBILE_LAYOUT_BREAKPOINT = 768;
-
-const PANEL_META: Record<PanelKey, { num: string; label: string }> = {
-  auctioneer: { num: "01", label: "Auctioneer" },
-  watch: { num: "02", label: "Broadcast" },
-  ownerA: { num: "03", label: "Owner A" },
-  ownerB: { num: "04", label: "Owner B" },
-};
-
-function computeLayout(highlighted: PanelKey[]): Record<PanelKey, number> {
-  const base: Record<PanelKey, number> = { auctioneer: 0, watch: 0, ownerA: 0, ownerB: 0 };
-  const desktopHi = highlighted.filter((p) => DESKTOP.includes(p));
-  const mobileHi = highlighted.filter((p) => MOBILE.includes(p));
-
-  if (desktopHi.length === 0 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
-  if (desktopHi.length === 1 && mobileHi.length === 0) return { ...base, [desktopHi[0]]: 75, ownerA: 25 };
-  if (desktopHi.length === 1 && mobileHi.length === 1) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 25 };
-  if (desktopHi.length === 1 && mobileHi.length === 2) return { ...base, [desktopHi[0]]: 75, [mobileHi[0]]: 12.5, [mobileHi[1]]: 12.5 };
-  if (desktopHi.length === 0 && mobileHi.length === 2) return { ...base, [mobileHi[0]]: 50, [mobileHi[1]]: 50 };
-  if (desktopHi.length === 0 && mobileHi.length === 1) return { ...base, [mobileHi[0]]: 25, watch: 75 };
-  if (desktopHi.length === 2 && mobileHi.length === 0) return { ...base, auctioneer: 50, watch: 50 };
-  if (desktopHi.length === 2 && mobileHi.length === 1) return { ...base, auctioneer: 37.5, watch: 37.5, [mobileHi[0]]: 25 };
-  if (desktopHi.length === 2 && mobileHi.length === 2) return { ...base, auctioneer: 25, watch: 25, ownerA: 25, ownerB: 25 };
-
-  return { ...base, auctioneer: 50, watch: 50 };
+function buildFlowPlayer(overrides: {
+  id: string; name: string; img: string | null; price: string;
+  status: FlowPlayer["status"]; teamShortCode?: string | null;
+}): FlowPlayer {
+  return { ...AUCTION_CONFIG.players[0], ...overrides } as FlowPlayer;
 }
 
-function useCellFit(naturalWidth: number, naturalHeight: number, fit: "contain" | "height" = "contain") {
-  const [scale, setScale] = useState(0);
-  const [ready, setReady] = useState(false);
-  const nodeRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
+function buildFlowTeam(overrides: {
+  id: string; name: string; shortCode: string; logoUrl: string; purse: string;
+}): FlowTeam {
+  return { ...AUCTION_CONFIG.teams[0], ...overrides } as FlowTeam;
+}
 
-  const recompute = useCallback(() => {
-    const el = nodeRef.current;
-    if (!el) return;
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    if (cw < 2 || ch < 2) return;
-    const widthRatio = cw / naturalWidth;
-    const heightRatio = ch / naturalHeight;
-    const raw = fit === "height" ? heightRatio : Math.min(widthRatio, heightRatio);
-    const s = raw * 0.998;
-    setScale(Math.max(s, 0.05));
-    setReady(true);
-  }, [naturalWidth, naturalHeight, fit]);
+// ─────────────────────────────────────────────────────────────────────────────
+// INNER CONTENT
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      nodeRef.current = el;
-      if (el) {
-        recompute();
-        const ro = new ResizeObserver(recompute);
-        ro.observe(el);
-        observerRef.current = ro;
+function ScreenContent({ auctionId }: { auctionId: string }) {
+  const { auction, loadFromDb }                                        = useAuction();
+  const { shotClock, isLocked, resetClock, freezeClock, pauseClock }  = useShotClock();
+
+  const [loadingLive, setLoadingLive]           = useState(true);
+  const [teamPurses, setTeamPurses]             = useState<Record<string, TeamPurse>>({});
+  const [currentLot, setCurrentLot]             = useState<AuctionLot | null>(null);
+  const [bidHistory, setBidHistory]             = useState<BidEntry[]>([]);
+  const [completedLots, setCompletedLots]       = useState<AuctionLot[]>([]);
+  const [lotNumber, setLotNumber]               = useState(0);
+
+  // ── Player flags (is_unsold / is_unsold_final / reentry_count) ───────────
+  // Kept live-synced via subscribeToPlayers so re-entry rounds (which never
+  // create a new lot row) still reflect on the watch screen without a reload.
+  const [playerFlags, setPlayerFlags] = useState<
+    Record<string, { isUnsold: boolean; isUnsoldFinal: boolean; reentryCount: number }>
+  >({});
+
+  // ── Auction-level status (realtime) ───────────────────────────────────────
+  // NOTE: The realtime subscription for status changes lives ONLY inside
+  // <AuctionStatusOverlay> below. We must not call useAuctionStatus() again
+  // here — both calls would build a channel with the same topic string
+  // (`auction-status:${auctionId}`), and Supabase's client dedupes channels
+  // by topic. The second call's .on() would then be registered on an
+  // already-subscribed channel, which throws:
+  // "cannot add postgres_changes callbacks ... after subscribe()".
+  // This local state is kept in sync purely via the onStatusChange callback
+  // passed to <AuctionStatusOverlay />.
+  const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(
+    (auction?.status as AuctionStatus) ?? "live"
+  );
+  useEffect(() => {
+    if (auction?.status) setAuctionStatus(auction.status as AuctionStatus);
+  }, [auction?.status]);
+
+  const [isSold, setIsSold]                     = useState(false);
+  const [isUnsold, setIsUnsold]                 = useState(false);
+  const [bidPulse, setBidPulse]                 = useState(true);
+  const [flashOverlay, setFlashOverlay]         = useState(false);
+  const [showLeaderboard, setShowLeaderboard]   = useState(false);
+
+  const [isShuffling, setIsShuffling]           = useState(false);
+  const [shuffleTarget, setShuffleTarget]       = useState<FlowPlayer | null>(null);
+  const [shuffleIndex, setShuffleIndex]         = useState(0);
+  const [shufflePool, setShufflePool]           = useState<FlowPlayer[]>([]);
+
+  const [activeView, setActiveView]             = useState<"live" | "flow">("live");
+  const [flowActivePlayer, setFlowActivePlayer] = useState<string | null>(null);
+  const [flowActiveTeam, setFlowActiveTeam]     = useState<string | null>(null);
+
+  const playerListRef    = useRef<HTMLDivElement>(null);
+  const teamListRef      = useRef<HTMLDivElement>(null);
+  const revealedLotIdRef = useRef<string | null>(null);
+
+  const leaderboardTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flashTimeout     = useRef<ReturnType<typeof setTimeout>  | null>(null);
+
+  const auctionRef       = useRef(auction);
+  const currentLotRef    = useRef(currentLot);
+  const completedLotsRef = useRef(completedLots);
+  const playerFlagsRef   = useRef(playerFlags);
+  useEffect(() => { auctionRef.current       = auction;          }, [auction]);
+  useEffect(() => { currentLotRef.current    = currentLot;       }, [currentLot]);
+  useEffect(() => { completedLotsRef.current = completedLots;    }, [completedLots]);
+  useEffect(() => { playerFlagsRef.current   = playerFlags;      }, [playerFlags]);
+
+  const isShufflingRef = useRef(isShuffling);
+  useEffect(() => { isShufflingRef.current = isShuffling; }, [isShuffling]);
+
+  // Hydrate context
+  useEffect(() => {
+    if (!auction?.auctionId || auction.auctionId !== auctionId) {
+      loadFromDb(auctionId).catch(console.error);
+    }
+  }, [auctionId, auction?.auctionId, loadFromDb]);
+
+  // Load live state once context ready
+  useEffect(() => {
+    if (!auction?.auctionId) return;
+
+    async function init() {
+      const purses = await ensureTeamPurses(
+        auctionId,
+        auction.teams,
+        auction.rules.totalPoints
+      );
+      setTeamPurses(purses);
+
+      const liveData = await loadLiveState(auctionId);
+      setBidHistory(liveData.bidHistory);
+      setCompletedLots(liveData.completedLots);
+      setLotNumber(liveData.lotNumber);
+
+      if (liveData.currentLot?.status === "sold") {
+        setCurrentLot(liveData.currentLot);
+        setIsSold(true);
+        freezeClock();
+      } else if (liveData.currentLot?.status === "unsold") {
+        setCurrentLot(liveData.currentLot);
+        setIsUnsold(true);
+        freezeClock();
+      } else if (liveData.currentLot?.status === "shuffling") {
+        setCurrentLot(null);
+        pauseClock();
+      } else if (liveData.currentLot) {
+        setCurrentLot(liveData.currentLot);
+        const anchor = liveData.bidHistory[0]?.placedAt ?? liveData.currentLot.startedAt!;
+        resetClock(anchor);
       } else {
-        setReady(false);
+        pauseClock();
       }
-    },
-    [recompute]
-  );
 
+      setLoadingLive(false);
+    }
+
+    init().catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auction?.auctionId]);
+
+  // Purse realtime
   useEffect(() => {
-    window.addEventListener("resize", recompute);
-    const raf1 = requestAnimationFrame(() => {
-      recompute();
-      requestAnimationFrame(recompute);
+    if (!auction?.auctionId) return;
+    const sub = subscribeToTeamPurses(auctionId, (teamId, remaining, roster) => {
+      setTeamPurses((prev) => ({ ...prev, [teamId]: { remaining, roster } }));
     });
-    return () => {
-      window.removeEventListener("resize", recompute);
-      cancelAnimationFrame(raf1);
-    };
-  }, [recompute]);
+    return () => { sub.unsubscribe(); };
+  }, [auctionId, auction?.auctionId]);
 
-  useEffect(() => () => observerRef.current?.disconnect(), []);
-
-  return { ref: setRef, scale, ready, boxW: naturalWidth * scale, boxH: naturalHeight * scale };
-}
-
-// Tracks the real browser viewport (not the simulated device frames) so
-// the page can swap the horizontal multiview row for a stacked layout
-// that actually fits on a phone. SSR-safe: starts false, syncs on mount.
-function useIsMobileViewport(breakpoint = MOBILE_LAYOUT_BREAKPOINT) {
-  const [isMobile, setIsMobile] = useState(false);
+  // ── Player flags: seed from loaded auction, then keep live-synced ────────
+  useEffect(() => {
+    if (!auction) return;
+    setPlayerFlags((prev) => {
+      const next = { ...prev };
+      auction.players.forEach((p) => {
+        const id = p.supabaseId;
+        if (!id || next[id]) return;
+        next[id] = {
+          isUnsold:      false,
+          isUnsoldFinal: p.isUnsoldFinal ?? false,
+          reentryCount:  p.reentryCount ?? 0,
+        };
+      });
+      return next;
+    });
+  }, [auction]);
 
   useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const update = () => setIsMobile(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, [breakpoint]);
+    if (!auction?.auctionId) return;
+    const sub = subscribeToPlayers(auctionId, (p) => {
+      setPlayerFlags((prev) => ({
+        ...prev,
+        [p.id]: { isUnsold: p.isUnsold, isUnsoldFinal: p.isUnsoldFinal, reentryCount: p.reentryCount },
+      }));
+    });
+    return () => { sub.unsubscribe(); };
+  }, [auctionId, auction?.auctionId]);
 
-  return isMobile;
-}
-
-function useSpotlight() {
-  const snap = useSyncExternalStore(
-    demoModel.subscribe.bind(demoModel),
-    getDemoSnapshot,
-    getDemoSnapshot
-  );
-  return {
-    activePanels: snap.activePanels as PanelKey[],
-    syncPanels: snap.syncPanels as PanelKey[],
-    mode: snap.mode,
-    autoFocusEnabled: snap.autoFocusEnabled,
-    teams: snap.auction.teams,
-    currentLot: snap.currentLot,
-    shuffle: snap.shuffle,
-    isLocked: snap.isLocked,
-    narratorText: snap.narratorText,
-    auctionStatus: snap.auction.status,
-    completedLots: snap.completedLots as DemoLot[],
-    finalizedUnsoldCount: snap.finalizedUnsoldPlayers.length,
-  };
-}
-
-// ── Live commentary ──────────────────────────────────────────────────
-// Two lines: the model's own narrator caption (what just happened — the
-// same text broadcastEvent() sets on every bid/sold/unsold/shuffle), and
-// a second, mode-aware line describing what the viewer can actually do
-// right now. The "what's next" line is worded differently for demo
-// (nothing to do but watch) vs interactive (here's your actual button).
-// Suppressed entirely once the auction is complete — the completion
-// overlay takes over messaging at that point.
-function getGuidance(
-  mode: "demo" | "interactive",
-  lot: ReturnType<typeof useSpotlight>["currentLot"],
-  shuffle: ReturnType<typeof useSpotlight>["shuffle"],
-  isLocked: boolean,
-  auctionStatus: "live" | "paused" | "completed"
-): string {
-  if (auctionStatus === "completed") return "";
-  if (mode === "demo") {
-    return "Watching the bot run the auction — switch to \"Try it yourself\" to take the controls.";
-  }
-  if (!lot || lot.status === "sold" || lot.status === "unsold") {
-    return "Lot resolved. Auctioneer: click Start Shuffle to bring up the next player.";
-  }
-  if (lot.status === "shuffling" && !shuffle.target) {
-    return "Reel is spinning — nothing to do yet, the next player is about to be revealed.";
-  }
-  if (lot.status === "shuffling" && shuffle.target) {
-    return "Player revealed — bidding opens in a moment.";
-  }
-  if (lot.status === "pending" && !isLocked) {
-    return "Bidding is open. Owner A / Owner B: place a bid from your phone to raise it — every bid resets the clock.";
-  }
-  if (lot.status === "pending" && isLocked) {
-    return lot.winningTeamId
-      ? "Time's up. Auctioneer: click Hammer Sold to confirm the winner (or it resolves on its own in a moment)."
-      : "Time's up with no bids. Auctioneer: click Mark Unsold (or it resolves on its own in a moment).";
-  }
-  return "";
-}
-
-// Classifies the narrator caption so the chyron can color/tag itself by
-// event type — the accent + tag alone should tell you what happened
-// before you've even read the words. Order matters: "unsold" must be
-// checked before the generic "sold" test since "unsold" contains "sold".
-type CommentaryKind = "sold" | "unsold" | "bid" | "reveal" | "shuffle" | "info";
-
-function classifyNarrator(text: string): { kind: CommentaryKind; accent: string; tag: string } {
-  if (/unsold/i.test(text)) return { kind: "unsold", accent: "#e5484d", tag: "UNSOLD" };
-  if (/\bsold\b/i.test(text)) return { kind: "sold", accent: "#3ddc84", tag: "SOLD" };
-  if (/\bbids?\b|\bpts\b/i.test(text)) return { kind: "bid", accent: "#f5a623", tag: "BID" };
-  if (/bidding is open|steps up/i.test(text)) return { kind: "reveal", accent: "#4fd1c5", tag: "ON THE BLOCK" };
-  if (/shuffl/i.test(text)) return { kind: "shuffle", accent: "#8b8bf5", tag: "SHUFFLE" };
-  return { kind: "info", accent: "#f5a623", tag: "LIVE" };
-}
-
-// Broadcast-style chyron / lower-third, not a chat toast. A left accent
-// rule + a small mono event tag stand in for an icon badge, keeping the
-// same "glanceable event type" job without reading as generic notification
-// UI. Floating overlay, not docked — pinned centered under the toolbar so
-// it never steals layout space from the panels underneath. pointer-events:
-// none on the wrapper keeps it from ever blocking a click on what's behind
-// it. Keyed by narratorText so React remounts the chyron on every new
-// caption, replaying the entrance animation each time — a rapid string of
-// bids each get their own visible "pop" instead of the text silently
-// swapping in place.
-function CommentaryOverlay({
-  narratorText,
-  guidance,
-}: {
-  narratorText: string;
-  guidance: string;
-}) {
-  if (!narratorText && !guidance) return null;
-  const { accent, tag } = classifyNarrator(narratorText || guidance);
-  return (
-    <div className="pointer-events-none fixed top-12 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-0 max-w-[640px] w-[92%]">
-      {narratorText && (
-        <div
-          key={narratorText}
-          className="commentary-toast flex items-stretch overflow-hidden rounded-[3px]"
-          style={{
-            background: "rgba(8,8,8,0.88)",
-            backdropFilter: "blur(10px)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            boxShadow: "0 12px 30px -10px rgba(0,0,0,0.6)",
-          }}
-        >
-          {/* Left accent rule — doubles as the event's color key, in place
-              of an icon badge. */}
-          <span className="shrink-0" style={{ width: 3, background: accent }} />
-
-          <div className="flex items-center gap-3 pl-3.5 pr-4 py-2.5">
-            <span
-              className="shrink-0 text-[9px] uppercase font-bold"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                letterSpacing: "0.14em",
-                color: accent,
-              }}
-            >
-              {tag}
-            </span>
-            <span className="w-px self-stretch bg-white/10" />
-            <span
-              className="text-[13px] leading-snug"
-              style={{
-                fontFamily: "var(--font-headline-lg)",
-                fontStyle: "italic",
-                fontWeight: 700,
-                color: "var(--color-on-surface)",
-              }}
-            >
-              {narratorText}
-            </span>
-          </div>
-        </div>
-      )}
-      {guidance && (
-        <div
-          className="px-4 py-1 text-[9px] uppercase text-center"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.1em",
-            background: "rgba(6,6,6,0.7)",
-            borderLeft: "1px solid rgba(255,255,255,0.06)",
-            borderRight: "1px solid rgba(255,255,255,0.06)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: "0 0 3px 3px",
-            color: "var(--color-outline)",
-            backdropFilter: "blur(6px)",
-          }}
-        >
-          {guidance}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// In demo/automation mode, events (bid, reveal, sold, shuffle...) can fire
-// faster than a person can read the caption for the previous one — the
-// overlay is keyed by narratorText, so a same-render replacement just
-// stomps the old text before its entrance animation even finishes. This
-// queues incoming values and holds each on screen for a minimum dwell
-// time, draining the queue in order, so a fast burst plays back as a
-// readable sequence instead of flashing/skipping captions.
-function useThrottledNarrator(source: string, minDisplayMs = 1400) {
-  const [shown, setShown] = useState(source);
-  const queueRef = useRef<string[]>([]);
-  const shownRef = useRef(source);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleNext = useCallback(() => {
-    if (timerRef.current) return; // a hold is already in progress
-    const next = queueRef.current.shift();
-    if (next === undefined) return;
-    shownRef.current = next;
-    setShown(next);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      scheduleNext();
-    }, minDisplayMs);
-  }, [minDisplayMs]);
-
-  useEffect(() => {
-    if (!source) return;
-    const alreadyQueued = queueRef.current[queueRef.current.length - 1] === source;
-    if (source !== shownRef.current && !alreadyQueued) {
-      queueRef.current.push(source);
-      scheduleNext();
-    }
-  }, [source, scheduleNext]);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    []
-  );
-
-  return shown;
-}
-
-function useTimecode() {
-  const [deci, setDeci] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setDeci((d) => d + 1), 100);
-    return () => clearInterval(id);
+  // ── Compute the live shuffle candidate pool fresh every time ─────────────
+  // Replaces the old static `remainingPlayers` state, which never picked up
+  // players requeued by a re-entry round (those don't create a new lot row,
+  // so nothing ever re-added them to a stale "remaining" list).
+  const getQueueCandidates = useCallback((): Player[] => {
+    const auc = auctionRef.current;
+    if (!auc) return [];
+    const soldIds = new Set(
+      completedLotsRef.current.filter((l) => l.status === "sold").map((l) => l.playerId)
+    );
+    const activeId = currentLotRef.current?.playerId;
+    return auc.players.filter((p) => {
+      const supId = p.supabaseId ?? "";
+      if (!supId) return false;
+      if (soldIds.has(supId)) return false;
+      if (activeId && supId === activeId) return false;
+      const flags = playerFlagsRef.current[supId];
+      if (flags?.isUnsoldFinal) return false; // permanently out — never a candidate
+      return true;
+    });
   }, []);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const totalSec = Math.floor(deci / 10);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor(totalSec / 60) % 60;
-  const s = totalSec % 60;
-  const cs = (deci % 10) * 10;
-  return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(cs)}`;
-}
 
-function Cell({ pct, ready, isSyncing, children }: { pct: number; ready: boolean; isSyncing: boolean; children: React.ReactNode }) {
-  const visible = pct > 0 && ready;
-  return (
-    <div
-      className={`min-w-0 h-full flex items-center justify-center overflow-hidden ${isSyncing ? "panel-sync-ring" : ""}`}
-      style={{
-        flex: `0 0 ${pct}%`,
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? "auto" : "none",
-        transition: `flex-basis ${ZOOM_TRANSITION}, opacity ${ZOOM_TRANSITION}`,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+  // Shuffle animation
+  const triggerShuffleAndReveal = useCallback((lot: AuctionLot) => {
+    setIsShuffling(true);
+    setIsSold(false);
+    setIsUnsold(false);
+    setBidHistory([]);
+    setShuffleTarget(null);
 
-// Right-edge vertical stepper for the two owner panels — two nodes joined
-// by a connecting line, each colored to its team. Doubles as a mini legend
-// as well as the switch control. Only relevant in interactive mode, and
-// only while at least one owner panel is part of the current spotlight —
-// during shuffle/sold/unsold beats (auctioneer + watch only) there's
-// nothing to switch to yet, so it stays hidden rather than dangling
-// irrelevant.
-function OwnerDotSwitcher({
-  mode,
-  active,
-  teams,
-  onSelect,
-}: {
-  mode: "demo" | "interactive";
-  active: PanelKey[];
-  teams: { supabaseId: string; code: string; name: string; color: string }[];
-  onSelect: (owner: "ownerA" | "ownerB") => void;
-}) {
-  const hasA = active.includes("ownerA");
-  const hasB = active.includes("ownerB");
-  if (mode !== "interactive" || (!hasA && !hasB)) return null;
+    const candidates = getQueueCandidates();
 
-  const teamFor = (owner: "ownerA" | "ownerB") =>
-    teams.find((t) => t.supabaseId === (owner === "ownerA" ? "tA" : "tB"));
+    const rawPool: FlowPlayer[] = candidates.map((p) =>
+      buildFlowPlayer({
+        id:     p.supabaseId ?? String(p.id),
+        name:   p.name,
+        img:    p.img,
+        price:  `${p.price.toLocaleString()} PTS`,
+        status: "locked",
+      })
+    );
 
-  const colorA = teamFor("ownerA")?.color ?? "var(--color-outline)";
-  const colorB = teamFor("ownerB")?.color ?? "var(--color-outline)";
-  const activeColor = hasA ? colorA : colorB;
+    const targetFlow = buildFlowPlayer({
+      id:     lot.playerId,
+      name:   lot.playerName,
+      img:    lot.playerImg,
+      price:  `${lot.basePrice.toLocaleString()} PTS`,
+      status: "pending",
+    });
 
-  return (
-    <div
-      className="fixed right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center"
-      style={{
-        background: "rgba(10,10,10,0.6)",
-        border: "1px solid var(--color-border-overlay)",
-        borderRadius: 999,
-        padding: "18px 11px",
-        backdropFilter: "blur(6px)",
-      }}
-    >
-      {(["ownerA", "ownerB"] as const).map((owner, i) => {
-        const isActive = active.includes(owner);
-        const team = teamFor(owner);
-        const color = team?.color ?? "var(--color-outline)";
-        return (
-          <div key={owner} className="flex flex-col items-center">
-            <button
-              onClick={() => onSelect(owner)}
-              title={team?.name ?? OWNER_DISPLAY_NAME[owner]}
-              className="group relative flex items-center justify-center"
-              style={{ cursor: isActive ? "default" : "pointer", width: 26, height: 26 }}
-            >
-              <span
-                className="absolute right-full mr-2.5 px-1.5 py-0.5 rounded text-[8px] uppercase whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                style={{
-                  fontFamily: "var(--font-label-mono)",
-                  letterSpacing: "0.08em",
-                  background: "rgba(10,10,10,0.9)",
-                  border: `1px solid color-mix(in srgb, ${color} 50%, transparent)`,
-                  color: "var(--color-on-surface)",
-                }}
-              >
-                {team?.name ?? OWNER_DISPLAY_NAME[owner]}
-              </span>
-              {/* Outer ring only lights up on the active step, like a
-                  progress-stepper node. */}
-              <span
-                className="absolute rounded-full transition-all"
-                style={{
-                  width: isActive ? 26 : 0,
-                  height: isActive ? 26 : 0,
-                  border: `1.5px solid ${color}`,
-                  opacity: isActive ? 0.5 : 0,
-                }}
-              />
-              <span
-                className="rounded-full transition-all"
-                style={{
-                  width: isActive ? 15 : 8,
-                  height: isActive ? 15 : 8,
-                  background: color,
-                  boxShadow: isActive
-                    ? `0 0 10px 1px color-mix(in srgb, ${color} 70%, transparent)`
-                    : "none",
-                  border: isActive ? "none" : `1px solid color-mix(in srgb, ${color} 55%, transparent)`,
-                }}
-              />
-            </button>
-            {/* Connecting rail between the two steps. */}
-            {i === 0 && (
-              <span
-                className="w-px"
-                style={{
-                  height: 22,
-                  margin: "6px 0",
-                  background: `linear-gradient(180deg, ${colorA}, ${colorB})`,
-                  opacity: 0.35,
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
+    const poolWithoutTarget = rawPool.filter((p) => p.id !== targetFlow.id);
+    const shuffledPool      = shuffleArray(poolWithoutTarget);
+    const targetIndex       = Math.floor(Math.random() * (shuffledPool.length + 1));
+    shuffledPool.splice(targetIndex, 0, targetFlow);
 
-      <span
-        className="mt-2 text-[7px] uppercase"
-        style={{
-          fontFamily: "var(--font-label-mono)",
-          letterSpacing: "0.14em",
-          color: activeColor,
-          opacity: 0.85,
-        }}
-      >
-        {(hasA ? teamFor("ownerA")?.code : teamFor("ownerB")?.code) ?? ""}
-      </span>
-    </div>
-  );
-}
+    const finalPool = shuffledPool.length > 0 ? shuffledPool : [targetFlow];
+    setShufflePool(finalPool);
 
-// Compact "last result" readout for the header — most recent completed lot
-// (sold or unsold), color-coded the same way as the commentary chyron, plus
-// a running sold/unsold tally so the header still means something once the
-// caption itself has scrolled on to the next lot. Returns null with nothing
-// completed yet rather than showing an empty/placeholder chip.
-function ResultChip({ completedLots }: { completedLots: DemoLot[] }) {
-  const last = completedLots[0];
-  if (!last) return null;
+    let delay      = 30;
+    const maxDelay = 380;
+    let idx        = Math.floor(Math.random() * finalPool.length);
+    let elapsed    = 0;
+    const SPIN_DURATION = 2200;
 
-  const soldCount = completedLots.filter((l) => l.status === "sold").length;
-  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
-  const isSold = last.status === "sold";
-  const accent = isSold ? "#3ddc84" : "#e5484d";
-
-  return (
-    <div
-      className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px]"
-      style={{
-        background: "rgba(0,0,0,0.22)",
-        border: `1px solid color-mix(in srgb, ${accent} 35%, var(--color-border-overlay))`,
-      }}
-      title={
-        isSold
-          ? `${last.playerName} sold to ${last.winningTeamCode} for ${last.currentBid.toLocaleString()} pts`
-          : `${last.playerName} went unsold`
+    function spin() {
+      idx = (idx + 1) % finalPool.length;
+      setShuffleIndex(idx);
+      elapsed += delay;
+      if (elapsed < SPIN_DURATION) {
+        delay = Math.min(delay * 1.12, maxDelay);
+        setTimeout(spin, delay);
+      } else {
+        setShuffleIndex(targetIndex);
+        setShuffleTarget(targetFlow);
+        setTimeout(async () => {
+          setIsShuffling(false);
+          setShuffleTarget(null);
+          setLotNumber(lot.lotNumber);
+          try {
+            const revealed = await completeLotReveal(lot.id);
+            revealedLotIdRef.current = revealed.id;
+            setCurrentLot(revealed);
+            resetClock(revealed.startedAt!);
+          } catch (err) {
+            console.error("[watch] completeLotReveal failed:", err);
+            setCurrentLot(lot);
+            resetClock();
+          }
+        }, 900);
       }
-    >
-      <span
-        className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-[2px]"
-        style={{
-          fontFamily: "var(--font-label-mono)",
-          letterSpacing: "0.1em",
-          color: "#08110c",
-          background: accent,
-        }}
-      >
-        {isSold ? "Sold" : "Unsold"}
-      </span>
-      <span
-        className="text-[10px] max-w-[220px] truncate"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface)" }}
-      >
-        {isSold ? `${last.playerName} → ${last.winningTeamCode} · ${last.currentBid.toLocaleString()} pts` : last.playerName}
-      </span>
-      <span
-        className="text-[8px] tabular-nums shrink-0"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)", letterSpacing: "0.05em" }}
-      >
-        {soldCount}S / {unsoldCount}U
-      </span>
-    </div>
-  );
-}
+    }
+    spin();
+  }, [resetClock, getQueueCandidates]);
 
-function MultiviewBar({
-  active,
-  syncing,
-  mode,
-  autoFocusEnabled,
-  auctionStatus,
-  completedLots,
-  onToggleMode,
-  onTogglePause,
-}: {
-  active: PanelKey[];
-  syncing: PanelKey[];
-  mode: "demo" | "interactive";
-  autoFocusEnabled: boolean;
-  auctionStatus: "live" | "paused" | "completed";
-  completedLots: DemoLot[];
-  onToggleMode: () => void;
-  onTogglePause: () => void;
-}) {
-  const tc = useTimecode();
-  return (
-    <div
-      className="shrink-0 h-11 flex items-center justify-between px-4 relative z-20"
-      style={{
-        background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
-        borderBottom: "1px solid var(--color-border-overlay)",
-        boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
-      }}
-    >
-      {/* ── Left: on-air badge + timecode ─────────────────────────── */}
-      <div className="flex items-center gap-4">
-        <div
-          className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
-          style={{
-            background: "color-mix(in srgb, #e5484d 14%, transparent)",
-            border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
-          }}
-        >
-          <span
-            className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
-            style={{ animation: "feedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
-          />
-          <span
-            className="text-[9px] font-bold uppercase"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
-          >
-            On Air
-          </span>
-        </div>
-
-        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
-
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[8px] uppercase"
-            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.22em", color: "var(--color-outline)" }}
-          >
-            Multiview
-          </span>
-          <span
-            className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px]"
-            style={{
-              fontFamily: "var(--font-headline-lg)",
-              fontStyle: "italic",
-              fontWeight: 700,
-              color: "var(--color-theme-orange)",
-              letterSpacing: "0.03em",
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid var(--color-border-overlay)",
-            }}
-          >
-            {tc}
-          </span>
-        </div>
-
-        <button
-          onClick={onTogglePause}
-          disabled={auctionStatus === "completed"}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            letterSpacing: "0.08em",
-            background: auctionStatus === "paused"
-              ? "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)"
-              : "rgba(255,255,255,0.03)",
-            border: `1px solid ${
-              auctionStatus === "paused"
-                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
-                : "var(--color-border-overlay)"
-            }`,
-            color: auctionStatus === "paused" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
-            cursor: "pointer",
-          }}
-        >
-          {auctionStatus === "paused" ? <Play size={11} /> : <Pause size={11} />}
-          <span className="text-[8px] uppercase">{auctionStatus === "paused" ? "Resume" : "Pause"}</span>
-        </button>
-
-        <ResultChip completedLots={completedLots} />
-
-        {mode === "interactive" && !autoFocusEnabled && auctionStatus !== "completed" && (
-          <button
-            onClick={() => demoModel.resumeAutoFocus()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[8px] uppercase transition-colors hover:brightness-110"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              letterSpacing: "0.1em",
-              background: "color-mix(in srgb, var(--color-theme-orange) 15%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 40%, transparent)",
-              color: "var(--color-theme-orange)",
-              cursor: "pointer",
-            }}
-          >
-            <span className="w-1 h-1 rounded-full" style={{ background: "var(--color-theme-orange)" }} />
-            Resume auto-switch
-          </button>
-        )}
-      </div>
-
-      {/* ── Right: panel tally + mode switch ──────────────────────── */}
-      <div className="flex items-center gap-3">
-        <div
-          className="flex items-center gap-1 p-1 rounded-[4px]"
-          style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
-        >
-          {PANEL_ORDER.map((key) => {
-            const isLive = active.includes(key);
-            const isSync = syncing.includes(key);
-            const clickable = mode === "interactive" && CONTROLLABLE.includes(key) && auctionStatus !== "completed";
-            return (
-              <div
-                key={key}
-                onClick={clickable ? () => demoModel.toggleActivePanel(key) : undefined}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-[3px] transition-colors"
-                style={{
-                  background: isLive
-                    ? "color-mix(in srgb, var(--color-theme-orange) 16%, transparent)"
-                    : "transparent",
-                  boxShadow: isLive
-                    ? "inset 0 0 0 1px color-mix(in srgb, var(--color-theme-orange) 50%, transparent)"
-                    : "inset 0 0 0 1px transparent",
-                  animation: isSync ? "panel-sync-pulse 0.9s ease-out" : undefined,
-                  cursor: clickable ? "pointer" : "default",
-                }}
-              >
-                <span
-                  className="w-[6px] h-[6px] rounded-full shrink-0"
-                  style={{
-                    background: isLive ? "var(--color-theme-orange)" : "var(--color-outline)",
-                    boxShadow: isLive ? "0 0 5px 0.5px color-mix(in srgb, var(--color-theme-orange) 70%, transparent)" : "none",
-                    opacity: isLive ? 1 : 0.5,
-                  }}
-                />
-                <span
-                  className="text-[8px] uppercase tabular-nums"
-                  style={{
-                    fontFamily: "var(--font-label-mono)",
-                    letterSpacing: "0.1em",
-                    color: isLive ? "var(--color-on-surface)" : "var(--color-outline)",
-                    fontWeight: isLive ? 700 : 400,
-                  }}
-                >
-                  {PANEL_META[key].num} {PANEL_META[key].label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
-
-        <button
-          onClick={onToggleMode}
-          className="group flex items-center gap-2 pl-1 pr-3 py-1 rounded-full transition-colors"
-          style={{
-            background: mode === "interactive"
-              ? "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)"
-              : "rgba(255,255,255,0.03)",
-            border: `1px solid ${
-              mode === "interactive"
-                ? "color-mix(in srgb, var(--color-theme-orange) 45%, transparent)"
-                : "var(--color-border-overlay)"
-            }`,
-            cursor: "pointer",
-          }}
-        >
-          <span
-            className="flex items-center justify-center rounded-full transition-transform"
-            style={{
-              width: 16,
-              height: 16,
-              background: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-outline)",
-            }}
-          >
-            <span
-              className="rounded-full bg-black/70"
-              style={{ width: 6, height: 6 }}
-            />
-          </span>
-          <span
-            className="text-[8px] uppercase"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              letterSpacing: "0.1em",
-              color: mode === "interactive" ? "var(--color-theme-orange)" : "var(--color-on-surface)",
-              fontWeight: 700,
-            }}
-          >
-            {mode === "demo" ? "Watching demo — Try it yourself" : "Playing — Watch demo"}
-          </span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Completion overlay ───────────────────────────────────────────────
-// Shown whenever auction.status === "completed", in EITHER mode — the
-// queue and the unsold pile are both empty, there's genuinely nothing
-// left to call. Rather than the model silently looping itself (demo
-// mode) or just sitting there inert (interactive mode), this asks the
-// person what they want to do next: hand them the controls, or watch
-// the whole showcase run again from a clean slate. Dims the panels
-// behind it but doesn't unmount them, so the final SOLD/UNSOLD stamp and
-// finished dashboards stay visible under the glass rather than flashing
-// to blank.
-function CompletionOverlay({
-  mode,
-  soldCount,
-  unsoldCount,
-  finalizedUnsoldCount,
-  onTryItYourself,
-  onRestart,
-}: {
-  mode: "demo" | "interactive";
-  soldCount: number;
-  unsoldCount: number;
-  finalizedUnsoldCount: number;
-  onTryItYourself: () => void;
-  onRestart: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(6,6,8,0.72)", backdropFilter: "blur(6px)" }}
-      />
-      <div
-        className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-8 flex flex-col gap-6"
-        style={{
-          background: "rgba(13,17,23,0.96)",
-          border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
-          boxShadow: "0 0 80px color-mix(in srgb, var(--color-theme-orange) 12%, transparent), 0 24px 64px rgba(0,0,0,0.6)",
-        }}
-      >
-        <div className="flex items-center justify-center">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center"
-            style={{
-              background: "color-mix(in srgb, var(--color-theme-orange) 12%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 30%, transparent)",
-            }}
-          >
-            <PartyPopper size={32} color="var(--color-theme-orange)" />
-          </div>
-        </div>
-
-        <div className="text-center space-y-2">
-          <h2
-            className="font-bold italic uppercase tracking-tight text-2xl"
-            style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}
-          >
-            Auction Complete
-          </h2>
-          <p
-            className="text-[11px] uppercase tracking-[0.12em] leading-relaxed"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-          >
-            Every lot has been called{unsoldCount > 0 || finalizedUnsoldCount > 0 ? " and re-entry rounds exhausted." : "."}
-          </p>
-        </div>
-
-        <div
-          className="grid grid-cols-3 gap-3 p-4 rounded-xl"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
-        >
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Sold</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#3ddc84" }}>{soldCount}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Unsold</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "#e5484d" }}>{unsoldCount}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[9px] uppercase tracking-[0.15em] mb-1" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}>Finalized</p>
-            <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-on-surface)" }}>{finalizedUnsoldCount}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {mode === "demo" && (
-            <button
-              onClick={onTryItYourself}
-              className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                background: "linear-gradient(135deg,#A87815,#E8C468)",
-                color: "#1a1304",
-              }}
-            >
-              <MousePointerClick size={14} />
-              Try It Yourself
-            </button>
-          )}
-          <button
-            onClick={onRestart}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
-            style={{
-              fontFamily: "var(--font-label-mono)",
-              background: mode === "demo" ? "rgba(255,255,255,0.05)" : "linear-gradient(135deg,#A87815,#E8C468)",
-              border: mode === "demo" ? "1px solid rgba(255,255,255,0.1)" : "none",
-              color: mode === "demo" ? "var(--color-on-surface)" : "#1a1304",
-            }}
-          >
-            <RotateCcw size={14} />
-            {mode === "demo" ? "Restart Demo" : "Restart Auction"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Mobile (real viewport) layout ────────────────────────────────────
-// Below MOBILE_LAYOUT_BREAKPOINT the side-by-side row simply doesn't
-// fit — the desktop-frame panel alone wants 1350px. Instead we stack
-// vertically: Auctioneer always anchors the top half. The bottom half
-// shows Watch by default, and swaps to whichever owner bid page(s) are
-// currently spotlighted — one full-width, or both side-by-side if two
-// owners are active at once, since a phone-width column comfortably
-// fits two half-width phone frames.
-function MobilePanelSlot({
-  cellRef,
-  w,
-  h,
-  ready,
-  isSyncing,
-  align = "center",
-  children,
-}: {
-  cellRef: (el: HTMLDivElement | null) => void;
-  w: number;
-  h: number;
-  ready: boolean;
-  isSyncing: boolean;
-  // Cross-axis (vertical) alignment of the scaled frame within its slot.
-  // "center" is the normal case (owner bid pages). For the Auctioneer /
-  // Watch pairing we use "end" on top and "start" on bottom so the two
-  // frames pull toward the shared middle seam instead of each centering
-  // independently within its own half — that's what closes the gap
-  // between them and makes the pair read as one centered group.
-  align?: "start" | "center" | "end";
-  children: React.ReactNode;
-}) {
-  const alignItems = align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center";
-  return (
-    <div
-      className={`min-w-0 min-h-0 h-full w-full flex justify-center overflow-hidden ${
-        isSyncing ? "panel-sync-ring" : ""
-      }`}
-      style={{
-        alignItems,
-        opacity: ready ? 1 : 0,
-        transition: `opacity ${ZOOM_TRANSITION}`,
-      }}
-    >
-      <div ref={cellRef} className="w-full h-full flex overflow-hidden" style={{ alignItems, justifyContent: "center" }}>
-        <div
-          style={{ width: w, height: h }}
-          className="overflow-hidden flex items-center justify-center shrink-0"
-        >
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MobileMultiview({
-  highlighted,
-  syncPanels,
-  frames,
-  cellRefs,
-  cellDims,
-  cellReady,
-}: {
-  highlighted: PanelKey[];
-  syncPanels: PanelKey[];
-  frames: Record<PanelKey, React.ReactNode>;
-  cellRefs: Record<PanelKey, (el: HTMLDivElement | null) => void>;
-  cellDims: Record<PanelKey, { w: number; h: number }>;
-  cellReady: Record<PanelKey, boolean>;
-}) {
-  const activeOwners = (["ownerA", "ownerB"] as const).filter((k) => highlighted.includes(k));
-  // As soon as it's "owner time" (either owner spotlighted), show BOTH bid
-  // pages side by side in the bottom half — the bottom half splits cleanly
-  // in two, so there's no reason to show just the one that happens to be
-  // highlighted upstream.
-  const showOwners = activeOwners.length > 0;
-  const OWNER_KEYS: readonly ("ownerA" | "ownerB")[] = ["ownerA", "ownerB"];
-
-  return (
-    <div className="flex-1 min-h-0 flex flex-col relative z-10">
-      {showOwners ? (
-        <>
-          {/* Top half — Auctioneer, always anchored here on mobile */}
-          <div className="min-h-0" style={{ flex: "1 1 50%" }}>
-            <MobilePanelSlot
-              cellRef={cellRefs.auctioneer}
-              w={cellDims.auctioneer.w}
-              h={cellDims.auctioneer.h}
-              ready={cellReady.auctioneer}
-              isSyncing={syncPanels.includes("auctioneer")}
-            >
-              {frames.auctioneer}
-            </MobilePanelSlot>
-          </div>
-
-          {/* Bottom half — both bid pages, split evenly side by side */}
-          <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
-            {OWNER_KEYS.map((key) => (
-              <div key={key} className="flex-1 min-w-0 h-full">
-                <MobilePanelSlot
-                  cellRef={cellRefs[key]}
-                  w={cellDims[key].w}
-                  h={cellDims[key].h}
-                  ready={cellReady[key]}
-                  isSyncing={syncPanels.includes(key)}
-                >
-                  {frames[key]}
-                </MobilePanelSlot>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Auctioneer + Watch: pull both toward the shared middle seam
-              (instead of each centering independently in its own 50%)
-              with a small fixed gap, so the pair reads as one group
-              centered in the viewport rather than two halves. */}
-          <div className="min-h-0 pb-1.5" style={{ flex: "1 1 50%" }}>
-            <MobilePanelSlot
-              cellRef={cellRefs.auctioneer}
-              w={cellDims.auctioneer.w}
-              h={cellDims.auctioneer.h}
-              ready={cellReady.auctioneer}
-              isSyncing={syncPanels.includes("auctioneer")}
-              align="end"
-            >
-              {frames.auctioneer}
-            </MobilePanelSlot>
-          </div>
-          <div className="min-h-0 pt-1.5" style={{ flex: "1 1 50%" }}>
-            <MobilePanelSlot
-              cellRef={cellRefs.watch}
-              w={cellDims.watch.w}
-              h={cellDims.watch.h}
-              ready={cellReady.watch}
-              isSyncing={syncPanels.includes("watch")}
-              align="start"
-            >
-              {frames.watch}
-            </MobilePanelSlot>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export default function SandboxPage() {
-  const {
-    activePanels,
-    syncPanels,
-    mode,
-    autoFocusEnabled,
-    teams,
-    currentLot,
-    shuffle,
-    isLocked,
-    narratorText,
-    auctionStatus,
-    completedLots,
-    finalizedUnsoldCount,
-  } = useSpotlight();
-
-  const isMobileViewport = useIsMobileViewport();
-
-  const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
-  const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
-  // Fit both dimensions ("contain") so the mobile frame never overflows its
-  // flex cell, no matter how narrow that cell gets.
-  const ownerACell = useCellFit(MOBILE_W, MOBILE_H, "contain");
-  const ownerBCell = useCellFit(MOBILE_W, MOBILE_H, "contain");
-
-  const cellReady: Record<PanelKey, boolean> = {
-    auctioneer: auctioneerCell.ready,
-    watch: watchCell.ready,
-    ownerA: ownerACell.ready,
-    ownerB: ownerBCell.ready,
-  };
-
-  // Starts in demo (bot-driven) mode, same as it always did. Switching
-  // modes tears down whichever driver was running and reset()s the model
-  // so the two never overlap or fight over state.
+  // Realtime: lot + bid changes
   useEffect(() => {
-    demoOrchestrator.start();
+    if (!auction?.auctionId) return;
+
+    const getCurrentLotId = () => currentLotRef.current?.id ?? null;
+
+    const lotSub = subscribeToLot(auctionId, (lot) => {
+      const isNewLot = currentLotRef.current?.id !== lot.id;
+
+      if (lot.status === "shuffling" && isNewLot) {
+        triggerShuffleAndReveal(lot);
+        return;
+      }
+
+      if (lot.status === "pending") {
+        if (isShufflingRef.current && currentLotRef.current?.id === lot.id) return;
+        const wasShuffling = currentLotRef.current?.status === "shuffling";
+        setCurrentLot(lot);
+        setIsSold(false);
+        setIsUnsold(false);
+        if ((isNewLot || wasShuffling) && revealedLotIdRef.current !== lot.id) {
+          resetClock(lot.startedAt!);
+        }
+        revealedLotIdRef.current = null;
+        return;
+      }
+
+      setCurrentLot(lot);
+
+      if (lot.status === "sold") {
+        setIsSold(true);
+        setIsUnsold(false);
+        freezeClock();
+        setCompletedLots((prev) =>
+          prev.some((l) => l.id === lot.id) ? prev : [lot, ...prev]
+        );
+      }
+      if (lot.status === "unsold") {
+        setIsUnsold(true);
+        setIsSold(false);
+        freezeClock();
+        setCompletedLots((prev) =>
+          prev.some((l) => l.id === lot.id) ? prev : [lot, ...prev]
+        );
+      }
+    }, getCurrentLotId);
+
+    const bidSub = subscribeToBids(auctionId, (bid) => {
+      if (bid.lotId !== currentLotRef.current?.id) return;
+      setBidHistory((prev) => [bid, ...prev].slice(0, 30));
+      setCurrentLot((prev) =>
+        prev
+          ? { ...prev, currentBid: bid.amount, winningTeamCode: bid.teamCode, winningTeamId: bid.teamId }
+          : prev
+      );
+      setBidPulse(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => setBidPulse(true)));
+      setFlashOverlay(true);
+      if (flashTimeout.current) clearTimeout(flashTimeout.current);
+      flashTimeout.current = setTimeout(() => setFlashOverlay(false), 200);
+      resetClock(bid.placedAt, true);
+    });
+
     return () => {
-      demoOrchestrator.stop();
-      demoInteractiveController.stop();
+      lotSub.unsubscribe();
+      bidSub.unsubscribe();
+    };
+  }, [auctionId, auction?.auctionId, triggerShuffleAndReveal, resetClock, freezeClock]);
+
+  // Leaderboard interrupt
+  useEffect(() => {
+    leaderboardTimer.current = setInterval(() => {
+      if (completedLotsRef.current.some((l) => l.status === "sold")) {
+        setShowLeaderboard(true);
+        setTimeout(() => setShowLeaderboard(false), 8000);
+      }
+    }, 25000);
+    return () => { if (leaderboardTimer.current) clearInterval(leaderboardTimer.current); };
+  }, []);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (flashTimeout.current)     clearTimeout(flashTimeout.current);
+      if (leaderboardTimer.current) clearInterval(leaderboardTimer.current);
     };
   }, []);
 
-  // In demo mode, pausing needs to freeze the *scripted* timeline (cursor
-  // moves, clicks, bid/reveal/sold calls) — demoOrchestrator.pause() does
-  // that and also freezes the model's bidding clock as a side effect. In
-  // interactive mode there's no script to freeze (a real person is
-  // clicking), so pause only needs to stop the bidding clock itself.
-  const handleTogglePause = useCallback(() => {
-    if (mode === "demo") {
-      if (demoOrchestrator.isPaused()) demoOrchestrator.resume();
-      else demoOrchestrator.pause();
-    } else {
-      if (auctionStatus === "paused") demoModel.resume();
-      else demoModel.pause();
-    }
-  }, [mode, auctionStatus]);
-
-  const handleToggleMode = useCallback(() => {
-    const next = mode === "demo" ? "interactive" : "demo";
-    if (next === "interactive") {
-      demoOrchestrator.stop();
-      demoInteractiveController.start();
-    } else {
-      demoInteractiveController.stop();
-      demoOrchestrator.start();
-    }
-  }, [mode]);
-
-  // Completion overlay's "Try It Yourself" — only offered in demo mode
-  // (interactive mode is already "yourself"). Hands off the same way the
-  // regular mode toggle does, just triggered from the overlay instead of
-  // the header pill.
-  const handleTryItYourself = useCallback(() => {
-    demoOrchestrator.stop();
-    demoInteractiveController.start();
-  }, []);
-
-  // Completion overlay's "Restart Demo" / "Restart Auction" — refills the
-  // player pool/purses/round counters via demoModel.startNewCycle() and,
-  // in demo mode, hands control straight back to the orchestrator's
-  // scripted timeline so the showcase picks up right where a fresh
-  // episode would start.
-  const handleRestart = useCallback(() => {
-    if (mode === "demo") {
-      demoOrchestrator.restartAfterCompletion();
-    } else {
-      demoModel.startNewCycle();
-    }
-  }, [mode]);
-
-  // globals.css forces `html { overflow-y: scroll }` site-wide so the
-  // marketing pages never jump-shift. This page is a fixed single
-  // viewport, so we suppress that just while mounted and put it back
-  // on unmount rather than touching the global rule.
+  // Scroll active into view
   useEffect(() => {
-    const html = document.documentElement;
-    const prevHtmlOverflow = html.style.overflowY;
-    const prevBodyOverflow = document.body.style.overflow;
-    html.style.overflowY = "hidden";
-    document.body.style.overflow = "hidden";
-    return () => {
-      html.style.overflowY = prevHtmlOverflow;
-      document.body.style.overflow = prevBodyOverflow;
-    };
-  }, []);
+    if (flowActivePlayer) {
+      document.getElementById(`player-${flowActivePlayer}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [flowActivePlayer]);
 
-  const highlighted: PanelKey[] = activePanels;
-  const layout = computeLayout(highlighted);
+  useEffect(() => {
+    if (flowActiveTeam) {
+      document.getElementById(`team-${flowActiveTeam}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [flowActiveTeam]);
 
-  const pctOf = (key: PanelKey) => layout[key] ?? 0;
+  // Derived
+  const winningTeam  = currentLot?.winningTeamId
+    ? auction?.teams.find((t) => t.supabaseId === currentLot.winningTeamId) ?? null
+    : null;
+  const winningPurse = winningTeam?.supabaseId ? teamPurses[winningTeam.supabaseId] : null;
 
-  const displayNarrator = useThrottledNarrator(narratorText);
-  const guidance = getGuidance(mode, currentLot, shuffle, isLocked, auctionStatus);
+  const leaderTopBuy = winningTeam
+    ? [...completedLots]
+        .filter((l) => l.status === "sold" && l.winningTeamId === winningTeam.supabaseId)
+        .sort((a, b) => b.currentBid - a.currentBid)[0]
+    : null;
 
-  const soldCount = completedLots.filter((l) => l.status === "sold").length;
-  const unsoldCount = completedLots.filter((l) => l.status === "unsold").length;
+  const blockPlayer = currentLot
+    ? auction?.players.find((p) => p.supabaseId === currentLot.playerId)
+    : null;
 
-  const frames: Record<PanelKey, React.ReactNode> = {
-    auctioneer: (
-      <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={auctioneerCell.scale} label="Auctioneer Console">
-        <DemoAuctioneerPage />
-      </DesktopFrame>
-    ),
-    watch: (
-      <DesktopFrame width={DESKTOP_W} height={DESKTOP_H} scale={watchCell.scale} label="Broadcast Overlay">
-        <DemoWatchPage />
-      </DesktopFrame>
-    ),
-    ownerA: (
-      <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerACell.scale}>
-        <DemoOwnerBidPage teamId="tA" cursorKey="ownerA" />
-      </MobileFrame>
-    ),
-    ownerB: (
-      <MobileFrame width={MOBILE_W} height={MOBILE_H} scale={ownerBCell.scale}>
-        <DemoOwnerBidPage teamId="tB" cursorKey="ownerB" />
-      </MobileFrame>
-    ),
+  const nextBid = currentLot
+    ? getNextBidAmount(currentLot.currentBid, auction?.rules.tiers ?? [])
+    : 0;
+
+  const topBuys = useMemo(
+    () =>
+      [...completedLots]
+        .filter((l) => l.status === "sold")
+        .sort((a, b) => b.currentBid - a.currentBid)
+        .slice(0, 3),
+    [completedLots]
+  );
+
+  const tickerMessages = useMemo(() => {
+    if (completedLots.length === 0) {
+      return [
+        `Welcome to ${auction?.session.auctionName ?? "the auction"}`,
+        "Bidding will begin shortly — stay tuned",
+      ];
+    }
+    return completedLots.slice(0, 8).map((l) =>
+      l.status === "sold"
+        ? `${l.playerName} sold to ${l.winningTeamCode ?? "—"} for ${l.currentBid.toLocaleString()} PTS!`
+        : `${l.playerName} went unsold`
+    );
+  }, [completedLots, auction?.session.auctionName]);
+
+  // ── Flow players — now carries isFinal / reentryCount so the sankey can
+  // visually distinguish "permanently unsold" from "awaiting re-entry" ─────
+  const flowPlayers: FlowPlayer[] = useMemo(() => {
+    if (!auction) return [];
+    return auction.players.map((p) => {
+      const supId = p.supabaseId ?? "";
+      const flags = playerFlags[supId];
+      const extra = {
+        isFinal:      flags?.isUnsoldFinal ?? false,
+        reentryCount: flags?.reentryCount ?? 0,
+      };
+
+      if (currentLot && currentLot.playerId === supId) {
+        return {
+          ...buildFlowPlayer({
+            id: supId, name: p.name, img: p.img,
+            price: `${p.price.toLocaleString()} PTS`,
+            status: "pending",
+            teamShortCode: currentLot.winningTeamCode,
+          }),
+          ...extra,
+        };
+      }
+      const playerLots = completedLots.filter((l) => l.playerId === supId);
+            const closedLot = playerLots.length
+              ? playerLots.reduce((best, l) =>
+                l.status === "sold" && best.status !== "sold" ? l : best
+            )
+        : undefined;      
+        if (closedLot) {
+        return {
+          ...buildFlowPlayer({
+            id: supId, name: p.name, img: p.img,
+            price: `${p.price.toLocaleString()} PTS`,
+            status: closedLot.status === "sold" ? "sold" : "unsold" as any,
+            teamShortCode: closedLot.status === "sold" ? closedLot.winningTeamCode : null,
+          }),
+          ...extra,
+        };
+      }
+      return {
+        ...buildFlowPlayer({
+          id: supId, name: p.name, img: p.img,
+          price: `${p.price.toLocaleString()} PTS`,
+          status: "locked",
+        }),
+        ...extra,
+      };
+    });
+  }, [auction, currentLot, completedLots, playerFlags]);
+
+  const flowTeams: FlowTeam[] = useMemo(() => {
+    if (!auction) return [];
+    return auction.teams.map((t) =>
+      buildFlowTeam({
+        id:        t.supabaseId ?? String(t.id),
+        name:      t.name,
+        shortCode: t.code,
+        logoUrl:   t.logo || "",
+        purse:     `${fmtPts(t.supabaseId ? teamPurses[t.supabaseId]?.remaining : undefined) ?? fmtPts(auction.rules.totalPoints)} PTS`,
+      })
+    );
+  }, [auction, teamPurses]);
+
+  const togglePlayer = (p: FlowPlayer) => {
+    if (flowActivePlayer === String(p.id)) {
+      setFlowActivePlayer(null);
+      setFlowActiveTeam(null);
+    } else {
+      setFlowActivePlayer(String(p.id));
+      setFlowActiveTeam((p as any).teamShortCode || null);
+    }
   };
 
-  const cellRefs: Record<PanelKey, (el: HTMLDivElement | null) => void> = {
-    auctioneer: auctioneerCell.ref,
-    watch: watchCell.ref,
-    ownerA: ownerACell.ref,
-    ownerB: ownerBCell.ref,
+  const toggleTeam = (t: FlowTeam) => {
+    if (flowActiveTeam === t.shortCode && !flowActivePlayer) {
+      setFlowActiveTeam(null);
+    } else {
+      setFlowActiveTeam(t.shortCode);
+      setFlowActivePlayer(null);
+    }
   };
 
-  const cellDims: Record<PanelKey, { w: number; h: number }> = {
-    auctioneer: { w: auctioneerCell.boxW, h: auctioneerCell.boxH },
-    watch: { w: watchCell.boxW, h: watchCell.boxH },
-    ownerA: { w: ownerACell.boxW, h: ownerACell.boxH },
-    ownerB: { w: ownerBCell.boxW, h: ownerBCell.boxH },
+  const clearFlowSelection = () => {
+    setFlowActivePlayer(null);
+    setFlowActiveTeam(null);
   };
+
+  const hasSelection = flowActivePlayer !== null || flowActiveTeam !== null;
+
+  // Shot clock colour
+  const shotClockColor =
+    shotClock < 25 ? "#ef4444" : shotClock < 50 ? "#f59e0b" : "#c9971f";
+
+  // ── Awaiting placeholder: only when truly no lots have happened yet ───────
+  const showAwaitingPlaceholder =
+    !currentLot && !isShuffling && completedLots.length === 0;
+
+  // ── Stats for CompletedContent ────────────────────────────────────────────
+  const overlayStats = useMemo((): AuctionStats => ({
+    totalLots:   completedLots.length,
+    soldCount:   completedLots.filter((l) => l.status === "sold").length,
+    unsoldCount: completedLots.filter((l) => l.status === "unsold").length,
+    topBuys: [...completedLots]
+      .filter((l) => l.status === "sold")
+      .sort((a, b) => b.currentBid - a.currentBid)
+      .slice(0, 5)
+      .map((l) => ({ playerName: l.playerName, teamCode: l.winningTeamCode ?? "—", amount: l.currentBid })),
+    teamSummaries: auction?.teams.map((t) => {
+      const purse = t.supabaseId ? teamPurses[t.supabaseId] : undefined;
+      const purseLeft = purse?.remaining ?? auction.rules.totalPoints;
+      const spent     = auction.rules.totalPoints - purseLeft;
+      return {
+        name:      t.name,
+        code:      t.code,
+        spent:     Math.max(0, spent),
+        roster:    purse?.roster ?? 0,
+        purseLeft: Math.max(0, purseLeft),
+      };
+    }) ?? [],
+  }), [completedLots, auction, teamPurses]);
+
+  if (!auction || loadingLive) {
+    return (
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-[3px] border-theme-orange/15 border-t-theme-orange rounded-full animate-spin mx-auto mb-4" />
+          <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading broadcast…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="h-screen w-screen overflow-hidden relative flex flex-col">
-      <style jsx global>{`
-        @keyframes panel-sync-pulse {
-          0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 55%, transparent); }
-          70% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
-          100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-theme-orange) 0%, transparent); }
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@400;500;700&family=Geist+Mono:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+        .ms { font-family:'Material Symbols Outlined'; font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; font-style:normal; line-height:1; display:inline-block; text-transform:none; letter-spacing:normal; user-select:none; }
+        .ms-fill { font-variation-settings:'FILL' 1,'wght' 400,'GRAD' 0,'opsz' 24; }
+
+        @keyframes pulse-bid { 0%,100%{filter:drop-shadow(0 0 7px rgba(201,151,31,0.45))} 50%{filter:drop-shadow(0 0 19px rgba(201,151,31,0.85))} }
+        .bid-animate { animation:pulse-bid 2s infinite ease-in-out; }
+
+        @keyframes ticker-scroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+        .ticker-track { animation:ticker-scroll 30s linear infinite; }
+
+        @keyframes stamp-sold { 0%{transform:translate(-50%,-50%) scale(3);opacity:0} 50%{transform:translate(-50%,-50%) scale(0.8);opacity:1} 70%{transform:translate(-50%,-50%) scale(1.1)} 100%{transform:translate(-50%,-50%) scale(1);opacity:1} }
+        .animate-stamp { animation:stamp-sold 0.4s cubic-bezier(0.175,0.885,0.32,1.275) forwards; }
+
+        @keyframes screen-shake { 0%,100%{transform:translate(0,0)} 10%{transform:translate(-2px,-2px)} 20%{transform:translate(-3px,0px)} 30%{transform:translate(3px,2px)} 40%{transform:translate(1px,-1px)} 50%{transform:translate(-1px,2px)} 60%{transform:translate(-3px,1px)} 70%{transform:translate(3px,1px)} 80%{transform:translate(-1px,-1px)} 90%{transform:translate(1px,2px)} }
+        .animate-shake { animation:screen-shake 0.5s cubic-bezier(.36,.07,.19,.97); }
+
+        @keyframes slide-in-right { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+        .animate-slide-in { animation:slide-in-right 0.5s ease-out forwards; }
+
+        @keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .dot-pulse { animation:dot-pulse 1.5s ease-in-out infinite; }
+
+        .glass-panel { background:var(--color-surface-glass); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px); }
+        .flare { position:absolute; border-radius:50%; background:radial-gradient(circle,rgba(201,151,31,0.13) 0%,transparent 70%); filter:blur(70px); pointer-events:none; }
+        .font-archivo { font-family:'Archivo Narrow',sans-serif; }
+        .font-mono-geist { font-family:'Geist Mono',monospace; }
+        .font-inter { font-family:'Inter',sans-serif; }
+        .text-fluid-hero { font-size:clamp(28px,5vw,80px); }
+        .text-fluid-bid  { font-size:clamp(36px,5.5vw,84px); }
+        .header-blur { backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+
+        @media (max-width:639px) {
+          .main-layout{overflow-y:auto!important;overflow-x:hidden!important;padding:0!important}
+          .live-view-inner{padding:0 16px 20px 16px!important;gap:16px!important}
+          .aside-panel{width:100%!important;flex-direction:column!important;padding:0!important;gap:16px!important;min-height:unset!important}
+          .bid-card{flex:none!important;min-height:160px!important;padding:16px!important;width:100%!important}
+          .hero-section{padding:8px 0 0!important;min-height:unset!important}
+          .player-image-wrap{width:220px!important;height:265px!important;margin-bottom:14px!important}
+          .stats-row{gap:24px!important;padding:10px 20px!important;margin-top:16px!important;width:100%!important;justify-content:space-between!important}
+          .stats-row .stat-value{font-size:18px!important}
+          .header-logo-text{font-size:14px!important}
+          .header-purse{display:none}
+          .header-px{padding-left:14px!important;padding-right:14px!important}
+          .live-badge-text{display:none}
+          .live-badge{padding:6px 10px!important}
+          .team-stats-grid{gap:6px!important}
+          .team-top-buy{display:none}
+          .bid-label{font-size:8px!important;margin-bottom:10px!important}
+          .bid-leading-icon{width:40px!important;height:40px!important}
+          .bid-leading-name{font-size:16px!important}
+          .bid-divider{margin-bottom:14px!important}
+          .flow-view-grid{display:flex!important;flex-direction:column!important;overflow-y:auto!important}
+          .flow-pool,.flow-franchises{width:100%!important;border:none!important;height:auto!important;max-height:400px!important}
+          .flow-canvas-container{display:none!important}
         }
 
-        @keyframes feedPulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.45; }
-        }
-
-        @keyframes commentaryIn {
-          0% { opacity: 0; transform: translateY(-16px) scale(0.97); }
-          55% { opacity: 1; transform: translateY(2px) scale(1.005); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .commentary-toast {
-          animation: commentaryIn 380ms cubic-bezier(0.22, 1, 0.36, 1);
-        }
-
-        .sandbox-scanlines {
-          background-image: repeating-linear-gradient(
-            0deg,
-            rgba(255, 255, 255, 0.012) 0px,
-            rgba(255, 255, 255, 0.012) 1px,
-            transparent 1px,
-            transparent 3px
-          );
+        
+        @media (min-width:640px) and (max-width:1023px) {
+          .main-layout{padding:0!important}
+          .live-view-inner{padding:0 16px!important;gap:12px!important}
+          .aside-panel{width:36%!important;flex-direction:column!important;padding:12px 0!important;gap:10px!important}
+          .bid-card{flex:1!important;padding:20px!important}
+          .hero-section{padding:10px 12px!important}
+          .player-image-wrap{width:240px!important;height:290px!important;margin-bottom:16px!important}
+          .stats-row{gap:20px!important;padding:10px 16px!important;margin-top:20px!important}
+          .stats-row .stat-value{font-size:20px!important}
+          .text-fluid-hero{font-size:clamp(26px,4.5vw,56px)!important}
+          .text-fluid-bid{font-size:clamp(32px,5vw,60px)!important}
+          .header-px{padding-left:18px!important;padding-right:18px!important}
+          .bid-leading-name{font-size:18px!important}
+          .bid-leading-icon{width:44px!important;height:44px!important}
         }
       `}</style>
 
-      <MultiviewBar
-        active={highlighted}
-        syncing={syncPanels}
-        mode={mode}
-        autoFocusEnabled={autoFocusEnabled}
-        auctionStatus={auctionStatus}
-        completedLots={completedLots}
-        onToggleMode={handleToggleMode}
-        onTogglePause={handleTogglePause}
-      />
+      {flashOverlay && (
+        <div className="fixed inset-0 pointer-events-none z-[200]" style={{ background: "rgba(201,151,31,0.05)" }} />
+      )}
 
-      <CommentaryOverlay narratorText={displayNarrator} guidance={guidance} />
-
-      <OwnerDotSwitcher
-        mode={mode}
-        active={highlighted}
-        teams={teams}
-        onSelect={(owner) => demoModel.focusOwner(owner)}
-      />
-
-      <div
-        className="pointer-events-none absolute inset-0 z-0 sandbox-scanlines"
-        style={{
-          background:
-            "radial-gradient(900px 380px at 50% 0%, color-mix(in srgb, var(--color-theme-orange) 7%, transparent), transparent 65%), " +
-            "linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)",
-          backgroundSize: "auto, 48px 48px, 48px 48px",
-        }}
-      />
-
-      {isMobileViewport ? (
-        <MobileMultiview
-          highlighted={highlighted}
-          syncPanels={syncPanels}
-          frames={frames}
-          cellRefs={cellRefs}
-          cellDims={cellDims}
-          cellReady={cellReady}
+      {activeView === "live" && (
+        <ShuffleOverlay
+          isShuffling={isShuffling}
+          shuffleTarget={shuffleTarget}
+          players={shufflePool}
+          shuffleIndex={shuffleIndex}
         />
-      ) : (
-        <div className="flex-1 min-h-0 flex relative z-10">
-          {PANEL_ORDER.map((key) => (
-            <Cell key={key} pct={pctOf(key)} ready={cellReady[key]} isSyncing={syncPanels.includes(key)}>
-              <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
-                <div
-                  style={{ width: cellDims[key].w, height: cellDims[key].h }}
-                  className="overflow-hidden flex items-center justify-center shrink-0"
-                >
-                  {frames[key]}
+      )}
+
+      {/* PAUSED overlay — dims everything, shows "Short Break" screen.
+          This is the ONLY place that subscribes to auction-status realtime
+          changes for this auctionId. */}
+      <AuctionStatusOverlay
+        auctionId={auctionId}
+        initialStatus={auctionStatus}
+        onStatusChange={setAuctionStatus}
+      />
+
+      <div className="font-inter bg-background text-on-background fixed inset-0 flex flex-col overflow-hidden select-none">
+        {/* HEADER */}
+        <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
+            <div className="flex items-center gap-[13px]">
+              <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
+                <Image
+                  src={auction.session.auctionLogo || "/moon-knight-logo.png"}
+                  alt="Auction logo"
+                  className="w-full h-full object-cover"
+                  width={52}
+                  height={52}
+                />
+              </div>
+              <div>
+                <div className="header-logo-text font-archivo text-[18px] font-bold tracking-[-0.01em] text-white">
+                  {auction.session.auctionName}
+                </div>
+                <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] tracking-[0.12em] uppercase">
+                  Broadcast Feed • Lot #{currentLot?.lotNumber ?? lotNumber} of {auction.players.length}
                 </div>
               </div>
-            </Cell>
-          ))}
-        </div>
-      )}
+            </div>
 
-      {auctionStatus === "completed" && (
-        <CompletionOverlay
-          mode={mode}
-          soldCount={soldCount}
-          unsoldCount={unsoldCount}
-          finalizedUnsoldCount={finalizedUnsoldCount}
-          onTryItYourself={handleTryItYourself}
-          onRestart={handleRestart}
-        />
-      )}
-    </div>
+          <div className="flex items-center gap-[16px] sm:gap-[30px]">
+            {currentLot && !isSold && !isUnsold && auctionStatus === "live" && (
+              <div className="flex items-center gap-3">
+                <span className="font-mono-geist text-[10px] uppercase tracking-[0.1em]" style={{ color: shotClockColor }}>
+                  {isLocked ? "Locked" : "Clock"}
+                </span>
+                <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-100"
+                    style={{ width: `${shotClock}%`, background: shotClockColor }} />
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setActiveView((v) => (v === "live" ? "flow" : "live"));
+                clearFlowSelection();
+              }}
+              className="text-[10px] font-mono-geist px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md border border-white/10 transition-colors uppercase tracking-widest text-theme-orange"
+            >
+              {activeView === "live" ? "View Full Board" : "View Live Bid"}
+            </button>
+            <div className="header-purse text-right hidden sm:block">
+              <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.1em]">Total Purse Cap</div>
+              <div className="font-archivo text-[18px] font-bold text-white">
+                {fmtPts(auction.rules.totalPoints)} <span className="text-[9px] opacity-50">PTS</span>
+              </div>
+            </div>
+            <div className="w-px h-7 bg-white/10 hidden sm:block" />
+            {/* Status badge — updates reactively */}
+            {auctionStatus === "live" && (
+              <div className="live-badge flex items-center gap-[9px] bg-[rgba(127,29,29,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(239,68,68,0.30)]">
+                <div className="dot-pulse w-[6px] h-[6px] rounded-full bg-red-500" style={{ boxShadow: "0 0 7px #ef4444" }} />
+                <span className="live-badge-text font-mono-geist text-red-400 font-bold tracking-[0.18em] text-[9px]">LIVE</span>
+              </div>
+            )}
+            {auctionStatus === "paused" && (
+              <div className="live-badge flex items-center gap-[9px] bg-[rgba(120,85,0,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(245,158,11,0.30)]">
+                <div className="w-[6px] h-[6px] rounded-full bg-amber-400" style={{ boxShadow: "0 0 7px #f59e0b" }} />
+                <span className="live-badge-text font-mono-geist text-amber-400 font-bold tracking-[0.18em] text-[9px]">PAUSED</span>
+              </div>
+            )}
+            {auctionStatus === "completed" && (
+              <div className="live-badge flex items-center gap-[9px] bg-[rgba(0,80,30,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(34,197,94,0.30)]">
+                <div className="w-[6px] h-[6px] rounded-full bg-green-500" style={{ boxShadow: "0 0 7px #22c55e" }} />
+                <span className="live-badge-text font-mono-geist text-green-400 font-bold tracking-[0.18em] text-[9px]">COMPLETED</span>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* MAIN */}
+        <main className={`main-layout flex-1 mt-14 mb-[40px] flex overflow-hidden min-h-0 relative ${isSold && activeView === "live" ? "animate-shake" : ""}`}>
+
+          {activeView === "live" && showLeaderboard && topBuys.length > 0 && auctionStatus === "live" && (
+            <div className="absolute left-8 top-8 z-40 animate-slide-in">
+              <div className="glass-panel p-5 rounded-2xl border border-theme-orange/30 w-72" style={{ background: "rgba(13,17,23,0.85)" }}>
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
+                  <span className="ms ms-fill text-theme-orange">leaderboard</span>
+                  <span className="font-mono-geist text-[10px] text-white uppercase tracking-[0.2em] font-bold">Top Buys</span>
+                </div>
+                <div className="space-y-3">
+                  {topBuys.map((lot) => (
+                    <div key={lot.id} className="flex items-center justify-between">
+                      <div>
+                        <div className="font-archivo font-bold text-white text-sm">{lot.playerName}</div>
+                        <div className="font-mono-geist text-[8px] text-white/50 uppercase">{lot.winningTeamCode ?? "—"}</div>
+                      </div>
+                      <div className="font-archivo text-theme-orange font-bold">{lot.currentBid.toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeView === "live" ? (
+            // ── LIVE VIEW ─────────────────────────────────────────────────
+            // When auction is COMPLETED, swap the hero area for CompletedContent.
+            // The aside (bid card + team stats) is hidden — it's not relevant anymore.
+            auctionStatus === "completed" ? (
+              <div className="w-full h-full px-0 sm:px-[30px] pt-4 pb-12">
+                <CompletedContent stats={overlayStats} />
+              </div>
+            ) : (
+              <div className="live-view-inner w-full h-full flex flex-col sm:flex-row gap-[14px] px-0 sm:px-[30px] pt-4 pb-12">
+                {/* CENTER: Hero */}
+                <section className="hero-section flex-1 flex flex-col items-center justify-center px-[34px] sm:px-[20px] py-[10px] relative min-w-0">
+                  {showAwaitingPlaceholder ? (
+                    <div className="text-center max-w-md">
+                      <span className="ms text-outline-variant text-6xl block mb-4">hourglass_empty</span>
+                      <h2 className="font-archivo text-3xl font-bold uppercase italic text-white mb-2">Awaiting First Lot</h2>
+                      <p className="font-mono-geist text-xs text-outline uppercase tracking-widest">
+                        The auctioneer hasn't started the auction yet
+                      </p>
+                    </div>
+                  ) : currentLot || isShuffling ? (
+                    <>
+                      <div className="relative">
+                        {(isSold || isUnsold) && (
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 animate-stamp pointer-events-none">
+                            <div
+                              className={`border-[6px] ${isSold ? "border-theme-orange text-theme-orange" : "border-gray-400 text-gray-400"} rounded-xl px-6 py-2 transform -rotate-12 backdrop-blur-sm bg-black/20`}
+                              style={{ boxShadow: `0 0 40px ${isSold ? "rgba(201,151,31,0.5)" : "rgba(156,163,175,0.5)"}, inset 0 0 20px ${isSold ? "rgba(201,151,31,0.5)" : "rgba(156,163,175,0.5)"}` }}
+                            >
+                              <span className="font-archivo text-6xl font-black italic tracking-tighter uppercase"
+                                style={{ textShadow: `0 0 20px ${isSold ? "rgba(201,151,31,0.8)" : "rgba(156,163,175,0.8)"}` }}>
+                                {isSold ? "SOLD" : "UNSOLD"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div
+                          className={`player-image-wrap relative z-10 w-[280px] h-[325px] rounded-xl overflow-hidden mb-[23px] shrink-0 border border-white/[0.08] transition-all duration-300 ${(isSold || isUnsold) ? "grayscale brightness-50" : ""}`}
+                          style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
+                        >
+                          {currentLot?.playerImg ? (
+                              <div className="relative aspect-[280/325] overflow-hidden">
+                                <Image
+                                  src={currentLot.playerImg}
+                                  alt={currentLot.playerName}
+                                  width={280}
+                                  height={325}
+                                  className="object-cover object-top"
+                                  style={{ filter: "grayscale(0.15) contrast(1.2)" }}
+                                  priority
+                                />
+                              </div>                          
+                            ) : (
+                            <div className="w-full h-full bg-surface-container flex items-center justify-center">
+                              <span className="ms text-outline-variant text-9xl">person</span>
+                            </div>
+                          )}
+                          <div className="absolute inset-0" style={{ background: "linear-gradient(to top,var(--color-background) 0%,transparent 55%)" }} />
+                          {currentLot && !isSold && !isUnsold && (
+                            <div className="absolute bottom-0 left-0 right-0 h-1.5">
+                              <div className="h-full transition-all duration-100"
+                                style={{ width: `${shotClock}%`, background: shotClockColor, boxShadow: `0 0 8px ${shotClockColor}` }} />
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-5 py-1 bg-theme-orange text-background font-mono-geist text-[8px] font-bold tracking-[0.32em] uppercase rounded-full whitespace-nowrap"
+                          style={{ boxShadow: "0 4px 16px rgba(201,151,31,0.45)" }}
+                        >
+                          LOT #{currentLot?.lotNumber ?? lotNumber} • {isSold ? "SOLD" : isUnsold ? "UNSOLD" : isLocked ? "LOCKED" : "ON THE BLOCK"}
+                        </div>
+                      </div>
+
+                      <div className="text-center z-20 -mt-[30px]">
+                        <h2 className="font-archivo text-fluid-hero leading-none font-bold uppercase tracking-[-0.025em] text-white italic mb-[9px]"
+                          style={{ textShadow: "0 4px 24px rgba(0,0,0,0.8)" }}>
+                          {currentLot?.playerName ?? "—"}
+                        </h2>
+                        <div className="flex items-center justify-center gap-3 sm:gap-5 flex-wrap">
+                          <span className="font-archivo text-[14px] sm:text-[17px] font-bold text-theme-orange tracking-[0.18em]">
+                            {(currentLot?.playerRole ?? "—").toUpperCase()}
+                          </span>
+                          <div className="w-[5px] h-[5px] rounded-full bg-[rgba(201,151,31,0.45)]" />
+                          <span className="font-archivo text-[14px] sm:text-[17px] font-semibold text-white/80 tracking-[0.08em]">
+                            BASE: {fmtPts(currentLot?.basePrice)} <span className="text-[10px] opacity-60">PTS</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div
+                        className="stats-row flex items-center gap-16 mt-[32px] px-11 py-3 rounded-[17px] border border-white/[0.08]"
+                        style={{ background: "rgba(13,17,23,0.42)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "0 8px 42px rgba(0,0,0,0.55)" }}
+                      >
+                        {[
+                          { label: "Country", value: currentLot?.playerCountry || "—" },
+                          { label: "Role",    value: currentLot?.playerRole    || "—" },
+                          { label: "Status",  value: blockPlayer ? (blockPlayer.capped ? "Capped" : "Uncapped") : "—" },
+                        ].map((s, i, arr) => (
+                          <React.Fragment key={s.label}>
+                            <div className="text-center">
+                              <p className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-[5px]">{s.label}</p>
+                              <p className="stat-value font-archivo text-[24px] font-bold text-white">{s.value}</p>
+                            </div>
+                            {i < arr.length - 1 && <div className="w-px h-8 bg-white/10" />}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    // Between lots mid-auction
+                    <div className="text-center max-w-md">
+                      <span className="ms text-outline-variant text-8xl block mb-4">pending</span>
+                      <h2 className="font-archivo text-3xl font-bold uppercase italic text-white mb-2">Next Lot Soon</h2>
+                      <p className="font-mono-geist text-xs text-outline uppercase tracking-widest">
+                        {completedLots.length} lot{completedLots.length !== 1 ? "s" : ""} completed — auctioneer is preparing the next player
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                {/* RIGHT: Bid + Team */}
+                <aside className="aside-panel w-[26%] shrink-0 flex flex-col py-4 gap-3 min-h-0">
+                  <div
+                    className="bid-card glass-panel flex-1 min-h-0 rounded-[20px] p-7 pb-6 flex flex-col items-center justify-center relative overflow-hidden border border-[rgba(201,151,31,0.18)]"
+                    style={{ background: "linear-gradient(135deg,rgba(39,43,44,0.45) 0%,rgba(13,17,23,0.82) 100%)" }}
+                  >
+                    <div className="absolute -top-8 -right-8 opacity-[0.05] pointer-events-none">
+                      <span className="ms ms-fill text-white" style={{ fontSize: 220 }}>gavel</span>
+                    </div>
+
+                    <div className="text-center w-full relative z-10">
+                      <span className="bid-label font-mono-geist text-theme-orange text-[10px] uppercase tracking-[0.35em] block mb-5 font-bold">
+                        Current High Bid
+                      </span>
+                      <div className={`font-archivo text-fluid-bid leading-none font-medium tracking-[0.01em] text-theme-orange mb-[15px] tabular-nums ${bidPulse ? "bid-animate" : ""}`}>
+                        {fmtPts(currentLot?.currentBid)}
+                      </div>
+
+                      {currentLot && !isSold && !isUnsold && !isLocked && (
+                        <p className="font-mono-geist text-[9px] text-outline uppercase tracking-widest mb-[15px]">
+                          Next bid: {fmtPts(nextBid)} PTS
+                        </p>
+                      )}
+                      {isLocked && !isSold && !isUnsold && (
+                        <p className="font-mono-geist text-[9px] uppercase tracking-widest mb-[15px]" style={{ color: "#ef4444" }}>
+                          Bidding locked
+                        </p>
+                      )}
+
+                      <div className="bid-divider w-full h-px mb-[30px]" style={{ background: "linear-gradient(to right,transparent,rgba(201,151,31,0.30),transparent)" }} />
+                      <div className="flex items-center justify-center gap-3 sm:gap-4">
+                        <div className="bid-leading-icon w-[58px] h-[58px] rounded-xl bg-theme-orange/10 border border-theme-orange/20 flex items-center justify-center">
+                          <span className="ms ms-fill text-[28px] text-theme-orange">groups</span>
+                        </div>
+                        <div>
+                          <div className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.18em] mb-1 font-bold">Leading Team</div>
+                          <div className="bid-leading-name font-archivo text-[24px] font-light text-white tracking-[-0.01em]">
+                            {winningTeam?.code ?? "—"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="glass-panel shrink-0 rounded-2xl px-[18px] pt-4 pb-[14px] border border-white/[0.06] relative overflow-hidden"
+                    style={{ background: "linear-gradient(135deg,rgba(255,255,255,0.04) 0%,transparent 100%)" }}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.12em]">Team Statistics</span>
+                      <div className="flex gap-[5px]">
+                        <div className="w-4 h-[3px] bg-theme-orange rounded-full" />
+                        <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                        <div className="w-[6px] h-[3px] bg-white/10 rounded-full" />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-archivo text-[16px] sm:text-[20px] font-bold text-white uppercase tracking-[0.02em]">
+                        {winningTeam?.name ?? "No Leader Yet"}
+                      </h3>
+                      {winningTeam && (
+                        <div className="px-[10px] py-[3px] bg-theme-orange/10 rounded-[6px] border border-theme-orange/20">
+                          <span className="font-mono-geist text-theme-orange text-[8px] font-bold tracking-[0.12em]">LEADING</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="team-stats-grid grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] block mb-[6px]">Squad Filled</span>
+                        <div className="flex items-center gap-[10px]">
+                          <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-white">
+                            {winningPurse?.roster ?? 0} <span className="text-[10px] opacity-40">/ {auction.rules.teamSize}</span>
+                          </span>
+                          <div className="flex-1 h-[5px] bg-white/[0.06] rounded-full overflow-hidden">
+                            <div className="h-full bg-theme-orange rounded-full"
+                              style={{ width: `${Math.min(((winningPurse?.roster ?? 0) / Math.max(auction.rules.teamSize, 1)) * 100, 100)}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.55)] uppercase tracking-[0.1em] mb-1">Remaining Purse</span>
+                        <span className="font-archivo text-[15px] sm:text-[18px] font-semibold text-theme-orange">
+                          {fmtPts(winningPurse?.remaining ?? auction.rules.totalPoints)} <span className="text-[9px] opacity-50">PTS</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="team-top-buy flex items-center justify-between px-3 py-2 bg-white/[0.04] rounded-[10px] border border-white/[0.05]">
+                      <div className="flex items-center gap-[10px]">
+                        <span className="ms ms-fill text-[13px] text-theme-orange">star</span>
+                        <span className="font-mono-geist text-[8px] text-[rgba(198,198,205,0.6)] uppercase tracking-[0.08em]">Top Buy</span>
+                      </div>
+                      <span className="font-mono-geist text-[10px] text-white">
+                        {leaderTopBuy ? `${leaderTopBuy.playerName} — ${leaderTopBuy.currentBid.toLocaleString()} PTS` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            )
+          ) : (
+            // ── FLOW VIEW — always available regardless of auction status ──
+            <div className="flow-view-grid w-full h-full relative z-10 grid grid-cols-12 gap-0 overflow-hidden">
+              <FlowCanvas
+                players={flowPlayers}
+                playerListRef={playerListRef}
+                teamListRef={teamListRef}
+                activePlayer={flowActivePlayer}
+                activeTeam={flowActiveTeam}
+              />
+
+              <aside ref={playerListRef} className="flow-pool col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-r border-white/5">
+                <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Player Pool</h3>
+                   
+                  </div>
+
+                  {flowPlayers.map((p) => {
+                    const pAny      = p as any;
+                    const status    = pAny.status as string;
+                    const isLocked2 = status === "locked";
+                    const isUnsoldP = status === "unsold";
+                    const isSoldP   = status === "sold";
+                    const isPending = status === "pending";
+
+                    const isHighlighted = hasSelection && !isLocked2 && !isUnsoldP
+                      ? (flowActivePlayer ? flowActivePlayer === String(p.id) : flowActiveTeam === pAny.teamShortCode)
+                      : false;
+                    const isDimmed = hasSelection && !isHighlighted && !isLocked2;
+
+                    return (
+                      <div key={p.id} id={`player-${p.id}`}
+                        onClick={() => !isLocked2 && togglePlayer(p)}
+                        className={[
+                          "glass-panel p-3 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
+                          isLocked2 ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
+                          isHighlighted ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10" : "border border-white/5",
+                          isDimmed    ? "opacity-30" : "",
+                          isUnsoldP && !isHighlighted ? "border-l-2 border-l-red-900/60" : "",
+                          isSoldP   && !isHighlighted ? "border-r-2 border-r-green-500/50" : "",
+                          isPending && !isHighlighted ? "border border-theme-orange/40" : "",
+                        ].filter(Boolean).join(" ")}
+                      >
+                        <div className={["w-10 h-10 rounded-lg overflow-hidden flex-shrink-0", isUnsoldP ? "grayscale opacity-40" : "bg-surface-container-highest"].join(" ")}>
+                          {p.img ? <Image src={p.img} className="w-full h-full object-cover" alt="" width={40} height={40} /> : <div className="w-full h-full bg-surface-container-highest" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className={["font-semibold text-sm truncate font-archivo", isUnsoldP ? "text-white/30 line-through decoration-red-900/60" : "text-white"].join(" ")}>
+                              {p.name}
+                            </p>
+                            {isUnsoldP && (
+                              <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-950/60 text-red-500/70 border border-red-900/40">
+                                {pAny.isFinal ? "UNSOLD · FINAL" : `UNSOLD${pAny.reentryCount > 0 ? ` · R${pAny.reentryCount}` : ""}`}
+                              </span>
+                            )}
+                            {isPending && <span className="shrink-0 font-mono-geist text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-theme-orange/15 text-theme-orange border border-theme-orange/30 animate-pulse">LIVE</span>}
+                          </div>
+                          <p className={["text-[10px] font-mono font-medium mt-0.5 uppercase",
+                            isSoldP ? "text-green-400" : isUnsoldP ? "text-red-900/80" : isPending ? "text-theme-orange" : "text-on-surface-variant"].join(" ")}>
+                            {isSoldP ? `SOLD • ${pAny.teamShortCode}` : isUnsoldP ? `BASE: ${pAny.price}` : isPending ? "ON THE BLOCK" : `BASE: ${pAny.price}`}
+                          </p>
+                        </div>
+                        {isUnsoldP && (
+                          <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl opacity-20">
+                            <div className="absolute top-0 left-0 w-full h-full"
+                              style={{ background: "repeating-linear-gradient(-45deg,transparent,transparent 6px,rgba(180,0,0,0.15) 6px,rgba(180,0,0,0.15) 7px)" }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              <section className="flow-canvas-container col-span-6 flex flex-col relative z-0 pointer-events-none" />
+
+              <aside ref={teamListRef} className="flow-franchises col-span-3 h-full overflow-y-auto no-scrollbar px-6 py-6 z-10 border-l border-white/5">
+                <div className="flex flex-col space-y-3 pt-6 pb-20 relative">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-archivo font-semibold text-lg tracking-tight uppercase text-white">Franchises</h3>
+                   
+                  </div>
+                  {flowTeams.map((t) => {
+                    const isHighlighted = hasSelection ? flowActiveTeam === t.shortCode : false;
+                    const isDimmed      = hasSelection && !isHighlighted;
+                    return (
+                      <div key={t.id} id={`team-${t.shortCode}`}
+                        onClick={() => toggleTeam(t)}
+                        className={`glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300
+                          ${isHighlighted ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10" : "border border-white/5 hover:border-theme-orange"}
+                          ${isDimmed ? "opacity-30" : "opacity-100"}`}
+                      >
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
+                          {t.logoUrl && <Image src={t.logoUrl} className="w-full h-full object-cover" alt="" width={40} height={40} />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">{t.name}</p>
+                          <p className="text-[10px] font-mono text-theme-orange mt-0.5 tracking-wider">{t.purse}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+            </div>
+          )}
+        </main>
+
+        {/* TICKER */}
+        <div className="absolute bottom-0 left-0 right-0 h-10 bg-theme-orange z-50 flex items-center overflow-hidden border-t border-theme-orange/50">
+          <div className="bg-background text-theme-orange h-full px-4 flex items-center shrink-0 z-10 border-r border-theme-orange/30">
+            <span className="font-mono-geist text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-theme-orange animate-pulse" />
+              LIVE NEWS
+            </span>
+          </div>
+          <div className="flex-1 overflow-hidden h-full flex items-center">
+            <div className="ticker-track flex whitespace-nowrap text-background font-archivo font-bold text-sm uppercase tracking-wide">
+              {[...Array(2)].map((_, i) => (
+                <div key={i} className="flex items-center">
+                  {tickerMessages.map((msg, j) => (
+                    <span key={j} className="px-6 flex items-center gap-2">
+                      <span className="w-1 h-1 bg-background/50 rounded-full" />
+                      {msg}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WRAPPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WatchWithClock({ auctionId }: { auctionId: string }) {
+  const { auction } = useAuction();
+
+  if (!auction?.session?.timerSeconds) {
+    return (
+      <div className="h-screen bg-surface-container-lowest flex items-center justify-center">
+        <div className="text-center">
+          <span className="ms text-theme-orange text-5xl animate-spin block mb-4">progress_activity</span>
+          <p className="font-mono-geist text-outline text-sm uppercase tracking-widest">Loading broadcast…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ShotClockProvider timerSeconds={auction.session.timerSeconds}>
+      <ScreenContent auctionId={auctionId} />
+    </ShotClockProvider>
+  );
+}
+
+export default function WatchPage({ params }: { params: Promise<{ auctionId: string }> }) {
+  const { auctionId } = use(params);
+  return (
+    <AuctionProvider>
+      <WatchWithClock auctionId={auctionId} />
+    </AuctionProvider>
   );
 }

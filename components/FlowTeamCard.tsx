@@ -31,22 +31,29 @@ export function FlowTeamCard({
   isDimmed,
   onClick,
 }: FlowTeamCardProps) {
+  // Same pattern as FlowPlayerCard: icon-only on mobile until this card is
+  // the active selection, then the name/purse text is revealed inline.
+  const textVisibilityClass = isHighlighted ? "block" : "hidden sm:block";
+
   return (
     <div
       id={`team-${shortCode}`}
+      role="button"
+      aria-label={`${name}. ${purseLabel}`}
+      aria-pressed={isHighlighted}
       onClick={onClick}
       className={[
-        "glass-panel p-3 rounded-xl flex items-center gap-4 cursor-pointer transition-all duration-300",
+        "glass-panel p-1.5 sm:p-3 rounded-xl flex items-center gap-3 sm:gap-4 cursor-pointer transition-all duration-300",
         isHighlighted
           ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
           : "border border-white/5 hover:border-theme-orange",
         isDimmed ? "opacity-30" : "opacity-100",
       ].join(" ")}
     >
-      <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
+      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0 ring-2 sm:ring-0 ring-white/15">
         {logoUrl && <img src={logoUrl} className="w-full h-full object-cover" alt="" />}
       </div>
-      <div className="min-w-0">
+      <div className={["min-w-0", textVisibilityClass].join(" ")}>
         <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">
           {name}
         </p>

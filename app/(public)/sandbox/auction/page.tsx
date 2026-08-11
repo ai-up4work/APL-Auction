@@ -574,6 +574,27 @@ function MultiviewBar({
     >
       {/* ── Left: on-air badge + timecode ─────────────────────────── */}
       <div className="flex items-center gap-4">
+        <div
+          className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px]"
+          style={{
+            background: "color-mix(in srgb, #e5484d 14%, transparent)",
+            border: "1px solid color-mix(in srgb, #e5484d 45%, transparent)",
+          }}
+        >
+          <span
+            className="w-[7px] h-[7px] rounded-full bg-[#e5484d]"
+            style={{ animation: "feedPulse 1.6s ease-in-out infinite", boxShadow: "0 0 6px 1px rgba(229,72,77,0.6)" }}
+          />
+          <span
+            className="text-[9px] font-bold uppercase"
+            style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.16em", color: "#e5484d" }}
+          >
+            On Air
+          </span>
+        </div>
+
+        <span className="w-px h-5" style={{ background: "var(--color-border-overlay)" }} />
+
         <div className="flex items-center gap-2">
           <span
             className="text-[8px] uppercase"
@@ -859,20 +880,58 @@ function CompletionOverlay({
 // ── Mobile (real viewport) layout ────────────────────────────────────
 // Below MOBILE_LAYOUT_BREAKPOINT the side-by-side row simply doesn't
 // fit — the desktop-frame panel alone wants 1350px. Instead we stack
-// vertically: Auctioneer always anchors the top, and the bottom shows
-// Watch by default or both owner bid pages split evenly when it's
-// "owner time."
-//
-// The frames are width-constrained (contain-fit against a narrow phone
-// screen), so each one ends up much shorter than the 50/50 half of the
-// viewport it's measured against — centering each independently inside
-// its own half leaves a big empty seam between them. Instead we split
-// this into two layers: invisible anchor divs (still 50/50, still what
-// useCellFit's ResizeObserver measures, so scale is unaffected) purely
-// for sizing, and a separate absolutely-positioned group that renders
-// the actual frames stacked with a small fixed gap and centered as one
-// block over the full available height — regardless of how much
-// letterboxing either half has on its own.
+// vertically: Auctioneer always anchors the top half. The bottom half
+// shows Watch by default, and swaps to whichever owner bid page(s) are
+// currently spotlighted — one full-width, or both side-by-side if two
+// owners are active at once, since a phone-width column comfortably
+// fits two half-width phone frames.
+function MobilePanelSlot({
+  cellRef,
+  w,
+  h,
+  ready,
+  isSyncing,
+  align = "center",
+  children,
+}: {
+  cellRef: (el: HTMLDivElement | null) => void;
+  w: number;
+  h: number;
+  ready: boolean;
+  isSyncing: boolean;
+  // Cross-axis (vertical) alignment of the scaled frame within its slot.
+  // "center" is the normal case (owner bid pages). For the Auctioneer /
+  // Watch pairing we use "end" on top and "start" on bottom so the two
+  // frames pull toward the shared middle seam instead of each centering
+  // independently within its own half — that's what closes the gap
+  // between them and makes the pair read as one centered group.
+  align?: "start" | "center" | "end";
+  children: React.ReactNode;
+}) {
+  const alignItems = align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center";
+  return (
+    <div
+      className={`min-w-0 min-h-0 h-full w-full flex justify-center overflow-hidden ${
+        isSyncing ? "panel-sync-ring" : ""
+      }`}
+      style={{
+        alignItems,
+        opacity: ready ? 1 : 0,
+        transition: `opacity ${ZOOM_TRANSITION}`,
+      }}
+    >
+      <div ref={cellRef} className="w-full h-full flex overflow-hidden" style={{ alignItems, justifyContent: "center" }}>
+        <div
+          style={{ width: w, height: h }}
+          className="overflow-hidden flex items-center justify-center shrink-0"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MobileMultiview({
   highlighted,
   syncPanels,
@@ -890,47 +949,78 @@ function MobileMultiview({
 }) {
   const activeOwners = (["ownerA", "ownerB"] as const).filter((k) => highlighted.includes(k));
   // As soon as it's "owner time" (either owner spotlighted), show BOTH bid
-  // pages side by side in the bottom half.
+  // pages side by side in the bottom half — the bottom half splits cleanly
+  // in two, so there's no reason to show just the one that happens to be
+  // highlighted upstream.
   const showOwners = activeOwners.length > 0;
-  const bottomKeys: readonly PanelKey[] = showOwners ? (["ownerA", "ownerB"] as const) : (["watch"] as const);
-
-  const FrameBox = ({ panelKey }: { panelKey: PanelKey }) => (
-    <div
-      className={`flex items-center justify-center overflow-hidden shrink-0 pointer-events-auto ${
-        syncPanels.includes(panelKey) ? "panel-sync-ring" : ""
-      }`}
-      style={{
-        width: cellDims[panelKey].w,
-        height: cellDims[panelKey].h,
-        opacity: cellReady[panelKey] ? 1 : 0,
-        transition: `opacity ${ZOOM_TRANSITION}`,
-      }}
-    >
-      {frames[panelKey]}
-    </div>
-  );
+  const OWNER_KEYS: readonly ("ownerA" | "ownerB")[] = ["ownerA", "ownerB"];
 
   return (
-    <div className="flex-1 min-h-0 relative flex flex-col z-10">
-      {/* Invisible sizing anchors — real 50/50 layout space, watched by
-          useCellFit's ResizeObserver, but never rendered with content. */}
-      <div ref={cellRefs.auctioneer} className="min-h-0" style={{ flex: "1 1 50%" }} />
-      <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
-        {bottomKeys.map((key) => (
-          <div key={key} ref={cellRefs[key]} className="flex-1 min-w-0" />
-        ))}
-      </div>
+    <div className="flex-1 min-h-0 flex flex-col relative z-10">
+      {showOwners ? (
+        <>
+          {/* Top half — Auctioneer, always anchored here on mobile */}
+          <div className="min-h-0" style={{ flex: "1 1 50%" }}>
+            <MobilePanelSlot
+              cellRef={cellRefs.auctioneer}
+              w={cellDims.auctioneer.w}
+              h={cellDims.auctioneer.h}
+              ready={cellReady.auctioneer}
+              isSyncing={syncPanels.includes("auctioneer")}
+            >
+              {frames.auctioneer}
+            </MobilePanelSlot>
+          </div>
 
-      {/* Visible group: the frames themselves, packed tight and centered
-          as one block over the full available height. */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
-        <FrameBox panelKey="auctioneer" />
-        <div className="flex gap-3">
-          {bottomKeys.map((key) => (
-            <FrameBox key={key} panelKey={key} />
-          ))}
-        </div>
-      </div>
+          {/* Bottom half — both bid pages, split evenly side by side */}
+          <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
+            {OWNER_KEYS.map((key) => (
+              <div key={key} className="flex-1 min-w-0 h-full">
+                <MobilePanelSlot
+                  cellRef={cellRefs[key]}
+                  w={cellDims[key].w}
+                  h={cellDims[key].h}
+                  ready={cellReady[key]}
+                  isSyncing={syncPanels.includes(key)}
+                >
+                  {frames[key]}
+                </MobilePanelSlot>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Auctioneer + Watch: pull both toward the shared middle seam
+              (instead of each centering independently in its own 50%)
+              with a small fixed gap, so the pair reads as one group
+              centered in the viewport rather than two halves. */}
+          <div className="min-h-0 pb-1.5" style={{ flex: "1 1 50%" }}>
+            <MobilePanelSlot
+              cellRef={cellRefs.auctioneer}
+              w={cellDims.auctioneer.w}
+              h={cellDims.auctioneer.h}
+              ready={cellReady.auctioneer}
+              isSyncing={syncPanels.includes("auctioneer")}
+              align="end"
+            >
+              {frames.auctioneer}
+            </MobilePanelSlot>
+          </div>
+          <div className="min-h-0 pt-1.5" style={{ flex: "1 1 50%" }}>
+            <MobilePanelSlot
+              cellRef={cellRefs.watch}
+              w={cellDims.watch.w}
+              h={cellDims.watch.h}
+              ready={cellReady.watch}
+              isSyncing={syncPanels.includes("watch")}
+              align="start"
+            >
+              {frames.watch}
+            </MobilePanelSlot>
+          </div>
+        </>
+      )}
     </div>
   );
 }

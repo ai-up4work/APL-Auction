@@ -27,6 +27,15 @@ export interface FlowPlayerCardProps {
   clickable?: boolean;
 }
 
+// Status -> ring color used on the compact (icon-only) avatar so identity
+// is still readable without any text on small screens.
+const STATUS_RING: Record<FlowPlayerCardStatus, string> = {
+  sold: "ring-green-500/70",
+  unsold: "ring-red-900/60",
+  pending: "ring-theme-orange/70",
+  locked: "ring-white/10",
+};
+
 export function FlowPlayerCard({
   id,
   name,
@@ -47,14 +56,31 @@ export function FlowPlayerCard({
   const isPending = status === "pending";
   const isClickable = clickable && !isLocked;
 
+  // On mobile the card is icon-only until it's the active selection —
+  // tapping a highlighted card is what reveals the name/status text.
+  // `sm:flex` (and friends) restore the full card on larger viewports
+  // regardless of selection state.
+  const textVisibilityClass = isHighlighted ? "flex" : "hidden sm:flex";
+
+  const statusLabel = isSoldP
+    ? `Sold to ${teamShortCode ?? "unknown team"} for ${price}`
+    : isUnsoldP
+    ? `Unsold, base ${price}`
+    : isPending
+    ? "On the block now"
+    : `Base ${price}`;
+
   return (
     <div
       id={`player-${id}`}
+      role="button"
+      aria-label={`${name}. ${statusLabel}`}
+      aria-pressed={isHighlighted}
       onClick={() => {
         if (isClickable) onClick?.();
       }}
       className={[
-        "glass-panel p-3 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
+        "glass-panel p-1.5 sm:p-3 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
         isLocked ? "opacity-40 cursor-not-allowed" : isClickable ? "cursor-pointer" : "",
         isHighlighted
           ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
@@ -69,7 +95,8 @@ export function FlowPlayerCard({
     >
       <div
         className={[
-          "w-10 h-10 rounded-lg overflow-hidden flex-shrink-0",
+          "w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden flex-shrink-0 ring-2 sm:ring-0",
+          STATUS_RING[status],
           isUnsoldP ? "grayscale opacity-40" : "bg-surface-container-highest",
         ].join(" ")}
       >
@@ -80,7 +107,7 @@ export function FlowPlayerCard({
         )}
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div className={["min-w-0 flex-1 flex-col", textVisibilityClass].join(" ")}>
         <div className="flex items-center gap-2">
           <p
             className={[
