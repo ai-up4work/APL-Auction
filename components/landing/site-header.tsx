@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { Menu, Twitter, X, LogOut, Loader2, Building2 } from "lucide-react"
+import { Menu, X, LogOut, Loader2, Building2, Twitter } from "lucide-react"
+import { FaWhatsapp } from "react-icons/fa"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Image from "next/image"
@@ -201,13 +202,13 @@ export function SiteHeader({
         {/* Right Side Controls (Shorter Height Section: 54px) */}
         <div className="flex items-center justify-end gap-3 h-[68px] lg:h-[54px]">
           <div className="hidden lg:flex items-center gap-3">
-            <Link href="#" target="_blank" rel="noopener noreferrer">
+            <Link href="https://wa.me/+94755354830" target="_blank" rel="noopener noreferrer">
               <Button
                 variant="ghost"
                 size="icon"
                 className="rounded-full w-8 h-8 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
               >
-                <Twitter className="h-4 w-4" />
+                <FaWhatsapp className="h-4 w-4" />
               </Button>
             </Link>
 

@@ -20,9 +20,9 @@ import {
   Quote,
   Shield,
   Trophy,
-  Twitter,
   X as XIcon,
 } from "lucide-react"
+import { FaWhatsapp } from "react-icons/fa"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { TypeText } from "@/components/landing/type-text"
@@ -695,7 +695,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                   ))}
                 </ul>
                 <div className="mt-8">
-                  <Button className="w-full bg-[#cd7f32] hover:bg-[#cd7f32]/80 text-black font-bold pulse" onClick={() => handleNavigation("/admin")}>
+                  <Button className="w-full bg-[#cd7f32] hover:bg-[#cd7f32]/80 text-black font-bold pulse" onClick={() => handleNavigation("/auth/register")}>
                     Get Started
                   </Button>
                 </div>
@@ -794,7 +794,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                   <div className="space-y-6">
                     <div className="flex items-start">
                       <Link
-                        href="mailto:hello@valiantleague.app"
+                        href="mailto:valiant-league@up4work.space"
                         className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
                         <Mail className="h-6 w-6 text-gold" />
@@ -802,36 +802,36 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Email Us</h4>
                         <p className="text-gray-300">
-                          hello@valiantleague.app <span className="text-gray-400">— placeholder, swap for your address</span>
+                          valiant-league@up4work.space
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-start">
                       <Link
-                        href="/admin"
+                        href="https://wa.me/+94755354830"
                         className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
-                        <Gavel className="h-6 w-6 text-gold" />
+                        <FaWhatsapp className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
-                        <h4 className="text-xl font-bold text-white mb-1">Book a Walkthrough</h4>
-                        <p className="text-gray-300">[Link to your scheduling page]</p>
+                        <h4 className="text-xl font-bold text-white mb-1">Contact us on whatsapp</h4>
+                        <a href="https://wa.me/+94755354830" className="text-gray-300">[+94 75 5354 830]</a>
                       </div>
                     </div>
 
                     <div className="flex items-start">
                       <Link
-                        href="#"
+                        href="https://wa.me/+94755354830"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
-                        <Twitter className="h-6 w-6 text-gold" />
+                        <FaWhatsapp className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Follow Us</h4>
-                        <p className="text-gray-300">[@yourhandle]</p>
+                        <p className="text-gray-300">[@valiantleague]</p>
                       </div>
                     </div>
                   </div>

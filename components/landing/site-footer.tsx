@@ -50,7 +50,7 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
                 <Twitter className="h-4 w-4" />
               </Link>
               <Link
-                href="mailto:hello@valiantleague.app"
+                href="mailto:valiant-league@up4work.space"
                 aria-label="Email"
                 className="w-11 h-11 rounded-full bg-white/5 border border-gold/20 flex items-center justify-center text-gray-400 hover:text-gold hover:border-gold hover:bg-gold/10 transition-all duration-300 shadow-[0_0_0_0_rgba(212,175,55,0)] hover:shadow-[0_0_15px_0_rgba(212,175,55,0.2)]"
               >
@@ -121,7 +121,7 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
               </li>
               <li>
                 <Link
-                  href="mailto:hello@valiantleague.app"
+                  href="mailto:valiant-league@up4work.space"
                   className="inline-flex items-center text-gray-400 hover:text-white transition-all duration-300 group py-1"
                 >
                   <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center mr-3 group-hover:bg-gold/20 transition-colors border border-transparent group-hover:border-gold/30">
