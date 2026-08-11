@@ -31,6 +31,13 @@ const MOBILE_W = 400;
 const MOBILE_H = 750;
 const ZOOM_TRANSITION = "500ms cubic-bezier(0.22,1,0.36,1)";
 
+// Below this real viewport width we switch from the side-by-side
+// multiview row (needs ~1350px+ for the desktop frame alone) to a
+// stacked layout that actually fits a phone screen. This is about the
+// visitor's own device, not the DESKTOP/MOBILE panel-frame groupings
+// above — those are simulated device chrome inside the page.
+const MOBILE_LAYOUT_BREAKPOINT = 768;
+
 const PANEL_META: Record<PanelKey, { num: string; label: string }> = {
   auctioneer: { num: "01", label: "Auctioneer" },
   watch: { num: "02", label: "Broadcast" },
@@ -108,6 +115,23 @@ function useCellFit(naturalWidth: number, naturalHeight: number, fit: "contain" 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
   return { ref: setRef, scale, ready, boxW: naturalWidth * scale, boxH: naturalHeight * scale };
+}
+
+// Tracks the real browser viewport (not the simulated device frames) so
+// the page can swap the horizontal multiview row for a stacked layout
+// that actually fits on a phone. SSR-safe: starts false, syncs on mount.
+function useIsMobileViewport(breakpoint = MOBILE_LAYOUT_BREAKPOINT) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [breakpoint]);
+
+  return isMobile;
 }
 
 function useSpotlight() {
@@ -853,6 +877,118 @@ function CompletionOverlay({
   );
 }
 
+// ── Mobile (real viewport) layout ────────────────────────────────────
+// Below MOBILE_LAYOUT_BREAKPOINT the side-by-side row simply doesn't
+// fit — the desktop-frame panel alone wants 1350px. Instead we stack
+// vertically: Auctioneer always anchors the top half. The bottom half
+// shows Watch by default, and swaps to whichever owner bid page(s) are
+// currently spotlighted — one full-width, or both side-by-side if two
+// owners are active at once, since a phone-width column comfortably
+// fits two half-width phone frames.
+function MobilePanelSlot({
+  cellRef,
+  w,
+  h,
+  ready,
+  isSyncing,
+  children,
+}: {
+  cellRef: (el: HTMLDivElement | null) => void;
+  w: number;
+  h: number;
+  ready: boolean;
+  isSyncing: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`min-w-0 min-h-0 h-full w-full flex items-center justify-center overflow-hidden ${
+        isSyncing ? "panel-sync-ring" : ""
+      }`}
+      style={{
+        opacity: ready ? 1 : 0,
+        transition: `opacity ${ZOOM_TRANSITION}`,
+      }}
+    >
+      <div ref={cellRef} className="w-full h-full flex items-center justify-center overflow-hidden">
+        <div
+          style={{ width: w, height: h }}
+          className="overflow-hidden flex items-center justify-center shrink-0"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileMultiview({
+  highlighted,
+  syncPanels,
+  frames,
+  cellRefs,
+  cellDims,
+  cellReady,
+}: {
+  highlighted: PanelKey[];
+  syncPanels: PanelKey[];
+  frames: Record<PanelKey, React.ReactNode>;
+  cellRefs: Record<PanelKey, (el: HTMLDivElement | null) => void>;
+  cellDims: Record<PanelKey, { w: number; h: number }>;
+  cellReady: Record<PanelKey, boolean>;
+}) {
+  const activeOwners = (["ownerA", "ownerB"] as const).filter((k) => highlighted.includes(k));
+  const showOwners = activeOwners.length > 0;
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col relative z-10">
+      {/* Top half — Auctioneer, always anchored here on mobile */}
+      <div className="min-h-0" style={{ flex: "1 1 50%" }}>
+        <MobilePanelSlot
+          cellRef={cellRefs.auctioneer}
+          w={cellDims.auctioneer.w}
+          h={cellDims.auctioneer.h}
+          ready={cellReady.auctioneer}
+          isSyncing={syncPanels.includes("auctioneer")}
+        >
+          {frames.auctioneer}
+        </MobilePanelSlot>
+      </div>
+
+      {/* Bottom half — Watch by default, or the active bid page(s) */}
+      <div className="min-h-0 flex" style={{ flex: "1 1 50%" }}>
+        {showOwners ? (
+          activeOwners.map((key) => (
+            <div key={key} className="flex-1 min-w-0 h-full">
+              <MobilePanelSlot
+                cellRef={cellRefs[key]}
+                w={cellDims[key].w}
+                h={cellDims[key].h}
+                ready={cellReady[key]}
+                isSyncing={syncPanels.includes(key)}
+              >
+                {frames[key]}
+              </MobilePanelSlot>
+            </div>
+          ))
+        ) : (
+          <div className="flex-1 min-w-0 h-full">
+            <MobilePanelSlot
+              cellRef={cellRefs.watch}
+              w={cellDims.watch.w}
+              h={cellDims.watch.h}
+              ready={cellReady.watch}
+              isSyncing={syncPanels.includes("watch")}
+            >
+              {frames.watch}
+            </MobilePanelSlot>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SandboxPage() {
   const {
     activePanels,
@@ -868,6 +1004,8 @@ export default function SandboxPage() {
     completedLots,
     finalizedUnsoldCount,
   } = useSpotlight();
+
+  const isMobileViewport = useIsMobileViewport();
 
   const auctioneerCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
   const watchCell = useCellFit(DESKTOP_W, DESKTOP_H + DESKTOP_CHROME_H);
@@ -1071,20 +1209,31 @@ export default function SandboxPage() {
         }}
       />
 
-      <div className="flex-1 min-h-0 flex relative z-10">
-        {PANEL_ORDER.map((key) => (
-          <Cell key={key} pct={pctOf(key)} ready={cellReady[key]} isSyncing={syncPanels.includes(key)}>
-            <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
-              <div
-                style={{ width: cellDims[key].w, height: cellDims[key].h }}
-                className="overflow-hidden flex items-center justify-center shrink-0"
-              >
-                {frames[key]}
+      {isMobileViewport ? (
+        <MobileMultiview
+          highlighted={highlighted}
+          syncPanels={syncPanels}
+          frames={frames}
+          cellRefs={cellRefs}
+          cellDims={cellDims}
+          cellReady={cellReady}
+        />
+      ) : (
+        <div className="flex-1 min-h-0 flex relative z-10">
+          {PANEL_ORDER.map((key) => (
+            <Cell key={key} pct={pctOf(key)} ready={cellReady[key]} isSyncing={syncPanels.includes(key)}>
+              <div ref={cellRefs[key]} className="w-full h-full flex items-center justify-center overflow-hidden">
+                <div
+                  style={{ width: cellDims[key].w, height: cellDims[key].h }}
+                  className="overflow-hidden flex items-center justify-center shrink-0"
+                >
+                  {frames[key]}
+                </div>
               </div>
-            </div>
-          </Cell>
-        ))}
-      </div>
+            </Cell>
+          ))}
+        </div>
+      )}
 
       {auctionStatus === "completed" && (
         <CompletionOverlay

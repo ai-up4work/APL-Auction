@@ -818,8 +818,18 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           style={{ boxShadow: "0 0 70px rgba(0,0,0,0.8)" }}
                         >
                           {currentLot?.playerImg ? (
-                            <Image src={currentLot.playerImg} alt={currentLot.playerName} className="w-full h-full object-cover object-top" style={{ filter: "grayscale(0.15) contrast(1.2)" }} width={280} height={325} />
-                          ) : (
+                              <div className="relative aspect-[280/325] overflow-hidden">
+                                <Image
+                                  src={currentLot.playerImg}
+                                  alt={currentLot.playerName}
+                                  width={280}
+                                  height={325}
+                                  className="object-cover object-top"
+                                  style={{ filter: "grayscale(0.15) contrast(1.2)" }}
+                                  priority
+                                />
+                              </div>                          
+                            ) : (
                             <div className="w-full h-full bg-surface-container flex items-center justify-center">
                               <span className="ms text-outline-variant text-9xl">person</span>
                             </div>
