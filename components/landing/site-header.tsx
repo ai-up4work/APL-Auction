@@ -202,15 +202,7 @@ export function SiteHeader({
         {/* Right Side Controls (Shorter Height Section: 54px) */}
         <div className="flex items-center justify-end gap-3 h-[68px] lg:h-[54px]">
           <div className="hidden lg:flex items-center gap-3">
-            <Link href="https://wa.me/+94755354830" target="_blank" rel="noopener noreferrer">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
-              >
-                <FaWhatsapp className="h-8 w-8" />
-              </Button>
-            </Link>
+
 
             <div className="w-px h-5 bg-gold/20" />
 
@@ -252,6 +244,15 @@ export function SiteHeader({
                     </p>
                   </div>
                 </button>
+                <Link href="https://wa.me/+94755354830" target="_blank" rel="noopener noreferrer">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
+                  >
+                    <FaWhatsapp className="h-8 w-8" />
+                  </Button>
+                </Link>
                 <button
                   onClick={handleLogout}
                   disabled={loggingOut}
@@ -407,7 +408,7 @@ export function SiteHeader({
 
             <div className="pt-4 flex justify-center">
               <Link
-                href="#"
+                href="https://wa.me/+94755354830"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => setIsNavOpen(false)}
@@ -417,7 +418,7 @@ export function SiteHeader({
                   size="icon"
                   className="rounded-full w-10 h-10 border border-gold/25 text-gold/80 hover:text-gold hover:border-gold/60 transition-colors"
                 >
-                  <Twitter className="h-4 w-4" />
+                  <FaWhatsapp className="h-6 w-6" />
                 </Button>
               </Link>
             </div>
