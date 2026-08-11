@@ -24,7 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 const { supabase } = await import("@/lib/supabase");
 
-const BUCKET = "Auction-Images";
+const BUCKET = "Valiant-League-Images";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"];
