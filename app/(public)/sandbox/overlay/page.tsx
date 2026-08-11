@@ -142,6 +142,32 @@
 // "Back to Controls" button and the "Sandbox Feed" badge keep an
 // explicit z-index, since those two ARE real children here and need to
 // stay above the video + portaled overlays.
+//
+// FIX (mobile portrait unusable for a broadcast console): added
+// <ForceLandscapeOnMobile>, a CSS-only rotation of the whole <html>
+// element on narrow/portrait viewports. There's no reliable JS
+// orientation-lock available outside the Fullscreen API (which iOS
+// Safari doesn't support at all), so this rotates the page itself
+// rather than the device. Targeting <html> (not a wrapper div in this
+// component's own tree) is what's required — LiveScoreBar and
+// BroadcastSurface's overlay components all portal straight to
+// document.body, same reason LivePreviewMonitor needs the iframe trick
+// above, so a transform anywhere inside this component wouldn't reach
+// them. Rotating <html> rotates its entire subtree, portals included,
+// for free.
+//
+// FIX (mobile header too tall): the console header now collapses on
+// mobile. A compact strip (badge + score + a chevron toggle) always
+// stays visible at a fixed height; the rest (team codes, innings pill,
+// hint text, Restart/Flip buttons) lives in a second row that
+// animates its max-height open/closed via `headerExpanded`. Desktop
+// (`md:` and up) overrides the collapse entirely — `md:!max-h-none
+// md:!opacity-100` on the detail row — so nothing about the existing
+// desktop header layout or behavior changes; only mobile's height
+// responds to the toggle. The two small action buttons are duplicated
+// (once for desktop's compact strip, once for mobile's detail row)
+// rather than shared across breakpoints with `order-*`, since moving
+// the same DOM node across the two rows on resize would remount it.
 
 "use client";
 
@@ -311,6 +337,43 @@ function ScrollbarTheme() {
       }
       *::-webkit-scrollbar-corner {
         background: transparent;
+      }
+    `}</style>
+  );
+}
+
+// ── Force landscape on mobile ────────────────────────────────────────
+// This is a broadcast console — cramming the scoring pad and channel
+// pills into a phone-portrait width doesn't work. There's no reliable
+// JS orientation lock available here (screen.orientation.lock() only
+// works inside the Fullscreen API on Chrome/Android and isn't supported
+// on iOS Safari at all, which is most of what "mobile" means for a
+// scorer's phone). So this rotates the whole page 90° via CSS instead
+// of the device — the phone stays physically in portrait, the page
+// just paints as landscape.
+//
+// IMPORTANT: this targets <html>, not some wrapper div inside this
+// component's own tree. Both LiveScoreBar and BroadcastSurface's
+// overlay components (MatchMomentOverlay etc.) portal straight to
+// document.body — same reason LivePreviewMonitor needs the iframe
+// trick above — so a transform on anything inside this component
+// wouldn't touch them. Rotating <html> rotates its entire subtree,
+// body-portaled content included, so Control and Live both get it for
+// free without being wired in separately.
+function ForceLandscapeOnMobile() {
+  return (
+    <style jsx global>{`
+      @media screen and (max-width: 900px) and (orientation: portrait) {
+        html {
+          transform: rotate(-90deg);
+          transform-origin: left top;
+          width: 100vh;
+          height: 100vw;
+          overflow-x: hidden;
+          position: absolute;
+          top: 100%;
+          left: 0;
+        }
       }
     `}</style>
   );
@@ -674,6 +737,12 @@ export default function OverlaySandboxPage() {
   const [log, setLog] = useState<string[]>([]);
   const [firedMoment, setFiredMoment] = useState<FiredMoment | null>(null);
   const momentIdRef = useRef(0);
+
+  // Mobile-only: header starts collapsed to save vertical space on
+  // small screens. Ignored on desktop (md:) via the CSS override on the
+  // detail row below — the header there stays exactly as it always
+  // was, single row, always expanded.
+  const [headerExpanded, setHeaderExpanded] = useState(false);
 
   // FIX: revert timer for the big floating chyron — previously only
   // the small Live Preview Monitor had one (previewRevertTimerRef
@@ -1052,6 +1121,7 @@ export default function OverlaySandboxPage() {
 
   return (
     <>
+    <ForceLandscapeOnMobile />
     <div
       className="h-screen w-screen overflow-hidden relative flex flex-col"
       style={{
@@ -1099,98 +1169,194 @@ export default function OverlaySandboxPage() {
 
       {/* ── Console header ────────────────────────────────────────── */}
       <div
-        className="shrink-0 h-11 flex items-center justify-between px-4 relative z-20"
+        className="shrink-0 relative z-20"
         style={{
           background: "linear-gradient(180deg, var(--color-surface-container-low), var(--color-surface-dim))",
           borderBottom: "1px solid var(--color-border-overlay)",
           boxShadow: "0 1px 0 rgba(0,0,0,0.4)",
         }}
       >
-        <div className="flex items-center gap-4 min-w-0">
-          <div
-            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
-            style={{
-              background: "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--color-theme-orange) 45%, transparent)",
-            }}
-          >
-            <span
-              className="w-[7px] h-[7px] rounded-full"
+        {/* Compact strip — always visible, always this height. On
+            desktop (md:) this row also carries the full info +
+            buttons, same as before; on mobile it's trimmed down to
+            just the essentials + a chevron that reveals the rest. */}
+        <div className="h-11 flex items-center justify-between px-4 gap-3">
+          <div className="flex items-center gap-3 md:gap-4 min-w-0">
+            <div
+              className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
               style={{
-                background: "var(--color-theme-orange)",
-                animation: "sandboxFeedPulse 1.6s ease-in-out infinite",
-                boxShadow: "0 0 6px 1px color-mix(in srgb, var(--color-theme-orange) 60%, transparent)",
+                background: "color-mix(in srgb, var(--color-theme-orange) 14%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-theme-orange) 45%, transparent)",
               }}
+            >
+              <span
+                className="w-[7px] h-[7px] rounded-full"
+                style={{
+                  background: "var(--color-theme-orange)",
+                  animation: "sandboxFeedPulse 1.6s ease-in-out infinite",
+                  boxShadow: "0 0 6px 1px color-mix(in srgb, var(--color-theme-orange) 60%, transparent)",
+                }}
+              />
+              <span
+                className="text-[10px] font-semibold uppercase"
+                style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.11em", color: "var(--color-theme-orange)" }}
+              >
+                Sandbox
+              </span>
+            </div>
+
+            <span className="w-px h-5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
+
+            {/* Team code line — hidden on mobile's compact strip, shown
+                in the collapsible row instead so mobile's top strip
+                stays short. Desktop shows it here same as always. */}
+            <span
+              className="hidden md:inline text-[12px] shrink-0"
+              style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+            >
+              {matchSetup.teamA.shortCode} vs {matchSetup.teamB.shortCode}
+            </span>
+
+            <span
+              className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px] shrink-0"
+              style={{
+                fontFamily: "var(--font-headline-lg)",
+                fontStyle: "italic",
+                fontWeight: 700,
+                color: "var(--color-theme-orange)",
+                letterSpacing: "0.03em",
+                background: "rgba(0,0,0,0.35)",
+                border: "1px solid var(--color-border-overlay)",
+              }}
+            >
+              {scoreReadout}
+            </span>
+
+            <div
+              className="hidden md:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
+              style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
+            >
+              <span
+                className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-[2px]"
+                style={{
+                  fontFamily: "var(--font-label-mono)",
+                  letterSpacing: "0.06em",
+                  color: liveState.matchComplete ? "#08110c" : "var(--color-on-surface)",
+                  background: liveState.matchComplete ? "#3ddc84" : "transparent",
+                }}
+              >
+                {inningsLabel}
+              </span>
+            </div>
+
+            <span
+              className="hidden lg:inline text-[10px] truncate"
+              style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+            >
+              hardcoded squads · no backend
+            </span>
+          </div>
+
+          {/* Desktop action buttons live here, same spot as always.
+              On mobile they move into the collapsible row below so the
+              compact strip only needs to fit the chevron. */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <ConsoleActionButton onClick={restartMatch} icon={<RotateCcw className="w-2.5 h-2.5" />}>
+              Restart
+            </ConsoleActionButton>
+            <ConsoleActionButton
+              onClick={goLive}
+              solid
+              icon={<MonitorPlay className="w-2.5 h-2.5" />}
+              title="Switch this tab into the actual broadcast surface"
+            >
+              Flip to Live
+            </ConsoleActionButton>
+          </div>
+
+          {/* Collapse toggle — mobile only. Desktop never renders this
+              and never respects headerExpanded (see the md: override
+              on the panel below), so nothing changes there. */}
+          <button
+            type="button"
+            onClick={() => setHeaderExpanded((e) => !e)}
+            className="md:hidden flex items-center justify-center w-7 h-7 rounded-full shrink-0 transition-colors"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              boxShadow: "inset 0 0 0 1px var(--color-border-overlay)",
+              color: "var(--color-outline)",
+            }}
+            aria-expanded={headerExpanded}
+            aria-label={headerExpanded ? "Collapse header" : "Expand header"}
+          >
+            <ChevronDown
+              className="w-3.5 h-3.5 transition-transform"
+              style={{ transform: headerExpanded ? "rotate(180deg)" : "none" }}
             />
-            <span
-              className="text-[10px] font-semibold uppercase"
-              style={{ fontFamily: "var(--font-label-mono)", letterSpacing: "0.11em", color: "var(--color-theme-orange)" }}
-            >
-              Sandbox
-            </span>
-          </div>
-
-          <span className="w-px h-5 shrink-0" style={{ background: "var(--color-border-overlay)" }} />
-
-          <span
-            className="text-[12px] shrink-0"
-            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
-          >
-            {matchSetup.teamA.shortCode} vs {matchSetup.teamB.shortCode}
-          </span>
-
-          <span
-            className="text-[12px] tabular-nums px-1.5 py-0.5 rounded-[2px] shrink-0"
-            style={{
-              fontFamily: "var(--font-headline-lg)",
-              fontStyle: "italic",
-              fontWeight: 700,
-              color: "var(--color-theme-orange)",
-              letterSpacing: "0.03em",
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid var(--color-border-overlay)",
-            }}
-          >
-            {scoreReadout}
-          </span>
-
-          <div
-            className="hidden md:flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
-            style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
-          >
-            <span
-              className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-[2px]"
-              style={{
-                fontFamily: "var(--font-label-mono)",
-                letterSpacing: "0.06em",
-                color: liveState.matchComplete ? "#08110c" : "var(--color-on-surface)",
-                background: liveState.matchComplete ? "#3ddc84" : "transparent",
-              }}
-            >
-              {inningsLabel}
-            </span>
-          </div>
-
-          <span
-            className="hidden lg:inline text-[10px] truncate"
-            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
-          >
-            hardcoded squads · no backend
-          </span>
+          </button>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <ConsoleActionButton onClick={restartMatch} icon={<RotateCcw className="w-2.5 h-2.5" />}>
-            Restart
-          </ConsoleActionButton>
-          <ConsoleActionButton
-            onClick={goLive}
-            solid
-            icon={<MonitorPlay className="w-2.5 h-2.5" />}
-            title="Switch this tab into the actual broadcast surface"
-          >
-            Flip to Live
-          </ConsoleActionButton>
+        {/* Collapsible detail row — mobile only in practice. The
+            md:!max-h-none / md:!opacity-100 override means desktop
+            always renders this fully expanded regardless of
+            headerExpanded, so nothing about the existing desktop
+            header behavior changes; only mobile's height responds to
+            the toggle. overflow-hidden + max-height transition (rather
+            than conditional rendering) keeps this a smooth collapse
+            instead of an abrupt cut. */}
+        <div
+          className="overflow-hidden transition-[max-height,opacity] duration-300 ease-out md:!max-h-none md:!opacity-100"
+          style={{
+            maxHeight: headerExpanded ? 160 : 0,
+            opacity: headerExpanded ? 1 : 0,
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1 md:hidden">
+            <span
+              className="text-[12px] shrink-0"
+              style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+            >
+              {matchSetup.teamA.shortCode} vs {matchSetup.teamB.shortCode}
+            </span>
+
+            <span
+              className="flex items-center pl-1.5 pr-2.5 py-1 rounded-[3px] shrink-0"
+              style={{ background: "rgba(0,0,0,0.22)", border: "1px solid var(--color-border-overlay)" }}
+            >
+              <span
+                className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-[2px]"
+                style={{
+                  fontFamily: "var(--font-label-mono)",
+                  letterSpacing: "0.06em",
+                  color: liveState.matchComplete ? "#08110c" : "var(--color-on-surface)",
+                  background: liveState.matchComplete ? "#3ddc84" : "transparent",
+                }}
+              >
+                {inningsLabel}
+              </span>
+            </span>
+
+            <span
+              className="text-[10px] shrink-0"
+              style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
+            >
+              hardcoded squads · no backend
+            </span>
+
+            <div className="flex items-center gap-2 w-full pt-1">
+              <ConsoleActionButton onClick={restartMatch} icon={<RotateCcw className="w-2.5 h-2.5" />}>
+                Restart
+              </ConsoleActionButton>
+              <ConsoleActionButton
+                onClick={goLive}
+                solid
+                icon={<MonitorPlay className="w-2.5 h-2.5" />}
+                title="Switch this tab into the actual broadcast surface"
+              >
+                Flip to Live
+              </ConsoleActionButton>
+            </div>
+          </div>
         </div>
       </div>
 
