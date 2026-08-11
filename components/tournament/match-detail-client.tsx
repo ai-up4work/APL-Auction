@@ -370,7 +370,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       ═══════════════════════════════════════════ */}
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
-          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-60"
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-40"
           style={{
             backgroundImage: `url('${match.tournamentLogoUrl || images.bg}')`,
           }}
