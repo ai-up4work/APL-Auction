@@ -5,7 +5,13 @@ import type { Metadata, Viewport } from "next";
 import { AuctionProvider } from "@/context/AuctionContext";
 import { AuthProvider } from "@/context/AuthContext";
 
+// TODO: swap in your real production domain — this is what Next.js uses to
+// turn every relative URL below (icons, og-image, canonical link) into the
+// absolute URL that social crawlers and search engines require.
+const SITE_URL = "https://valiantleague.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Valiant League — Live Auction, Tournament & Broadcast Platform",
   description:
     "Valiant League lets cricket clubs and tournament organizers run an entire competition lifecycle from one connected platform: draft players through a live points-based auction, build tournament brackets from the resulting teams, and broadcast matches with real-time overlay graphics — all synced live via Supabase.",
@@ -17,13 +23,13 @@ export const metadata: Metadata = {
     "player draft auction",
     "cricket scoring app",
   ],
+  // Canonical + per-locale alternates, resolved against metadataBase above.
+  alternates: {
+    canonical: "/",
+  },
   // Favicon / touch icon / PWA icon wiring. Next.js injects the right
   // <link> tags into <head> from this — no manual <link rel="icon">
   // needed. All paths are resolved from /public.
-  //
-  // NOTE: these files don't exist in /public yet — see the accompanying
-  // note for the exact list of image files to add (or send over the
-  // source logo and I'll generate them for you).
   icons: {
     icon: [
       { url: "/marketing/favicon.ico", sizes: "any" },
@@ -49,6 +55,7 @@ export const metadata: Metadata = {
     title: "Valiant League",
     description:
       "Run your cricket club's auction, tournament bracket, and live broadcast overlay — all from one connected, real-time platform.",
+    url: SITE_URL,
     siteName: "Valiant League",
     type: "website",
     images: [
