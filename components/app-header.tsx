@@ -203,7 +203,7 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
                   aria-label="Go to organization"
                   className="hidden sm:flex items-center gap-2.5 px-3 min-w-0 max-w-[220px] h-full group/org"
                 >
-                  <div className="relative w-8 h-8 lg:w-9 lg:h-9 shrink-0 rounded-full overflow-hidden bg-white/5 border border-gold/25 flex items-center justify-center group-hover/org:border-gold/60 transition-colors duration-300">
+                  <div className="relative w-14 h-14 lg:w-14 lg:h-14 shrink-0 rounded-full overflow-hidden bg-white/5 border border-gold/25 flex items-center justify-center group-hover/org:border-gold/60 transition-colors duration-300">
                     {orgLoading ? (
                       <div className="w-full h-full bg-white/10 animate-pulse" />
                     ) : organization?.logoUrl && !logoFailed ? (
