@@ -250,7 +250,7 @@ export function SiteHeader({
                     size="icon"
                     className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
                   >
-                    <FaWhatsapp className="h-8 w-8" />
+                    <FaWhatsapp className="h-9 w-9" />
                   </Button>
                 </Link>
                 <button
@@ -280,7 +280,7 @@ export function SiteHeader({
                     size="icon"
                     className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
                   >
-                    <FaWhatsapp className="h-8 w-8" />
+                    <FaWhatsapp className="h-9 w-9" />
                   </Button>
                 </Link>
                 <Button
@@ -398,7 +398,7 @@ export function SiteHeader({
                       size="icon"
                       className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
                     >
-                      <FaWhatsapp className="h-8 w-8" />
+                      <FaWhatsapp className="h-9 w-9" />
                     </Button>
                   </Link>
                   <Button
@@ -437,7 +437,7 @@ export function SiteHeader({
                   size="icon"
                   className="rounded-full w-10 h-10 border border-gold/25 text-gold/80 hover:text-gold hover:border-gold/60 transition-colors"
                 >
-                  <FaWhatsapp className="h-6 w-6" />
+                  <FaWhatsapp className="h-9 w-9" />
                 </Button>
               </Link>
             </div>
