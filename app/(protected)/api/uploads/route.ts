@@ -71,23 +71,38 @@ function safeFileName(originalName: string): string {
   return `${rand}.${ext || "png"}`;
 }
 
-// Given either a raw storage path ("auctionId/Auction-Images/logos/xyz.png")
-// or a full Supabase public URL for this bucket, return the storage path.
-// Returns null if it can't confidently resolve one (never guess — a wrong
-// path could delete an unrelated file).
-function resolveStoragePath(raw: unknown): string | null {
+// Given either a raw storage path ("auctionId/Auction-Images/logos/xyz.png",
+// assumed to live in the default BUCKET) or a full Supabase public URL
+// (which may point at ANY bucket, e.g. an older "Auction Images" bucket
+// from before this app standardized on BUCKET), resolve which bucket +
+// path to operate on. Returns null if it can't confidently resolve one —
+// never guess, since a wrong path could delete an unrelated file.
+function resolveStorageRef(raw: unknown): { bucket: string; path: string } | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   const value = raw.trim();
 
   if (!/^https?:\/\//i.test(value)) {
-    return value.replace(/^\/+/, "");
+    // Bare path, no bucket info available — assume the default bucket.
+    return { bucket: BUCKET, path: value.replace(/^\/+/, "") };
   }
 
-  const marker = `/storage/v1/object/public/${BUCKET}/`;
+  // Supabase public storage URLs look like:
+  //   https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path...>
+  // Capture the bucket name dynamically rather than assuming BUCKET, so
+  // this also resolves images sitting in older/differently-named buckets.
+  const marker = "/storage/v1/object/public/";
   const idx = value.indexOf(marker);
   if (idx === -1) return null;
 
-  return decodeURIComponent(value.slice(idx + marker.length));
+  const rest = value.slice(idx + marker.length); // "<bucket>/<path...>"
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) return null;
+
+  const bucket = decodeURIComponent(rest.slice(0, slashIdx));
+  const path = decodeURIComponent(rest.slice(slashIdx + 1));
+  if (!bucket || !path) return null;
+
+  return { bucket, path };
 }
 
 // Normalizes whatever variant of "kind" a caller sends (old or new naming)
@@ -138,10 +153,11 @@ export async function POST(req: NextRequest) {
     const subType   = formData.get("subType"); // "banner" | "logo" | "team-images" | "player-images" | "award-images" etc.
 
     // Precise old-image reference, when the caller has one (this is the
-    // component's current `value` — see comment at top of file).
-    const oldStoragePath =
-      resolveStoragePath(formData.get("oldPath")) ??
-      resolveStoragePath(formData.get("oldImageUrl"));
+    // component's current `value` — see comment at top of file). May
+    // point at a different bucket than BUCKET (e.g. older images).
+    const oldRef =
+      resolveStorageRef(formData.get("oldPath")) ??
+      resolveStorageRef(formData.get("oldImageUrl"));
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
@@ -244,14 +260,16 @@ export async function POST(req: NextRequest) {
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
     // Best-effort precise cleanup: delete the exact old file the caller
-    // told us about, as long as it isn't the file we just wrote. This runs
-    // AFTER the new upload succeeds, so a failure here never leaves the
-    // user without an image — it just leaves an orphaned file.
+    // told us about, from whichever bucket it's actually in (older images
+    // may live in a different bucket than BUCKET), as long as it isn't
+    // the file we just wrote. This runs AFTER the new upload succeeds, so
+    // a failure here never leaves the user without an image — it just
+    // leaves an orphaned file.
     let oldImageDeleted = false;
     let oldImageDeleteError: string | undefined;
 
-    if (oldStoragePath && oldStoragePath !== path) {
-      const { error: deleteErr } = await supabase.storage.from(BUCKET).remove([oldStoragePath]);
+    if (oldRef && !(oldRef.bucket === BUCKET && oldRef.path === path)) {
+      const { error: deleteErr } = await supabase.storage.from(oldRef.bucket).remove([oldRef.path]);
       if (deleteErr) {
         oldImageDeleteError = deleteErr.message;
       } else {
@@ -265,7 +283,7 @@ export async function POST(req: NextRequest) {
       url: publicUrlData.publicUrl,
       path,
       oldImageCleared: clearOldBeforeUpload,
-      ...(oldStoragePath ? { oldImageDeleted, oldImageDeleteError } : {}),
+      ...(oldRef ? { oldImageDeleted, oldImageDeleteError } : {}),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Unknown upload error" }, { status: 500 });
@@ -274,18 +292,20 @@ export async function POST(req: NextRequest) {
 
 // Delete an image directly (e.g. the field's "remove image" button).
 // Body: { path: string } | { imageUrl: string } — either the storage path
-// or the full public URL returned by POST above both work.
+// (assumed in the default bucket) or the full public URL (resolved to
+// whichever bucket it actually lives in — handles older images stored in
+// a differently-named bucket) both work.
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json();
-    const storagePath = resolveStoragePath(body?.path) ?? resolveStoragePath(body?.imageUrl);
+    const ref = resolveStorageRef(body?.path) ?? resolveStorageRef(body?.imageUrl);
 
-    if (!storagePath) {
+    if (!ref) {
       return NextResponse.json({ error: "Missing or unresolvable path/imageUrl" }, { status: 400 });
     }
 
     const supabase = admin();
-    const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
+    const { error } = await supabase.storage.from(ref.bucket).remove([ref.path]);
 
     if (error) {
       return NextResponse.json({ error: `Delete failed: ${error.message}` }, { status: 500 });
