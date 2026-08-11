@@ -138,7 +138,9 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
                   <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center mr-3 group-hover:bg-gold group-hover:shadow-[0_0_10px_rgba(212,175,55,0.4)] transition-all border border-gold/30 group-hover:border-gold">
                     <Shield className="h-3.5 w-3.5 text-gold group-hover:text-black transition-colors" />
                   </div>
+                  <a href="/auth/register" className="text-gray-400 hover:text-white transition-colors duration-300">
                   <span className="font-semibold text-gold/90 group-hover:text-gold transition-colors">Start Your League</span>
+                  </a>
                 </div>
               </li>
             </ul>
