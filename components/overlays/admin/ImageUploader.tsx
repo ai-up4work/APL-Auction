@@ -1,123 +1,115 @@
-// lib/uploadImage.ts
-// Client-side helper for uploading team logos / player photos / auction
-// logos to Supabase Storage via the server-side /api/uploads route (see
-// app/api/uploads/route.ts). We go through that API rather than uploading
-// directly from the browser so the Supabase Storage bucket's INSERT policy
-// can stay locked to the service role — the anon/browser client never needs
-// storage write access.
+"use client";
 
-export interface UploadResult {
-  url:  string; // public URL — store this directly on teams.logo / players.img / session.auctionLogo
-  path: string; // storage path — keep this if you want to support deleting/replacing later
-}
+import React, { useRef, useState } from "react";
+import { FieldLabel, IconBtn } from "./ui";
+import Image from "next/image";
+import { type UploadKind } from "@/lib/uploadImage";
 
-export type UploadKind = "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award";
+export function ImageUploader({
+  auctionId,
+  kind,
+  value,
+  onChange,
+  label,
+  compact,
+}: {
+  auctionId: string;
+  kind: UploadKind;
+  value: string;
+  onChange: (url: string) => void;
+  label?: string;
+  compact?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hovered, setHovered] = useState(false);
 
-// Kinds in this set map to the route's LEGACY branch — sent as
-// auctionId + kind, unchanged from before. Everything else maps to the
-// route's newer multi-context branch (context + contextId + subType),
-// since normalizeLegacyKind() in /api/uploads only ever accepts
-// team/player/logo (and their string variants) — passing anything else
-// as `kind` there (e.g. "match") always 400s.
-const LEGACY_KINDS = new Set<UploadKind>(["team", "player", "logo"]);
-
-// Default subType per new-style kind, used when the caller doesn't pass
-// one explicitly. Matches what the route's context branches expect —
-// see the path templates in app/api/uploads/route.ts.
-const DEFAULT_SUBTYPE: Partial<Record<UploadKind, string>> = {
-  tournament: "banner",
-  organization: "logo",
-  match: "banner",
-  award: "award-images",
-};
-
-// Maps our UploadKind to the route's `context` value. Only relevant for
-// non-legacy kinds.
-const CONTEXT_FOR_KIND: Partial<Record<UploadKind, string>> = {
-  tournament: "tournament",
-  organization: "organization",
-  match: "match",
-  award: "award",
-};
-
-export interface UploadOptions {
-  // Overrides the default subType for this kind (e.g. "player-images"
-  // instead of "banner" for a match-context upload).
-  subType?: string;
-  // Only read when kind === "award" — forwarded as awardId to the route.
-  awardId?: string;
-  // The image this upload is replacing — pass the field's current
-  // `value` (public URL) or a raw storage path here. When present, the
-  // API deletes exactly that file after the new upload succeeds. This is
-  // what makes "replace" auto-clean-up work even for team-images /
-  // player-images folders that hold many different entities at once,
-  // since it targets the specific file rather than the whole folder.
-  oldImageUrl?: string;
-}
-
-export async function uploadAuctionImage(
-  // For legacy kinds (team/player/logo) this is the auction id, exactly
-  // as before. For new-style kinds (tournament/organization/match/award)
-  // this is that entity's own id (tournamentId/orgId/matchId/tournamentId
-  // respectively) — same parameter, different meaning depending on kind,
-  // so every existing call site keeps working unchanged.
-  auctionOrContextId: string,
-  kind: UploadKind,
-  file: File,
-  options?: UploadOptions
-): Promise<UploadResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  if (LEGACY_KINDS.has(kind)) {
-    formData.append("auctionId", auctionOrContextId);
-    formData.append("kind", kind);
-  } else {
-    const context = CONTEXT_FOR_KIND[kind];
-    if (!context) {
-      throw new Error(`uploadAuctionImage: no context mapping for kind "${kind}"`);
-    }
-    formData.append("context", context);
-    formData.append("contextId", auctionOrContextId);
-    formData.append("subType", options?.subType ?? DEFAULT_SUBTYPE[kind] ?? "default");
-    if (context === "award" && options?.awardId) {
-      formData.append("awardId", options.awardId);
+  async function handleFile(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("auctionId", auctionId);
+      fd.append("kind", kind);
+      const res = await fetch("/api/uploads", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      onChange(data.url);
+    } catch (e: any) {
+      setError(e?.message ?? "Upload failed");
+    } finally {
+      setUploading(false);
     }
   }
 
-  if (options?.oldImageUrl) {
-    formData.append("oldImageUrl", options.oldImageUrl);
-  }
+  const size = compact ? 34 : 44;
 
-  const res = await fetch("/api/uploads", { method: "POST", body: formData });
-  const data = await res.json();
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label && <FieldLabel>{label}</FieldLabel>}
+      <div className="flex items-center gap-2.5">
+        <div
+          className="relative rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0"
+          style={{
+            width: size,
+            height: size,
+            background: "var(--color-surface-container-low)",
+            border: "1px solid var(--color-border-overlay)",
+          }}
+        >
+          {value ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <Image src={value} alt="" className="w-full h-full object-cover" width={size} height={size} />
+          ) : (
+            <span className="material-symbols-outlined" style={{ fontSize: compact ? 16 : 18, color: "var(--color-outline)" }}>
+              image
+            </span>
+          )}
+        </div>
 
-  if (!res.ok) {
-    throw new Error(data?.error ?? `Upload failed (${res.status})`);
-  }
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className="flex-1 min-w-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all"
+          style={{
+            fontFamily: "var(--font-label-mono)",
+            background: hovered ? "rgba(201,151,31,0.1)" : "var(--color-surface-container-low)",
+            border: "1px solid var(--color-border-overlay)",
+            color: hovered ? "var(--color-theme-orange)" : "var(--color-on-surface-variant)",
+            cursor: uploading ? "wait" : "pointer",
+          }}
+        >
+          <span className={`material-symbols-outlined ${uploading ? "animate-spin" : ""}`} style={{ fontSize: 14 }}>
+            {uploading ? "progress_activity" : "upload"}
+          </span>
+          {uploading ? "Uploading…" : value ? "Replace" : "Upload"}
+        </button>
 
-  return data as UploadResult;
+        {value && !uploading && <IconBtn icon="close" title="Remove image" danger onClick={() => onChange("")} />}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+          e.target.value = "";
+        }}
+      />
+
+      {error && (
+        <span className="text-[10px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
 }
-
-export async function deleteAuctionImage(pathOrUrl: string): Promise<void> {
-  // The route's DELETE handler accepts either a raw storage path or a
-  // full public URL (it resolves either into a storage path internally),
-  // so callers can pass whichever they have on hand — no need to have
-  // kept the original `path` around if only the public `url` was stored.
-  const isUrl = /^https?:\/\//i.test(pathOrUrl);
-  const res = await fetch("/api/uploads", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(isUrl ? { imageUrl: pathOrUrl } : { path: pathOrUrl }),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error ?? `Delete failed (${res.status})`);
-  }
-}
-
-// Convenience wrappers — unchanged, still legacy team/player/logo
-export const uploadTeamLogo    = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "team",   file);
-export const uploadPlayerPhoto = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "player", file);
-export const uploadAuctionLogo = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "logo",   file);
