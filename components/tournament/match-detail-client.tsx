@@ -41,14 +41,14 @@ function initials(name: string) {
 
 // "stats" removed as a standalone tab — win probability now lives inline
 // in the score strip instead (see WinProbabilityBar below).
-type Tab = "info" | "scorecard" | "squads" | "overs" | "graphs"
+type Tab = "summary" | "scorecard" | "squads" | "overs" | "graphs"
 
 // All tabs are always rendered — never hidden based on data
 // availability. Tabs without underlying data are shown locked (see
 // isTabLocked) instead, so the visitor knows the feature exists and needs
 // to be set up, rather than wondering why a tab silently disappeared.
 const TABS: { key: Tab; label: string }[] = [
-  { key: "info", label: "Info" },
+  { key: "summary", label: "summary" },
   { key: "scorecard", label: "Scorecard" },
   { key: "squads", label: "Squads" },
   { key: "overs", label: "Overs" },
@@ -219,7 +219,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>("info")
+  const [tab, setTab] = useState<Tab>("summary")
   // Default to innings 1 — this gets kept in sync with whichever innings
   // is actually in progress by the effect below, so opening Scorecard /
   // Overs / Graphs mid-1st-innings shows the live 1st innings instead of
@@ -319,7 +319,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         return !hasBallData
       case "squads":
         return match.squads.length === 0
-      case "info":
+      case "summary":
       default:
         return false
     }
@@ -706,7 +706,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
               {/* INFO TAB — never locked; every field shows a "Not set"
                   placeholder instead of being omitted when blank */}
-              {tab === "info" && (
+              {tab === "summary" && (
                 <div className="space-y-4 mb-8">
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
                     <h2 className="text-xl font-bold text-white mb-4 font-cinzel">MATCH INFO</h2>
