@@ -271,8 +271,18 @@ export function SiteHeader({
                 </button>
               </div>
             ) : (
+              
               // Logged Out: Login/Register Buttons
               <>
+                <Link href="https://wa.me/+94755354830" target="_blank" rel="noopener noreferrer">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
+                  >
+                    <FaWhatsapp className="h-8 w-8" />
+                  </Button>
+                </Link>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -382,6 +392,15 @@ export function SiteHeader({
                 </div>
               ) : (
                 <>
+                  <Link href="https://wa.me/+94755354830" target="_blank" rel="noopener noreferrer">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
+                    >
+                      <FaWhatsapp className="h-8 w-8" />
+                    </Button>
+                  </Link>
                   <Button
                     variant="ghost"
                     className="font-cinzel font-semibold w-full justify-start text-white/90 hover:text-gold hover:bg-white/5"
