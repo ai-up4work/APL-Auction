@@ -4,6 +4,7 @@
 import { useRef, useState } from "react"
 import { Upload, Loader2, ImageOff, Trash2 } from "lucide-react"
 import { uploadAuctionImage, type UploadKind } from "@/lib/uploadImage"
+import Image from "next/image"
 
 interface ImageUploadFieldProps {
   label?: string
@@ -206,7 +207,7 @@ export default function ImageUploadField({
         >
           {value && !imageBroken ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={value} alt="" className="w-full h-full object-cover" onError={() => setImageBroken(true)} />
+            <Image src={value} alt="" className="w-full h-full object-cover" onError={() => setImageBroken(true)} width={52} height={52} />
           ) : (
             <ImageOff className="h-4 w-4 text-gray-600" />
           )}

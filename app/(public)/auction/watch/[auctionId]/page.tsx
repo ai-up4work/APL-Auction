@@ -683,10 +683,12 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
             <div className="flex items-center gap-[13px]">
               <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
-                <img
+                <Image
                   src={auction.session.auctionLogo || "/moon-knight-logo.png"}
                   alt="Auction logo"
                   className="w-full h-full object-cover"
+                  width={52}
+                  height={52}
                 />
               </div>
               <div>
@@ -1080,7 +1082,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
                           ${isDimmed ? "opacity-30" : "opacity-100"}`}
                       >
                         <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0">
-                          {t.logoUrl && <img src={t.logoUrl} className="w-full h-full object-cover" alt="" />}
+                          {t.logoUrl && <Image src={t.logoUrl} className="w-full h-full object-cover" alt="" width={40} height={40} />}
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">{t.name}</p>
