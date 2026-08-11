@@ -157,6 +157,38 @@ function safeColor(value: string | undefined, fallback: string): string {
   return fallback
 }
 
+/** Aggregates the batters currently not-out into a single "current
+ *  partnership" figure — runs, balls, and boundary counts summed
+ *  across both. Each BattingRow's own stats already only cover the
+ *  time that particular batter has been at the crease (they start
+ *  fresh at 0 when a new batter comes in), so summing the not-out
+ *  rows is a solid proxy for the partnership total without needing a
+ *  separate partnership field in the data model. Returns null once
+ *  there are no not-out batters to show (innings not live, or the
+ *  moment right after a wicket before the new batter's row exists). */
+function currentPartnership(
+  rows: BattingRow[],
+): { runs: number; balls: number; fours: number; sixes: number; batters: BattingRow[] } | null {
+  const notOut = rows.filter((b) => b.notOut)
+  if (notOut.length === 0) return null
+  return {
+    runs: notOut.reduce((s, b) => s + b.runs, 0),
+    balls: notOut.reduce((s, b) => s + b.balls, 0),
+    fours: notOut.reduce((s, b) => s + b.fours, 0),
+    sixes: notOut.reduce((s, b) => s + b.sixes, 0),
+    batters: notOut,
+  }
+}
+
+/** The bowler currently on — assumed to be the last entry in the
+ *  innings' bowling array, since bowlers are appended to that list as
+ *  they come on to bowl. If the data model ever adds an explicit
+ *  "current bowler" flag (e.g. from match_state), swap this out for
+ *  that instead of relying on array order. */
+function currentBowler(rows: BowlingRow[]): BowlingRow | null {
+  return rows.length > 0 ? rows[rows.length - 1] : null
+}
+
 /** Compact win-probability bar, now shown inline in the score strip
  *  instead of behind its own Stats tab. Renders nothing if winProb isn't
  *  available yet (e.g. before the live match engine has published a
@@ -215,6 +247,58 @@ function WinProbabilityBar({
   )
 }
 
+/** Compact strip showing the current partnership (not-out batters,
+ *  summed runs/balls/4s/6s) and the bowler currently on. Sits inline
+ *  in the score strip, right under the score boxes and above the
+ *  status line, and only renders anything while the innings in
+ *  question is actually live — there's no "current partnership" or
+ *  "current bowler" to show once play has stopped or before it's
+ *  begun. Either half can render on its own if the other has no data
+ *  yet (e.g. bowler recorded but no partial batting rows). */
+function CurrentPlayStrip({
+  partnership,
+  bowler,
+}: {
+  partnership: ReturnType<typeof currentPartnership>
+  bowler: BowlingRow | null
+}) {
+  if (!partnership && !bowler) return null
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+      {partnership && (
+        <div className="rounded-lg p-3 border border-gold/10 bg-white/[0.02] min-w-0">
+          <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel mb-1.5">
+            Current Partnership
+          </p>
+          <p className="text-white font-bold font-cinzel text-sm">
+            {partnership.runs}
+            <span className="text-gray-400 font-normal"> ({partnership.balls} balls)</span>
+          </p>
+          <p className="text-gray-500 text-[11px] mt-1">
+            {partnership.fours} four{partnership.fours === 1 ? "" : "s"} · {partnership.sixes} six
+            {partnership.sixes === 1 ? "" : "es"}
+          </p>
+          {partnership.batters.length > 0 && (
+            <p className="text-gray-400 text-[11px] mt-1.5 break-words">
+              {partnership.batters.map((b) => `${b.name} ${b.runs}(${b.balls})`).join(" & ")}
+            </p>
+          )}
+        </div>
+      )}
+      {bowler && (
+        <div className="rounded-lg p-3 border border-gold/10 bg-white/[0.02] min-w-0">
+          <p className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel mb-1.5">Current Bowler</p>
+          <p className="text-white font-bold font-cinzel text-sm truncate">{bowler.name}</p>
+          <p className="text-gray-400 text-[11px] mt-1">
+            {bowler.overs} ov · {bowler.runs} runs · {bowler.wkts} wkt{bowler.wkts === 1 ? "" : "s"}
+          </p>
+          <p className="text-gray-500 text-[11px] mt-0.5">Econ {bowler.econ}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MatchDetailClient({ match: initialMatch, tournamentSlug }: MatchDetailClientProps) {
   useScrollTop()
   const router = useRouter()
@@ -257,7 +341,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
   // Explicit — read from match_setup.currentInnings (see data/match-data.ts)
   // rather than inferred from target/ball counts. This is what stops the
-  // score strip from showing a phantom "Team B need X runs" while team A
+  // score strip from showing a phantom "Team B need X runs" while team a
   // is still batting in the 1st innings.
   //
   // Fallback: also treat the 2nd innings as started if there's already
@@ -308,6 +392,17 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         ? { a: 100, b: 0 }
         : { a: 0, b: 100 }
     : match.winProb
+
+  // Current partnership / current bowler — only meaningful while a
+  // match is actually live. Sourced from whichever innings is
+  // currently batting: 1st-innings data (match.innings1) is kept
+  // live-updated in place by useLiveMatch while it's in progress, and
+  // the 2nd innings uses the dedicated live partial slice
+  // (innings2Partial) once the chase has started.
+  const activeBattingRows = live ? (innings2Started ? match.innings2Partial.batting : match.innings1.batting) : []
+  const activeBowlingRows = live ? (innings2Started ? match.innings2Partial.bowling : match.innings1.bowling) : []
+  const partnership = live ? currentPartnership(activeBattingRows) : null
+  const bowlerNow = live ? currentBowler(activeBowlingRows) : null
 
   // Tab lock state — never hide a tab, just mark it locked when the
   // underlying data doesn't exist yet.
@@ -431,8 +526,9 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
       {/* ═══════════════════════════════════════════
           SCORE STRIP — now also carries the win
-          probability bar inline (see
-          WinProbabilityBar), replacing the old
+          probability bar, current partnership, and
+          current bowler inline (see WinProbabilityBar
+          and CurrentPlayStrip), replacing the old
           standalone Stats tab.
 
           Previously this whole section was wrapped in
@@ -518,6 +614,13 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                     )}
                   </div>
                 </div>
+
+                {/* Current partnership + current bowler — only shown
+                    while play is actually live (see CurrentPlayStrip),
+                    sitting right under the score boxes and above the
+                    status line so it's the first thing visible near the
+                    banner. */}
+                {live && <CurrentPlayStrip partnership={partnership} bowler={bowlerNow} />}
 
                 {/* Status line — only ever describes the innings that's
                     actually in progress, using the explicit
