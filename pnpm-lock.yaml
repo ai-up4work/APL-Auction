@@ -158,6 +158,9 @@ importers:
       react-hook-form:
         specifier: ^7.81.0
         version: 7.84.0(react@19.2.4)
+      react-icons:
+        specifier: ^5.7.0
+        version: 5.7.0(react@19.2.4)
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.18)(react@19.2.4)
