@@ -344,7 +344,7 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
                   </span>
                 </div>
 
-                <div className="flex flex-col items-start sm:items-stretch gap-2 sm:gap-0 sm:space-y-3">
+                <div className="flex flex-col items-end sm:items-stretch gap-2 sm:gap-0 sm:space-y-3">
                   {flowTeams.length === 0 ? (
                     <p className="font-mono-geist text-[11px] text-outline uppercase tracking-widest">
                       No teams added yet.
