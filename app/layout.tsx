@@ -1,10 +1,11 @@
 // Ignore TS error for side-effect CSS import when no type declarations are present
 // @ts-ignore
 import "./globals.css";
+import type { Metadata, Viewport } from "next";
 import { AuctionProvider } from "@/context/AuctionContext";
 import { AuthProvider } from "@/context/AuthContext";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Valiant League — Live Auction, Tournament & Broadcast Platform",
   description:
     "Valiant League lets cricket clubs and tournament organizers run an entire competition lifecycle from one connected platform: draft players through a live points-based auction, build tournament brackets from the resulting teams, and broadcast matches with real-time overlay graphics — all synced live via Supabase.",
@@ -16,6 +17,34 @@ export const metadata = {
     "player draft auction",
     "cricket scoring app",
   ],
+  // Favicon / touch icon / PWA icon wiring. Next.js injects the right
+  // <link> tags into <head> from this — no manual <link rel="icon">
+  // needed. All paths are resolved from /public.
+  //
+  // NOTE: these files don't exist in /public yet — see the accompanying
+  // note for the exact list of image files to add (or send over the
+  // source logo and I'll generate them for you).
+  icons: {
+    icon: [
+      { url: "/marketing/favicon.ico", sizes: "any" },
+      { url: "/marketing/icon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/marketing/icon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/marketing/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/marketing/icon-512x512.png", sizes: "512x512", type: "image/png" },
+      // Modern browsers/OSes that support a scalable favicon
+      { url: "/marketing/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [
+      { url: "/marketing/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+    shortcut: ["/marketing/favicon.ico"],
+  },
+  manifest: "/marketing/site.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Valiant League",
+  },
   openGraph: {
     title: "Valiant League",
     description:
@@ -38,6 +67,13 @@ export const metadata = {
       "Live points-based auctions, tournament brackets, and real-time broadcast overlays for cricket clubs.",
     images: ["/marketing/og-image.png"],
   },
+};
+
+// Theme color / viewport config lives in its own export as of Next.js
+// 14 (previously part of `metadata.themeColor`, now deprecated there).
+export const viewport: Viewport = {
+  themeColor: "#000000",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({

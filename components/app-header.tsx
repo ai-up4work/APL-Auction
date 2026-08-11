@@ -3,9 +3,10 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { useState } from "react"
-import { ArrowLeft, LogOut, Loader2 } from "lucide-react"
+import { useState, useEffect } from "react"
+import { ArrowLeft, LogOut, Loader2, Building2 } from "lucide-react"
 import { useAuth } from "@/context/AuthContext"
+import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 
 interface AppHeaderProps {
   title?: string
@@ -27,6 +28,39 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
   const router = useRouter()
   const { user, loading, signOut } = useAuth()
   const [loggingOut, setLoggingOut] = useState(false)
+  const [organization, setOrganization] = useState<OrgSummary | null>(null)
+  const [orgLoading, setOrgLoading] = useState(false)
+  const [logoFailed, setLogoFailed] = useState(false)
+
+  // Fetch the user's organization (logo, name, slug) via the shared helper.
+  useEffect(() => {
+    if (!user) {
+      setOrganization(null)
+      return
+    }
+
+    let cancelled = false
+    setOrgLoading(true)
+
+    getOrgForUser(user.id)
+      .then((org) => {
+        if (!cancelled) {
+          setOrganization(org)
+          setLogoFailed(false)
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch organization:", err)
+        if (!cancelled) setOrganization(null)
+      })
+      .finally(() => {
+        if (!cancelled) setOrgLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
 
   const handleLogout = async () => {
     if (loggingOut) return // guard against double-click firing signOut twice
@@ -38,6 +72,10 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
       console.error("Logout failed:", err)
       setLoggingOut(false) // let them retry instead of getting stuck
     }
+  }
+
+  const goToOrganization = () => {
+    router.push("/organization")
   }
 
   // Symmetrical Desktop clip path: 
@@ -113,7 +151,7 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
             </button>
           ) : (
             <Link
-              href="/organization"
+              href="/"
               className="flex items-center gap-3 h-[68px] cursor-pointer group min-w-0"
             >
               <div className="relative w-14 h-14 lg:w-15 lg:h-15 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
@@ -158,17 +196,41 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
             user && (
               <div className="flex items-center h-full gap-2 pl-2">
                 
-                {/* User Info */}
-                <div className="hidden sm:flex flex-col items-end px-3 min-w-0 max-w-[180px] justify-center h-full">
-                  <p className="text-sm lg:text-[15px] text-white/95 font-semibold truncate w-full text-right tracking-wide">
-                    {displayNameFor(user)}
-                  </p>
-                  {user.email && (
-                    <p className="text-[10px] lg:text-xs text-gold/60 truncate w-full text-right font-medium">
-                      {user.email}
+                {/* Organization: logo + name, links to /organization */}
+                <button
+                  type="button"
+                  onClick={goToOrganization}
+                  aria-label="Go to organization"
+                  className="hidden sm:flex items-center gap-2.5 px-3 min-w-0 max-w-[220px] h-full group/org"
+                >
+                  <div className="relative w-8 h-8 lg:w-9 lg:h-9 shrink-0 rounded-full overflow-hidden bg-white/5 border border-gold/25 flex items-center justify-center group-hover/org:border-gold/60 transition-colors duration-300">
+                    {orgLoading ? (
+                      <div className="w-full h-full bg-white/10 animate-pulse" />
+                    ) : organization?.logoUrl && !logoFailed ? (
+                      <Image
+                        src={organization.logoUrl}
+                        alt={organization.name ? `${organization.name} logo` : "Organization logo"}
+                        fill
+                        sizes="36px"
+                        className="object-contain p-0.5"
+                        onError={() => setLogoFailed(true)}
+                      />
+                    ) : (
+                      <Building2 className="w-4 h-4 text-gold/70" />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end min-w-0 justify-center">
+                    <p className="text-sm lg:text-[15px] text-white/95 font-semibold truncate w-full text-right tracking-wide group-hover/org:text-gold transition-colors duration-300">
+                      {displayNameFor(user)}
                     </p>
-                  )}
-                </div>
+                    {user.email && (
+                      <p className="text-[10px] lg:text-xs text-gold/60 truncate w-full text-right font-medium">
+                        {user.email.slice(0, 10)}
+                        {user.email.length > 10 ? "…" : ""}
+                      </p>
+                    )}
+                  </div>
+                </button>
 
                 {/* Upgraded Logout Button */}
                 <button

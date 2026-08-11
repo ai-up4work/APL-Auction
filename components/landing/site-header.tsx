@@ -1,12 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { Menu, Twitter, X, LogOut, Loader2 } from "lucide-react"
+import { Menu, Twitter, X, LogOut, Loader2, Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Image from "next/image"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/context/AuthContext"
+import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization"
 
 interface SiteHeaderProps {
   activeSection: string
@@ -34,6 +35,45 @@ export function SiteHeader({
 }: SiteHeaderProps) {
   const { user, loading, signOut } = useAuth()
   const [loggingOut, setLoggingOut] = useState(false)
+  const [organization, setOrganization] = useState<OrgSummary | null>(null)
+  const [orgLoading, setOrgLoading] = useState(false)
+  const [logoFailed, setLogoFailed] = useState(false)
+
+  // Fetch the user's organization (logo, name, slug) via the shared helper.
+  // Keyed on user?.id (a stable primitive) rather than the user object
+  // itself — Supabase's onAuthStateChange fires on tab focus/visibility
+  // and hands back a new session (and therefore a new user object
+  // reference) even when it's the same logged-in user. Depending on the
+  // object would re-run this effect — and re-render/reload the logo
+  // image — every time the tab regains focus.
+  useEffect(() => {
+    if (!user) {
+      setOrganization(null)
+      return
+    }
+
+    let cancelled = false
+    setOrgLoading(true)
+
+    getOrgForUser(user.id)
+      .then((org) => {
+        if (!cancelled) {
+          setOrganization(org)
+          setLogoFailed(false)
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch organization:", err)
+        if (!cancelled) setOrganization(null)
+      })
+      .finally(() => {
+        if (!cancelled) setOrgLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
 
   const handleMobileNav = (id: string) => {
     scrollToSection(id)
@@ -53,9 +93,29 @@ export function SiteHeader({
     }
   }
 
+  // Navigate to the landing page (root route)
+  const goToLandingPage = () => {
+    handleNavigation("/")
+  }
+
+  // Navigate to the organization route
+  const goToOrganization = () => {
+    handleNavigation("/organization")
+  }
+
   // Desktop clip path: Reduced left side height to 68px, angled drop down to 54px on right
   const desktopClipPath =
     "polygon(0 0, 100% 0, 100% 54px, 340px 54px, 290px 68px, 0 68px)"
+
+  // "Home" removed — clicking the logo / SaaS name now serves that purpose
+  const navItems = [
+    { id: "tournaments", label: "All Tournaments" },
+    { id: "matches", label: "All Matches" },
+    { id: "players", label: "Players" },
+    { id: "teams", label: "Teams" },
+    { id: "standings", label: "Standings" },
+    { id: "stats", label: "Stats" },
+  ]
 
   return (
     <header className="fixed top-0 left-0 w-full z-50 transition-all duration-500">
@@ -90,9 +150,14 @@ export function SiteHeader({
 
       {/* Main Header Content */}
       <div className="relative z-10 container mx-auto px-4 h-[68px] flex items-start justify-between w-full max-w-[1600px]">
-        {/* Left Side: Logo & Brand Name (Reduced Height Area: 68px) */}
+        {/* Left Side: Logo & Brand Name (Reduced Height Area: 68px) — clicking leads to the landing page */}
         <div
-          onClick={() => scrollToSection("home")}
+          onClick={goToLandingPage}
+          role="link"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") goToLandingPage()
+          }}
           className="flex items-center gap-3 h-[68px] cursor-pointer group pr-6 z-20"
         >
           <div className="relative w-14 h-14 lg:w-16 lg:h-16 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
@@ -115,15 +180,7 @@ export function SiteHeader({
 
         {/* Navigation Bar (Shorter Height Section: 54px) */}
         <nav className="hidden lg:flex items-center justify-center gap-1 xl:gap-2 h-[54px]">
-          {[
-            { id: "home", label: "Home" },
-            { id: "tournaments", label: "All Tournaments" },
-            { id: "matches", label: "All Matches" },
-            { id: "players", label: "Players" },
-            { id: "teams", label: "Teams" },
-            { id: "standings", label: "Standings" },
-            { id: "stats", label: "Stats" },
-          ].map((item) => (
+          {navItems.map((item) => (
             <Button
               key={item.id}
               variant="ghost"
@@ -164,13 +221,36 @@ export function SiteHeader({
                 <div className="h-8 w-24 bg-white/10 rounded animate-pulse" />
               </div>
             ) : user ? (
-              // Logged In: User Profile & Premium Logout
+              // Logged In: Organization Logo + Name (links to /organization) & Premium Logout
               <div className="flex items-center gap-3">
-                <div className="flex flex-col items-end justify-center min-w-0 max-w-[120px] xl:max-w-[150px]">
-                  <p className="text-xs xl:text-[13px] text-white/95 font-semibold truncate w-full text-right tracking-wide">
-                    {displayNameFor(user)}
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={goToOrganization}
+                  className="flex items-center gap-2 group/org"
+                  aria-label="Go to organization"
+                >
+                  <div className="relative w-7 h-7 xl:w-8 xl:h-8 shrink-0 rounded-full overflow-hidden bg-white/5 border border-gold/25 flex items-center justify-center group-hover/org:border-gold/60 transition-colors duration-300">
+                    {orgLoading ? (
+                      <div className="w-full h-full bg-white/10 animate-pulse" />
+                    ) : organization?.logoUrl && !logoFailed ? (
+                      <Image
+                        src={organization.logoUrl}
+                        alt={organization.name ? `${organization.name} logo` : "Organization logo"}
+                        fill
+                        sizes="32px"
+                        className="object-contain p-0.5"
+                        onError={() => setLogoFailed(true)}
+                      />
+                    ) : (
+                      <Building2 className="w-3.5 h-3.5 xl:w-4 xl:h-4 text-gold/70" />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end justify-center min-w-0 max-w-[100px] xl:max-w-[130px] text-right">
+                    <p className="text-xs xl:text-[13px] text-white/95 font-semibold truncate w-full text-right tracking-wide group-hover/org:text-gold transition-colors duration-300">
+                      {displayNameFor(user)}
+                    </p>
+                  </div>
+                </button>
                 <button
                   onClick={handleLogout}
                   disabled={loggingOut}
@@ -234,15 +314,7 @@ export function SiteHeader({
       >
         <div className="container mx-auto px-4 py-6">
           <nav className="flex flex-col space-y-2.5">
-            {[
-              { id: "home", label: "Home" },
-              { id: "tournaments", label: "All Tournaments" },
-              { id: "matches", label: "All Matches" },
-              { id: "players", label: "Players" },
-              { id: "teams", label: "Teams" },
-              { id: "standings", label: "Standings" },
-              { id: "stats", label: "Stats" },
-            ].map((item) => (
+            {navItems.map((item) => (
               <Button
                 key={item.id}
                 variant="ghost"
@@ -264,10 +336,38 @@ export function SiteHeader({
                 <div className="h-20 w-full bg-white/5 rounded-lg animate-pulse" />
               ) : user ? (
                 <div className="flex flex-col gap-2 p-3 bg-white/5 border border-gold/10 rounded-lg">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-white/90">{displayNameFor(user)}</span>
-                    {user.email && <span className="text-[11px] text-gold/60">{user.email}</span>}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      goToOrganization()
+                      setIsNavOpen(false)
+                    }}
+                    className="flex items-center gap-3 text-left"
+                    aria-label="Go to organization"
+                  >
+                    <div className="relative w-9 h-9 shrink-0 rounded-full overflow-hidden bg-white/5 border border-gold/25 flex items-center justify-center">
+                      {orgLoading ? (
+                        <div className="w-full h-full bg-white/10 animate-pulse" />
+                      ) : organization?.logoUrl && !logoFailed ? (
+                        <Image
+                          src={organization.logoUrl}
+                          alt={organization.name ? `${organization.name} logo` : "Organization logo"}
+                          fill
+                          sizes="36px"
+                          className="object-contain p-0.5"
+                          onError={() => setLogoFailed(true)}
+                        />
+                      ) : (
+                        <Building2 className="w-4 h-4 text-gold/70" />
+                      )}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-white/90 hover:text-gold transition-colors duration-300">
+                        {displayNameFor(user)}
+                      </span>
+                      {user.email && <span className="text-[11px] text-gold/60">{user.email}</span>}
+                    </div>
+                  </button>
                   <Button
                     variant="ghost"
                     onClick={handleLogout}
