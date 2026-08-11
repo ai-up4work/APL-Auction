@@ -206,9 +206,9 @@ export function SiteHeader({
               <Button
                 variant="ghost"
                 size="icon"
-                className="rounded-full w-8 h-8 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
+                className="rounded-full w-10 h-10 text-gold/80 hover:text-gold hover:bg-gold/10 transition-colors"
               >
-                <FaWhatsapp className="h-4 w-4" />
+                <FaWhatsapp className="h-8 w-8" />
               </Button>
             </Link>
 

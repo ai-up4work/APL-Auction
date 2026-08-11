@@ -3,6 +3,8 @@
 import Image from "next/image"
 import Link from "next/link"
 import { ArrowRight, Mail, Shield, Twitter } from "lucide-react"
+import { FaWhatsapp } from "react-icons/fa"
+
 
 interface SiteFooterProps {
   scrollToSection: (sectionId: string) => void
@@ -41,13 +43,13 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
             {/* Compact-view-only social row: icons, no heading, centered */}
             <div className="flex lg:hidden items-center justify-center gap-5 pt-2">
               <Link
-                href="#"
+                href="https://wa.me/+94755354830"
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Twitter"
+                aria-label="Whatsapp"
                 className="w-11 h-11 rounded-full bg-white/5 border border-gold/20 flex items-center justify-center text-gray-400 hover:text-gold hover:border-gold hover:bg-gold/10 transition-all duration-300 shadow-[0_0_0_0_rgba(212,175,55,0)] hover:shadow-[0_0_15px_0_rgba(212,175,55,0.2)]"
               >
-                <Twitter className="h-4 w-4" />
+                <FaWhatsapp className="h-4 w-4" />
               </Link>
               <Link
                 href="mailto:valiant-league@up4work.space"
@@ -108,15 +110,15 @@ export function SiteFooter({ scrollToSection, handleNavigation }: SiteFooterProp
             <ul className="space-y-3">
               <li>
                 <Link
-                  href="#"
+                  href="https://wa.me/+94755354830"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center text-gray-400 hover:text-white transition-all duration-300 group py-1"
                 >
                   <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center mr-3 group-hover:bg-gold/20 transition-colors border border-transparent group-hover:border-gold/30">
-                    <Twitter className="h-3.5 w-3.5 text-gold" />
+                    <FaWhatsapp className="h-3.5 w-3.5 text-gold" />
                   </div>
-                  <span className="transition-transform duration-300 group-hover:translate-x-1">Twitter</span>
+                  <span className="transition-transform duration-300 group-hover:translate-x-1">Whatsapp</span>
                 </Link>
               </li>
               <li>

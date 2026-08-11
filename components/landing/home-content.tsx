@@ -20,6 +20,7 @@ import {
   Quote,
   Shield,
   Trophy,
+  Twitter,
   X as XIcon,
 } from "lucide-react"
 import { FaWhatsapp } from "react-icons/fa"
@@ -827,7 +828,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
                         rel="noopener noreferrer"
                         className="h-12 w-12 rounded-full bg-gold/10 flex items-center justify-center mr-4 hover:bg-gold/20 transition-colors shrink-0"
                       >
-                        <FaWhatsapp className="h-6 w-6 text-gold" />
+                        <Twitter className="h-6 w-6 text-gold" />
                       </Link>
                       <div>
                         <h4 className="text-xl font-bold text-white mb-1">Follow Us</h4>
