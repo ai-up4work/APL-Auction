@@ -154,7 +154,7 @@ export function AppHeader({ title, showBackButton = false }: AppHeaderProps) {
               href="/"
               className="flex items-center gap-3 h-[68px] cursor-pointer group min-w-0"
             >
-              <div className="relative w-14 h-14 lg:w-15 lg:h-15 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
+              <div className="relative w-16 h-16 lg:w-16 lg:h-16 py-0 my-0 transition-transform duration-300 group-hover:scale-105">
                 <Image
                   src="/valiant-league-logo.png"
                   alt="Valiant League Logo"
