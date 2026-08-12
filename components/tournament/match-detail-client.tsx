@@ -1,3 +1,4 @@
+// app/components/tournament/match-detail-client.tsx
 "use client"
 
 import { useState, useEffect, useMemo } from "react"

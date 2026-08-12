@@ -1,4 +1,3 @@
-// app/(protected)/match/[matchId]/simulate/page.tsx
 "use client"
 
 import { useRef, useState } from "react"
@@ -165,6 +164,59 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   )
 }
 
+// ── DB cleanup helper ────────────────────────────────────────────
+// Every delete call in this page was previously fire-and-forget: RLS
+// denying a delete doesn't throw in supabase-js, it just resolves with
+// `{ error }` (or lets the row silently not match), so a blind
+// `await supabase.from(...).delete()...` with the result discarded can
+// look like it worked while nothing actually happened server-side.
+// This wrapper always inspects the error, always logs a row count via
+// `count: "exact"`, and returns a message string on failure so callers
+// can surface it in the UI (`errorMsg`) instead of pretending success.
+async function deleteRows(
+  table: string,
+  column: string,
+  value: string
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  // Check how many rows exist first, so a delete that matches 0 rows
+  // due to an RLS policy (not because there was nothing to delete) can
+  // be told apart from a genuinely empty table.
+  const { count: beforeCount, error: countErr } = await supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .eq(column, value)
+
+  if (countErr) {
+    console.error(`[deleteRows] ${table} pre-count failed:`, countErr.message)
+    return { ok: false, error: `${table}: ${countErr.message}` }
+  }
+
+  const { error, count } = await supabase
+    .from(table)
+    .delete({ count: "exact" })
+    .eq(column, value)
+
+  if (error) {
+    console.error(`[deleteRows] ${table} delete failed:`, error.message)
+    return { ok: false, error: `${table}: ${error.message}` }
+  }
+
+  const deleted = count ?? 0
+  console.log(`[deleteRows] ${table}: existed=${beforeCount ?? 0}, deleted=${deleted}`)
+
+  // RLS-blocked deletes return no error but delete 0 rows — that's
+  // indistinguishable from "nothing to delete" unless we compare
+  // against the pre-delete count.
+  if ((beforeCount ?? 0) > 0 && deleted === 0) {
+    return {
+      ok: false,
+      error: `${table}: ${beforeCount} row(s) exist but delete matched 0 — likely blocked by a missing DELETE RLS policy`,
+    }
+  }
+
+  return { ok: true, count: deleted }
+}
+
 export default function SimulateMatchPage() {
   useScrollTop()
   const params = useParams<{ matchId: string }>()
@@ -250,6 +302,25 @@ export default function SimulateMatchPage() {
     return current
   }
 
+  // Deletes balls/match_state/engine_state/ball_commentary for a match,
+  // checking every delete's error/count and collecting failures instead
+  // of firing them blind. Shared by handleStart's reset branch and
+  // handleClear so both surface the same failure detail.
+  async function clearMatchData(matchId: string): Promise<{ allOk: boolean; failures: string[] }> {
+    const results = await Promise.all([
+      deleteRows("balls", "match_id", matchId),
+      deleteRows("match_state", "match_id", matchId),
+      deleteRows("engine_state", "match_id", matchId),
+      deleteRows("ball_commentary", "match_id", matchId),
+    ])
+
+    const failures = results
+      .filter((r): r is { ok: false; error: string } => !r.ok)
+      .map((r) => r.error)
+
+    return { allOk: failures.length === 0, failures }
+  }
+
   async function handleStart(reset: boolean) {
     setErrorMsg(null)
     setLog([])
@@ -298,10 +369,14 @@ export default function SimulateMatchPage() {
         .maybeSingle()
 
       if (reset) {
-        pushLog("Clearing any existing balls/state for this match…")
-        await supabase.from("balls").delete().eq("match_id", matchId)
-        await supabase.from("match_state").delete().eq("match_id", matchId)
-        await supabase.from("engine_state").delete().eq("match_id", matchId)
+        pushLog("Clearing any existing balls/state/commentary for this match…")
+        const { allOk, failures } = await clearMatchData(matchId)
+        if (!allOk) {
+          // Don't silently continue into a fresh simulation on top of
+          // data that failed to clear (e.g. stale commentary lines
+          // sitting under RLS) — surface it and stop here.
+          throw new Error(`Failed clearing existing data before reset: ${failures.join("; ")}`)
+        }
       }
 
       if (myToken !== runTokenRef.current) return // superseded during the delete/await above
@@ -412,10 +487,11 @@ export default function SimulateMatchPage() {
   }
 
   // Wipes every trace of this match's simulated data — balls, live/engine
-  // state, bracket score/status, and the runtime-only match_setup keys
-  // (target, currentInnings) — while leaving team1/team2/venue/etc alone.
-  // This is what makes the live match page fall back to "not_started"
-  // and empty scorecards the instant it's clicked, via Realtime.
+  // state, ball-by-ball commentary, bracket score/status, and the
+  // runtime-only match_setup keys (target, currentInnings) — while
+  // leaving team1/team2/venue/etc alone. This is what makes the live
+  // match page fall back to "not_started" and empty scorecards the
+  // instant it's clicked, via Realtime.
   async function handleClear() {
     const matchId = matchIdInput.trim()
     if (!matchId) {
@@ -431,9 +507,16 @@ export default function SimulateMatchPage() {
     setUsedRealSquads(null)
 
     try {
-      await supabase.from("balls").delete().eq("match_id", matchId)
-      await supabase.from("match_state").delete().eq("match_id", matchId)
-      await supabase.from("engine_state").delete().eq("match_id", matchId)
+      // Checks each delete's error/count instead of firing blind — an
+      // RLS-denied delete doesn't throw in supabase-js, so this is the
+      // only way to know a table like ball_commentary actually got
+      // wiped versus silently not matching any rows.
+      const { allOk, failures } = await clearMatchData(matchId)
+      if (!allOk) {
+        throw new Error(
+          `Some data failed to clear (likely a missing RLS policy) — ${failures.join("; ")}`
+        )
+      }
 
       const { data: bracketRow } = await supabase
         .from("bracket_matches")
@@ -459,7 +542,7 @@ export default function SimulateMatchPage() {
         await supabase.from("matches").update({ match_setup: rest }).eq("id", matchId)
       }
 
-      pushLog("Cleared — all deliveries, live state, and match progress have been wiped.", true)
+      pushLog("Cleared — all deliveries, live state, and commentary have been wiped.", true)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to clear match data.")
       setRun("error")
