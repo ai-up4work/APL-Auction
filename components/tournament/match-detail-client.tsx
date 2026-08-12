@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -13,12 +13,15 @@ import { SiteHeader } from "@/components/landing/site-header"
 import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
 import { pageStyles } from "@/data/site-data"
+import { MatchEndToast } from "@/components/tournament/match-end-toast"
 import type {
   MatchDetail,
   BattingRow,
   BowlingRow,
   MatchSquad,
   InningsComplete,
+  PlayerStatRow,
+  BowlingStatRow,
 } from "@/data/match-data"
 import type { OverRow } from "./match-graphs"
 import MatchTabs from "./match-tabs"
@@ -150,6 +153,83 @@ function currentPartnership(
  *  that instead of relying on array order. */
 function currentBowler(rows: BowlingRow[]): BowlingRow | null {
   return rows.length > 0 ? rows[rows.length - 1] : null
+}
+
+/** Builds the Stats tab's leaderboard rows from THIS match alone —
+ *  every batter/bowler from both innings, pooled together (so it reads
+ *  as "leading run scorers / wicket takers in this match", across both
+ *  teams). Replaces the earlier tournament-wide leaderboard: that
+ *  required every match to carry a resolved tournamentId, which
+ *  standalone/friendly matches never have — so the tab was permanently
+ *  locked for them even with full ball-by-ball data on hand. This
+ *  version only depends on data the match already has, so it works
+ *  for every match, tournament or not, the moment ball data exists.
+ *
+ *  matches/inns are always 1 here — a single match, single-innings-per-
+ *  player context — kept on the row shape only so it can reuse the same
+ *  PlayerStatRow/BowlingStatRow types (and StatsPanel component) that
+ *  would apply to a real multi-match series if that's ever added back.
+ *
+ *  Batting average: with only one innings on record, "average" isn't
+ *  really an average — it's just that player's score if dismissed, or
+ *  null (rendered as "--") if not out, mirroring how a single-innings
+ *  score is conventionally shown (e.g. "45*" rather than an averaged
+ *  figure) without inventing a fake ratio.
+ */
+function buildMatchStats(
+  match: MatchDetail,
+  live: boolean,
+): { battingStats: PlayerStatRow[]; bowlingStats: BowlingStatRow[] } {
+  const innings2Batting = live ? match.innings2Partial.batting : match.innings2Final.batting
+  const innings2Bowling = live ? match.innings2Partial.bowling : match.innings2Final.bowling
+
+  const allBatting: BattingRow[] = [...match.innings1.batting, ...innings2Batting]
+  const allBowling: BowlingRow[] = [...match.innings1.bowling, ...innings2Bowling]
+
+  const battingStats: PlayerStatRow[] = allBatting.map((b) => ({
+    player: b.name,
+    matches: 1,
+    inns: 1,
+    runs: b.runs,
+    avg: b.notOut ? null : b.runs,
+    sr: b.balls > 0 ? (b.runs / b.balls) * 100 : 0,
+    fours: b.fours,
+    sixes: b.sixes,
+  }))
+
+  const bowlingStats: BowlingStatRow[] = allBowling.map((b) => {
+    const [oversWhole, ballsPart] = b.overs.split(".").map(Number)
+    const oversFaced = (oversWhole || 0) + (ballsPart || 0) / 6
+    const econVal = parseFloat(b.econ)
+    return {
+      player: b.name,
+      matches: 1,
+      inns: 1,
+      wkts: b.wkts,
+      avg: b.wkts > 0 ? b.runs / b.wkts : null,
+      econ: Number.isFinite(econVal) ? econVal : oversFaced > 0 ? b.runs / oversFaced : 0,
+      best: `${b.wkts}/${b.runs}`,
+    }
+  })
+
+  return { battingStats, bowlingStats }
+}
+
+/** Name -> photo URL, resolved from match.squads (Playing XI + bench,
+ *  both teams). The Stats tab pools batters/bowlers by name only, so
+ *  this is how the leaderboard's avatars find a real photo instead of
+ *  falling back to initials for every player, every time. A player who
+ *  scored runs but isn't in the squads list (e.g. squads not entered
+ *  for this match) simply won't have an entry, and the avatar falls
+ *  back gracefully — this map is a best-effort lookup, not a guarantee. */
+function buildPlayerImageMap(match: MatchDetail): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const squad of match.squads) {
+    for (const p of squad.players) {
+      if (p.img) map[p.name] = p.img
+    }
+  }
+  return map
 }
 
 /** Compact win-probability bar, now shown inline in the score strip
@@ -312,7 +392,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
-  const [tab, setTab] = useState<"info" | "scorecard" | "squads" | "overs" | "graphs">("info")
+  const [tab, setTab] = useState<"info" | "scorecard" | "squads" | "overs" | "graphs" | "stats">("info")
   // Default to innings 1 — this gets kept in sync with whichever innings
   // is actually in progress by the effect below, so opening Scorecard /
   // Overs / Graphs mid-1st-innings shows the live 1st innings instead of
@@ -333,14 +413,10 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   // hook does an initial fetch + aggregation, then subscribes to
   // Supabase Realtime on `balls` / `bracket_matches` / `matches` for
   // this match id, recomputing scorecards + win probability from fresh
-  // ball-by-ball data the instant anything changes — no fixed delay,
-  // and it stays subscribed even if the match starts out "not_started"
-  // (fixing the old bug where a tab left open before the match went
-  // live would never start polling). It also reacts instantly when the
-  // simulate page's "Clear" wipes `balls`/`match_state`/`match_setup` —
-  // hasBallData flips back to false and every tab falls back to its
-  // locked/empty state automatically.
-  const { match, isSyncing } = useLiveMatch(initialMatch.id, initialMatch)
+  // ball-by-ball data the instant anything changes. justCompleted /
+  // clearJustCompleted drive the "match over" in-app toast — see
+  // MatchEndToast below.
+  const { match, isSyncing, justCompleted, clearJustCompleted } = useLiveMatch(initialMatch.id, initialMatch)
 
   const status = match.matchStatus // "not_started" | "live" | "completed"
   const live = status === "live"
@@ -352,22 +428,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   // rather than inferred from target/ball counts. This is what stops the
   // score strip from showing a phantom "Team B need X runs" while team a
   // is still batting in the 1st innings.
-  //
-  // Fallback: also treat the 2nd innings as started if there's already
-  // real ball data for it (batting rows recorded), in case the explicit
-  // `currentInnings` flag lags behind the actual live scoring feed —
-  // otherwise tabs/toggles that depend on this (Scorecard, Overs, and
-  // the Graphs sub-tabs) can stay incorrectly locked even while the
-  // chase is visibly in progress elsewhere on the page (e.g. the win
-  // probability bar).
   const innings2Started = match.currentInnings === 2 || match.innings2Partial.batting.length > 0
 
-  // Keep the innings selector pinned to whichever innings is actually in
-  // progress: re-sync whenever the visitor switches tabs, and whenever
-  // the match itself flips from 1st to 2nd innings while a tab is open.
-  // Without this, `innings` could stay stuck on its initial/previous
-  // value and a freshly-opened Scorecard/Overs tab would show the wrong
-  // (or locked) innings instead of the live one.
   useEffect(() => {
     setInnings(innings2Started ? 2 : 1)
   }, [tab, innings2Started])
@@ -389,9 +451,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   // Win probability — once the match is completed, this is snapped to a
   // clean, resolved value (100/0 for the winner, or 50/50 on a tie)
   // based on the actual final totals, rather than whatever the live
-  // probability model last happened to output. That snapped value is
-  // the single source of truth passed to BOTH the score-strip bar and
-  // the Graphs tab's Win Probability chart, so they can never disagree.
+  // probability model last happened to output.
   const winner = completed ? determineWinner(match) : null
   const winProb = winner
     ? winner === "tie"
@@ -401,16 +461,21 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         : { a: 0, b: 100 }
     : match.winProb
 
-  // Current partnership / current bowler — only meaningful while a
-  // match is actually live. Sourced from whichever innings is
-  // currently batting: 1st-innings data (match.innings1) is kept
-  // live-updated in place by useLiveMatch while it's in progress, and
-  // the 2nd innings uses the dedicated live partial slice
-  // (innings2Partial) once the chase has started.
   const activeBattingRows = live ? (innings2Started ? match.innings2Partial.batting : match.innings1.batting) : []
   const activeBowlingRows = live ? (innings2Started ? match.innings2Partial.bowling : match.innings1.bowling) : []
   const partnership = live ? currentPartnership(activeBattingRows) : null
   const bowlerNow = live ? currentBowler(activeBowlingRows) : null
+
+  // Stats tab data — this match's own batting/bowling, pooled across
+  // both innings/both teams (see buildMatchStats above). Recomputes
+  // whenever the live-updated `match` object changes, so a live match's
+  // Stats tab stays current the same way the Scorecard/Overs tabs do.
+  const { battingStats, bowlingStats } = useMemo(() => buildMatchStats(match, live), [match, live])
+
+  // Name -> photo URL for the Stats tab's leaderboard avatars, resolved
+  // from match.squads. Recomputes only when squads change (not on every
+  // live tick), since squad photos don't change mid-match.
+  const playerImageMap = useMemo(() => buildPlayerImageMap(match), [match.squads])
 
   const getOverByOverData = (inn: 1 | 2 = innings): OverRow[] => {
     const source: InningsComplete = inn === 1 ? match.innings1 : match.innings2Final
@@ -492,10 +557,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
             </div>
           </div>
 
-          {/* Venue/date are ALWAYS shown, even when blank — an empty
-              field is shown as an explicit "Not set" pill rather than
-              disappearing, so whoever manages this match knows it still
-              needs filling in. */}
           <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-3 mt-10 text-xs text-gray-200 font-cinzel uppercase tracking-widest bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gold/20 shadow-lg max-w-full">
             <SetupField icon={<MapPin className="h-4 w-4 text-gold shrink-0" />} value={match.venue} fallback="Venue not set" />
             <SetupField
@@ -505,8 +566,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
             />
           </div>
 
-          {/* Toss used to be hidden entirely when empty — now always
-              shown with an explicit placeholder for the same reason. */}
           <div className="mt-6">
             <SetupField
               value={match.toss}
@@ -517,19 +576,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       </section>
 
       {/* ═══════════════════════════════════════════
-          SCORE STRIP — now also carries the win
-          probability bar, current partnership, and
-          current bowler inline (see WinProbabilityBar
-          and CurrentPlayStrip), replacing the old
-          standalone Stats tab.
-
-          Previously this whole section was wrapped in
-          `status === "live" &&`, which made the
-          "not_started" / "completed" branches inside
-          it dead code — a not-started or completed
-          match never showed this strip at all. Now it
-          renders for every status; its own internal
-          branches already handle each case correctly.
+          SCORE STRIP
       ═══════════════════════════════════════════ */}
       <section className="px-4 relative z-10 -mt-24">
         <div className="container mx-auto max-w-3xl">
@@ -554,9 +601,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                 )}
               </div>
 
-              {/* Subtle realtime-sync indicator — shows briefly whenever
-                  the hook is re-fetching after a Supabase Realtime event.
-                  Not an error state, just a "data just updated" cue. */}
               {isSyncing && (
                 <span className="flex items-center gap-1.5 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">
                   <RefreshCw className="h-3 w-3 animate-spin" />
@@ -566,12 +610,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
             </div>
 
             {status === "not_started" ? (
-              // No balls recorded at all — showing "0/0" with CRR/RRR and
-              // a fabricated "need X runs" line here would look like a
-              // real live match. Instead, say plainly that there's
-              // nothing to show yet, and surface the scheduled date/time
-              // (or an explicit "not set" note) so visitors know when to
-              // check back.
               <div className="text-center py-6">
                 <p className="text-gray-300 font-semibold mb-1">This match hasn't started yet.</p>
                 <p className="text-gray-500 text-sm mb-4">
@@ -607,16 +645,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   </div>
                 </div>
 
-                {/* Current partnership + current bowler — only shown
-                    while play is actually live (see CurrentPlayStrip),
-                    sitting right under the score boxes and above the
-                    status line so it's the first thing visible near the
-                    banner. */}
                 {live && <CurrentPlayStrip partnership={partnership} bowler={bowlerNow} />}
 
-                {/* Status line — only ever describes the innings that's
-                    actually in progress, using the explicit
-                    currentInnings flag rather than guessed arithmetic. */}
                 <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
                   {status === "completed"
                     ? match.resultNote || "Match completed."
@@ -640,11 +670,6 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   )}
                 </div>
 
-                {/* Win probability — folded in here instead of behind a
-                    separate Stats tab. Renders nothing if winProb isn't
-                    available yet, so it never shows an empty/fake bar.
-                    Once completed, `winProb` is already the snapped
-                    final value and the bar labels itself "Final". */}
                 <WinProbabilityBar
                   winProb={winProb}
                   teamAShort={match.teamA.short}
@@ -660,14 +685,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       </section>
 
       {/* ═══════════════════════════════════════════
-          TABS + TAB CONTENT — delegated to
-          <MatchTabs>. Only shown once the match has
-          actually started (live or completed). A
-          not-started match shows a single "not
-          started" notice instead of the full tab
-          shell, since every tab would just be locked
-          anyway and there's nothing meaningful to
-          browse yet.
+          TABS + TAB CONTENT
       ═══════════════════════════════════════════ */}
       <section className="px-4 relative z-10">
         <div className="container mx-auto max-w-3xl">
@@ -692,10 +710,24 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
               getOverByOverData={getOverByOverData}
               overRunsB={live ? partialOverRuns(match.innings2Partial) : match.innings2Final.overRuns}
               liveScriptLength={match.liveScript.length}
+              battingStats={battingStats}
+              bowlingStats={bowlingStats}
+              playerImageMap={playerImageMap}
             />
           )}
         </div>
       </section>
+
+      {/* ═══════════════════════════════════════════
+          MATCH-END NOTIFICATION
+      ═══════════════════════════════════════════ */}
+      <MatchEndToast
+        show={justCompleted}
+        onDismiss={clearJustCompleted}
+        teamAName={match.teamA.name}
+        teamBName={match.teamB.name}
+        resultNote={match.resultNote}
+      />
     </main>
   )
 }

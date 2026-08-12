@@ -190,6 +190,7 @@ export interface MatchDetail {
   tournamentSlug?: string
   tournamentName?: string
   round: string
+  tournamentId?: string
   /** Empty string means genuinely not set — the UI should show that explicitly, not hide it. */
   venue: string
   date: string
@@ -840,6 +841,7 @@ export async function getMatchDetailById(
     id: matchRow.id,
     tournamentSlug: resolvedTournamentSlug,
     tournamentName: resolvedTournamentName,
+    tournamentId: tournamentIdToResolve,   // ← add this line
     round: setup.round ?? (bracketRow?.round !== undefined ? `Round ${bracketRow.round}` : ""),
     venue: setup.venue || bracketRow?.venue || "",
     date: setup.date || (bracketRow?.scheduled_at ? new Date(bracketRow.scheduled_at).toLocaleDateString() : ""),
@@ -875,4 +877,254 @@ export async function getMatchDetailById(
 export async function hasMatchDetail(matchId: string): Promise<boolean> {
   const { data, error } = await supabase.from("matches").select("id").eq("id", matchId).maybeSingle()
   return !error && !!data
+}
+
+// ─────────────────────────────────────────────────────────────
+// TOURNAMENT STATS — series-wide leaderboards for the Stats tab.
+// Aggregates every `balls` row across every match in a tournament,
+// grouped by player rather than by match.
+// ─────────────────────────────────────────────────────────────
+export interface PlayerStatRow {
+  player: string
+  matches: number
+  inns: number
+  runs: number
+  avg: number | null
+  sr: number
+  fours: number
+  sixes: number
+}
+
+export interface BowlingStatRow {
+  player: string
+  matches: number
+  inns: number
+  wkts: number
+  avg: number | null
+  econ: number
+  best: string
+}
+
+interface TournamentStats {
+  battingStats: PlayerStatRow[]
+  bowlingStats: BowlingStatRow[]
+}
+
+export async function getTournamentStats(tournamentId: string): Promise<TournamentStats> {
+  // 1. Matches linked via the real `matches.tournament_id` column.
+  const { data: directMatches, error: directErr } = await supabase
+    .from("matches")
+    .select("id")
+    .eq("tournament_id", tournamentId)
+
+  if (directErr) {
+    console.error("[getTournamentStats] direct matches query failed:", directErr.message)
+  }
+
+  // 2. Matches whose tournament link only lives in
+  //    match_setup.tournamentId (the JSON field) — this is the same
+  //    field getMatchDetailById falls back to via
+  //    `tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId`.
+  //    It is NOT written back into the real tournament_id column, so a
+  //    tournament made up of standalone matches (no bracket_matches
+  //    rows) would never be found without this query.
+  const { data: jsonLinkedMatches, error: jsonLinkedErr } = await supabase
+    .from("matches")
+    .select("id")
+    .eq("match_setup->>tournamentId", tournamentId)
+
+  if (jsonLinkedErr) {
+    console.error("[getTournamentStats] json-linked matches query failed:", jsonLinkedErr.message)
+  }
+
+  // 3. Matches linked via bracket_matches (real FK, tournament brackets).
+  const { data: bracketRows, error: bracketErr } = await supabase
+    .from("bracket_matches")
+    .select("overlay_match_id")
+    .eq("tournament_id", tournamentId)
+    .not("overlay_match_id", "is", null)
+
+  if (bracketErr) {
+    console.error("[getTournamentStats] bracket_matches query failed:", bracketErr.message)
+  }
+
+  const matchIds = Array.from(
+    new Set([
+      ...(directMatches ?? []).map((m) => m.id as string),
+      ...(jsonLinkedMatches ?? []).map((m) => m.id as string),
+      ...(bracketRows ?? []).map((b) => b.overlay_match_id as string),
+    ])
+  )
+
+  console.log(
+    `[getTournamentStats] tournamentId=${tournamentId} — direct=${directMatches?.length ?? 0} jsonLinked=${
+      jsonLinkedMatches?.length ?? 0
+    } bracket=${bracketRows?.length ?? 0} → ${matchIds.length} unique match ids:`,
+    matchIds
+  )
+
+  if (matchIds.length === 0) {
+    console.warn(
+      `[getTournamentStats] no matches resolved for tournamentId=${tournamentId} — Stats tab will show locked.`
+    )
+    return { battingStats: [], bowlingStats: [] }
+  }
+
+  // 4. Every ball from every one of those matches, in one query.
+  const { data: ballRows, error: ballsErr } = await supabase
+    .from("balls")
+    .select(
+      "match_id, innings_number, sequence, over_number, ball_number, striker_name, bowler_name, runs, extra_type, is_wicket, dismissal_type"
+    )
+    .in("match_id", matchIds)
+    .order("sequence", { ascending: true })
+
+  if (ballsErr) {
+    console.error("[getTournamentStats] balls query failed:", ballsErr.message)
+    return { battingStats: [], bowlingStats: [] }
+  }
+
+  const allBalls = ballRows ?? []
+  console.log(`[getTournamentStats] fetched ${allBalls.length} ball rows across ${matchIds.length} matches`)
+
+  if (allBalls.length === 0) {
+    console.warn(
+      `[getTournamentStats] matches resolved but zero balls rows exist for them yet — Stats tab will show locked until scoring starts.`
+    )
+    return { battingStats: [], bowlingStats: [] }
+  }
+
+  type BatAcc = {
+    matches: Set<string>
+    innings: Set<string> // `${match_id}-${innings_number}`
+    runs: number
+    balls: number
+    fours: number
+    sixes: number
+    dismissals: number
+  }
+  type BowlAcc = {
+    matches: Set<string>
+    innings: Set<string>
+    legalBalls: number
+    runs: number
+    wkts: number
+    bestWkts: number
+    bestRuns: number
+  }
+
+  const batting = new Map<string, BatAcc>()
+  const bowling = new Map<string, BowlAcc>()
+  const bowlerInningsFigures = new Map<string, { wkts: number; runs: number }>()
+
+  for (const row of allBalls) {
+    const striker = row.striker_name ?? "Unknown"
+    const bowler = row.bowler_name ?? "Unknown"
+    const isWide = row.extra_type === "wide"
+    const isNoBall = row.extra_type === "no_ball"
+    const isBye = row.extra_type === "bye"
+    const isLegBye = row.extra_type === "leg_bye"
+    const isLegal = !isWide && !isNoBall
+    const inningsKey = `${row.match_id}-${row.innings_number}`
+
+    if (!batting.has(striker)) {
+      batting.set(striker, {
+        matches: new Set(),
+        innings: new Set(),
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        dismissals: 0,
+      })
+    }
+    const bat = batting.get(striker)!
+    bat.matches.add(row.match_id)
+    bat.innings.add(inningsKey)
+    if (!isWide) bat.balls += 1
+    if (!row.extra_type) {
+      bat.runs += row.runs
+      if (row.runs === 4) bat.fours += 1
+      if (row.runs === 6) bat.sixes += 1
+    }
+    if (row.is_wicket) bat.dismissals += 1
+
+    if (!bowling.has(bowler)) {
+      bowling.set(bowler, {
+        matches: new Set(),
+        innings: new Set(),
+        legalBalls: 0,
+        runs: 0,
+        wkts: 0,
+        bestWkts: 0,
+        bestRuns: 0,
+      })
+    }
+    const bowl = bowling.get(bowler)!
+    bowl.matches.add(row.match_id)
+    bowl.innings.add(inningsKey)
+    if (isLegal) bowl.legalBalls += 1
+    if (!isBye && !isLegBye) bowl.runs += row.runs
+    if (row.is_wicket && row.dismissal_type !== "run_out") bowl.wkts += 1
+
+    const figKey = `${bowler}__${inningsKey}`
+    if (!bowlerInningsFigures.has(figKey)) {
+      bowlerInningsFigures.set(figKey, { wkts: 0, runs: 0 })
+    }
+    const fig = bowlerInningsFigures.get(figKey)!
+    if (!isBye && !isLegBye) fig.runs += row.runs
+    if (row.is_wicket && row.dismissal_type !== "run_out") fig.wkts += 1
+  }
+
+  // Roll bowlerInningsFigures up into each bowler's best-figures.
+  // "Best" = most wickets, ties broken by fewest runs conceded.
+  for (const [figKey, fig] of bowlerInningsFigures) {
+    const bowlerName = figKey.split("__")[0]
+    const bowl = bowling.get(bowlerName)
+    if (!bowl) continue
+    if (fig.wkts > bowl.bestWkts || (fig.wkts === bowl.bestWkts && fig.runs < bowl.bestRuns)) {
+      bowl.bestWkts = fig.wkts
+      bowl.bestRuns = fig.runs
+    }
+  }
+
+  const battingStats: PlayerStatRow[] = [...batting.entries()].map(([player, b]) => {
+    const outs = b.dismissals
+    const avg = outs > 0 ? b.runs / outs : null
+    const sr = b.balls > 0 ? (b.runs / b.balls) * 100 : 0
+    return {
+      player,
+      matches: b.matches.size,
+      inns: b.innings.size,
+      runs: b.runs,
+      avg,
+      sr,
+      fours: b.fours,
+      sixes: b.sixes,
+    }
+  })
+
+  const bowlingStats: BowlingStatRow[] = [...bowling.entries()]
+    .filter(([, b]) => b.legalBalls > 0)
+    .map(([player, b]) => {
+      const oversFaced = b.legalBalls / 6
+      const avg = b.wkts > 0 ? b.runs / b.wkts : null
+      const econ = oversFaced > 0 ? b.runs / oversFaced : 0
+      const best = b.bestWkts > 0 || b.bestRuns > 0 ? `${b.bestWkts}/${b.bestRuns}` : "--"
+      return {
+        player,
+        matches: b.matches.size,
+        inns: b.innings.size,
+        wkts: b.wkts,
+        avg,
+        econ,
+        best,
+      }
+    })
+
+  console.log(
+    `[getTournamentStats] built ${battingStats.length} batting rows, ${bowlingStats.length} bowling rows`
+  )
+
+  return { battingStats, bowlingStats }
 }

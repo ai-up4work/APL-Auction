@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Lock, Shield } from "lucide-react"
 import type {
   MatchDetail,
@@ -9,22 +10,21 @@ import type {
   MatchSquad,
   InningsComplete,
   DeliveryEntry,
+  PlayerStatRow,
+  BowlingStatRow,
 } from "@/data/match-data"
 import MatchGraphs, { type OverRow } from "./match-graphs"
 import type { MatchDetail as GraphMatchDetail } from "@/data/tournament-data"
 
-export type Tab = "info" | "scorecard" | "squads" | "overs" | "graphs"
+export type Tab = "info" | "scorecard" | "squads" | "overs" | "graphs" | "stats"
 
-// All tabs are always rendered — never hidden based on data
-// availability. Tabs without underlying data are shown locked (see
-// isTabLocked) instead, so the visitor knows the feature exists and needs
-// to be set up, rather than wondering why a tab silently disappeared.
 const TABS: { key: Tab; label: string }[] = [
   { key: "info", label: "Info" },
   { key: "scorecard", label: "Scorecard" },
   { key: "squads", label: "Squads" },
   { key: "overs", label: "Overs" },
   { key: "graphs", label: "Graphs" },
+  { key: "stats", label: "Stats" },
 ]
 
 function initials(name: string) {
@@ -36,9 +36,6 @@ function initials(name: string) {
     .toUpperCase()
 }
 
-/** Shown in place of a tab's real content when that tab has no underlying
- *  data yet. Used for locked tabs so the message is consistent everywhere
- *  instead of each tab inventing its own "no data" text. */
 function LockedTabPanel({ title, hint }: { title: string; hint: string }) {
   return (
     <div className="flex flex-col items-center justify-center text-center py-16 px-6 border border-dashed border-gold/20 rounded-lg bg-white/[0.02] mb-8">
@@ -56,18 +53,26 @@ function notOutBatters(rows: BattingRow[]): string {
   return names.length > 0 ? `${names.join(" & ")} (not out)` : ""
 }
 
-// ─────────────────────────────────────────────────────────────
-// Ball-by-ball chips (Overs tab)
-// ─────────────────────────────────────────────────────────────
-// `InningsComplete.deliveries` / `innings2Partial.deliveries` carry the
-// raw per-ball log now (see the BALL-BY-BALL DELIVERIES note in
-// data/match-data.ts). This turns each delivery into a small labelled
-// chip — dot, run, boundary, extra, or wicket — instead of the old
-// per-over display which only ever showed a bare "W" for any wicket
-// that fell in the over. Both are additive: matches/innings that don't
-// have `deliveries` populated yet (older rows, or a live-match hook that
-// hasn't been updated to carry it) fall straight back to that original
-// wicket-chip-only rendering, unchanged, in the Overs tab below.
+type BattingStatKey = "runs" | "avg" | "sr" | "fours" | "sixes"
+
+const BATTING_STAT_CATEGORIES: { key: BattingStatKey; label: string }[] = [
+  { key: "runs", label: "Most Runs" },
+  { key: "avg", label: "Best Batting Average" },
+  { key: "sr", label: "Best Batting Strike Rate" },
+  { key: "fours", label: "Most Fours" },
+  { key: "sixes", label: "Most Sixes" },
+]
+
+type BowlingStatKey = "wkts" | "avg" | "econ"
+
+const BOWLING_STAT_CATEGORIES: { key: BowlingStatKey; label: string }[] = [
+  { key: "wkts", label: "Most Wickets" },
+  { key: "avg", label: "Best Bowling Average" },
+  { key: "econ", label: "Best Economy" },
+]
+
+const fmtStat = (v: number | null, decimals = 2) => (v === null || v === undefined ? "--" : v.toFixed(decimals))
+
 type ChipKind = "dot" | "run" | "four" | "six" | "wicket" | "extra"
 
 function deliveryChip(d: DeliveryEntry): { label: string; kind: ChipKind } {
@@ -91,25 +96,50 @@ const chipStyles: Record<ChipKind, string> = {
   extra: "bg-white/5 text-gray-400 border border-dashed border-gray-600 italic",
 }
 
-function DeliveryChipView({ delivery }: { delivery: DeliveryEntry }) {
+function describeDelivery(d: DeliveryEntry): string {
+  const overBall = `${d.over}.${d.ball}`
+  if (d.isWicket) return `${overBall} · Wicket`
+  if (d.extraType === "wide") {
+    const extra = d.runs > 1 ? `, ${d.runs - 1} run${d.runs - 1 === 1 ? "" : "s"} through` : ""
+    return `${overBall} · Wide${extra}`
+  }
+  if (d.extraType === "no_ball") {
+    const extra = d.runs > 1 ? `, ${d.runs - 1} run${d.runs - 1 === 1 ? "" : "s"} off the bat` : ""
+    return `${overBall} · No ball${extra}`
+  }
+  if (d.extraType === "bye") return `${overBall} · ${d.runs} bye${d.runs === 1 ? "" : "s"}`
+  if (d.extraType === "leg_bye") return `${overBall} · ${d.runs} leg bye${d.runs === 1 ? "" : "s"}`
+  if (d.runs === 0) return `${overBall} · Dot ball`
+  if (d.runs === 4) return `${overBall} · Four`
+  if (d.runs === 6) return `${overBall} · Six`
+  return `${overBall} · ${d.runs} run${d.runs === 1 ? "" : "s"}`
+}
+
+function DeliveryChipView({ delivery, isLatest }: { delivery: DeliveryEntry; isLatest?: boolean }) {
   const { label, kind } = deliveryChip(delivery)
-  const title = delivery.isWicket
-    ? "Wicket"
-    : delivery.extraType
-      ? delivery.extraType.replace("_", " ")
-      : `${delivery.runs} run${delivery.runs === 1 ? "" : "s"}`
+  const description = describeDelivery(delivery)
   return (
-    <span
-      title={title}
-      className={`h-6 min-w-[1.5rem] px-1.5 rounded flex items-center justify-center text-[11px] font-bold shrink-0 ${chipStyles[kind]}`}
-    >
-      {label}
+    <span className="relative inline-flex group">
+      <button
+        type="button"
+        aria-label={description}
+        className={`h-6 min-w-[1.5rem] px-1.5 rounded flex items-center justify-center text-[11px] font-bold shrink-0 cursor-default transition-transform duration-150 group-hover:scale-110 group-focus-within:scale-110 ${
+          chipStyles[kind]
+        } ${isLatest ? "ring-2 ring-gold/60 animate-pulse" : ""}`}
+      >
+        {label}
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-gold/20 bg-black px-2 py-1 text-[10px] font-medium text-gray-200 opacity-0 shadow-lg shadow-black/60 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {description}
+        <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-black" />
+      </span>
     </span>
   )
 }
 
-/** Groups an innings' raw delivery log by over number, sorted by ball
- *  within each over — the shape the Overs tab renders directly. */
 function groupDeliveriesByOver(deliveries: DeliveryEntry[]): Map<number, DeliveryEntry[]> {
   const byOver = new Map<number, DeliveryEntry[]>()
   for (const d of deliveries) {
@@ -127,7 +157,6 @@ interface MatchTabsProps {
   completed: boolean
   hasBallData: boolean
   innings2Started: boolean
-  /** Current (or final, once the innings is over) 2nd-innings totals. */
   runs: number
   wkts: number
   overLabel: string
@@ -139,13 +168,14 @@ interface MatchTabsProps {
   getOverByOverData: (inn?: 1 | 2) => OverRow[]
   overRunsB: number[]
   liveScriptLength: number
+  battingStats?: PlayerStatRow[]
+  bowlingStats?: BowlingStatRow[]
+  /** Name -> photo URL, built from match.squads. Optional since standalone
+   *  stats views may not always have squads resolved; Stats tab falls back
+   *  to initials avatars when a name isn't found here. */
+  playerImageMap?: Record<string, string>
 }
 
-/** Tabs bar + all tab content (Info / Scorecard / Squads / Overs /
- *  Graphs). Assumes the match has actually started — the parent is
- *  responsible for only rendering this once `started` is true, since a
- *  not-started match shows a single "not started" notice instead of the
- *  full tab shell (every tab would just be locked anyway). */
 export default function MatchTabs({
   match,
   status,
@@ -164,9 +194,10 @@ export default function MatchTabs({
   getOverByOverData,
   overRunsB,
   liveScriptLength,
+  battingStats,
+  bowlingStats,
+  playerImageMap,
 }: MatchTabsProps) {
-  // Tab lock state — never hide a tab, just mark it locked when the
-  // underlying data doesn't exist yet.
   const isTabLocked = (t: Tab): boolean => {
     switch (t) {
       case "scorecard":
@@ -175,6 +206,8 @@ export default function MatchTabs({
         return !hasBallData
       case "squads":
         return match.squads.length === 0
+      case "stats":
+        return !battingStats?.length && !bowlingStats?.length
       case "info":
       default:
         return false
@@ -308,8 +341,7 @@ export default function MatchTabs({
         </div>
       )}
 
-      {/* INFO TAB — never locked; every field shows a "Not set"
-          placeholder instead of being omitted when blank */}
+      {/* INFO TAB */}
       {tab === "info" && (
         <div className="space-y-4 mb-8">
           <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
@@ -337,8 +369,7 @@ export default function MatchTabs({
         </div>
       )}
 
-      {/* SQUADS TAB — degrades gracefully via LockedTabPanel when
-          no squads have been added yet for this match. */}
+      {/* SQUADS TAB */}
       {tab === "squads" && (
         <div className="space-y-6 mb-8">
           {match.squads.length === 0 ? (
@@ -365,17 +396,12 @@ export default function MatchTabs({
           (() => {
             const overOverData = getOverByOverData(innings)
 
-            // Real ball-by-ball log for whichever innings is selected —
-            // innings 1 always reads from the completed innings1 record;
-            // innings 2 reads from the live partial while the chase is
-            // in progress, else the completed innings2Final record. Both
-            // are optional/additive (see data/match-data.ts), so this
-            // is `undefined` for older matches or a live-match hook that
-            // hasn't been updated to carry deliveries yet.
             const rawDeliveries: DeliveryEntry[] | undefined =
               innings === 1 ? match.innings1.deliveries : live ? match.innings2Partial.deliveries : match.innings2Final.deliveries
             const hasDeliveryData = !!rawDeliveries && rawDeliveries.length > 0
             const deliveriesByOver = hasDeliveryData ? groupDeliveriesByOver(rawDeliveries!) : null
+            const latestDelivery =
+              hasDeliveryData && live ? rawDeliveries![rawDeliveries!.length - 1] : undefined
 
             return (
               <div className="mb-8 space-y-4 fade-in">
@@ -435,11 +461,16 @@ export default function MatchTabs({
                           {(() => {
                             const overBalls = deliveriesByOver?.get(ov.num)
                             if (overBalls && overBalls.length > 0) {
-                              return overBalls.map((d, ballIdx) => <DeliveryChipView key={ballIdx} delivery={d} />)
+                              return overBalls.map((d, ballIdx) => (
+                                <DeliveryChipView
+                                  key={ballIdx}
+                                  delivery={d}
+                                  isLatest={
+                                    !!latestDelivery && latestDelivery.over === d.over && latestDelivery.ball === d.ball
+                                  }
+                                />
+                              ))
                             }
-                            // Fallback: no real per-ball log for this over
-                            // (or this innings) — original wicket-only
-                            // chip display, unchanged.
                             return ov.balls.length > 0 ? (
                               ov.balls.map((b, ballIdx) => (
                                 <span
@@ -494,6 +525,19 @@ export default function MatchTabs({
             completed={completed}
           />
         ))}
+
+      {/* STATS TAB */}
+      {tab === "stats" &&
+        (!battingStats?.length && !bowlingStats?.length ? (
+          <div className="mb-8">
+            <LockedTabPanel
+              title="Stats not available yet"
+              hint="Series leaderboards — most runs, best average, most wickets and more — will show up here once player stats are wired up."
+            />
+          </div>
+        ) : (
+          <StatsPanel battingStats={battingStats ?? []} bowlingStats={bowlingStats ?? []} playerImageMap={playerImageMap ?? {}} />
+        ))}
     </>
   )
 }
@@ -542,6 +586,274 @@ function DataGrid({
           ))
         )}
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// STATS TAB — redesigned
+// ─────────────────────────────────────────────────────────────
+
+const RANK_STYLE: Record<number, { badge: string; glow: string }> = {
+  0: { badge: "bg-gradient-to-b from-[#F5D583] to-[#C98A2E] text-black", glow: "shadow-[0_0_16px_rgba(245,166,35,0.35)]" },
+  1: { badge: "bg-gradient-to-b from-[#E4E4E4] to-[#9B9B9B] text-black", glow: "" },
+  2: { badge: "bg-gradient-to-b from-[#D8A06B] to-[#8B5A2B] text-white", glow: "" },
+}
+
+function initialsStats(name: string) {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+/** Real photo when one resolves from the squads data, initials otherwise.
+ *  Tracks load failure in state (rather than the MatchSquadPanel's
+ *  onError-toggles-a-sibling-class trick) since this needs to size
+ *  differently per call site (spotlight vs. row) and state is simpler
+ *  to keep correct across re-renders when `img` changes between players. */
+function PlayerAvatar({ name, img, size = "md" }: { name: string; img?: string; size?: "sm" | "md" }) {
+  const [failed, setFailed] = useState(false)
+  const dims = size === "md" ? "h-14 w-14 text-sm" : "h-8 w-8 text-[10px]"
+  const showPhoto = !!img && !failed
+  return (
+    <div
+      className={`relative ${dims} rounded-full overflow-hidden bg-black/60 border-2 border-gold/40 flex items-center justify-center shrink-0 ${
+        size === "md" ? "shadow-[0_0_20px_rgba(245,166,35,0.25)]" : ""
+      }`}
+    >
+      {showPhoto ? (
+        <img src={img} alt={name} className="w-full h-full object-cover" onError={() => setFailed(true)} />
+      ) : (
+        <span className="font-bold text-gold font-cinzel">{initialsStats(name)}</span>
+      )}
+    </div>
+  )
+}
+
+/** Spotlight card for whoever currently leads the selected category —
+ *  gives the tab a hero moment instead of opening straight into a table. */
+function LeaderSpotlight({
+  name,
+  img,
+  value,
+  unit,
+  meta,
+}: {
+  name: string
+  img?: string
+  value: string
+  unit: string
+  meta: string
+}) {
+  return (
+    <div className="relative rounded-xl border border-gold/25 bg-gradient-to-br from-gold/[0.08] via-black/40 to-black/40 p-5 mb-5 overflow-hidden">
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
+      <div className="flex items-center gap-4">
+        <PlayerAvatar name={name} img={img} size="md" />
+        <div className="min-w-0 flex-1">
+          <p className="text-gold/70 text-[10px] uppercase tracking-[0.2em] font-cinzel mb-0.5">Leading</p>
+          <h4 className="text-lg font-bold text-white font-cinzel truncate">{name}</h4>
+          <p className="text-gray-500 text-[11px] mt-0.5">{meta}</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-3xl font-black text-gold font-cinzel tabular-nums leading-none">{value}</p>
+          <p className="text-[10px] uppercase tracking-widest text-gray-500 mt-1">{unit}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Leaderboard row with a background bar sized relative to the top value
+ *  in the current category — so "second place" visually reads as close
+ *  or distant, not just a number one row down. */
+function LeaderboardRow({
+  rank,
+  name,
+  img,
+  primaryValue,
+  primaryLabel,
+  fraction,
+  secondary,
+}: {
+  rank: number
+  name: string
+  img?: string
+  primaryValue: string
+  primaryLabel: string
+  fraction: number
+  secondary: { label: string; value: string | number }[]
+}) {
+  const medal = RANK_STYLE[rank]
+  return (
+    <div className={`relative flex items-center gap-3 px-3 py-3 rounded-lg mb-1.5 overflow-hidden ${medal ? "bg-white/[0.02]" : ""}`}>
+      <div
+        className="absolute inset-y-0 left-0 bg-gold/[0.06] transition-all duration-500"
+        style={{ width: `${Math.max(fraction, 2)}%` }}
+      />
+      <div
+        className={`relative h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold font-cinzel shrink-0 ${
+          medal ? `${medal.badge} ${medal.glow}` : "bg-white/5 text-gray-500 border border-white/10"
+        }`}
+      >
+        {rank + 1}
+      </div>
+      <PlayerAvatar name={name} img={img} size="sm" />
+      <p className="relative text-sm text-gray-100 font-medium truncate flex-1 min-w-0">{name}</p>
+      <div className="relative hidden sm:flex items-center gap-3 shrink-0">
+        {secondary.map((s) => (
+          <span key={s.label} className="text-[10.5px] text-gray-500 tabular-nums">
+            {s.value}
+            <span className="text-gray-700 ml-1">{s.label}</span>
+          </span>
+        ))}
+      </div>
+      <div className="relative text-right shrink-0 min-w-[3.5rem]">
+        <span className="text-base font-bold text-gold font-cinzel tabular-nums">{primaryValue}</span>
+        <span className="hidden md:inline text-[9px] uppercase tracking-widest text-gray-600 ml-1.5">{primaryLabel}</span>
+      </div>
+    </div>
+  )
+}
+
+function StatsPanel({
+  battingStats,
+  bowlingStats,
+  playerImageMap = {},
+}: {
+  battingStats: PlayerStatRow[]
+  bowlingStats: BowlingStatRow[]
+  playerImageMap?: Record<string, string>
+}) {
+  const [mode, setMode] = useState<"batting" | "bowling">(battingStats.length ? "batting" : "bowling")
+  const [battingKey, setBattingKey] = useState<BattingStatKey>("runs")
+  const [bowlingKey, setBowlingKey] = useState<BowlingStatKey>("wkts")
+
+  const sortedBatting = [...battingStats].sort((a, b) => (b[battingKey] ?? -Infinity) - (a[battingKey] ?? -Infinity))
+  const sortedBowling = [...bowlingStats].sort((a, b) => {
+    if (bowlingKey === "avg" || bowlingKey === "econ") return (a[bowlingKey] ?? Infinity) - (b[bowlingKey] ?? Infinity)
+    return b[bowlingKey] - a[bowlingKey]
+  })
+
+  const activeRows = mode === "batting" ? sortedBatting : sortedBowling
+  const leader = activeRows[0]
+
+  // For the leader spotlight + bar widths, "best average/econ" categories
+  // are lower-is-better, so the bar's reference max should be the worst
+  // (highest) value in view, not the leader's own value — otherwise the
+  // leader's bar would render empty.
+  const lowerIsBetter = mode === "bowling" && (bowlingKey === "avg" || bowlingKey === "econ")
+
+  const battingValue = (r: PlayerStatRow) =>
+    battingKey === "avg" ? fmtStat(r.avg) : battingKey === "sr" ? r.sr.toFixed(2) : String(r[battingKey])
+  const bowlingValue = (r: BowlingStatRow) =>
+    bowlingKey === "avg" ? fmtStat(r.avg) : bowlingKey === "econ" ? r.econ.toFixed(2) : String(r[bowlingKey])
+
+  const battingNumeric = (r: PlayerStatRow) => (battingKey === "avg" ? r.avg ?? 0 : battingKey === "sr" ? r.sr : r[battingKey])
+  const bowlingNumeric = (r: BowlingStatRow) => (bowlingKey === "avg" ? r.avg ?? 0 : bowlingKey === "econ" ? r.econ : r[bowlingKey])
+
+  const maxNumeric = Math.max(
+    ...(mode === "batting" ? sortedBatting.map(battingNumeric) : sortedBowling.map(bowlingNumeric)),
+    1,
+  )
+
+  const fractionFor = (numeric: number) => (lowerIsBetter ? 100 - (numeric / maxNumeric) * 100 : (numeric / maxNumeric) * 100)
+
+  return (
+    <div className="mb-8">
+      {/* Batting / Bowling segmented switch */}
+      <div className="flex gap-1 bg-black/50 border border-gold/20 rounded-lg p-1 mb-4 w-fit">
+        {(["batting", "bowling"] as const).map((m) => (
+          <button
+            key={m}
+            disabled={(m === "batting" ? battingStats : bowlingStats).length === 0}
+            onClick={() => setMode(m)}
+            className={`px-5 py-1.5 rounded-md text-xs font-cinzel uppercase tracking-wide transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+              mode === m ? "bg-gold text-black font-bold" : "text-gray-400 hover:text-gold"
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {/* Category chips — horizontally scrollable, replaces the old vertical sidebar list */}
+      <div className="flex gap-2 overflow-x-auto pb-1 mb-5 scrollbar-none">
+        {(mode === "batting" ? BATTING_STAT_CATEGORIES : BOWLING_STAT_CATEGORIES).map((c) => {
+          const active = mode === "batting" ? battingKey === c.key : bowlingKey === c.key
+          return (
+            <button
+              key={c.key}
+              onClick={() => (mode === "batting" ? setBattingKey(c.key as BattingStatKey) : setBowlingKey(c.key as BowlingStatKey))}
+              className={`shrink-0 text-[11px] font-cinzel uppercase tracking-wide px-3.5 py-2 rounded-full border transition-all whitespace-nowrap ${
+                active ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/15 text-gray-400 hover:text-gold hover:border-gold/40"
+              }`}
+            >
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {activeRows.length === 0 ? (
+        <p className="text-gray-600 text-xs text-center py-10 border border-dashed border-gold/15 rounded-lg">
+          No {mode} stats yet.
+        </p>
+      ) : (
+        <div className="bg-black/50 border border-gold/20 rounded-lg p-5">
+          {mode === "batting" ? (
+            <>
+              <LeaderSpotlight
+                name={leader.player}
+                img={playerImageMap[leader.player]}
+                value={battingValue(leader as PlayerStatRow)}
+                unit={battingKey}
+                meta={`${leader.matches} match${leader.matches === 1 ? "" : "es"} · ${leader.inns} inns`}
+              />
+              {sortedBatting.map((r, i) => (
+                <LeaderboardRow
+                  key={r.player}
+                  rank={i}
+                  name={r.player}
+                  img={playerImageMap[r.player]}
+                  primaryValue={battingValue(r)}
+                  primaryLabel={battingKey}
+                  fraction={fractionFor(battingNumeric(r))}
+                  secondary={[
+                    { label: "4s", value: r.fours },
+                    { label: "6s", value: r.sixes },
+                  ]}
+                />
+              ))}
+            </>
+          ) : (
+            <>
+              <LeaderSpotlight
+                name={leader.player}
+                img={playerImageMap[leader.player]}
+                value={bowlingValue(leader as BowlingStatRow)}
+                unit={bowlingKey}
+                meta={`${(leader as BowlingStatRow).best} best · ${leader.matches} match${leader.matches === 1 ? "" : "es"}`}
+              />
+              {sortedBowling.map((r, i) => (
+                <LeaderboardRow
+                  key={r.player}
+                  rank={i}
+                  name={r.player}
+                  img={playerImageMap[r.player]}
+                  primaryValue={bowlingValue(r)}
+                  primaryLabel={bowlingKey}
+                  fraction={fractionFor(bowlingNumeric(r))}
+                  secondary={[{ label: "best", value: r.best }]}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

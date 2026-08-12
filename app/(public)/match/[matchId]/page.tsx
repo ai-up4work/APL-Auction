@@ -16,7 +16,6 @@ export async function generateMetadata({ params }: MatchPageProps): Promise<Meta
   }
 
   const match = result.match
-  // console.log("generateMetadata: match detail for matchId", matchId, ":", match.squads[0].players)
   const title = `${match.teamA.name} vs ${match.teamB.name} — ${match.round} | Valiant League`
   const description = match.tournamentName
     ? `${match.round} of ${match.tournamentName}: ${match.teamA.name} vs ${match.teamB.name} at ${match.venue}.`
@@ -30,12 +29,7 @@ export async function generateMetadata({ params }: MatchPageProps): Promise<Meta
   }
 }
 
-// Human-readable label + suggested next step per failure reason. Kept here
-// (rather than in match-data.ts) since it's presentation, not data logic.
-const REASON_COPY: Record<
-  string,
-  { label: string; suggestion: string }
-> = {
+const REASON_COPY: Record<string, { label: string; suggestion: string }> = {
   match_not_found: {
     label: "Match not found",
     suggestion:
@@ -111,10 +105,7 @@ function MatchLookupError({
           </div>
         )}
 
-        <a
-          href="/"
-          className="inline-block mt-6 text-xs uppercase tracking-widest font-bold text-gold hover:underline"
-        >
+        <a href="/" className="inline-block mt-6 text-xs uppercase tracking-widest font-bold text-gold hover:underline">
           ← Back home
         </a>
       </div>
@@ -128,14 +119,13 @@ export default async function MatchPage({ params }: MatchPageProps) {
 
   if (!result.ok) {
     return (
-      <MatchLookupError
-        matchId={matchId}
-        reason={result.reason}
-        message={result.message}
-        detail={result.detail}
-      />
+      <MatchLookupError matchId={matchId} reason={result.reason} message={result.message} detail={result.detail} />
     )
   }
 
+  // Stats tab is now computed client-side, per-match, straight from
+  // match.innings1 / innings2Final / innings2Partial — see
+  // buildMatchStats() in match-detail-client.tsx. No separate fetch or
+  // tournament lookup needed here.
   return <MatchDetailClient match={result.match} tournamentSlug={result.match.tournamentSlug} />
 }

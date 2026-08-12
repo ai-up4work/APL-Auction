@@ -67,6 +67,17 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
     )
   )
 
+  // ── MATCH-END NOTIFICATION ──
+  // Tracks the previously-seen matchStatus so we can detect the exact
+  // refresh() call where it flips into "completed" and fire the in-app
+  // toast exactly once. Seeded from initialMatch.matchStatus (the
+  // server-rendered value) rather than null, so a page load of a match
+  // that was ALREADY completed before this visitor arrived does NOT
+  // show the toast — only a live transition witnessed during this
+  // session does.
+  const prevStatusRef = useRef<MatchStatus | null>(initialMatch.matchStatus ?? null)
+  const [justCompleted, setJustCompleted] = useState(false)
+
   const refresh = useCallback(async () => {
     setIsSyncing(true)
     try {
@@ -169,6 +180,20 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         matchStatus = arithmeticIsLive ? "live" : "completed"
       }
 
+      // Fires the toast exactly on the transition into "completed" —
+      // never on first paint of an already-finished match (see the
+      // prevStatusRef seeding comment above), and never more than once
+      // per transition even though refresh() keeps firing on every
+      // subsequent realtime event while status stays "completed".
+      if (
+        prevStatusRef.current !== null &&
+        prevStatusRef.current !== "completed" &&
+        matchStatus === "completed"
+      ) {
+        setJustCompleted(true)
+      }
+      prevStatusRef.current = matchStatus
+
       // Explicit — mirrors the same logic used server-side in
       // getMatchDetailById, so the two never disagree about which
       // innings is in progress.
@@ -189,6 +214,7 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         target,
         teamA,
         teamB,
+        resultNote: matchStatus === "completed" ? prev.resultNote || "Match completed" : prev.resultNote,
         innings1: { ...innings1, deliveries: toDeliveries(innings1Balls) },
         innings2Final: { ...innings2Agg, deliveries: toDeliveries(innings2Balls) },
         innings2Partial: {
@@ -261,5 +287,15 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
     }
   }, [matchId, refresh])
 
-  return { match, isSyncing, channelStatus }
+  return {
+    match,
+    isSyncing,
+    channelStatus,
+    /** True for the brief window right after this session witnessed the
+     *  match flip into "completed". The match page renders <MatchEndToast
+     *  show={justCompleted} .../> off this and calls clearJustCompleted
+     *  once the toast has been dismissed/timed out. */
+    justCompleted,
+    clearJustCompleted: useCallback(() => setJustCompleted(false), []),
+  }
 }
