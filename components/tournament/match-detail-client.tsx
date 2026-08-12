@@ -458,6 +458,15 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         }}
       />
 
+
+      <SiteHeader
+        activeSection={`${match.teamA.name} vs ${match.teamB.name}`}
+        isNavOpen={isNavOpen}
+        setIsNavOpen={setIsNavOpen}
+        scrollToSection={scrollToSection}
+        handleNavigation={handleNavigation}
+      />
+
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-40"
@@ -473,23 +482,29 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
         <div className="container mx-auto px-4 relative z-10 text-center fade-in flex flex-col items-center mt-10 max-w-full mb-20">
 
-          <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 w-full max-w-4xl mx-auto">
+          <div className="flex flex-row items-center justify-center gap-4 md:gap-12 w-full max-w-4xl mx-auto">
             <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-              <LogoSlot src={match.teamA.logo} alt={`${match.teamA.name} logo`} />
-              <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+              <LogoSlot
+                src={match.teamA.logo}
+                alt={`${match.teamA.name} logo`}
+              />
+              <h1 className="text-xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                 {match.teamA.name}
               </h1>
             </div>
 
             <div className="flex flex-col items-center justify-center shrink-0">
-              <span className="text-gold font-cinzel text-2xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
+              <span className="text-gold font-cinzel text-xl md:text-4xl font-black drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]">
                 VS
               </span>
             </div>
 
             <div className="flex flex-col items-center flex-1 min-w-0 max-w-full">
-              <LogoSlot src={match.teamB.logo} alt={`${match.teamB.name} logo`} />
-              <h1 className="text-2xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
+              <LogoSlot
+                src={match.teamB.logo}
+                alt={`${match.teamB.name} logo`}
+              />
+              <h1 className="text-xl md:text-3xl font-bold text-white font-cinzel tracking-wider drop-shadow-md text-center break-words max-w-full">
                 {match.teamB.name}
               </h1>
             </div>

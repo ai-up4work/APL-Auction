@@ -153,7 +153,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
 
       <SiteHeader
-        activeSection="tournament"
+        activeSection={tournament.title}
         isNavOpen={isNavOpen}
         setIsNavOpen={setIsNavOpen}
         scrollToSection={scrollToSection}
