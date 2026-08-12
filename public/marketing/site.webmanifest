@@ -1,21 +1,17 @@
 {
   "name": "Valiant League",
   "short_name": "Valiant League",
-  "description": "Live auctions, tournament brackets, and real-time broadcast overlays for cricket clubs.",
+  "description": "Live cricket auctions, tournament brackets, scoring and real-time broadcast overlays.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
+  "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/marketing/icon-16x16.png",
-      "sizes": "16x16",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/marketing/icon-512x512.png",
-      "sizes": "512x512",
+      "src": "/marketing/icon-192x192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
@@ -24,6 +20,12 @@
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/marketing/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/marketing/icon-512x512.png",
