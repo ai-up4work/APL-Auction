@@ -482,7 +482,7 @@ export default function SimulateMatchPage() {
 
       <AppHeader title="Match Simulator" />
 
-      <section className="pt-28 sm:pt-40 pb-8 relative section-pattern">
+      <section className="pt-26 sm:pt-30 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10 max-w-3xl">
           <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-gold mb-2 font-cinzel">
