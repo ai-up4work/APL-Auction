@@ -22,18 +22,15 @@ interface UseBallCommentaryArgs {
   striker?: { name: string; runs: number; balls: number }
   nonStriker?: { name: string; runs: number; balls: number }
   bowlerFigures?: { name: string; overs: string; runs: number; wkts: number }
-  /** Only fire generation while this is true — e.g. `live` from the match page. */
   enabled: boolean
 }
 
 const key = (over: number, ball: number) => `${over}.${ball}`
 
-// ── Pacing / token-safety knobs ──────────────────────────────────
 const TICK_MS = 5_000
 const MIN_INTERVAL_MS = 45_000
 const MAX_BATCH_SIZE = 6
 const RECENT_CONTEXT_LINES = 5
-const RATE_LIMIT_BACKOFF_MS = 10 * 60_000
 const MAX_CLAIM_CANDIDATES_PER_TICK = MAX_BATCH_SIZE
 const RECONCILE_POLL_MS = 20_000
 
@@ -61,14 +58,14 @@ export function useBallCommentary({
   const [byKey, setByKey] = useState<Map<string, string>>(new Map())
   const orderedKeys = useRef<string[]>([])
 
-  // Balls the DB says are permanently failed OR currently claimed by
-  // *someone* (possibly this device, possibly another). Shared truth
-  // read from the DB / Realtime / poll — never a local-only guess.
+  // Balls the DB says are either currently claimed (pending, by anyone)
+  // or permanently failed. Either way: don't send them again. This is
+  // the ENTIRE retry policy — once a key lands here via a 'failed'
+  // status, it never leaves except on a fresh load()/new match.
   const [unavailableKeys, setUnavailableKeys] = useState<Set<string>>(new Set())
 
   const requestInFlight = useRef(false)
   const lastFiredAt = useRef(0)
-  const rateLimitedUntil = useRef(0)
 
   const contextRef = useRef({
     matchId, inningsNumber, teamBatting, teamBowling, target, scoreState, striker, nonStriker, bowlerFigures,
@@ -96,8 +93,7 @@ export function useBallCommentary({
         return next
       })
     } else {
-      // 'pending' (claimed, by us or another request) or 'failed'
-      // (permanently gave up) — either way, nobody should re-send it.
+      // 'pending' or 'failed' — either way, stop trying it.
       setUnavailableKeys((prev) => (prev.has(k) ? prev : new Set(prev).add(k)))
     }
   }, [])
@@ -120,8 +116,6 @@ export function useBallCommentary({
   }, [])
 
   // Load whatever's already cached/claimed/failed for this match/innings.
-  // Read-only SELECT — the only kind of query the browser client is
-  // allowed to run against this table.
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -155,7 +149,6 @@ export function useBallCommentary({
       orderedKeys.current = order
       setUnavailableKeys(unavailable)
       lastFiredAt.current = 0
-      rateLimitedUntil.current = 0
     }
     load()
     return () => {
@@ -164,10 +157,6 @@ export function useBallCommentary({
   }, [matchId, inningsNumber])
 
   // ── Realtime sync ──
-  // Requires `ball_commentary` to be added to the `supabase_realtime`
-  // publication and to have a SELECT policy Realtime can evaluate — see
-  // the SQL block above. If devices ever show diverging "AI Commentary"
-  // vs "Match Data" for the SAME ball again, check that first.
   useEffect(() => {
     if (!matchId) return
 
@@ -197,9 +186,7 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber, mergeRow, removeRow])
 
-  // ── Reconciliation poll (belt-and-suspenders) ──
-  // Self-heals a device that missed a Realtime event. Read-only, and
-  // skips entirely when nothing is outstanding.
+  // ── Reconciliation poll (belt-and-suspenders for missed Realtime events) ──
   useEffect(() => {
     if (!matchId) return
 
@@ -228,23 +215,19 @@ export function useBallCommentary({
   }, [matchId, inningsNumber, deliveries, byKey, mergeRow])
 
   // ── Scheduler ──
-  // Sends CANDIDATE balls to /api/commentary/generate, which does the
-  // atomic claim itself server-side (service role, bypasses RLS). This
-  // client never writes to ball_commentary directly — no browser-role
-  // write policy exists for this table, by design.
+  // Sends candidate balls to /api/commentary/generate, which claims
+  // them atomically server-side. One attempt per ball, ever — success
+  // marks 'ready', any failure marks 'failed', and this hook never
+  // reconsiders a ball once it's in unavailableKeys, short of a full
+  // reload (new match/innings mount).
   useEffect(() => {
     if (!enabled) return
 
     const interval = setInterval(async () => {
       if (requestInFlight.current) return
-      if (Date.now() < rateLimitedUntil.current) return
       const now = Date.now()
       if (now - lastFiredAt.current < MIN_INTERVAL_MS) return
 
-      // Candidates: balls we have delivery data for, that aren't ready
-      // and aren't already known claimed/failed. Newest first, so a
-      // device opening mid-match prioritizes the live edge over
-      // backfilling historical balls in one burst.
       const candidates = [...deliveries]
         .filter((d) => {
           const k = key(d.over, d.ball)
@@ -258,10 +241,8 @@ export function useBallCommentary({
       lastFiredAt.current = now
       requestInFlight.current = true
 
-      // Optimistically mark these as unavailable so this device's own
-      // next tick doesn't re-send them while this request is in flight.
-      // Realtime/the poll corrects this if the server ends up not
-      // claiming some of them (lost a race to another device).
+      // Mark these unavailable immediately — win or lose, success or
+      // failure, we don't touch them again from this hook.
       setUnavailableKeys((prev) => {
         const next = new Set(prev)
         for (const d of candidates) next.add(key(d.over, d.ball))
@@ -304,36 +285,28 @@ export function useBallCommentary({
             })),
           }),
         })
-        const json: { commentary?: CommentaryLine[]; error?: string; detail?: string; code?: string } = await res.json()
+        const json: { commentary?: CommentaryLine[]; error?: string; detail?: string } = await res.json()
 
         if (json.error) {
-          console.error("[useBallCommentary] generate failed:", json.error, json.detail)
-          if (json.code === "rate_limit_exceeded") {
-            rateLimitedUntil.current = Date.now() + RATE_LIMIT_BACKOFF_MS
-          }
-          // The server already wrote status:'failed' for any balls it
-          // claimed but couldn't generate for. Realtime/the poll will
-          // deliver that and every device converges on the fallback —
-          // no local retry needed.
+          // Server already wrote status:'failed' for these balls. We do
+          // nothing further here — Realtime/poll confirms it, and since
+          // it's already in unavailableKeys, the UI is already showing
+          // the fallback. No retry, no backoff, no bookkeeping.
+          console.error("[useBallCommentary] generate failed (permanent, no retry):", json.error, json.detail)
           return
         }
 
-        // Merge whatever came back (belt-and-suspenders — Realtime
-        // should also deliver these, but this avoids waiting on it).
         for (const c of json.commentary ?? []) {
           mergeRow({ over: c.over, ball: c.ball, text: c.text, status: "ready" })
         }
       } catch (err) {
-        console.error("[useBallCommentary] request failed:", err)
-        // Pure network failure — we don't know if the server's claim
-        // step even ran. Don't hold these keys unavailable forever on
-        // faith; let the reconciliation poll and next enqueue pass sort
-        // out the true DB state shortly.
-        setUnavailableKeys((prev) => {
-          const next = new Set(prev)
-          for (const d of candidates) next.delete(key(d.over, d.ball))
-          return next
-        })
+        // Couldn't even reach our own API route. The server-side claim
+        // may or may not have happened — either way we don't retry from
+        // here. If a claim row exists, the poll will pick up whatever
+        // status it eventually settles at (most likely 'failed', since
+        // the route fails its own requests closed). We just leave this
+        // ball in unavailableKeys and move on.
+        console.error("[useBallCommentary] request failed (permanent, no retry):", err)
       } finally {
         requestInFlight.current = false
       }

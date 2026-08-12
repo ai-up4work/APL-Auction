@@ -1,4 +1,3 @@
-// app/api/commentary/generate/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase" // server-side client — service role, bypasses RLS
 
@@ -30,14 +29,9 @@ interface GenerateBody {
   nonStriker?: { name: string; runs: number; balls: number }
   bowlerFigures?: { name: string; overs: string; runs: number; wkts: number }
   recentCommentary: string[]
-  /**
-   * CANDIDATES, not a claimed set. The client sends every ball it
-   * thinks might need commentary; this route does the atomic claim
-   * itself (server-side, service-role) and only generates for whichever
-   * subset it actually wins. This is what keeps the write path off the
-   * client entirely — no RLS policy needs to allow browser writes to
-   * ball_commentary at all.
-   */
+  /** Candidates the client thinks need commentary — this route does the
+   *  atomic claim itself (server-side, service role) and only generates
+   *  for whichever subset it actually wins. */
   deliveries: DeliveryContext[]
 }
 
@@ -61,6 +55,16 @@ function truncateToWords(text: string, maxWords: number): string {
   return words.slice(0, maxWords).join(" ") + "…"
 }
 
+/**
+ * Marks balls as permanently failed. Policy: ANY failure — rate limit,
+ * network error, Groq outage, bad JSON, whatever — results in exactly
+ * one attempt, then a permanent 'failed' status. No retry, no backoff,
+ * no "transient vs content" distinction. Every device converges on the
+ * phrase-bank fallback for these balls immediately and for good. This
+ * keeps the system simple and avoids ever leaving the UI stuck on
+ * "Writing commentary…" while something quietly retries in the
+ * background.
+ */
 async function markFailed(matchId: string, inningsNumber: number, deliveries: { over: number; ball: number }[]) {
   if (deliveries.length === 0) return
   const rows = deliveries.map((d) => ({
@@ -98,13 +102,11 @@ export async function POST(req: NextRequest) {
 
   const candidates = body.deliveries.slice(0, MAX_DELIVERIES_PER_REQUEST)
 
-  // ── ATOMIC CLAIM ──────────────────────────────────────────────
-  // INSERT ... ON CONFLICT DO NOTHING RETURNING *, under the
-  // service-role client (bypasses RLS — this is the only path that
-  // ever writes to ball_commentary). If another device/request already
-  // has a row (pending, ready, or failed) for a ball, that row is
-  // skipped and NOT returned — so `claimedKeys` is exactly the subset
-  // this request, and only this request, is now responsible for.
+  // ── ATOMIC CLAIM ──
+  // INSERT ... ON CONFLICT DO NOTHING RETURNING *, service-role only.
+  // Whichever balls come back here are exclusively this request's
+  // responsibility — win or lose, they end this request at 'ready' or
+  // 'failed', never left dangling at 'pending'.
   const placeholderRows = candidates.map((d) => ({
     match_id: body.matchId,
     innings_number: body.inningsNumber,
@@ -128,10 +130,7 @@ export async function POST(req: NextRequest) {
   const deliveries = candidates.filter((d) => claimedKeySet.has(`${d.over}.${d.ball}`))
 
   if (deliveries.length === 0) {
-    // Every candidate was already claimed by another concurrent request
-    // (race between two devices hitting this route at nearly the same
-    // moment). Nothing to generate — the other request owns these balls
-    // and Realtime will deliver the outcome to everyone.
+    // Every candidate was already claimed by a concurrent request.
     return NextResponse.json({ commentary: [], claimed: 0 })
   }
 
@@ -169,20 +168,17 @@ export async function POST(req: NextRequest) {
       }),
     })
   } catch (err) {
-    // We already claimed these balls — if we don't resolve them, they
-    // stay 'pending' forever and no device (including this one) can
-    // ever retry them again, since claims are exclusive by design.
     await markFailed(body.matchId, body.inningsNumber, deliveries)
-    return NextResponse.json({ error: "Groq request failed", detail: String(err) }, { status: 502 })
+    return NextResponse.json({ error: "Groq request failed", detail: String(err), failed: deliveries }, { status: 502 })
   }
 
   if (!groqRes.ok) {
     const detail = await groqRes.text()
     console.error("[commentary/generate] Groq returned an error:", groqRes.status, detail)
-    const isRateLimit = groqRes.status === 429
     await markFailed(body.matchId, body.inningsNumber, deliveries)
+    const isRateLimit = groqRes.status === 429
     return NextResponse.json(
-      { error: "Groq returned an error", detail, code: isRateLimit ? "rate_limit_exceeded" : undefined },
+      { error: "Groq returned an error", detail, code: isRateLimit ? "rate_limit_exceeded" : undefined, failed: deliveries },
       { status: 502 },
     )
   }
@@ -193,12 +189,12 @@ export async function POST(req: NextRequest) {
 
   if (!content) {
     await markFailed(body.matchId, body.inningsNumber, deliveries)
-    return NextResponse.json({ error: "No content in Groq response" }, { status: 502 })
+    return NextResponse.json({ error: "No content in Groq response", failed: deliveries }, { status: 502 })
   }
   if (finishReason === "length") {
     await markFailed(body.matchId, body.inningsNumber, deliveries)
     return NextResponse.json(
-      { error: "Groq response truncated by max_tokens", detail: `batch size ${deliveries.length}` },
+      { error: "Groq response truncated by max_tokens", detail: `batch size ${deliveries.length}`, failed: deliveries },
       { status: 502 },
     )
   }
@@ -209,7 +205,7 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(parsed.commentary)) throw new Error("commentary is not an array")
   } catch {
     await markFailed(body.matchId, body.inningsNumber, deliveries)
-    return NextResponse.json({ error: "Failed to parse Groq JSON", raw: content }, { status: 502 })
+    return NextResponse.json({ error: "Failed to parse Groq JSON", raw: content, failed: deliveries }, { status: 502 })
   }
 
   const requestedKeys = new Set(deliveries.map((d) => `${d.over}.${d.ball}`))
@@ -223,8 +219,8 @@ export async function POST(req: NextRequest) {
     })
     .map((c) => ({ ...c, text: truncateToWords(c.text, MAX_WORDS_PER_LINE) }))
 
-  // Any claimed ball the model didn't return a valid line for still
-  // needs resolving — otherwise it's stuck at 'pending' forever.
+  // Balls the model silently skipped a line for — fail those specific
+  // ones even though the batch overall "succeeded".
   const validatedKeys = new Set(validated.map((c) => `${c.over}.${c.ball}`))
   const missing = deliveries.filter((d) => !validatedKeys.has(`${d.over}.${d.ball}`))
   if (missing.length > 0) {
@@ -232,7 +228,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (validated.length === 0) {
-    return NextResponse.json({ error: "No valid commentary entries after validation", raw: content }, { status: 502 })
+    return NextResponse.json({ error: "No valid commentary entries after validation", raw: content, failed: missing }, { status: 502 })
   }
 
   const rows = validated.map((c) => ({
@@ -252,10 +248,10 @@ export async function POST(req: NextRequest) {
     console.error("[commentary/generate] upsert failed:", upsertErr.message, upsertErr)
     await markFailed(body.matchId, body.inningsNumber, deliveries)
     return NextResponse.json(
-      { error: "Failed to persist commentary to database", detail: upsertErr.message },
+      { error: "Failed to persist commentary to database", detail: upsertErr.message, failed: deliveries },
       { status: 502 },
     )
   }
 
-  return NextResponse.json({ commentary: validated })
+  return NextResponse.json({ commentary: validated, missing })
 }
