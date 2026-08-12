@@ -1,6 +1,6 @@
 // app/api/commentary/generate/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase" // server-side client
+import { supabase } from "@/lib/supabase" // server-side client — service role, bypasses RLS
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 const GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -31,12 +31,12 @@ interface GenerateBody {
   bowlerFigures?: { name: string; overs: string; runs: number; wkts: number }
   recentCommentary: string[]
   /**
-   * IMPORTANT: this must already be the CLAIMED subset — i.e. the rows
-   * that came back from the client's own
-   * `insert(..., { onConflict, ignoreDuplicates: true }).select()` call.
-   * This route no longer does any claiming itself; it assumes the
-   * caller already atomically won the right to generate these balls.
-   * See use-ball-commentary.ts's claimBalls().
+   * CANDIDATES, not a claimed set. The client sends every ball it
+   * thinks might need commentary; this route does the atomic claim
+   * itself (server-side, service-role) and only generates for whichever
+   * subset it actually wins. This is what keeps the write path off the
+   * client entirely — no RLS policy needs to allow browser writes to
+   * ball_commentary at all.
    */
   deliveries: DeliveryContext[]
 }
@@ -61,10 +61,8 @@ function truncateToWords(text: string, maxWords: number): string {
   return words.slice(0, maxWords).join(" ") + "…"
 }
 
-/** Marks a batch of already-claimed rows as permanently failed, so every
- *  device reads this from the DB and shows the fallback — instead of
- *  each device independently retrying and independently giving up. */
-async function markFailed(matchId: string, inningsNumber: number, deliveries: DeliveryContext[]) {
+async function markFailed(matchId: string, inningsNumber: number, deliveries: { over: number; ball: number }[]) {
+  if (deliveries.length === 0) return
   const rows = deliveries.map((d) => ({
     match_id: matchId,
     innings_number: inningsNumber,
@@ -98,7 +96,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "matchId and deliveries are required" }, { status: 400 })
   }
 
-  const deliveries = body.deliveries.slice(0, MAX_DELIVERIES_PER_REQUEST)
+  const candidates = body.deliveries.slice(0, MAX_DELIVERIES_PER_REQUEST)
+
+  // ── ATOMIC CLAIM ──────────────────────────────────────────────
+  // INSERT ... ON CONFLICT DO NOTHING RETURNING *, under the
+  // service-role client (bypasses RLS — this is the only path that
+  // ever writes to ball_commentary). If another device/request already
+  // has a row (pending, ready, or failed) for a ball, that row is
+  // skipped and NOT returned — so `claimedKeys` is exactly the subset
+  // this request, and only this request, is now responsible for.
+  const placeholderRows = candidates.map((d) => ({
+    match_id: body.matchId,
+    innings_number: body.inningsNumber,
+    over: d.over,
+    ball: d.ball,
+    status: "pending" as const,
+    text: null,
+  }))
+
+  const { data: claimedRows, error: claimErr } = await supabase
+    .from("ball_commentary")
+    .upsert(placeholderRows, { onConflict: "match_id,innings_number,over,ball", ignoreDuplicates: true })
+    .select("over, ball")
+
+  if (claimErr) {
+    console.error("[commentary/generate] claim failed:", claimErr.message)
+    return NextResponse.json({ error: "Claim failed", detail: claimErr.message }, { status: 500 })
+  }
+
+  const claimedKeySet = new Set((claimedRows ?? []).map((r) => `${r.over}.${r.ball}`))
+  const deliveries = candidates.filter((d) => claimedKeySet.has(`${d.over}.${d.ball}`))
+
+  if (deliveries.length === 0) {
+    // Every candidate was already claimed by another concurrent request
+    // (race between two devices hitting this route at nearly the same
+    // moment). Nothing to generate — the other request owns these balls
+    // and Realtime will deliver the outcome to everyone.
+    return NextResponse.json({ commentary: [], claimed: 0 })
+  }
+
   const maxTokens = Math.min(MAX_TOKENS_CEILING, BASE_OVERHEAD_TOKENS + deliveries.length * TOKENS_PER_LINE)
 
   const userPayload = {
@@ -133,10 +169,9 @@ export async function POST(req: NextRequest) {
       }),
     })
   } catch (err) {
-    // Network-level failure — this batch was already claimed (status
-    // 'pending' rows exist), so we MUST resolve them to 'failed' or
-    // they'd sit as permanent stuck claims that nobody else can pick up
-    // and nothing ever shows for those balls.
+    // We already claimed these balls — if we don't resolve them, they
+    // stay 'pending' forever and no device (including this one) can
+    // ever retry them again, since claims are exclusive by design.
     await markFailed(body.matchId, body.inningsNumber, deliveries)
     return NextResponse.json({ error: "Groq request failed", detail: String(err) }, { status: 502 })
   }
@@ -188,10 +223,8 @@ export async function POST(req: NextRequest) {
     })
     .map((c) => ({ ...c, text: truncateToWords(c.text, MAX_WORDS_PER_LINE) }))
 
-  // Any claimed ball that the model didn't return a valid line for
-  // still needs to be resolved — otherwise it's stuck at status
-  // 'pending' forever and no device (including this one) will ever
-  // retry or fall back for it.
+  // Any claimed ball the model didn't return a valid line for still
+  // needs resolving — otherwise it's stuck at 'pending' forever.
   const validatedKeys = new Set(validated.map((c) => `${c.over}.${c.ball}`))
   const missing = deliveries.filter((d) => !validatedKeys.has(`${d.over}.${d.ball}`))
   if (missing.length > 0) {
@@ -217,11 +250,6 @@ export async function POST(req: NextRequest) {
 
   if (upsertErr) {
     console.error("[commentary/generate] upsert failed:", upsertErr.message, upsertErr)
-    // These rows are still stuck at 'pending' in the DB (the claim
-    // insert succeeded earlier). Best-effort resolve them to 'failed'
-    // so they don't stay claimed-but-never-generated forever — a
-    // client can distinguish this from a true content failure only by
-    // the missing text, which is fine, the fallback UI is the same.
     await markFailed(body.matchId, body.inningsNumber, deliveries)
     return NextResponse.json(
       { error: "Failed to persist commentary to database", detail: upsertErr.message },
