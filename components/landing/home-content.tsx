@@ -376,7 +376,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             ))}
           </div>
 
-          <div className="text-center mt-10 fade-in-up stagger-4">
+          {/* <div className="text-center mt-10 fade-in-up stagger-4">
             <Button
               variant="outline"
               className="border-gold text-gold hover:bg-gold/10"
@@ -386,7 +386,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
               View All Tournaments
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
-          </div>
+          </div> */}
         </div>
       </section>
 
