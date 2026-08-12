@@ -855,11 +855,6 @@ export default function MatchTabs({
                     isOverPending={isCommentaryOverPending}
                   />
                 )}
-                <p className="text-[10px] text-gray-600 text-center pt-2">
-                  <span className="text-gold">AI Commentary</span> lines are generated live, cinematic narration.{" "}
-                  <span className="text-gray-400">Match Data</span> lines are plain, factual text built directly from
-                  ball-by-ball data and are shown whenever AI narration isn't available yet.
-                </p>
               </div>
             )
           })()

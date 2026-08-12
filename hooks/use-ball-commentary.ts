@@ -27,6 +27,15 @@ interface UseBallCommentaryArgs {
 
 const key = (over: number, ball: number) => `${over}.${ball}`
 
+// Compares two "over.ball" keys chronologically (over first, then ball)
+// rather than lexicographically — "10.1" must sort after "9.2", which
+// plain string comparison would get wrong.
+function compareKeys(a: string, b: string): number {
+  const [aOver, aBall] = a.split(".").map(Number)
+  const [bOver, bBall] = b.split(".").map(Number)
+  return aOver - bOver || aBall - bBall
+}
+
 // ── Pacing knobs ──────────────────────────────────────────────────
 const TICK_MS = 5_000
 const MIN_INTERVAL_MS = 45_000
@@ -74,6 +83,16 @@ export function useBallCommentary({
   enabled,
 }: UseBallCommentaryArgs) {
   const [byKey, setByKey] = useState<Map<string, string>>(new Map())
+  // Always kept sorted chronologically (over, then ball) — NOT arrival
+  // order. Realtime events and the reconciliation poll's DB query can
+  // both deliver rows out of over/ball sequence when multiple devices
+  // are generating concurrently for the same live match (each ball is
+  // claimed by whichever device's request lands first server-side, and
+  // network timing across devices doesn't respect ball order). Since
+  // recentCommentary below does `.slice(-RECENT_CONTEXT_LINES)` and
+  // relies on the tail being the true most-recent balls, insertion
+  // order here would silently corrupt the "last 5 lines" continuity
+  // context sent to the model.
   const orderedKeys = useRef<string[]>([])
 
   // Status per ball key, for every ball that ISN'T ready-with-text.
@@ -114,6 +133,17 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber, teamBatting, teamBowling, target, scoreState, striker, nonStriker, bowlerFigures])
 
+  // Inserts a key into orderedKeys at its correct chronological
+  // position (rather than pushing to the end) if it isn't already
+  // present. O(n) per insert, but n is at most ~130 balls for a T20
+  // innings — negligible.
+  const insertOrdered = (k: string) => {
+    if (orderedKeys.current.includes(k)) return
+    const idx = orderedKeys.current.findIndex((existing) => compareKeys(existing, k) > 0)
+    if (idx === -1) orderedKeys.current.push(k)
+    else orderedKeys.current.splice(idx, 0, k)
+  }
+
   // Merges a row into local state exactly once, whether it came from
   // the initial load, a Realtime push, or the reconciliation poll.
   const mergeRow = useCallback((row: CommentaryRow) => {
@@ -122,7 +152,7 @@ export function useBallCommentary({
       setByKey((prev) => {
         if (prev.get(k) === row.text) return prev // no-op, avoids extra re-renders
         const next = new Map(prev)
-        if (!next.has(k)) orderedKeys.current.push(k)
+        insertOrdered(k)
         next.set(k, row.text!)
         return next
       })
@@ -182,6 +212,9 @@ export function useBallCommentary({
       const ready = new Map<string, string>()
       const order: string[] = []
       const status = new Map<string, "pending" | "failed">()
+      // Query is already sorted over/ball ascending, so a plain push
+      // here is fine — this is the one place arrival order and
+      // chronological order coincide by construction.
       for (const row of (data ?? []) as CommentaryRow[]) {
         const k = key(row.over, row.ball)
         if (row.status === "ready" && row.text) {
@@ -253,6 +286,10 @@ export function useBallCommentary({
       ]
       if (outstandingOvers.length === 0) return
 
+      // No .order() here — Postgres/PostgREST give no ordering
+      // guarantee for an .in() filter, so results can (and do) arrive
+      // in a different sequence than over/ball order. mergeRow's
+      // insertOrdered() is what keeps orderedKeys correct regardless.
       const { data, error } = await supabase
         .from("ball_commentary")
         .select("over, ball, text, status")
