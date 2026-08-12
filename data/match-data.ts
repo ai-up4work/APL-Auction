@@ -1016,7 +1016,6 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
   }
 
   const allBalls = ballRows ?? []
-  console.log(`[getTournamentStats] fetched ${allBalls.length} ball rows across ${matchIds.length} matches`)
 
   if (allBalls.length === 0) {
     console.warn(
@@ -1153,9 +1152,6 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
       }
     })
 
-  console.log(
-    `[getTournamentStats] built ${battingStats.length} batting rows, ${bowlingStats.length} bowling rows`
-  )
 
   return { battingStats, bowlingStats }
 }
