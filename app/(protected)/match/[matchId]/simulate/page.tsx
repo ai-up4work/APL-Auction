@@ -553,7 +553,7 @@ export default function SimulateMatchPage() {
               </label>
               <input
                 type="range"
-                min={200}
+                min={10000}
                 max={60000}
                 step={100}
                 value={speedMs}
