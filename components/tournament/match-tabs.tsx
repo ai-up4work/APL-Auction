@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Lock, Shield } from "lucide-react"
+import { Lock, Shield, Sparkles, Database } from "lucide-react"
 import type {
   MatchDetail,
   BattingRow,
@@ -152,12 +152,15 @@ function groupDeliveriesByOver(deliveries: DeliveryEntry[]): Map<number, Deliver
 }
 
 // ─────────────────────────────────────────────────────────────
-// AUTO-GENERATED COMMENTARY
+// AUTO-GENERATED COMMENTARY (fallback phrase banks)
 // ─────────────────────────────────────────────────────────────
-// Phrase banks per delivery outcome. A deterministic hash of the delivery
-// (over/ball/runs/wicket) picks the phrase, so re-renders (and live
-// polling refreshes) never make an already-shown line "flicker" to
-// different wording — the same ball always reads the same way.
+// Used whenever an LLM-generated line for a given ball isn't available
+// yet (still loading, or generation is disabled — e.g. non-live/older
+// matches you haven't backfilled). Deterministic hash of the delivery
+// (over/ball/runs/wicket) picks the phrase so it never flickers on
+// re-render. This is the "Match Data" source: short, factual lines
+// built directly off the delivery record (runs/extras/wicket) rather
+// than freeform narration.
 
 const DOT_PHRASES = [
   "Solid defense, no run there.",
@@ -236,9 +239,8 @@ function commentarySeed(d: DeliveryEntry): number {
   return d.over * 131 + d.ball * 17 + d.runs * 7 + (d.isWicket ? 91 : 0)
 }
 
-/** Turns a raw delivery into an auto-generated, commentary-style sentence.
- *  Falls back to a plain description for run counts that don't have a
- *  dedicated phrase bank (e.g. 5 runs from overthrows). */
+/** Turns a raw delivery into a fallback commentary-style sentence, used
+ *  only when no LLM-generated text is available for this ball yet. */
 function generateCommentaryText(d: DeliveryEntry): string {
   const seed = commentarySeed(d)
 
@@ -273,9 +275,44 @@ const commentaryBadgeStyles: Record<ChipKind, string> = {
   extra: "bg-white/5 text-gray-400 border border-dashed border-gray-600",
 }
 
-function CommentaryEntry({ delivery, isLatest }: { delivery: DeliveryEntry; isLatest?: boolean }) {
+/** Small pill identifying whether a commentary line is cinematic
+ *  AI narration or the deterministic, data-derived fallback line. */
+function CommentarySourceTag({ isAi }: { isAi: boolean }) {
+  return isAi ? (
+    <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-widest font-cinzel px-1.5 py-0.5 rounded-full bg-gradient-to-r from-gold/20 to-gold/5 border border-gold/30 text-gold">
+      <Sparkles className="h-2.5 w-2.5" />
+      AI Commentary
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-widest font-cinzel px-1.5 py-0.5 rounded-full bg-white/[0.03] border border-white/10 text-gray-500">
+      <Database className="h-2.5 w-2.5" />
+      Match Data
+    </span>
+  )
+}
+
+function CommentaryEntry({
+  delivery,
+  isLatest,
+  llmText,
+  isPending,
+}: {
+  delivery: DeliveryEntry
+  isLatest?: boolean
+  /** LLM-generated line for this exact ball, if it's been generated yet. */
+  llmText?: string
+  /** True while this ball's over is still being generated — shows a
+   *  quiet "writing..." placeholder instead of the phrase-bank fallback,
+   *  so it's visually obvious real commentary is on the way. */
+  isPending?: boolean
+}) {
   const { label, kind } = deliveryChip(delivery)
-  const text = generateCommentaryText(delivery)
+  // Whether this line is the cinematic, LLM-generated one vs. the
+  // deterministic "Match Data" fallback. Fallback logic is unchanged —
+  // this only affects the badge shown next to the text.
+  const isAiGenerated = !!llmText
+  const text = llmText ?? (isPending ? undefined : generateCommentaryText(delivery))
+
   return (
     <div
       className={`flex gap-3 p-3.5 transition-colors ${
@@ -294,28 +331,42 @@ function CommentaryEntry({ delivery, isLatest }: { delivery: DeliveryEntry; isLa
           {label}
         </span>
       </div>
-      <p className={`text-sm leading-snug pt-1 ${kind === "wicket" ? "text-red-300 font-semibold" : "text-gray-300"}`}>
-        {text}
-        {isLatest && (
-          <span className="ml-2 inline-flex items-center gap-1 text-[9px] uppercase tracking-widest text-gold/80 font-cinzel align-middle">
-            <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live
-          </span>
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm leading-snug pt-1 ${kind === "wicket" ? "text-red-300 font-semibold" : "text-gray-300"}`}>
+          {text ?? <span className="text-gray-600 italic">Writing commentary…</span>}
+          {isLatest && (
+            <span className="ml-2 inline-flex items-center gap-1 text-[9px] uppercase tracking-widest text-gold/80 font-cinzel align-middle">
+              <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live
+            </span>
+          )}
+        </p>
+        {text && (
+          <div className="mt-1.5">
+            <CommentarySourceTag isAi={isAiGenerated} />
+          </div>
         )}
-      </p>
+      </div>
     </div>
   )
 }
 
-/** Auto-generated live commentary feed: latest over on top, latest ball
- *  within each over on top — the way a live text-commentary widget reads. */
+/** Live commentary feed: latest over on top, latest ball within each
+ *  over on top — the way a live text-commentary widget reads.
+ *  `getLlmText`/`isOverPending` are optional so this component still
+ *  works (falling back to the phrase banks) for any caller that hasn't
+ *  wired up useBallCommentary. */
 function CommentaryFeed({
   deliveries,
   overOverData,
   isLive,
+  getLlmText,
+  isOverPending,
 }: {
   deliveries: DeliveryEntry[]
   overOverData: OverRow[]
   isLive: boolean
+  getLlmText?: (over: number, ball: number) => string | undefined
+  isOverPending?: (over: number) => boolean
 }) {
   const byOver = groupDeliveriesByOver(deliveries)
   const overNums = [...byOver.keys()].sort((a, b) => b - a)
@@ -327,15 +378,23 @@ function CommentaryFeed({
       {overNums.map((num) => {
         const balls = [...byOver.get(num)!].sort((a, b) => b.ball - a.ball)
         const meta = overMeta.get(num)
+        const pending = isOverPending?.(num) ?? false
         return (
           <div key={num}>
             <div className="flex items-center justify-between mb-2 px-1">
               <p className="text-xs font-cinzel uppercase tracking-widest text-gold/70">Over {num}</p>
-              {meta && (
-                <p className="text-[11px] text-gray-500">
-                  {meta.score} <span className="text-gray-700">·</span> {meta.totalRuns} runs
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                {pending && (
+                  <span className="flex items-center gap-1 text-[10px] text-gray-500">
+                    <span className="h-1 w-1 rounded-full bg-gray-500 animate-pulse" /> writing
+                  </span>
+                )}
+                {meta && (
+                  <p className="text-[11px] text-gray-500">
+                    {meta.score} <span className="text-gray-700">·</span> {meta.totalRuns} runs
+                  </p>
+                )}
+              </div>
             </div>
             <div className="border border-gold/10 rounded-lg divide-y divide-gold/5 bg-black/30 overflow-hidden">
               {balls.map((d, i) => (
@@ -343,6 +402,8 @@ function CommentaryFeed({
                   key={i}
                   delivery={d}
                   isLatest={!!latestDelivery && latestDelivery.over === d.over && latestDelivery.ball === d.ball}
+                  llmText={getLlmText?.(d.over, d.ball)}
+                  isPending={pending && !getLlmText?.(d.over, d.ball)}
                 />
               ))}
             </div>
@@ -377,6 +438,11 @@ interface MatchTabsProps {
    *  stats views may not always have squads resolved; Stats tab falls back
    *  to initials avatars when a name isn't found here. */
   playerImageMap?: Record<string, string>
+  /** Groq-generated commentary lookup — see hooks/use-ball-commentary.ts.
+   *  Optional: when omitted, the Commentary tab falls back entirely to
+   *  the deterministic phrase-bank text. */
+  getCommentaryText?: (over: number, ball: number) => string | undefined
+  isCommentaryOverPending?: (over: number) => boolean
 }
 
 export default function MatchTabs({
@@ -400,6 +466,8 @@ export default function MatchTabs({
   battingStats,
   bowlingStats,
   playerImageMap,
+  getCommentaryText,
+  isCommentaryOverPending,
 }: MatchTabsProps) {
   const isTabLocked = (t: Tab): boolean => {
     switch (t) {
@@ -725,7 +793,7 @@ export default function MatchTabs({
 
             return (
               <div className="mb-8 space-y-4 fade-in">
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex flex-wrap gap-2 mb-4 items-center">
                   <button
                     onClick={() => setInnings(1)}
                     className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
@@ -758,6 +826,20 @@ export default function MatchTabs({
                   )}
                 </div>
 
+                {/* Legend explaining the two commentary sources */}
+                {hasDeliveryData && (
+                  <div className="flex flex-wrap items-center gap-3 px-1 pb-1">
+                    <span className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                      <CommentarySourceTag isAi={true} />
+                      cinematic, narrated ball-by-ball text
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                      <CommentarySourceTag isAi={false} />
+                      plain text derived straight from delivery data
+                    </span>
+                  </div>
+                )}
+
                 {innings === 2 && !innings2Started ? (
                   <p className="text-gray-500 text-sm text-center py-8">2nd innings hasn't started yet.</p>
                 ) : !hasDeliveryData ? (
@@ -765,10 +847,18 @@ export default function MatchTabs({
                     No ball-by-ball data recorded for this innings yet — commentary will appear once it starts.
                   </p>
                 ) : (
-                  <CommentaryFeed deliveries={rawDeliveries!} overOverData={overOverData} isLive={live} />
+                  <CommentaryFeed
+                    deliveries={rawDeliveries!}
+                    overOverData={overOverData}
+                    isLive={live}
+                    getLlmText={getCommentaryText}
+                    isOverPending={isCommentaryOverPending}
+                  />
                 )}
                 <p className="text-[10px] text-gray-600 text-center pt-2">
-                  Commentary is generated automatically from ball-by-ball data.
+                  <span className="text-gold">AI Commentary</span> lines are generated live, cinematic narration.{" "}
+                  <span className="text-gray-400">Match Data</span> lines are plain, factual text built directly from
+                  ball-by-ball data and are shown whenever AI narration isn't available yet.
                 </p>
               </div>
             )
@@ -881,11 +971,6 @@ function initialsStats(name: string) {
     .toUpperCase()
 }
 
-/** Real photo when one resolves from the squads data, initials otherwise.
- *  Tracks load failure in state (rather than the MatchSquadPanel's
- *  onError-toggles-a-sibling-class trick) since this needs to size
- *  differently per call site (spotlight vs. row) and state is simpler
- *  to keep correct across re-renders when `img` changes between players. */
 function PlayerAvatar({ name, img, size = "md" }: { name: string; img?: string; size?: "sm" | "md" }) {
   const [failed, setFailed] = useState(false)
   const dims = size === "md" ? "h-14 w-14 text-sm" : "h-8 w-8 text-[10px]"
@@ -905,8 +990,6 @@ function PlayerAvatar({ name, img, size = "md" }: { name: string; img?: string; 
   )
 }
 
-/** Spotlight card for whoever currently leads the selected category —
- *  gives the tab a hero moment instead of opening straight into a table. */
 function LeaderSpotlight({
   name,
   img,
@@ -941,9 +1024,6 @@ function LeaderSpotlight({
   )
 }
 
-/** Leaderboard row with a background bar sized relative to the top value
- *  in the current category — so "second place" visually reads as close
- *  or distant, not just a number one row down. */
 function LeaderboardRow({
   rank,
   name,
@@ -1000,11 +1080,6 @@ const ALL_STAT_CATEGORIES = [
   ...BOWLING_STAT_CATEGORIES.map((c) => ({ ...c, mode: "bowling" as const })),
 ]
 
-/** Mode switcher, reimagined as two content-bearing cards instead of a
- *  plain segmented toggle. Each card always shows a live preview — the
- *  current leader for whatever category that mode last had selected —
- *  so picking a mode is also the first useful thing you see, not just
- *  flipping a switch before the real content loads in below it. */
 function ModeCard({
   label,
   active,
@@ -1108,7 +1183,6 @@ function StatsPanel({
 
   return (
     <div className="mb-8">
-      {/* Mode selector — two preview cards instead of a plain toggle */}
       <div className="grid grid-cols-2 gap-3 mb-5">
         <ModeCard
           label="Batting"
@@ -1136,7 +1210,6 @@ function StatsPanel({
         />
       </div>
 
-      {/* Category chips — scoped to whichever mode is active */}
       <div className="flex gap-2 overflow-x-auto pb-1 mb-5 scrollbar-none">
         {(mode === "batting" ? BATTING_STAT_CATEGORIES : BOWLING_STAT_CATEGORIES).map((c) => {
           const active = mode === "batting" ? battingKey === c.key : bowlingKey === c.key

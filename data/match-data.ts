@@ -97,6 +97,15 @@
 //   if it doesn't go through aggregateInnings) is required to supply
 //   it — callers that don't have it just fall back to the old
 //   wicket-only chip display.
+//
+// COMMENTARY PLAYER CONTEXT (additive):
+//   DeliveryEntry now also carries striker/nonStriker/bowler names plus
+//   dismissal detail (dismissalType/batsmanOut/fielder). This is what
+//   lets the Groq-generated commentary say "Kumar strikes, castles
+//   Sharma" instead of just "a wicket fell" — see
+//   hooks/use-ball-commentary.ts and app/api/commentary/generate.
+//   These fields were already present on the raw `balls` row; this just
+//   stops them being discarded during aggregation.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -128,17 +137,26 @@ export type FowEntry = [string, string, string]
  * A single delivery, straight from `balls` (one row per ball). Kept
  * deliberately close to the DB row shape rather than pre-formatted, so
  * the UI layer decides how to label/style each ball (dot, boundary,
- * wide, wicket, ...).
+ * wide, wicket, ...), and so downstream consumers (like the Groq
+ * commentary generator) have everything they need without a second
+ * fetch.
  *
- *   over       — over number, matching the same 1-indexed convention
- *                already used by InningsComplete.overRuns / the Overs tab.
- *   ball       — ball number within that over, as stored on the row.
- *   runs       — total runs on this delivery (bat + extra runs combined,
- *                same as `balls.runs`).
- *   extraType  — null for a normal delivery; otherwise "wide",
- *                "no_ball", "bye", "leg_bye", or whatever `balls.extra_type`
- *                holds.
- *   isWicket   — whether this delivery produced a dismissal.
+ *   over          — over number, matching the same 1-indexed convention
+ *                    already used by InningsComplete.overRuns / the Overs tab.
+ *   ball          — ball number within that over, as stored on the row.
+ *   runs          — total runs on this delivery (bat + extra runs combined,
+ *                    same as `balls.runs`).
+ *   extraType     — null for a normal delivery; otherwise "wide",
+ *                    "no_ball", "bye", "leg_bye", or whatever `balls.extra_type`
+ *                    holds.
+ *   isWicket      — whether this delivery produced a dismissal.
+ *   striker       — batter facing this delivery.
+ *   nonStriker    — batter at the other end.
+ *   bowler        — bowler of this delivery.
+ *   dismissalType — e.g. "bowled", "caught", "run_out" (only meaningful when isWicket).
+ *   batsmanOut    — who was actually dismissed (usually striker, but not
+ *                    always — e.g. a non-striker run out).
+ *   fielder       — fielder involved in the dismissal, if any.
  */
 export interface DeliveryEntry {
   over: number
@@ -146,6 +164,12 @@ export interface DeliveryEntry {
   runs: number
   extraType: string | null
   isWicket: boolean
+  striker: string | null
+  nonStriker: string | null
+  bowler: string | null
+  dismissalType?: string | null
+  batsmanOut?: string | null
+  fielder?: string | null
 }
 
 export interface MatchSquad {
@@ -454,6 +478,12 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
       runs: row.runs,
       extraType: row.extra_type,
       isWicket: row.is_wicket,
+      striker: row.striker_name,
+      nonStriker: row.non_striker_name,
+      bowler: row.bowler_name,
+      dismissalType: row.dismissal_type,
+      batsmanOut: row.batsman_out,
+      fielder: row.fielder,
     })
   }
 
@@ -532,8 +562,6 @@ async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: stri
     })
   })
 
-
-
   // Fetch player data (including images) from the players table, with fallback to player_bank
   const playerMap = new Map<string, { name: string; img?: string }>()
   if (playerIds.size > 0) {
@@ -554,7 +582,6 @@ async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: stri
     })
 
     if (missingPlayers.length > 0) {
-      
       // Get player names first
       const playerNames: { [key: string]: string } = {}
       playerRows?.forEach((p) => {
@@ -586,30 +613,28 @@ async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: stri
     }
   }
 
-
-
   // Build squads with enriched player data
-    return setup.squads.map((s) => {
-      const tag = s.teamId?.toLowerCase?.() ?? ""
-      const isTeamA =
-        tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
-      const isTeamB =
-        tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
-      const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
-      return {
-        team: teamName,
-        captain: s.captain,
-        players: s.players?.map((p) => {
-          const playerData = p.playerId ? playerMap.get(p.playerId) : null
-          return {
-            name: playerData?.name || p.name,
-            role: p.role,
-            xi: p.xi,
-            img: playerData?.img || p.img || undefined,
-          }
-        }) || [],
-      }
-    })
+  return setup.squads.map((s) => {
+    const tag = s.teamId?.toLowerCase?.() ?? ""
+    const isTeamA =
+      tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
+    const isTeamB =
+      tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
+    const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
+    return {
+      team: teamName,
+      captain: s.captain,
+      players: s.players?.map((p) => {
+        const playerData = p.playerId ? playerMap.get(p.playerId) : null
+        return {
+          name: playerData?.name || p.name,
+          role: p.role,
+          xi: p.xi,
+          img: playerData?.img || p.img || undefined,
+        }
+      }) || [],
+    }
+  })
 }
 
 /**
@@ -753,7 +778,6 @@ export async function getMatchDetailById(
       message: "The database rejected the lookup for this match's ball-by-ball data.",
       detail: ballErr.message,
     }
-
   }
 
   const allBalls = ballRows ?? []
@@ -841,7 +865,7 @@ export async function getMatchDetailById(
     id: matchRow.id,
     tournamentSlug: resolvedTournamentSlug,
     tournamentName: resolvedTournamentName,
-    tournamentId: tournamentIdToResolve,   // ← add this line
+    tournamentId: tournamentIdToResolve,
     round: setup.round ?? (bracketRow?.round !== undefined ? `Round ${bracketRow.round}` : ""),
     venue: setup.venue || bracketRow?.venue || "",
     date: setup.date || (bracketRow?.scheduled_at ? new Date(bracketRow.scheduled_at).toLocaleDateString() : ""),
@@ -868,9 +892,8 @@ export async function getMatchDetailById(
     hasBallData,
     currentInnings,
     winProb,
-    tournamentLogoUrl
+    tournamentLogoUrl,
   }
-  // console.log("getMatchDetailById: returning match detail for matchId", matchId, ":", match.squads[0].players)
   return { ok: true, match }
 }
 

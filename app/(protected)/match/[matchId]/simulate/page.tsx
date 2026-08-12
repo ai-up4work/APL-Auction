@@ -549,7 +549,7 @@ export default function SimulateMatchPage() {
             <div>
               <label className="text-xs uppercase tracking-widest text-gold/70 font-cinzel flex items-center gap-2">
                 <Zap className="w-3.5 h-3.5 text-gold" />
-                Speed: <span className="text-gold">{speedMs}ms</span> per ball
+                Speed: <span className="text-gold">{speedMs/1000}s</span> per ball
               </label>
               <input
                 type="range"

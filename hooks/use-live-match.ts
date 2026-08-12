@@ -32,11 +32,15 @@ interface TeamRow {
 }
 
 /** Raw ball rows (already fetched for aggregation) -> the lightweight
- *  DeliveryEntry log the Overs tab renders. Built locally here rather
- *  than inside `aggregateInnings` (from lib/matches/cricket-engine) so
- *  this stays additive without needing to touch that shared engine —
- *  every field it needs (over_number, ball_number, runs, extra_type,
- *  is_wicket) is already present on the BallRow[] this hook fetches. */
+ *  DeliveryEntry log the Overs/Commentary tabs render. Built locally
+ *  here rather than inside `aggregateInnings` (from
+ *  lib/matches/cricket-engine) so this stays additive without needing
+ *  to touch that shared engine — every field it needs (over_number,
+ *  ball_number, runs, extra_type, is_wicket, striker/non-striker/bowler
+ *  names, dismissal detail) is already present on the BallRow[] this
+ *  hook fetches. Carrying player names through is what lets the Groq
+ *  commentary generator (hooks/use-ball-commentary.ts) say "Kumar
+ *  strikes, castles Sharma" instead of just "a wicket fell". */
 function toDeliveries(balls: BallRow[]): DeliveryEntry[] {
   return [...balls]
     .sort((a, b) => a.sequence - b.sequence)
@@ -46,6 +50,12 @@ function toDeliveries(balls: BallRow[]): DeliveryEntry[] {
       runs: b.runs,
       extraType: b.extra_type,
       isWicket: b.is_wicket,
+      striker: b.striker_name,
+      nonStriker: b.non_striker_name,
+      bowler: b.bowler_name,
+      dismissalType: b.dismissal_type,
+      batsmanOut: b.batsman_out,
+      fielder: b.fielder,
     }))
 }
 
