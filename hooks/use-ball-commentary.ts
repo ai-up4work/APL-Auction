@@ -37,11 +37,15 @@ const RECENT_CONTEXT_LINES = 5
 // token-quota) error, instead of retrying every tick against a quota
 // that's guaranteed to still be dead.
 const RATE_LIMIT_BACKOFF_MS = 10 * 60_000
-// How many balls this device is willing to try claiming/backfilling in
-// a single pass. Keeps a device that opens mid-match with 40 unscored
-// balls from queuing all 40 at once — it works through them a few at a
-// time, newest first, across multiple ticks instead.
+// How many balls this device is willing to try claiming in a single
+// tick. Keeps a device that opens mid-match with 40 unscored balls
+// from queuing all 40 at once — it works through them a few at a time,
+// newest first, across multiple ticks instead.
 const MAX_CLAIM_CANDIDATES_PER_TICK = MAX_BATCH_SIZE
+// Belt-and-suspenders poll interval — see the comment above the
+// reconciliation effect below. Only fires a query when there's
+// actually something outstanding, so it's cheap when idle.
+const RECONCILE_POLL_MS = 20_000
 
 type DbStatus = "pending" | "ready" | "failed"
 interface CommentaryRow {
@@ -70,10 +74,9 @@ export function useBallCommentary({
   // Balls the DB says are permanently failed OR currently claimed by
   // *someone* (possibly this device, possibly another). Either way, no
   // device should try to claim them again. This is shared truth read
-  // from the DB / Realtime — not a local per-session guess, which is
-  // exactly what was missing before: a failure now means "everyone
-  // shows the fallback, forever," not "this one tab gives up twice and
-  // every other tab/refresh retries from zero."
+  // from the DB / Realtime — not a local per-session guess. A failure
+  // means "everyone shows the fallback, forever," not "this tab gives
+  // up and every other tab/refresh retries from zero."
   const [unavailableKeys, setUnavailableKeys] = useState<Set<string>>(new Set())
 
   const requestInFlight = useRef(false)
@@ -89,11 +92,15 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber, teamBatting, teamBowling, target, scoreState, striker, nonStriker, bowlerFigures])
 
+  // Merges a row into local state exactly once, whether it came from
+  // the initial load, a Realtime push, or the reconciliation poll —
+  // all three funnel through here so there's one source of truth for
+  // "what does this device currently believe about this ball".
   const mergeRow = useCallback((row: CommentaryRow) => {
     const k = key(row.over, row.ball)
     if (row.status === "ready" && row.text) {
       setByKey((prev) => {
-        if (prev.get(k) === row.text) return prev
+        if (prev.get(k) === row.text) return prev // no-op, avoids extra re-renders
         const next = new Map(prev)
         if (!next.has(k)) orderedKeys.current.push(k)
         next.set(k, row.text!)
@@ -108,12 +115,12 @@ export function useBallCommentary({
     } else {
       // 'pending' (claimed, by us or another device) or 'failed'
       // (permanently gave up) — either way, nobody should re-claim it.
-      // isPending vs isFailed distinction for the UI comes from
-      // whether byKey has text; both render as "not ready yet".
       setUnavailableKeys((prev) => (prev.has(k) ? prev : new Set(prev).add(k)))
     }
   }, [])
 
+  // Removes a row locally — fired on a Realtime DELETE (e.g. the
+  // Simulator's Reset/Clear wiping ball_commentary for this match).
   const removeRow = useCallback((over: number, ball: number) => {
     const k = key(over, ball)
     setByKey((prev) => {
@@ -174,7 +181,17 @@ export function useBallCommentary({
   }, [matchId, inningsNumber])
 
   // ── Realtime sync — every device (this one included) hears about
-  // every claim, success, and failure the instant it's written. ──
+  // every claim, success, and failure the instant it's written.
+  //
+  // IMPORTANT: this only works if `ball_commentary` is added to the
+  // `supabase_realtime` publication AND has a SELECT policy that lets
+  // Realtime broadcast to subscribers. If devices show diverging
+  // "AI Commentary" vs "Match Data" for the SAME ball, that's the most
+  // likely cause — check `pg_publication_tables` and your RLS policies
+  // before assuming this hook has a bug. The reconciliation poll below
+  // is a safety net for missed events, not a substitute for a working
+  // Realtime feed — a broken feed just means every device runs on a
+  // ~20s delay instead of instant sync. ──
   useEffect(() => {
     if (!matchId) return
 
@@ -204,6 +221,42 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber, mergeRow, removeRow])
 
+  // ── Reconciliation poll (belt-and-suspenders) ──
+  // If a Realtime message is dropped — dead socket, backgrounded tab,
+  // a temporary publication/RLS misconfig, whatever — this device would
+  // otherwise show stale state (fallback text, or "Writing commentary…")
+  // indefinitely, with no self-healing until a manual refresh re-runs
+  // `load()`. Instead, every RECONCILE_POLL_MS, re-fetch just the rows
+  // for balls this device currently thinks are NOT ready, and merge
+  // whatever the DB actually says. Cheap: skips entirely when nothing
+  // is outstanding, and only queries the specific overs involved.
+  useEffect(() => {
+    if (!matchId) return
+
+    const reconcile = async () => {
+      const outstandingOvers = [
+        ...new Set(deliveries.filter((d) => !byKey.has(key(d.over, d.ball))).map((d) => d.over)),
+      ]
+      if (outstandingOvers.length === 0) return
+
+      const { data, error } = await supabase
+        .from("ball_commentary")
+        .select("over, ball, text, status")
+        .eq("match_id", matchId)
+        .eq("innings_number", inningsNumber)
+        .in("over", outstandingOvers)
+
+      if (error) {
+        console.error("[useBallCommentary] reconcile poll failed:", error.message)
+        return
+      }
+      for (const row of (data ?? []) as CommentaryRow[]) mergeRow(row)
+    }
+
+    const pollInterval = setInterval(reconcile, RECONCILE_POLL_MS)
+    return () => clearInterval(pollInterval)
+  }, [matchId, inningsNumber, deliveries, byKey, mergeRow])
+
   // ── Scheduler: at most one attempt per MIN_INTERVAL_MS, and the
   // attempt itself atomically claims balls before ever calling Groq. ──
   useEffect(() => {
@@ -218,7 +271,7 @@ export function useBallCommentary({
       // Candidates: balls we have real delivery data for, that aren't
       // already ready, and aren't already known claimed/failed. Newest
       // first, so a device opening mid-match prioritizes the live edge
-      // over backfilling 40 historical balls in one burst.
+      // over backfilling historical balls in one burst.
       const candidates = [...deliveries]
         .filter((d) => {
           const k = key(d.over, d.ball)
@@ -263,7 +316,8 @@ export function useBallCommentary({
         // Mark everything we tried as unavailable locally right away —
         // whether we won the claim (now pending-by-us) or lost it (now
         // pending/ready/failed-by-someone-else) — so this device's next
-        // tick doesn't re-consider any of them.
+        // tick doesn't re-consider any of them. Realtime/the poll will
+        // correct this if the eventual DB state says otherwise.
         setUnavailableKeys((prev) => {
           const next = new Set(prev)
           for (const d of candidates) next.add(key(d.over, d.ball))
@@ -274,7 +328,7 @@ export function useBallCommentary({
         if (batch.length === 0) {
           // Every candidate was already claimed by another device
           // between our read and our claim attempt — nothing to do,
-          // Realtime will tell us the outcome.
+          // Realtime/the poll will tell us the outcome.
           return
         }
 
@@ -322,10 +376,9 @@ export function useBallCommentary({
           }
           // The server already wrote status:'failed' for these rows on
           // any failure path (see markFailed in the route). We don't
-          // need to retry locally — Realtime will deliver the 'failed'
-          // update and every device (including this one) will fall back
-          // to phrase-bank text for these balls permanently. No local
-          // retry bookkeeping needed anymore.
+          // retry locally — Realtime (or the reconciliation poll, if
+          // Realtime is misbehaving) will deliver the 'failed' status
+          // and every device converges on the phrase-bank fallback.
           return
         }
 
@@ -349,12 +402,12 @@ export function useBallCommentary({
           status: "failed" as const,
           text: null,
         }))
-        await supabase
+        const { error: cleanupErr } = await supabase
           .from("ball_commentary")
           .upsert(stuckRows, { onConflict: "match_id,innings_number,over,ball" })
-          .then(({ error }) => {
-            if (error) console.error("[useBallCommentary] failed to resolve stuck claim:", error.message)
-          })
+        if (cleanupErr) {
+          console.error("[useBallCommentary] failed to resolve stuck claim:", cleanupErr.message)
+        }
       } finally {
         requestInFlight.current = false
       }
@@ -370,9 +423,10 @@ export function useBallCommentary({
     // no longer pending anywhere — every device shows the deterministic
     // fallback immediately instead of "Writing commentary…" forever.
     isGeneratingOver: useCallback(
-      (over: number) => {
-        return deliveries.some((d) => d.over === over && unavailableKeys.has(key(d.over, d.ball)) && !byKey.has(key(d.over, d.ball)))
-      },
+      (over: number) =>
+        deliveries.some(
+          (d) => d.over === over && unavailableKeys.has(key(d.over, d.ball)) && !byKey.has(key(d.over, d.ball)),
+        ),
       [deliveries, unavailableKeys, byKey],
     ),
   }
