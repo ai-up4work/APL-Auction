@@ -15,11 +15,9 @@ import {
   Trophy,
   Calendar,
   Users,
-  Radio,
   ListOrdered,
   CalendarClock,
   Network,
-  MapPin,
   Award,
   Shield,
   Lock,
@@ -37,7 +35,6 @@ import { pageStyles } from "@/data/site-data"
 import {
   hasMatchDetail,
   type Tournament,
-  type LiveMatch,
   type PointsRow,
   type Fixture,
   type BracketMatch,
@@ -60,12 +57,12 @@ import {
 
 /* ------------------------------------------------------------------ */
 /*  NOTE ON TABS:                                                       */
-/*  Every tab (Live, Points, Schedule, Bracket, Squads, Stats) is now    */
-/*  always rendered so visitors can see the full shape of what a        */
-/*  fully-run tournament looks like. If the underlying data for a tab   */
-/*  isn't there yet, the tab trigger is disabled + shows a lock icon,   */
-/*  and its content renders a "coming soon" placeholder instead of      */
-/*  being hidden outright.                                              */
+/*  Every tab (Points, Schedule, Bracket, Squads, Stats) is now always   */
+/*  rendered so visitors can see the full shape of what a fully-run     */
+/*  tournament looks like. If the underlying data for a tab isn't there */
+/*  yet, the tab trigger is disabled + shows a lock icon, and its       */
+/*  content renders a "coming soon" placeholder instead of being        */
+/*  hidden outright.                                                    */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -108,7 +105,7 @@ function initials(name: string) {
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState(tournament.liveMatch ? "live" : "overview")
+  const [activeTab, setActiveTab] = useState("overview")
   const [isNavOpen, setIsNavOpen] = useState(false)
 
   const handleNavigation = (path: string) => {
@@ -129,7 +126,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
         ? "bg-green-600 hover:bg-green-700"
         : "bg-gold text-black hover:bg-gold/90"
 
-  const hasLive = !!tournament.liveMatch
   const hasPoints = !!tournament.pointsTable?.length
   const hasFixtures = !!tournament.fixtures?.length
 
@@ -190,12 +186,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   <h1 className="text-3xl md:text-4xl font-bold text-white font-cinzel">{tournament.title}</h1>
                   <p className="text-gray-300 mt-2 text-sm md:text-base">{tournament.by}</p>
                 </div>
-                {hasLive && (
-                  <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-yellow-600 text-white text-xs font-bold font-cinzel px-3 py-1.5 rounded-full animate-pulse">
-                    <Radio className="h-3 w-3" />
-                    LIVE
-                  </div>
-                )}
               </div>
             </div>
 
@@ -231,15 +221,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                       </div>
                     </div>
                   )}
-                  {tournament.liveMatch?.venue && (
-                    <div className="flex items-center gap-3">
-                      <MapPin className="h-4 w-4 text-gold" />
-                      <div>
-                        <p className="text-gray-400 text-sm">Current Venue</p>
-                        <p className="text-white font-semibold">{tournament.liveMatch.venue}</p>
-                      </div>
-                    </div>
-                  )}
                   <div>
                     <p className="text-gray-400 text-sm mb-1">Status</p>
                     <Badge className={statusColor}>{status}</Badge>
@@ -255,7 +236,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
             <div className="w-full lg:w-2/3 fade-in">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full justify-start mb-6 flex-wrap h-auto gap-1">
-                  <LockableTabTrigger value="live" label="Live" locked={!hasLive} />
                   <TabsTrigger
                     value="overview"
                     className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
@@ -274,19 +254,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                     Prizes
                   </TabsTrigger>
                 </TabsList>
-
-                {/* LIVE */}
-                <TabsContent value="live" className="mt-0">
-                  {hasLive ? (
-                    <LiveScorePanel match={tournament.liveMatch!} />
-                  ) : (
-                    <LockedTabPlaceholder
-                      icon={Radio}
-                      title="No Live Match Right Now"
-                      description="Once a match kicks off, ball-by-ball scoring, run rates, and the current batting/bowling breakdown will show up here."
-                    />
-                  )}
-                </TabsContent>
 
                 {/* OVERVIEW */}
                 <TabsContent value="overview" className="mt-0">
@@ -546,166 +513,6 @@ function LockedTabPlaceholder({
       </div>
       <h3 className="text-white font-bold font-cinzel">{title}</h3>
       <p className="text-gray-400 text-sm max-w-sm">{description}</p>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// LIVE SCORE PANEL
-// ─────────────────────────────────────────────────────────────
-function LiveScorePanel({ match }: { match: LiveMatch }) {
-  const chasing = !!match.target
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
-          <Radio className="h-5 w-5 text-green-500" />
-          LIVE SCORE
-        </h2>
-        {match.matchStatus === "live" && (
-          <span className="flex items-center gap-1.5 text-green-500 text-xs font-bold font-cinzel">
-            <span className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
-            IN PROGRESS
-          </span>
-        )}
-      </div>
-
-      {/* Scoreboard */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <TeamScoreBlock
-          name={match.team1.name}
-          short={match.team1.short}
-          score={match.score1}
-          overs={match.overs1}
-          batting={match.inningsTeam === match.team1.short}
-        />
-        <TeamScoreBlock
-          name={match.team2.name}
-          short={match.team2.short}
-          score={match.score2}
-          overs={match.overs2}
-          batting={match.inningsTeam === match.team2.short}
-        />
-      </div>
-
-      {/* CRR / RRR strip */}
-      <div className="flex flex-wrap gap-4 mb-6 text-sm">
-        <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-          <span className="text-gray-400">CRR </span>
-          <span className="text-gold font-bold font-cinzel">{match.crr}</span>
-        </div>
-        {chasing && match.rrr && (
-          <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-            <span className="text-gray-400">RRR </span>
-            <span className="text-gold font-bold font-cinzel">{match.rrr}</span>
-          </div>
-        )}
-        {chasing && (
-          <div className="bg-gold/10 border border-gold/20 rounded-md px-4 py-2">
-            <span className="text-gray-400">Target </span>
-            <span className="text-gold font-bold font-cinzel">{match.target}</span>
-          </div>
-        )}
-      </div>
-
-      {match.matchNote && (
-        <p className="text-white font-semibold mb-6 border-l-2 border-gold pl-3">{match.matchNote}</p>
-      )}
-
-      {/* Batsmen & Bowler */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        <div>
-          <p className="text-gray-400 text-xs uppercase tracking-wide mb-2 font-cinzel">Batting</p>
-          <div className="space-y-1">
-            {match.batsmen.map((b) => (
-              <div key={b.name} className="flex items-center justify-between text-sm">
-                <span className={b.onStrike ? "text-gold font-semibold" : "text-gray-300"}>
-                  {b.onStrike && "★ "}
-                  {b.name}
-                </span>
-                <span className="text-white">
-                  {b.runs} <span className="text-gray-500">({b.balls})</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div>
-          <p className="text-gray-400 text-xs uppercase tracking-wide mb-2 font-cinzel">Bowling</p>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-300">{match.bowler.name}</span>
-            <span className="text-white">
-              {match.bowler.wickets}/{match.bowler.runs} <span className="text-gray-500">({match.bowler.overs})</span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* This over */}
-      <div className="mb-6">
-        <p className="text-gray-400 text-xs uppercase tracking-wide mb-2 font-cinzel">This Over</p>
-        <div className="flex gap-2 flex-wrap">
-          {match.recentBalls.map((ball, i) => (
-            <div
-              key={i}
-              className={`h-9 w-9 flex items-center justify-center rounded-full text-xs font-bold font-cinzel ${
-                ball.label === "W"
-                  ? "bg-red-600 text-white"
-                  : ball.runs === 6
-                    ? "bg-gold text-black"
-                    : ball.runs === 4
-                      ? "bg-gold/40 text-white"
-                      : "bg-white/10 text-gray-300"
-              }`}
-            >
-              {ball.label}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="text-sm text-gray-400 space-y-1 border-t border-gold/10 pt-4">
-        <p>
-          <span className="text-gray-500">Venue: </span>
-          {match.venue}
-        </p>
-        <p>
-          <span className="text-gray-500">Toss: </span>
-          {match.toss}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function TeamScoreBlock({
-  name,
-  short,
-  score,
-  overs,
-  batting,
-}: {
-  name: string
-  short: string
-  score?: string
-  overs?: string
-  batting: boolean
-}) {
-  return (
-    <div className={`rounded-lg p-4 border ${batting ? "border-gold bg-gold/5" : "border-gold/10 bg-white/[0.02]"}`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-white font-bold font-cinzel">{short}</span>
-        {batting && <span className="text-[10px] text-gold font-bold tracking-wide">BATTING</span>}
-      </div>
-      <p className="text-gray-400 text-xs mb-2">{name}</p>
-      {score ? (
-        <p className="text-2xl font-bold text-white font-cinzel">
-          {score}
-          {overs && <span className="text-sm text-gray-400 font-normal ml-2">({overs} ov)</span>}
-        </p>
-      ) : (
-        <p className="text-gray-500 text-sm">Yet to bat</p>
-      )}
     </div>
   )
 }
