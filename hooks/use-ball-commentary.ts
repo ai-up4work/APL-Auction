@@ -58,11 +58,14 @@ export function useBallCommentary({
   const [byKey, setByKey] = useState<Map<string, string>>(new Map())
   const orderedKeys = useRef<string[]>([])
 
-  // Balls the DB says are either currently claimed (pending, by anyone)
-  // or permanently failed. Either way: don't send them again. This is
-  // the ENTIRE retry policy — once a key lands here via a 'failed'
-  // status, it never leaves except on a fresh load()/new match.
-  const [unavailableKeys, setUnavailableKeys] = useState<Set<string>>(new Set())
+  // Status per ball key, for every ball that ISN'T ready-with-text.
+  // This is the fix: 'pending' (claimed, generation in flight — show
+  // "Writing commentary…") and 'failed' (permanently gave up — show
+  // the phrase-bank fallback immediately) used to be lumped into one
+  // flat "unavailable" set, which made isGeneratingOver report `true`
+  // for failed balls forever, so the UI never fell through to the
+  // fallback text. Splitting them by actual status fixes that.
+  const [statusByKey, setStatusByKey] = useState<Map<string, "pending" | "failed">>(new Map())
 
   const requestInFlight = useRef(false)
   const lastFiredAt = useRef(0)
@@ -86,15 +89,21 @@ export function useBallCommentary({
         next.set(k, row.text!)
         return next
       })
-      setUnavailableKeys((prev) => {
+      setStatusByKey((prev) => {
         if (!prev.has(k)) return prev
-        const next = new Set(prev)
+        const next = new Map(prev)
         next.delete(k)
         return next
       })
     } else {
-      // 'pending' or 'failed' — either way, stop trying it.
-      setUnavailableKeys((prev) => (prev.has(k) ? prev : new Set(prev).add(k)))
+      // 'pending' or 'failed' — record which, so isGeneratingOver can
+      // tell them apart.
+      setStatusByKey((prev) => {
+        if (prev.get(k) === row.status) return prev
+        const next = new Map(prev)
+        next.set(k, row.status as "pending" | "failed")
+        return next
+      })
     }
   }, [])
 
@@ -107,9 +116,9 @@ export function useBallCommentary({
       return next
     })
     orderedKeys.current = orderedKeys.current.filter((existing) => existing !== k)
-    setUnavailableKeys((prev) => {
+    setStatusByKey((prev) => {
       if (!prev.has(k)) return prev
-      const next = new Set(prev)
+      const next = new Map(prev)
       next.delete(k)
       return next
     })
@@ -135,19 +144,19 @@ export function useBallCommentary({
 
       const ready = new Map<string, string>()
       const order: string[] = []
-      const unavailable = new Set<string>()
+      const status = new Map<string, "pending" | "failed">()
       for (const row of (data ?? []) as CommentaryRow[]) {
         const k = key(row.over, row.ball)
         if (row.status === "ready" && row.text) {
           ready.set(k, row.text)
           order.push(k)
         } else {
-          unavailable.add(k)
+          status.set(k, row.status as "pending" | "failed")
         }
       }
       setByKey(ready)
       orderedKeys.current = order
-      setUnavailableKeys(unavailable)
+      setStatusByKey(status)
       lastFiredAt.current = 0
     }
     load()
@@ -215,11 +224,9 @@ export function useBallCommentary({
   }, [matchId, inningsNumber, deliveries, byKey, mergeRow])
 
   // ── Scheduler ──
-  // Sends candidate balls to /api/commentary/generate, which claims
-  // them atomically server-side. One attempt per ball, ever — success
-  // marks 'ready', any failure marks 'failed', and this hook never
-  // reconsiders a ball once it's in unavailableKeys, short of a full
-  // reload (new match/innings mount).
+  // One attempt per ball, ever. Success -> 'ready'. Any failure ->
+  // 'failed', permanently, no retry. See generate route for the
+  // markFailed policy.
   useEffect(() => {
     if (!enabled) return
 
@@ -231,7 +238,7 @@ export function useBallCommentary({
       const candidates = [...deliveries]
         .filter((d) => {
           const k = key(d.over, d.ball)
-          return !byKey.has(k) && !unavailableKeys.has(k)
+          return !byKey.has(k) && !statusByKey.has(k)
         })
         .sort((a, b) => b.over - a.over || b.ball - a.ball)
         .slice(0, MAX_CLAIM_CANDIDATES_PER_TICK)
@@ -241,11 +248,11 @@ export function useBallCommentary({
       lastFiredAt.current = now
       requestInFlight.current = true
 
-      // Mark these unavailable immediately — win or lose, success or
-      // failure, we don't touch them again from this hook.
-      setUnavailableKeys((prev) => {
-        const next = new Set(prev)
-        for (const d of candidates) next.add(key(d.over, d.ball))
+      // Optimistically mark these 'pending' locally so this device's
+      // own next tick doesn't re-send them while in flight.
+      setStatusByKey((prev) => {
+        const next = new Map(prev)
+        for (const d of candidates) next.set(key(d.over, d.ball), "pending")
         return next
       })
 
@@ -288,41 +295,64 @@ export function useBallCommentary({
         const json: { commentary?: CommentaryLine[]; error?: string; detail?: string } = await res.json()
 
         if (json.error) {
-          // Server already wrote status:'failed' for these balls. We do
-          // nothing further here — Realtime/poll confirms it, and since
-          // it's already in unavailableKeys, the UI is already showing
-          // the fallback. No retry, no backoff, no bookkeeping.
           console.error("[useBallCommentary] generate failed (permanent, no retry):", json.error, json.detail)
+          // The server already wrote status:'failed' to the DB for
+          // these balls. Mark them failed locally right away too,
+          // instead of waiting on Realtime/poll — this is the actual
+          // fix for "Writing commentary…" sticking forever: these keys
+          // must flip from 'pending' to 'failed' so isGeneratingOver
+          // stops reporting them as in-progress.
+          setStatusByKey((prev) => {
+            const next = new Map(prev)
+            for (const d of candidates) next.set(key(d.over, d.ball), "failed")
+            return next
+          })
           return
         }
 
         for (const c of json.commentary ?? []) {
           mergeRow({ over: c.over, ball: c.ball, text: c.text, status: "ready" })
         }
+        // Anything in this batch NOT present in the response (server's
+        // `missing` — model skipped it) also needs to flip to failed
+        // locally; Realtime/poll will confirm shortly, but don't leave
+        // it reporting 'pending' in the meantime.
+        const returnedKeys = new Set((json.commentary ?? []).map((c) => key(c.over, c.ball)))
+        const unresolved = candidates.filter((d) => !returnedKeys.has(key(d.over, d.ball)))
+        if (unresolved.length > 0) {
+          setStatusByKey((prev) => {
+            const next = new Map(prev)
+            for (const d of unresolved) next.set(key(d.over, d.ball), "failed")
+            return next
+          })
+        }
       } catch (err) {
-        // Couldn't even reach our own API route. The server-side claim
-        // may or may not have happened — either way we don't retry from
-        // here. If a claim row exists, the poll will pick up whatever
-        // status it eventually settles at (most likely 'failed', since
-        // the route fails its own requests closed). We just leave this
-        // ball in unavailableKeys and move on.
         console.error("[useBallCommentary] request failed (permanent, no retry):", err)
+        // Same reasoning — flip locally to failed so the UI stops
+        // showing "Writing commentary…" for these even though we don't
+        // know for certain the server-side claim resolved cleanly.
+        setStatusByKey((prev) => {
+          const next = new Map(prev)
+          for (const d of candidates) next.set(key(d.over, d.ball), "failed")
+          return next
+        })
       } finally {
         requestInFlight.current = false
       }
     }, TICK_MS)
 
     return () => clearInterval(interval)
-  }, [enabled, byKey, unavailableKeys, deliveries, mergeRow])
+  }, [enabled, byKey, statusByKey, deliveries, mergeRow])
 
   return {
     getText: useCallback((over: number, ball: number) => byKey.get(key(over, ball)), [byKey]),
+    // Only 'pending' balls count as generating. 'failed' balls are NOT
+    // pending — MatchTabs should immediately fall through to
+    // generateCommentaryText() for them, showing "Match Data" instead
+    // of hanging on "Writing commentary…" indefinitely.
     isGeneratingOver: useCallback(
-      (over: number) =>
-        deliveries.some(
-          (d) => d.over === over && unavailableKeys.has(key(d.over, d.ball)) && !byKey.has(key(d.over, d.ball)),
-        ),
-      [deliveries, unavailableKeys, byKey],
+      (over: number) => deliveries.some((d) => d.over === over && statusByKey.get(key(d.over, d.ball)) === "pending"),
+      [deliveries, statusByKey],
     ),
   }
 }
