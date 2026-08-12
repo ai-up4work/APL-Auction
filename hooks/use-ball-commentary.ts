@@ -27,6 +27,27 @@ interface UseBallCommentaryArgs {
 
 const key = (over: number, ball: number) => `${over}.${ball}`
 
+// ── Pacing / token-safety knobs ──────────────────────────────────
+// MIN_INTERVAL_MS: minimum gap between generation requests. This is
+// what actually gives you "one batch per minute" — deliveries that
+// arrive faster than this just queue up instead of firing immediately.
+const MIN_INTERVAL_MS = 45_000
+// How often the scheduler checks the queue. Doesn't need to match
+// MIN_INTERVAL_MS exactly — this just controls responsiveness of the
+// check, the real pacing is enforced by lastFiredAt below.
+const TICK_MS = 5_000
+// Cap on deliveries sent in a single request. Even if the queue backs
+// up (e.g. client was offline and multiple overs arrive at once), we
+// never send more than this many balls in one prompt — keeps every
+// request's token footprint small and consistent regardless of how
+// bursty the incoming deliveries are.
+const MAX_BATCH_SIZE = 6
+// How many previous commentary lines to include as style/continuity
+// context. Kept small on purpose — this is the main thing that would
+// otherwise grow unbounded over a 120-ball innings if you weren't
+// careful.
+const RECENT_CONTEXT_LINES = 5
+
 export function useBallCommentary({
   matchId,
   inningsNumber,
@@ -41,8 +62,44 @@ export function useBallCommentary({
   enabled,
 }: UseBallCommentaryArgs) {
   const [byKey, setByKey] = useState<Map<string, string>>(new Map())
-  const inFlight = useRef<Set<string>>(new Set())
   const orderedKeys = useRef<string[]>([])
+
+  // Deliveries waiting to be sent, keyed so we never queue the same
+  // ball twice even if the effect below re-runs before the queue drains.
+  const pendingQueue = useRef<Map<string, DeliveryEntry>>(new Map())
+  // True while a generation request is in flight — the scheduler won't
+  // start a new one until this clears, so requests never overlap.
+  const requestInFlight = useRef(false)
+  const lastFiredAt = useRef(0)
+
+  // Keep latest non-delivery context in a ref so the scheduler (which
+  // runs on its own interval, not on every prop change) always reads
+  // the freshest score/striker/bowler state without needing to be in
+  // the interval's dependency array.
+  const contextRef = useRef({
+    matchId,
+    inningsNumber,
+    teamBatting,
+    teamBowling,
+    target,
+    scoreState,
+    striker,
+    nonStriker,
+    bowlerFigures,
+  })
+  useEffect(() => {
+    contextRef.current = {
+      matchId,
+      inningsNumber,
+      teamBatting,
+      teamBowling,
+      target,
+      scoreState,
+      striker,
+      nonStriker,
+      bowlerFigures,
+    }
+  }, [matchId, inningsNumber, teamBatting, teamBowling, target, scoreState, striker, nonStriker, bowlerFigures])
 
   // Load whatever's already cached for this match/innings.
   useEffect(() => {
@@ -69,6 +126,9 @@ export function useBallCommentary({
       }
       setByKey(map)
       orderedKeys.current = order
+      // Fresh innings/match — drop any stale queue/timing from before.
+      pendingQueue.current.clear()
+      lastFiredAt.current = 0
     }
     load()
     return () => {
@@ -76,26 +136,49 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber])
 
-  // Generate for any delivery missing commentary, batched per over.
+  // Enqueue any delivery that doesn't have commentary yet and isn't
+  // already queued. This just collects work — it does NOT fire a
+  // request. Firing is entirely the scheduler's job below, so bursts
+  // of new deliveries never translate into bursts of requests.
   useEffect(() => {
-    if (!enabled || deliveries.length === 0) return
-
-    const missing = deliveries.filter((d) => !byKey.has(key(d.over, d.ball)))
-    if (missing.length === 0) return
-
-    const byOver = new Map<number, DeliveryEntry[]>()
-    for (const d of missing) {
-      if (!byOver.has(d.over)) byOver.set(d.over, [])
-      byOver.get(d.over)!.push(d)
+    if (!enabled) return
+    for (const d of deliveries) {
+      const k = key(d.over, d.ball)
+      if (byKey.has(k)) continue
+      if (pendingQueue.current.has(k)) continue
+      pendingQueue.current.set(k, d)
     }
+  }, [deliveries, byKey, enabled])
 
-    for (const [over, overDeliveries] of byOver) {
-      const flightKey = `${inningsNumber}-${over}`
-      if (inFlight.current.has(flightKey)) continue
-      inFlight.current.add(flightKey)
+  // Single scheduler: every TICK_MS, check whether enough time has
+  // passed since the last request AND there's something queued. If so,
+  // drain up to MAX_BATCH_SIZE deliveries (oldest first) and fire one
+  // request. This is what enforces "at most one batch per minute"
+  // regardless of how fast balls are actually being scored.
+  useEffect(() => {
+    if (!enabled) return
 
+    const interval = setInterval(() => {
+      if (requestInFlight.current) return
+      if (pendingQueue.current.size === 0) return
+
+      const now = Date.now()
+      if (now - lastFiredAt.current < MIN_INTERVAL_MS) return
+
+      const batch = [...pendingQueue.current.entries()]
+        .sort(([, a], [, b]) => a.over - b.over || a.ball - b.ball)
+        .slice(0, MAX_BATCH_SIZE)
+
+      if (batch.length === 0) return
+
+      for (const [k] of batch) pendingQueue.current.delete(k)
+
+      requestInFlight.current = true
+      lastFiredAt.current = now
+
+      const ctx = contextRef.current
       const recentCommentary = orderedKeys.current
-        .slice(-5)
+        .slice(-RECENT_CONTEXT_LINES)
         .map((k) => byKey.get(k))
         .filter((t): t is string => !!t)
 
@@ -103,17 +186,17 @@ export function useBallCommentary({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          matchId,
-          inningsNumber,
-          teamBatting,
-          teamBowling,
-          target,
-          scoreState,
-          striker,
-          nonStriker,
-          bowlerFigures,
+          matchId: ctx.matchId,
+          inningsNumber: ctx.inningsNumber,
+          teamBatting: ctx.teamBatting,
+          teamBowling: ctx.teamBowling,
+          target: ctx.target,
+          scoreState: ctx.scoreState,
+          striker: ctx.striker,
+          nonStriker: ctx.nonStriker,
+          bowlerFigures: ctx.bowlerFigures,
           recentCommentary,
-          deliveries: overDeliveries.map((d) => ({
+          deliveries: batch.map(([, d]) => ({
             over: d.over,
             ball: d.ball,
             runs: d.runs,
@@ -132,6 +215,9 @@ export function useBallCommentary({
         .then((json: { commentary?: CommentaryLine[]; error?: string }) => {
           if (json.error || !json.commentary) {
             console.error("[useBallCommentary] generate failed:", json.error)
+            // Put the batch back so it gets retried on a later tick
+            // instead of silently losing that over's commentary.
+            for (const [k, d] of batch) pendingQueue.current.set(k, d)
             return
           }
           setByKey((prev) => {
@@ -144,31 +230,27 @@ export function useBallCommentary({
             return next
           })
         })
-        .catch((err) => console.error("[useBallCommentary] request failed:", err))
-        .finally(() => {
-          inFlight.current.delete(flightKey)
+        .catch((err) => {
+          console.error("[useBallCommentary] request failed:", err)
+          for (const [k, d] of batch) pendingQueue.current.set(k, d)
         })
-    }
-  }, [
-    deliveries,
-    byKey,
-    enabled,
-    matchId,
-    inningsNumber,
-    teamBatting,
-    teamBowling,
-    target,
-    scoreState,
-    striker,
-    nonStriker,
-    bowlerFigures,
-  ])
+        .finally(() => {
+          requestInFlight.current = false
+        })
+    }, TICK_MS)
+
+    return () => clearInterval(interval)
+  }, [enabled, byKey])
 
   return {
     getText: useCallback((over: number, ball: number) => byKey.get(key(over, ball)), [byKey]),
     isGeneratingOver: useCallback(
-      (over: number) => inFlight.current.has(`${inningsNumber}-${over}`),
-      [inningsNumber]
+      (over: number) => {
+        // Pending (queued but not yet sent) OR currently mid-request.
+        const queuedForOver = [...pendingQueue.current.keys()].some((k) => k.startsWith(`${over}.`))
+        return queuedForOver || requestInFlight.current
+      },
+      [byKey],
     ),
   }
 }
