@@ -224,7 +224,7 @@ export default function SimulateMatchPage() {
 
   const [matchIdInput, setMatchIdInput] = useState(matchIdFromRoute)
   const [runState, setRunState] = useState<RunState>("idle")
-  const [speedMs, setSpeedMs] = useState(5000)
+  const [speedMs, setSpeedMs] = useState(30000)
   const [log, setLog] = useState<LogLine[]>([])
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [scoreLine, setScoreLine] = useState<string>("")
