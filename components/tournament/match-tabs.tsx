@@ -641,12 +641,14 @@ function LeaderSpotlight({
   value,
   unit,
   meta,
+  accent,
 }: {
   name: string
   img?: string
   value: string
   unit: string
   meta: string
+  accent: string
 }) {
   return (
     <div className="relative rounded-xl border border-gold/25 bg-gradient-to-br from-gold/[0.08] via-black/40 to-black/40 p-5 mb-5 overflow-hidden">
@@ -659,7 +661,7 @@ function LeaderSpotlight({
           <p className="text-gray-500 text-[11px] mt-0.5">{meta}</p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-3xl font-black text-gold font-cinzel tabular-nums leading-none">{value}</p>
+          <p className={`text-3xl font-black font-cinzel tabular-nums leading-none ${accent}`}>{value}</p>
           <p className="text-[10px] uppercase tracking-widest text-gray-500 mt-1">{unit}</p>
         </div>
       </div>
@@ -677,6 +679,7 @@ function LeaderboardRow({
   primaryValue,
   primaryLabel,
   fraction,
+  accent,
   secondary,
 }: {
   rank: number
@@ -685,6 +688,7 @@ function LeaderboardRow({
   primaryValue: string
   primaryLabel: string
   fraction: number
+  accent: string
   secondary: { label: string; value: string | number }[]
 }) {
   const medal = RANK_STYLE[rank]
@@ -712,10 +716,78 @@ function LeaderboardRow({
         ))}
       </div>
       <div className="relative text-right shrink-0 min-w-[3.5rem]">
-        <span className="text-base font-bold text-gold font-cinzel tabular-nums">{primaryValue}</span>
+        <span className={`text-base font-bold font-cinzel tabular-nums ${accent}`}>{primaryValue}</span>
         <span className="hidden md:inline text-[9px] uppercase tracking-widest text-gray-600 ml-1.5">{primaryLabel}</span>
       </div>
     </div>
+  )
+}
+
+const ALL_STAT_CATEGORIES = [
+  ...BATTING_STAT_CATEGORIES.map((c) => ({ ...c, mode: "batting" as const })),
+  ...BOWLING_STAT_CATEGORIES.map((c) => ({ ...c, mode: "bowling" as const })),
+]
+
+/** Mode switcher, reimagined as two content-bearing cards instead of a
+ *  plain segmented toggle. Each card always shows a live preview — the
+ *  current leader for whatever category that mode last had selected —
+ *  so picking a mode is also the first useful thing you see, not just
+ *  flipping a switch before the real content loads in below it. */
+function ModeCard({
+  label,
+  active,
+  disabled,
+  leaderName,
+  leaderImg,
+  statValue,
+  statLabel,
+  accent,
+  dot,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  disabled: boolean
+  leaderName?: string
+  leaderImg?: string
+  statValue?: string
+  statLabel?: string
+  accent: string
+  dot: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative text-left rounded-xl border p-4 transition-all overflow-hidden disabled:opacity-30 disabled:cursor-not-allowed ${
+        active
+          ? "border-gold/40 bg-gradient-to-br from-white/[0.04] to-transparent shadow-[0_0_20px_rgba(245,166,35,0.08)]"
+          : "border-white/10 bg-white/[0.01] hover:border-white/20"
+      }`}
+    >
+      {active && <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/50 to-transparent" />}
+      <div className="flex items-center gap-1.5 mb-3">
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dot}`} />
+        <p className={`text-[10px] uppercase tracking-[0.2em] font-cinzel ${active ? "text-gray-300" : "text-gray-600"}`}>
+          {label}
+        </p>
+      </div>
+      {leaderName ? (
+        <div className="flex items-center gap-2.5">
+          <PlayerAvatar name={leaderName} img={leaderImg} size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className={`text-sm font-semibold truncate ${active ? "text-white" : "text-gray-400"}`}>{leaderName}</p>
+            <p className="text-[10px] text-gray-600 truncate">{statLabel}</p>
+          </div>
+          <p className={`text-xl font-black font-cinzel tabular-nums shrink-0 ${active ? accent : "text-gray-500"}`}>
+            {statValue}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-600 py-2">No data yet</p>
+      )}
+    </button>
   )
 }
 
@@ -740,11 +812,8 @@ function StatsPanel({
 
   const activeRows = mode === "batting" ? sortedBatting : sortedBowling
   const leader = activeRows[0]
+  const accent = mode === "batting" ? "text-gold" : "text-emerald-400"
 
-  // For the leader spotlight + bar widths, "best average/econ" categories
-  // are lower-is-better, so the bar's reference max should be the worst
-  // (highest) value in view, not the leader's own value — otherwise the
-  // leader's bar would render empty.
   const lowerIsBetter = mode === "bowling" && (bowlingKey === "avg" || bowlingKey === "econ")
 
   const battingValue = (r: PlayerStatRow) =>
@@ -762,34 +831,50 @@ function StatsPanel({
 
   const fractionFor = (numeric: number) => (lowerIsBetter ? 100 - (numeric / maxNumeric) * 100 : (numeric / maxNumeric) * 100)
 
+  const battingCategoryLabel = BATTING_STAT_CATEGORIES.find((c) => c.key === battingKey)?.label
+  const bowlingCategoryLabel = BOWLING_STAT_CATEGORIES.find((c) => c.key === bowlingKey)?.label
+
   return (
     <div className="mb-8">
-      {/* Batting / Bowling segmented switch */}
-      <div className="flex gap-1 bg-black/50 border border-gold/20 rounded-lg p-1 mb-4 w-fit">
-        {(["batting", "bowling"] as const).map((m) => (
-          <button
-            key={m}
-            disabled={(m === "batting" ? battingStats : bowlingStats).length === 0}
-            onClick={() => setMode(m)}
-            className={`px-5 py-1.5 rounded-md text-xs font-cinzel uppercase tracking-wide transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
-              mode === m ? "bg-gold text-black font-bold" : "text-gray-400 hover:text-gold"
-            }`}
-          >
-            {m}
-          </button>
-        ))}
+      {/* Mode selector — two preview cards instead of a plain toggle */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <ModeCard
+          label="Batting"
+          active={mode === "batting"}
+          disabled={battingStats.length === 0}
+          leaderName={sortedBatting[0]?.player}
+          leaderImg={sortedBatting[0] ? playerImageMap[sortedBatting[0].player] : undefined}
+          statValue={sortedBatting[0] ? battingValue(sortedBatting[0]) : undefined}
+          statLabel={battingCategoryLabel}
+          accent="text-gold"
+          dot="bg-gold"
+          onClick={() => setMode("batting")}
+        />
+        <ModeCard
+          label="Bowling"
+          active={mode === "bowling"}
+          disabled={bowlingStats.length === 0}
+          leaderName={sortedBowling[0]?.player}
+          leaderImg={sortedBowling[0] ? playerImageMap[sortedBowling[0].player] : undefined}
+          statValue={sortedBowling[0] ? bowlingValue(sortedBowling[0]) : undefined}
+          statLabel={bowlingCategoryLabel}
+          accent="text-emerald-400"
+          dot="bg-emerald-400"
+          onClick={() => setMode("bowling")}
+        />
       </div>
 
-      {/* Category chips — horizontally scrollable, replaces the old vertical sidebar list */}
+      {/* Category chips — scoped to whichever mode is active */}
       <div className="flex gap-2 overflow-x-auto pb-1 mb-5 scrollbar-none">
         {(mode === "batting" ? BATTING_STAT_CATEGORIES : BOWLING_STAT_CATEGORIES).map((c) => {
           const active = mode === "batting" ? battingKey === c.key : bowlingKey === c.key
+          const activeStyle = mode === "batting" ? "bg-gold/15 border-gold text-gold" : "bg-emerald-400/10 border-emerald-400 text-emerald-300"
           return (
             <button
               key={c.key}
               onClick={() => (mode === "batting" ? setBattingKey(c.key as BattingStatKey) : setBowlingKey(c.key as BowlingStatKey))}
               className={`shrink-0 text-[11px] font-cinzel uppercase tracking-wide px-3.5 py-2 rounded-full border transition-all whitespace-nowrap ${
-                active ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/15 text-gray-400 hover:text-gold hover:border-gold/40"
+                active ? `${activeStyle} font-bold` : "border-white/10 text-gray-400 hover:text-white hover:border-white/25"
               }`}
             >
               {c.label}
@@ -812,6 +897,7 @@ function StatsPanel({
                 value={battingValue(leader as PlayerStatRow)}
                 unit={battingKey}
                 meta={`${leader.matches} match${leader.matches === 1 ? "" : "es"} · ${leader.inns} inns`}
+                accent={accent}
               />
               {sortedBatting.map((r, i) => (
                 <LeaderboardRow
@@ -822,6 +908,7 @@ function StatsPanel({
                   primaryValue={battingValue(r)}
                   primaryLabel={battingKey}
                   fraction={fractionFor(battingNumeric(r))}
+                  accent={accent}
                   secondary={[
                     { label: "4s", value: r.fours },
                     { label: "6s", value: r.sixes },
@@ -837,6 +924,7 @@ function StatsPanel({
                 value={bowlingValue(leader as BowlingStatRow)}
                 unit={bowlingKey}
                 meta={`${(leader as BowlingStatRow).best} best · ${leader.matches} match${leader.matches === 1 ? "" : "es"}`}
+                accent={accent}
               />
               {sortedBowling.map((r, i) => (
                 <LeaderboardRow
@@ -847,6 +935,7 @@ function StatsPanel({
                   primaryValue={bowlingValue(r)}
                   primaryLabel={bowlingKey}
                   fraction={fractionFor(bowlingNumeric(r))}
+                  accent={accent}
                   secondary={[{ label: "best", value: r.best }]}
                 />
               ))}
