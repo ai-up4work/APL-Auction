@@ -104,9 +104,14 @@ export function SiteHeader({
     handleNavigation("/organization")
   }
 
-  // Desktop clip path: Reduced left side height to 68px, angled drop down to 54px on right
+  // Desktop clip path: left side matches AppHeader's curve exactly
+  // (0,68 -> 320,68 -> 360,54), so the shape doesn't visibly jump when
+  // swapping between SiteHeader and AppHeader (e.g. on login/logout).
+  // Right side here stays flat at 54px out to the edge — SiteHeader's
+  // right side doesn't need the symmetric downward curve AppHeader has,
+  // since it just runs into the nav/user-menu area rather than framing it.
   const desktopClipPath =
-    "polygon(0 0, 100% 0, 100% 54px, 340px 54px, 290px 68px, 0 68px)"
+    "polygon(0 0, 100% 0, 100% 54px, 360px 54px, 320px 68px, 0 68px)"
 
   // "Home" removed — clicking the logo / SaaS name now serves that purpose
   const navItems = [
@@ -136,8 +141,9 @@ export function SiteHeader({
           xmlns="http://www.w3.org/2000/svg"
         >
           <path 
-            // Traces along the bottom edge: (0,68) -> (290,68) -> (340,54) -> (End of screen,54)
-            d="M 0 68 L 290 68 L 340 54 L 9999 54" 
+            // Traces along the bottom edge: (0,68) -> (320,68) -> (360,54) -> (End of screen,54)
+            // Widths match AppHeader's left-side curve so the two headers align pixel-for-pixel.
+            d="M 0 68 L 320 68 L 360 54 L 9999 54" 
             stroke="rgba(212, 175, 55, 0.6)" 
             strokeWidth="1.5" 
             fill="none" 

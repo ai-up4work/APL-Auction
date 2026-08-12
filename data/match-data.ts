@@ -106,6 +106,19 @@
 //   hooks/use-ball-commentary.ts and app/api/commentary/generate.
 //   These fields were already present on the raw `balls` row; this just
 //   stops them being discarded during aggregation.
+//
+// TOURNAMENT STATS — MATCH RESOLUTION (fixed):
+//   getTournamentStats previously ran three parallel queries to resolve
+//   which matches belong to a tournament, including a direct
+//   `matches.tournament_id = tournamentId` filter. Per the SOURCE OF
+//   TRUTH note above, `matches` has NO real tournament_id column —
+//   the only place a tournament link lives on a standalone match row is
+//   inside `match_setup.tournamentId` (JSON). Querying a non-existent
+//   column doesn't throw in a way that surfaces obviously; Supabase/PostgREST
+//   returns an error object, which the code only console.error'd and
+//   continued past — so it silently ran (and failed) on every call. That
+//   query is removed. Match resolution now relies on the two real paths:
+//   the `match_setup->>tournamentId` JSON filter, and `bracket_matches`.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -906,6 +919,13 @@ export async function hasMatchDetail(matchId: string): Promise<boolean> {
 // TOURNAMENT STATS — series-wide leaderboards for the Stats tab.
 // Aggregates every `balls` row across every match in a tournament,
 // grouped by player rather than by match.
+//
+// Match resolution: two real paths only (see the TOURNAMENT STATS —
+// MATCH RESOLUTION note at the top of this file for why the third,
+// `matches.tournament_id`, was removed):
+//   1. `match_setup->>tournamentId` — standalone matches whose only link
+//      to a tournament lives inside the match_setup JSON.
+//   2. `bracket_matches.tournament_id` — bracket-linked matches, real FK.
 // ─────────────────────────────────────────────────────────────
 export interface PlayerStatRow {
   player: string
@@ -934,23 +954,12 @@ interface TournamentStats {
 }
 
 export async function getTournamentStats(tournamentId: string): Promise<TournamentStats> {
-  // 1. Matches linked via the real `matches.tournament_id` column.
-  const { data: directMatches, error: directErr } = await supabase
-    .from("matches")
-    .select("id")
-    .eq("tournament_id", tournamentId)
-
-  if (directErr) {
-    console.error("[getTournamentStats] direct matches query failed:", directErr.message)
-  }
-
-  // 2. Matches whose tournament link only lives in
-  //    match_setup.tournamentId (the JSON field) — this is the same
-  //    field getMatchDetailById falls back to via
+  // 1. Matches whose tournament link lives in match_setup.tournamentId
+  //    (the JSON field) — this is the same field getMatchDetailById
+  //    falls back to via
   //    `tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId`.
-  //    It is NOT written back into the real tournament_id column, so a
-  //    tournament made up of standalone matches (no bracket_matches
-  //    rows) would never be found without this query.
+  //    This is the ONLY way a tournament made up of standalone matches
+  //    (no bracket_matches rows) is ever found.
   const { data: jsonLinkedMatches, error: jsonLinkedErr } = await supabase
     .from("matches")
     .select("id")
@@ -960,7 +969,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     console.error("[getTournamentStats] json-linked matches query failed:", jsonLinkedErr.message)
   }
 
-  // 3. Matches linked via bracket_matches (real FK, tournament brackets).
+  // 2. Matches linked via bracket_matches (real FK, tournament brackets).
   const { data: bracketRows, error: bracketErr } = await supabase
     .from("bracket_matches")
     .select("overlay_match_id")
@@ -973,14 +982,13 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
 
   const matchIds = Array.from(
     new Set([
-      ...(directMatches ?? []).map((m) => m.id as string),
       ...(jsonLinkedMatches ?? []).map((m) => m.id as string),
       ...(bracketRows ?? []).map((b) => b.overlay_match_id as string),
     ])
   )
 
   console.log(
-    `[getTournamentStats] tournamentId=${tournamentId} — direct=${directMatches?.length ?? 0} jsonLinked=${
+    `[getTournamentStats] tournamentId=${tournamentId} — jsonLinked=${
       jsonLinkedMatches?.length ?? 0
     } bracket=${bracketRows?.length ?? 0} → ${matchIds.length} unique match ids:`,
     matchIds
@@ -993,7 +1001,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     return { battingStats: [], bowlingStats: [] }
   }
 
-  // 4. Every ball from every one of those matches, in one query.
+  // 3. Every ball from every one of those matches, in one query.
   const { data: ballRows, error: ballsErr } = await supabase
     .from("balls")
     .select(

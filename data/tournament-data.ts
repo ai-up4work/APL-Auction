@@ -8,6 +8,8 @@
 import { showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket"
 import type { DoubleElimData } from "@/lib/tournament/doubleElim"
+import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
+
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -54,6 +56,14 @@ export interface Fixture {
   team2: string
   team1Logo?: string
   team2Logo?: string
+  /** Current/final numeric score for each side — populated whenever the
+   *  underlying bracket_matches row has score_a/score_b set, regardless
+   *  of whether a winner has been decided yet. This lets a LIVE fixture
+   *  show a running score on the Schedule tab instead of nothing until
+   *  the match actually completes (previously only `result`, which
+   *  requires a decided winner, carried any score information). */
+  team1Score?: number
+  team2Score?: number
   date: string
   time: string
   venue: string
@@ -158,7 +168,10 @@ export interface TournamentExtras {
   squads?: Squad[]
   runsLeaderboard?: LeaderboardRow[]
   wicketsLeaderboard?: LeaderboardRow[]
+  battingStats?: PlayerStatRow[]
+  bowlingStats?: BowlingStatRow[]
   awards?: AwardEntry[]
+
 }
 
 export type Tournament = ShowcaseSlide & TournamentExtras
@@ -913,4 +926,26 @@ export function getMatchById(tournamentSlug: string, matchId: string): BracketMa
 // bracket entries that don't have a built-out match page yet).
 export function hasMatchDetail(matchId: string): boolean {
   return matchId in matchDetails
+}
+
+
+export interface TournamentExtras {
+  liveMatch?: LiveMatch
+  pointsTable?: PointsRow[]
+  fixtures?: Fixture[]
+  bracket?: BracketMatch[]
+  bracketFormat?: "single" | "double"
+  bracketRounds?: Round[]
+  doubleElimData?: DoubleElimData
+  squads?: Squad[]
+  runsLeaderboard?: LeaderboardRow[]
+  wicketsLeaderboard?: LeaderboardRow[]
+  awards?: AwardEntry[]
+  /** Series-wide per-player batting/bowling leaderboards, aggregated
+   *  from every `balls` row across the tournament's matches — see
+   *  getTournamentStats in data/match-data.ts. Populated at the page
+   *  level (app/(protected)/tournaments/[id]/page.tsx), not part of
+   *  the static showcase extras above. */
+  battingStats?: PlayerStatRow[]
+  bowlingStats?: BowlingStatRow[]
 }

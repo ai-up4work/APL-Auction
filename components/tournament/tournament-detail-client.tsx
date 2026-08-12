@@ -43,6 +43,8 @@ import {
   type LeaderboardRow,
   type AwardEntry,
 } from "@/data/tournament-data"
+import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
+
 
 /* ------------------------------------------------------------------ */
 /*  NOTE ON BRACKETS:                                                   */
@@ -135,7 +137,8 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
   const hasBracket = !!tournament.bracketFormat || !!tournament.bracket?.length
 
   const hasSquads = !!tournament.squads?.length
-  const hasLeaderboard = !!(tournament.runsLeaderboard?.length || tournament.wicketsLeaderboard?.length)
+  const hasLeaderboard = !!(tournament.battingStats?.length || tournament.bowlingStats?.length)
+
   const hasAwards = !!tournament.awards?.length
   const hasPrizes = !!tournament.prizes?.length
 
@@ -335,9 +338,10 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 {/* STATS / LEADERBOARD */}
                 <TabsContent value="stats" className="mt-0">
                   {hasLeaderboard ? (
-                    <LeaderboardPanel
-                      runs={tournament.runsLeaderboard || []}
-                      wickets={tournament.wicketsLeaderboard || []}
+                    <TournamentStatsPanel
+                      batting={tournament.battingStats || []}
+                      bowling={tournament.bowlingStats || []}
+                      fixtures={tournament.fixtures || []}
                     />
                   ) : (
                     <LockedTabPlaceholder
@@ -1126,6 +1130,61 @@ function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean
       <div className="w-full">
         <p className="text-gray-200 text-xs font-semibold truncate leading-tight">{p.name}</p>
         {p.role && <p className="text-gray-500 text-[10px] truncate">{p.role}</p>}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// TOURNAMENT STATS — mirrors the match Stats tab and adds team scoring.
+// ─────────────────────────────────────────────────────────────
+function TournamentStatsPanel({
+  batting,
+  bowling,
+  fixtures,
+}: {
+  batting: PlayerStatRow[]
+  bowling: BowlingStatRow[]
+  fixtures: Fixture[]
+}) {
+  const [mode, setMode] = useState<"batting" | "bowling">(batting.length ? "batting" : "bowling")
+  const teamScores = new Map<string, { scored: number; conceded: number; games: number }>()
+  for (const f of fixtures) {
+    if (f.team1Score == null || f.team2Score == null) continue
+    const a = teamScores.get(f.team1) ?? { scored: 0, conceded: 0, games: 0 }
+    const b = teamScores.get(f.team2) ?? { scored: 0, conceded: 0, games: 0 }
+    a.scored += f.team1Score; a.conceded += f.team2Score; a.games += 1
+    b.scored += f.team2Score; b.conceded += f.team1Score; b.games += 1
+    teamScores.set(f.team1, a); teamScores.set(f.team2, b)
+  }
+  const teams = [...teamScores.entries()].sort((a, b) => b[1].scored - a[1].scored)
+  const rows = mode === "batting" ? [...batting].sort((a, b) => b.runs - a.runs) : [...bowling].sort((a, b) => b.wkts - a.wkts)
+
+  return (
+    <div className="space-y-6 mb-8">
+      <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+        <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">TOURNAMENT STATS</h2>
+        <div className="flex gap-2 mb-5">
+          {batting.length > 0 && <button onClick={() => setMode("batting")} className={`px-4 py-2 rounded-md border text-xs font-cinzel uppercase ${mode === "batting" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300"}`}>Batting</button>}
+          {bowling.length > 0 && <button onClick={() => setMode("bowling")} className={`px-4 py-2 rounded-md border text-xs font-cinzel uppercase ${mode === "bowling" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300"}`}>Bowling</button>}
+        </div>
+        <div className="space-y-2">
+          {rows.map((r, i) => (
+            <div key={r.player} className="flex items-center justify-between border border-gold/10 rounded-md p-3 bg-white/[0.02]">
+              <div className="flex items-center gap-3"><span className="text-gold font-bold font-cinzel w-5">{i + 1}</span><span className="h-8 w-8 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">{initials(r.player)}</span><div><p className="text-white text-sm font-semibold">{r.player}</p><p className="text-gray-400 text-xs">{r.matches} matches · {r.inns} innings</p></div></div>
+              <div className="text-right"><p className="text-gold font-bold font-cinzel text-lg">{mode === "batting" ? (r as PlayerStatRow).runs : (r as BowlingStatRow).wkts}</p><p className="text-gray-400 text-xs">{mode === "batting" ? "runs" : "wickets"}</p></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+        <h2 className="text-xl font-bold text-white mb-4 font-cinzel">TEAM SCORING</h2>
+        {teams.length > 0 ? <>
+          <div className="space-y-2 mb-6">{teams.map(([team, s], i) => <div key={team} className="flex items-center justify-between border border-gold/10 rounded-md p-3 bg-white/[0.02]"><span className="text-gray-200"><span className="text-gold font-bold mr-3">{i + 1}</span>{team}</span><span className="text-right"><b className="text-gold font-cinzel">{s.scored}</b><small className="text-gray-500 ml-2">runs · {s.games} matches</small></span></div>)}</div>
+          <p className="text-gold/70 text-xs uppercase tracking-widest font-cinzel mb-3">Match by match</p>
+          <div className="space-y-2">{fixtures.filter(f => f.team1Score != null && f.team2Score != null).map(f => <div key={f.id} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-gold/10 py-2 text-sm"><span className="text-gray-300 text-right">{f.team1}</span><span className="text-white font-bold font-cinzel whitespace-nowrap">{f.team1Score} — {f.team2Score}</span><span className="text-gray-300">{f.team2}</span></div>)}</div>
+        </> : <p className="text-gray-500 text-sm">Team scoring will appear once tournament matches have recorded final scores.</p>}
       </div>
     </div>
   )
