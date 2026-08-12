@@ -467,6 +467,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         handleNavigation={handleNavigation}
       />
 
+      { /* Hero Section */ }
       <section className="relative w-full min-h-[450px] flex items-center justify-center pt-24 pb-12 overflow-hidden bg-black border-b border-gold/20">
         <div
           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-40"
@@ -528,7 +529,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         </div>
       </section>
 
-      <section className="px-4 relative z-10 -mt-24">
+      <section className="px-4 relative z-10 -mt-24 md:-mt-24">
         <div className="container mx-auto max-w-3xl">
           <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
