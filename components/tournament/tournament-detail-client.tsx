@@ -442,7 +442,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                   Want your league running on Valiant League too? Start free with one live match and points table.
                 </p>
                 <Button className="w-full bg-gold hover:bg-gold/90 text-black font-bold">
-                  <Link href="/#tiers" className="flex items-center justify-center gap-2 w-full">
+                  <Link href="/organization" className="flex items-center justify-center gap-2 w-full">
                     Get Started
                   </Link>
                 </Button>
