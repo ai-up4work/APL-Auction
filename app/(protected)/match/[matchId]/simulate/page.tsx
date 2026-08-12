@@ -172,7 +172,7 @@ export default function SimulateMatchPage() {
 
   const [matchIdInput, setMatchIdInput] = useState(matchIdFromRoute)
   const [runState, setRunState] = useState<RunState>("idle")
-  const [speedMs, setSpeedMs] = useState(1200)
+  const [speedMs, setSpeedMs] = useState(5000)
   const [log, setLog] = useState<LogLine[]>([])
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [scoreLine, setScoreLine] = useState<string>("")
@@ -554,7 +554,7 @@ export default function SimulateMatchPage() {
               <input
                 type="range"
                 min={200}
-                max={3000}
+                max={60000}
                 step={100}
                 value={speedMs}
                 onChange={(e) => {
