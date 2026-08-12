@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { aggregateInnings, parseMatchSetup, buildSquads, type BallRow } from "@/lib/matches/cricket-engine"
 import { buildFullMatchLiveScript } from "@/lib/matches/win-probability"
-import type { MatchDetail, MatchStatus, MatchTeamRef } from "@/data/match-data"
+import type { MatchDetail, MatchStatus, MatchTeamRef, DeliveryEntry } from "@/data/match-data"
 
 export interface LiveScriptStep {
   ball: string
@@ -29,6 +29,24 @@ interface TeamRow {
   code: string
   logo: string | null
   color: string
+}
+
+/** Raw ball rows (already fetched for aggregation) -> the lightweight
+ *  DeliveryEntry log the Overs tab renders. Built locally here rather
+ *  than inside `aggregateInnings` (from lib/matches/cricket-engine) so
+ *  this stays additive without needing to touch that shared engine —
+ *  every field it needs (over_number, ball_number, runs, extra_type,
+ *  is_wicket) is already present on the BallRow[] this hook fetches. */
+function toDeliveries(balls: BallRow[]): DeliveryEntry[] {
+  return [...balls]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((b) => ({
+      over: b.over_number,
+      ball: b.ball_number,
+      runs: b.runs,
+      extraType: b.extra_type,
+      isWicket: b.is_wicket,
+    }))
 }
 
 export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
@@ -171,8 +189,8 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         target,
         teamA,
         teamB,
-        innings1,
-        innings2Final: innings2Agg,
+        innings1: { ...innings1, deliveries: toDeliveries(innings1Balls) },
+        innings2Final: { ...innings2Agg, deliveries: toDeliveries(innings2Balls) },
         innings2Partial: {
           runsAtStart: 0,
           wktsAtStart: 0,
@@ -187,6 +205,9 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
           batting: innings2Agg.batting,
           bowling: innings2Agg.bowling,
           fow: innings2Agg.fow,
+          // Live 2nd-innings ball-by-ball log — see toDeliveries above,
+          // and the BALL-BY-BALL DELIVERIES note in data/match-data.ts.
+          deliveries: toDeliveries(innings2Balls),
         },
         squads: setup.squads
           ? buildSquads(setup, teamA.name, teamB.name).map((s) => ({

@@ -82,6 +82,21 @@
 //   then its logo (`logo_url`), then finally `undefined` so the hero's
 //   own "not available" placeholder background kicks in — see
 //   resolvedTournamentBannerUrl below.
+//
+// BALL-BY-BALL DELIVERIES (additive):
+//   Batting/bowling cards, fall-of-wickets, and per-over totals were
+//   already derived from `balls`, but the individual deliveries
+//   themselves were discarded after aggregation — the Overs tab could
+//   only ever show a per-over run total plus a "W" chip for any wicket
+//   that fell in that over, never the actual ball-by-ball sequence
+//   (dot, 1, 4, 6, wd, nb...). `InningsComplete.deliveries` (and the
+//   matching field on `innings2Partial`) now carries that raw sequence
+//   through, in the same over_number/ball_number shape the `balls`
+//   table already stores. It's optional so nothing that builds an
+//   `InningsComplete`-shaped object elsewhere (e.g. the live-match hook,
+//   if it doesn't go through aggregateInnings) is required to supply
+//   it — callers that don't have it just fall back to the old
+//   wicket-only chip display.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -109,6 +124,30 @@ export interface BowlingRow {
 
 export type FowEntry = [string, string, string]
 
+/**
+ * A single delivery, straight from `balls` (one row per ball). Kept
+ * deliberately close to the DB row shape rather than pre-formatted, so
+ * the UI layer decides how to label/style each ball (dot, boundary,
+ * wide, wicket, ...).
+ *
+ *   over       — over number, matching the same 1-indexed convention
+ *                already used by InningsComplete.overRuns / the Overs tab.
+ *   ball       — ball number within that over, as stored on the row.
+ *   runs       — total runs on this delivery (bat + extra runs combined,
+ *                same as `balls.runs`).
+ *   extraType  — null for a normal delivery; otherwise "wide",
+ *                "no_ball", "bye", "leg_bye", or whatever `balls.extra_type`
+ *                holds.
+ *   isWicket   — whether this delivery produced a dismissal.
+ */
+export interface DeliveryEntry {
+  over: number
+  ball: number
+  runs: number
+  extraType: string | null
+  isWicket: boolean
+}
+
 export interface MatchSquad {
   team: string
   captain: string
@@ -125,6 +164,10 @@ export interface InningsComplete {
   wkts: number
   overs: string
   overRuns: number[]
+  /** Full ball-by-ball sequence for this innings, when available — see
+   *  the BALL-BY-BALL DELIVERIES note above. Optional/additive: existing
+   *  code paths that only read overRuns/fow/etc. are unaffected. */
+  deliveries?: DeliveryEntry[]
   dnb?: string[]
   potm?: { name: string; note: string }
 }
@@ -175,6 +218,10 @@ export interface MatchDetail {
     batting: BattingRow[]
     bowling: BowlingRow[]
     fow: FowEntry[]
+    /** Same as InningsComplete.deliveries — the live 2nd-innings ball
+     *  sequence so far. Optional/additive, see BALL-BY-BALL DELIVERIES
+     *  note above. */
+    deliveries?: DeliveryEntry[]
   }
   squads: MatchSquad[]
   /** Explicit status — see the block comment above. Prefer this over isLive. */
@@ -327,6 +374,9 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
   const bowling = new Map<string, BowlAcc>()
   const fow: FowEntry[] = []
   const overRunsMap = new Map<number, number>()
+  // Raw per-delivery log, in play order — see DeliveryEntry / the
+  // BALL-BY-BALL DELIVERIES note at the top of this file.
+  const deliveries: DeliveryEntry[] = []
 
   let battingOrder = 0
   let bowlingOrder = 0
@@ -396,6 +446,14 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
       lastBallInOver = row.ball_number
     }
     overRunsMap.set(row.over_number, (overRunsMap.get(row.over_number) ?? 0) + row.runs)
+
+    deliveries.push({
+      over: row.over_number,
+      ball: row.ball_number,
+      runs: row.runs,
+      extraType: row.extra_type,
+      isWicket: row.is_wicket,
+    })
   }
 
   const battingRows: BattingRow[] = [...batting.entries()]
@@ -444,6 +502,7 @@ function aggregateInnings(balls: BallRow[]): Omit<InningsComplete, "dnb" | "potm
     wkts: teamWkts,
     overs: legalDeliveries > 0 ? `${lastOver}.${lastBallInOver}` : "0.0",
     overRuns,
+    deliveries,
   }
 }
 
@@ -763,6 +822,9 @@ export async function getMatchDetailById(
     batting: innings2Agg.batting,
     bowling: innings2Agg.bowling,
     fow: innings2Agg.fow,
+    // Raw ball-by-ball log for the live 2nd innings — see BALL-BY-BALL
+    // DELIVERIES note at the top of this file.
+    deliveries: innings2Agg.deliveries,
   }
 
   const squads = await buildSquads(setup, teamA.name, teamB.name)
