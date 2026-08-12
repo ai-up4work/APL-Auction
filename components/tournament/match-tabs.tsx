@@ -16,13 +16,14 @@ import type {
 import MatchGraphs, { type OverRow } from "./match-graphs"
 import type { MatchDetail as GraphMatchDetail } from "@/data/tournament-data"
 
-export type Tab = "info" | "scorecard" | "squads" | "overs" | "graphs" | "stats"
+export type Tab = "info" | "scorecard" | "squads" | "overs" | "commentary" | "graphs" | "stats"
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "info", label: "Info" },
   { key: "scorecard", label: "Scorecard" },
   { key: "squads", label: "Squads" },
   { key: "overs", label: "Overs" },
+  { key: "commentary", label: "Commentary" },
   { key: "graphs", label: "Graphs" },
   { key: "stats", label: "Stats" },
 ]
@@ -150,6 +151,208 @@ function groupDeliveriesByOver(deliveries: DeliveryEntry[]): Map<number, Deliver
   return byOver
 }
 
+// ─────────────────────────────────────────────────────────────
+// AUTO-GENERATED COMMENTARY
+// ─────────────────────────────────────────────────────────────
+// Phrase banks per delivery outcome. A deterministic hash of the delivery
+// (over/ball/runs/wicket) picks the phrase, so re-renders (and live
+// polling refreshes) never make an already-shown line "flicker" to
+// different wording — the same ball always reads the same way.
+
+const DOT_PHRASES = [
+  "Solid defense, no run there.",
+  "Beaten on the outside edge, dot ball.",
+  "Worked straight to the fielder, no run.",
+  "Good, tight line — dot ball.",
+  "Left alone outside off.",
+  "Defended off the back foot, no run taken.",
+]
+
+const SINGLE_PHRASES = [
+  "Nudged into the gap for a quick single.",
+  "Pushed to mid-on, they cross for one.",
+  "Worked away off the pads for a single.",
+  "Driven softly, easy single.",
+  "Tapped to point, one run taken.",
+]
+
+const TWO_PHRASES = [
+  "Driven into the gap, they come back for two.",
+  "Good running between the wickets — two runs.",
+  "Pushed into the deep, a brisk two.",
+  "Placed away nicely, two runs added.",
+]
+
+const THREE_PHRASES = [
+  "Excellent running gets them three.",
+  "Into the gap and they hare back for three.",
+  "Good placement, three runs on hard-run legs.",
+]
+
+const FOUR_PHRASES = [
+  "Cracked through the covers — that's four!",
+  "Timed beautifully and races to the boundary!",
+  "Finds the gap, four runs!",
+  "Pierces the field — good shot, four!",
+  "Eased away off the back foot, boundary!",
+]
+
+const SIX_PHRASES = [
+  "Launched into the stands — maximum!",
+  "Clean strike, that's gone all the way — six!",
+  "Picked the length early and smashed it for six!",
+  "Enormous hit — over the ropes for six!",
+]
+
+const WIDE_PHRASES = [
+  "Strays down the leg side — called wide.",
+  "Drifts wide of off stump, umpire signals wide.",
+  "Wide called — width on offer there.",
+]
+
+const NO_BALL_PHRASES = [
+  "Overstepped — no ball, free hit coming up.",
+  "No ball called for overstepping the crease.",
+  "Front foot no ball — extra run added.",
+]
+
+const BYE_PHRASES = ["Beaten and it runs through to the keeper — {n} bye(s).", "Missed everything, {n} bye(s) taken."]
+const LEG_BYE_PHRASES = ["Off the pads and away — {n} leg bye(s).", "Deflects off the body, {n} leg bye(s) taken."]
+
+const WICKET_PHRASES = [
+  "That's out! Big moment in the innings.",
+  "Gone! The bowler strikes at a crucial time.",
+  "OUT! The batting side will feel that one.",
+  "Wicket! A huge breakthrough for the fielding side.",
+  "That's the end of that innings — wicket falls.",
+]
+
+function pick<T>(arr: T[], seed: number): T {
+  const i = ((seed % arr.length) + arr.length) % arr.length
+  return arr[i]
+}
+
+function commentarySeed(d: DeliveryEntry): number {
+  return d.over * 131 + d.ball * 17 + d.runs * 7 + (d.isWicket ? 91 : 0)
+}
+
+/** Turns a raw delivery into an auto-generated, commentary-style sentence.
+ *  Falls back to a plain description for run counts that don't have a
+ *  dedicated phrase bank (e.g. 5 runs from overthrows). */
+function generateCommentaryText(d: DeliveryEntry): string {
+  const seed = commentarySeed(d)
+
+  if (d.isWicket) return pick(WICKET_PHRASES, seed)
+
+  if (d.extraType === "wide") {
+    const base = pick(WIDE_PHRASES, seed)
+    return d.runs > 1 ? `${base} ${d.runs - 1} extra run${d.runs - 1 === 1 ? "" : "s"} taken too.` : base
+  }
+  if (d.extraType === "no_ball") {
+    const base = pick(NO_BALL_PHRASES, seed)
+    return d.runs > 1 ? `${base} ${d.runs - 1} run${d.runs - 1 === 1 ? "" : "s"} off the bat as well.` : base
+  }
+  if (d.extraType === "bye") return pick(BYE_PHRASES, seed).replace("{n}", String(d.runs))
+  if (d.extraType === "leg_bye") return pick(LEG_BYE_PHRASES, seed).replace("{n}", String(d.runs))
+
+  if (d.runs === 0) return pick(DOT_PHRASES, seed)
+  if (d.runs === 1) return pick(SINGLE_PHRASES, seed)
+  if (d.runs === 2) return pick(TWO_PHRASES, seed)
+  if (d.runs === 3) return pick(THREE_PHRASES, seed)
+  if (d.runs === 4) return pick(FOUR_PHRASES, seed)
+  if (d.runs === 6) return pick(SIX_PHRASES, seed)
+  return `${d.runs} runs taken off that one.`
+}
+
+const commentaryBadgeStyles: Record<ChipKind, string> = {
+  dot: "bg-white/5 text-gray-500 border border-white/10",
+  run: "bg-white/5 text-gray-300 border border-gold/10",
+  four: "bg-gold/15 text-gold border border-gold/30",
+  six: "bg-gold text-black border border-gold",
+  wicket: "bg-red-600 text-white",
+  extra: "bg-white/5 text-gray-400 border border-dashed border-gray-600",
+}
+
+function CommentaryEntry({ delivery, isLatest }: { delivery: DeliveryEntry; isLatest?: boolean }) {
+  const { label, kind } = deliveryChip(delivery)
+  const text = generateCommentaryText(delivery)
+  return (
+    <div
+      className={`flex gap-3 p-3.5 transition-colors ${
+        isLatest ? "bg-gold/[0.06]" : kind === "wicket" ? "bg-red-950/10" : "hover:bg-white/[0.01]"
+      }`}
+    >
+      <div className="flex flex-col items-center gap-1.5 shrink-0 w-11">
+        <span className="text-[10px] font-bold text-gray-500 font-cinzel tabular-nums">
+          {delivery.over}.{delivery.ball}
+        </span>
+        <span
+          className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+            commentaryBadgeStyles[kind]
+          } ${isLatest ? "ring-2 ring-gold/60 animate-pulse" : ""}`}
+        >
+          {label}
+        </span>
+      </div>
+      <p className={`text-sm leading-snug pt-1 ${kind === "wicket" ? "text-red-300 font-semibold" : "text-gray-300"}`}>
+        {text}
+        {isLatest && (
+          <span className="ml-2 inline-flex items-center gap-1 text-[9px] uppercase tracking-widest text-gold/80 font-cinzel align-middle">
+            <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live
+          </span>
+        )}
+      </p>
+    </div>
+  )
+}
+
+/** Auto-generated live commentary feed: latest over on top, latest ball
+ *  within each over on top — the way a live text-commentary widget reads. */
+function CommentaryFeed({
+  deliveries,
+  overOverData,
+  isLive,
+}: {
+  deliveries: DeliveryEntry[]
+  overOverData: OverRow[]
+  isLive: boolean
+}) {
+  const byOver = groupDeliveriesByOver(deliveries)
+  const overNums = [...byOver.keys()].sort((a, b) => b - a)
+  const latestDelivery = isLive && deliveries.length > 0 ? deliveries[deliveries.length - 1] : undefined
+  const overMeta = new Map(overOverData.map((o) => [o.num, o]))
+
+  return (
+    <div className="space-y-5">
+      {overNums.map((num) => {
+        const balls = [...byOver.get(num)!].sort((a, b) => b.ball - a.ball)
+        const meta = overMeta.get(num)
+        return (
+          <div key={num}>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <p className="text-xs font-cinzel uppercase tracking-widest text-gold/70">Over {num}</p>
+              {meta && (
+                <p className="text-[11px] text-gray-500">
+                  {meta.score} <span className="text-gray-700">·</span> {meta.totalRuns} runs
+                </p>
+              )}
+            </div>
+            <div className="border border-gold/10 rounded-lg divide-y divide-gold/5 bg-black/30 overflow-hidden">
+              {balls.map((d, i) => (
+                <CommentaryEntry
+                  key={i}
+                  delivery={d}
+                  isLatest={!!latestDelivery && latestDelivery.over === d.over && latestDelivery.ball === d.ball}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 interface MatchTabsProps {
   match: MatchDetail
   status: "not_started" | "live" | "completed"
@@ -202,6 +405,7 @@ export default function MatchTabs({
     switch (t) {
       case "scorecard":
       case "overs":
+      case "commentary":
       case "graphs":
         return !hasBallData
       case "squads":
@@ -498,6 +702,74 @@ export default function MatchTabs({
                     Ball-by-ball breakdown within each over isn't available yet — showing runs and wickets per over.
                   </p>
                 )}
+              </div>
+            )
+          })()
+        ))}
+
+      {/* COMMENTARY TAB */}
+      {tab === "commentary" &&
+        (!hasBallData ? (
+          <div className="mb-8">
+            <LockedTabPanel
+              title="Commentary not available yet"
+              hint="Ball-by-ball commentary is generated automatically from delivery data — it fills in once scoring begins."
+            />
+          </div>
+        ) : (
+          (() => {
+            const overOverData = getOverByOverData(innings)
+            const rawDeliveries: DeliveryEntry[] | undefined =
+              innings === 1 ? match.innings1.deliveries : live ? match.innings2Partial.deliveries : match.innings2Final.deliveries
+            const hasDeliveryData = !!rawDeliveries && rawDeliveries.length > 0
+
+            return (
+              <div className="mb-8 space-y-4 fade-in">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    onClick={() => setInnings(1)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                      innings === 1
+                        ? "bg-gold text-black shadow-md shadow-gold/20"
+                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {match.teamA.short} (1st Inn)
+                  </button>
+                  <button
+                    onClick={() => setInnings(2)}
+                    disabled={!innings2Started}
+                    title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:cursor-not-allowed ${
+                      innings === 2
+                        ? "bg-gold text-black shadow-md shadow-gold/20"
+                        : !innings2Started
+                          ? "bg-white/[0.02] border border-dashed border-gray-700 text-gray-600"
+                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {!innings2Started && <Lock className="h-2.5 w-2.5" />}
+                    {match.teamB.short} (2nd Inn)
+                  </button>
+                  {live && (
+                    <span className="ml-auto flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel self-center">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-300 animate-pulse" /> auto-updating
+                    </span>
+                  )}
+                </div>
+
+                {innings === 2 && !innings2Started ? (
+                  <p className="text-gray-500 text-sm text-center py-8">2nd innings hasn't started yet.</p>
+                ) : !hasDeliveryData ? (
+                  <p className="text-gray-500 text-sm text-center py-8">
+                    No ball-by-ball data recorded for this innings yet — commentary will appear once it starts.
+                  </p>
+                ) : (
+                  <CommentaryFeed deliveries={rawDeliveries!} overOverData={overOverData} isLive={live} />
+                )}
+                <p className="text-[10px] text-gray-600 text-center pt-2">
+                  Commentary is generated automatically from ball-by-ball data.
+                </p>
               </div>
             )
           })()

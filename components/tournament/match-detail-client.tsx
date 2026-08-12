@@ -24,7 +24,7 @@ import type {
   BowlingStatRow,
 } from "@/data/match-data"
 import type { OverRow } from "./match-graphs"
-import MatchTabs from "./match-tabs"
+import MatchTabs, { type Tab } from "./match-tabs"
 
 interface MatchDetailClientProps {
   match: MatchDetail
@@ -392,7 +392,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   useScrollTop()
   const router = useRouter()
   const [isNavOpen, setIsNavOpen] = useState(false)
-  const [tab, setTab] = useState<"info" | "scorecard" | "squads" | "overs" | "graphs" | "stats">("info")
+  const [tab, setTab] = useState<Tab>("info")
   // Default to innings 1 — this gets kept in sync with whichever innings
   // is actually in progress by the effect below, so opening Scorecard /
   // Overs / Graphs mid-1st-innings shows the live 1st innings instead of
