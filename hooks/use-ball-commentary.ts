@@ -28,24 +28,9 @@ interface UseBallCommentaryArgs {
 const key = (over: number, ball: number) => `${over}.${ball}`
 
 // ── Pacing / token-safety knobs ──────────────────────────────────
-// MIN_INTERVAL_MS: minimum gap between generation requests. This is
-// what actually gives you "one batch per minute" — deliveries that
-// arrive faster than this just queue up instead of firing immediately.
 const MIN_INTERVAL_MS = 45_000
-// How often the scheduler checks the queue. Doesn't need to match
-// MIN_INTERVAL_MS exactly — this just controls responsiveness of the
-// check, the real pacing is enforced by lastFiredAt below.
 const TICK_MS = 5_000
-// Cap on deliveries sent in a single request. Even if the queue backs
-// up (e.g. client was offline and multiple overs arrive at once), we
-// never send more than this many balls in one prompt — keeps every
-// request's token footprint small and consistent regardless of how
-// bursty the incoming deliveries are.
 const MAX_BATCH_SIZE = 6
-// How many previous commentary lines to include as style/continuity
-// context. Kept small on purpose — this is the main thing that would
-// otherwise grow unbounded over a 120-ball innings if you weren't
-// careful.
 const RECENT_CONTEXT_LINES = 5
 
 export function useBallCommentary({
@@ -64,18 +49,10 @@ export function useBallCommentary({
   const [byKey, setByKey] = useState<Map<string, string>>(new Map())
   const orderedKeys = useRef<string[]>([])
 
-  // Deliveries waiting to be sent, keyed so we never queue the same
-  // ball twice even if the effect below re-runs before the queue drains.
   const pendingQueue = useRef<Map<string, DeliveryEntry>>(new Map())
-  // True while a generation request is in flight — the scheduler won't
-  // start a new one until this clears, so requests never overlap.
   const requestInFlight = useRef(false)
   const lastFiredAt = useRef(0)
 
-  // Keep latest non-delivery context in a ref so the scheduler (which
-  // runs on its own interval, not on every prop change) always reads
-  // the freshest score/striker/bowler state without needing to be in
-  // the interval's dependency array.
   const contextRef = useRef({
     matchId,
     inningsNumber,
@@ -100,6 +77,23 @@ export function useBallCommentary({
       bowlerFigures,
     }
   }, [matchId, inningsNumber, teamBatting, teamBowling, target, scoreState, striker, nonStriker, bowlerFigures])
+
+  // Merges a row into local state exactly once, whether it came from the
+  // initial load, a Realtime push echoing THIS device's own generate
+  // call, or a Realtime push from a completely different device/tab.
+  const mergeRow = useCallback((over: number, ball: number, text: string) => {
+    const k = key(over, ball)
+    setByKey((prev) => {
+      if (prev.get(k) === text) return prev // no-op, avoids extra re-renders
+      const next = new Map(prev)
+      if (!next.has(k)) orderedKeys.current.push(k)
+      next.set(k, text)
+      return next
+    })
+    // If another device already generated this ball, drop it from our
+    // own pending queue so we don't waste a request re-generating it.
+    pendingQueue.current.delete(k)
+  }, [])
 
   // Load whatever's already cached for this match/innings.
   useEffect(() => {
@@ -126,7 +120,6 @@ export function useBallCommentary({
       }
       setByKey(map)
       orderedKeys.current = order
-      // Fresh innings/match — drop any stale queue/timing from before.
       pendingQueue.current.clear()
       lastFiredAt.current = 0
     }
@@ -136,10 +129,42 @@ export function useBallCommentary({
     }
   }, [matchId, inningsNumber])
 
+  // ── Realtime sync ─────────────────────────────────────────────
+  // Subscribes to inserts/updates on ball_commentary for this match.
+  // This is what makes commentary appear live on every open device —
+  // without it, each device only ever saw whatever was cached at its
+  // own page-load. Filtered by match_id at the subscription level
+  // (Supabase Realtime filters cleanly support one column); innings is
+  // checked in the callback since a match can have rows for both
+  // innings flowing through the same channel.
+  useEffect(() => {
+    if (!matchId) return
+
+    const channel = supabase
+      .channel(`ball_commentary:${matchId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // INSERT (first generation) and UPDATE (e.g. a later correction/upsert)
+          schema: "public",
+          table: "ball_commentary",
+          filter: `match_id=eq.${matchId}`,
+        },
+        (payload) => {
+          const row = payload.new as { innings_number: number; over: number; ball: number; text: string } | null
+          if (!row || row.innings_number !== inningsNumber) return
+          mergeRow(row.over, row.ball, row.text)
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [matchId, inningsNumber, mergeRow])
+
   // Enqueue any delivery that doesn't have commentary yet and isn't
-  // already queued. This just collects work — it does NOT fire a
-  // request. Firing is entirely the scheduler's job below, so bursts
-  // of new deliveries never translate into bursts of requests.
+  // already queued.
   useEffect(() => {
     if (!enabled) return
     for (const d of deliveries) {
@@ -150,11 +175,7 @@ export function useBallCommentary({
     }
   }, [deliveries, byKey, enabled])
 
-  // Single scheduler: every TICK_MS, check whether enough time has
-  // passed since the last request AND there's something queued. If so,
-  // drain up to MAX_BATCH_SIZE deliveries (oldest first) and fire one
-  // request. This is what enforces "at most one batch per minute"
-  // regardless of how fast balls are actually being scored.
+  // Scheduler: fires at most one batched request per MIN_INTERVAL_MS.
   useEffect(() => {
     if (!enabled) return
 
@@ -215,20 +236,14 @@ export function useBallCommentary({
         .then((json: { commentary?: CommentaryLine[]; error?: string }) => {
           if (json.error || !json.commentary) {
             console.error("[useBallCommentary] generate failed:", json.error)
-            // Put the batch back so it gets retried on a later tick
-            // instead of silently losing that over's commentary.
             for (const [k, d] of batch) pendingQueue.current.set(k, d)
             return
           }
-          setByKey((prev) => {
-            const next = new Map(prev)
-            for (const c of json.commentary!) {
-              const k = key(c.over, c.ball)
-              if (!next.has(k)) orderedKeys.current.push(k)
-              next.set(k, c.text)
-            }
-            return next
-          })
+          // Merge locally too (belt-and-suspenders) — Realtime should
+          // also deliver this same write back a moment later, but this
+          // means the device that generated it doesn't wait on the
+          // round-trip through Realtime to show it.
+          for (const c of json.commentary!) mergeRow(c.over, c.ball, c.text)
         })
         .catch((err) => {
           console.error("[useBallCommentary] request failed:", err)
@@ -240,17 +255,13 @@ export function useBallCommentary({
     }, TICK_MS)
 
     return () => clearInterval(interval)
-  }, [enabled, byKey])
+  }, [enabled, byKey, mergeRow])
 
   return {
     getText: useCallback((over: number, ball: number) => byKey.get(key(over, ball)), [byKey]),
-    isGeneratingOver: useCallback(
-      (over: number) => {
-        // Pending (queued but not yet sent) OR currently mid-request.
-        const queuedForOver = [...pendingQueue.current.keys()].some((k) => k.startsWith(`${over}.`))
-        return queuedForOver || requestInFlight.current
-      },
-      [byKey],
-    ),
+    isGeneratingOver: useCallback((over: number) => {
+      const queuedForOver = [...pendingQueue.current.keys()].some((k) => k.startsWith(`${over}.`))
+      return queuedForOver || requestInFlight.current
+    }, [byKey]),
   }
 }

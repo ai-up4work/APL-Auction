@@ -92,6 +92,31 @@ export function generatePlaceholderPool(teamName: string, teamShort: string): Si
   return { teamName, teamShort, battingOrder: names, bowlers: names.slice(0, 6) }
 }
 
+// ── Defensive fallbacks ──────────────────────────────────────────
+// These two exported helpers (createInningsState / simulateNextDelivery)
+// are pure functions with no dependency on how their inputs were built.
+// In practice callers go through poolFromSetup(), which guarantees
+// battingOrder.length >= 2 and bowlers.length >= 2 — but nothing in this
+// file enforces that itself. A bad caller (a test, a future API route, a
+// hand-built pool) with a too-small battingOrder or an empty bowlers
+// array would otherwise silently produce `undefined` names that get
+// written straight into the `balls` table and fail there with a
+// confusing NOT NULL constraint error instead of a clear one here.
+const FALLBACK_BATTER_NAME = "Player TBD"
+const FALLBACK_BOWLER_NAME = "Bowler TBD"
+
+function safeBattingOrder(order: string[]): string[] {
+  if (order.length >= 2) return order
+  // Pad up to 2 so strikerName/nonStrikerName are never undefined.
+  const padded = [...order]
+  while (padded.length < 2) padded.push(`${FALLBACK_BATTER_NAME} ${padded.length + 1}`)
+  return padded
+}
+
+function safeBowlerPool(bowlers: string[]): string[] {
+  return bowlers.length > 0 ? bowlers : [FALLBACK_BOWLER_NAME]
+}
+
 export function createInningsState(params: {
   inningsNumber: 1 | 2
   battingTeam: SimPlayerPool
@@ -100,18 +125,30 @@ export function createInningsState(params: {
   target?: number | null
   startSequence: number
 }): InningsSimState {
-  const { inningsNumber, battingTeam, bowlingTeam, oversLimit, target, startSequence } = params
+  const { inningsNumber, battingTeam, bowlingTeam, target, startSequence } = params
+
+  const battingOrder = safeBattingOrder(battingTeam.battingOrder)
+  const bowlers = safeBowlerPool(bowlingTeam.bowlers)
+  const safeBattingTeam: SimPlayerPool = { ...battingTeam, battingOrder }
+  const safeBowlingTeam: SimPlayerPool = { ...bowlingTeam, bowlers }
+
+  // Guard against a zero/negative/non-finite overs limit (e.g. a match
+  // whose match_setup carries `overs: 0` — "??" alone wouldn't catch
+  // that since 0 isn't null/undefined). Without this, oversUsedUp trips
+  // almost immediately and the innings ends after ~1 ball.
+  const oversLimit = Number.isFinite(params.oversLimit) && params.oversLimit > 0 ? params.oversLimit : 20
+
   return {
     inningsNumber,
-    battingTeam,
-    bowlingTeam,
+    battingTeam: safeBattingTeam,
+    bowlingTeam: safeBowlingTeam,
     oversLimit,
     maxOversPerBowler: Math.max(1, Math.ceil(oversLimit / 5)),
     target: target ?? null,
     sequence: startSequence,
     nextBatterIdx: 2,
-    strikerName: battingTeam.battingOrder[0],
-    nonStrikerName: battingTeam.battingOrder[1],
+    strikerName: battingOrder[0],
+    nonStrikerName: battingOrder[1],
     outBatters: new Set(),
     currentBowlerName: null,
     lastOverBowlerName: null,
@@ -128,6 +165,11 @@ export function createInningsState(params: {
 
 function pickBowler(state: InningsSimState): string {
   const pool = state.bowlingTeam.bowlers
+  // pool is guaranteed non-empty by safeBowlerPool() in createInningsState,
+  // but keep this fallback so pickBowler never returns undefined even if
+  // called against a state built some other way.
+  if (pool.length === 0) return FALLBACK_BOWLER_NAME
+
   const eligible = pool.filter((b) => {
     if (b === state.lastOverBowlerName) return false
     const bowled = state.bowlerLegalBalls[b] ?? 0
@@ -135,7 +177,7 @@ function pickBowler(state: InningsSimState): string {
   })
   const candidates = eligible.length > 0 ? eligible : pool.filter((b) => b !== state.lastOverBowlerName)
   const finalCandidates = candidates.length > 0 ? candidates : pool
-  return finalCandidates[Math.floor(Math.random() * finalCandidates.length)]
+  return finalCandidates[Math.floor(Math.random() * finalCandidates.length)] ?? pool[0]
 }
 
 function pickNextBatter(state: InningsSimState): string | null {
@@ -328,6 +370,11 @@ export function simulateNextDelivery(prev: InningsSimState): {
 
   if (wicketFell) {
     const next = pickNextBatter(state)
+    // If there's genuinely no next batter (last-man-standing edge case),
+    // strikerName is left pointing at the just-dismissed batter — but
+    // the allOut check below fires in this same call before another
+    // delivery can ever be simulated against that stale name, so no
+    // further ball gets attributed to a batter who's already out.
     if (next) {
       state.strikerName = next
     }
