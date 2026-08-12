@@ -29,9 +29,14 @@ interface GenerateBody {
   nonStriker?: { name: string; runs: number; balls: number }
   bowlerFigures?: { name: string; overs: string; runs: number; wkts: number }
   recentCommentary: string[]
-  /** Candidates the client thinks need commentary — this route does the
-   *  atomic claim itself (server-side, service role) and only generates
-   *  for whichever subset it actually wins. */
+  /**
+   * CANDIDATES, not a pre-claimed set. This route does the atomic claim
+   * itself (server-side, service role) via INSERT ... ON CONFLICT DO
+   * NOTHING RETURNING *, and only generates for whichever subset it
+   * actually wins. The browser client never writes to ball_commentary
+   * directly — there's no RLS write policy for the anon/authenticated
+   * role on this table, by design.
+   */
   deliveries: DeliveryContext[]
 }
 
@@ -57,15 +62,17 @@ function truncateToWords(text: string, maxWords: number): string {
 
 /**
  * Marks balls as permanently failed. Policy: ANY failure — rate limit,
- * network error, Groq outage, bad JSON, whatever — results in exactly
- * one attempt, then a permanent 'failed' status. No retry, no backoff,
- * no "transient vs content" distinction. Every device converges on the
- * phrase-bank fallback for these balls immediately and for good. This
- * keeps the system simple and avoids ever leaving the UI stuck on
- * "Writing commentary…" while something quietly retries in the
- * background.
+ * network error, Groq outage, bad JSON, model silently skipping a
+ * ball, our own DB write failing — results in exactly one attempt,
+ * then a permanent 'failed' status. No retry, no backoff, no
+ * transient/permanent distinction. Every device converges on the
+ * phrase-bank fallback for these balls immediately and for good.
  */
-async function markFailed(matchId: string, inningsNumber: number, deliveries: { over: number; ball: number }[]) {
+async function markFailed(
+  matchId: string,
+  inningsNumber: number,
+  deliveries: { over: number; ball: number }[],
+) {
   if (deliveries.length === 0) return
   const rows = deliveries.map((d) => ({
     match_id: matchId,
@@ -103,10 +110,10 @@ export async function POST(req: NextRequest) {
   const candidates = body.deliveries.slice(0, MAX_DELIVERIES_PER_REQUEST)
 
   // ── ATOMIC CLAIM ──
-  // INSERT ... ON CONFLICT DO NOTHING RETURNING *, service-role only.
-  // Whichever balls come back here are exclusively this request's
-  // responsibility — win or lose, they end this request at 'ready' or
-  // 'failed', never left dangling at 'pending'.
+  // If another concurrent request already has a row (pending, ready,
+  // or failed) for a ball, that row is skipped and NOT returned here —
+  // so `deliveries` below is exactly the subset this request, and only
+  // this request, is responsible for resolving.
   const placeholderRows = candidates.map((d) => ({
     match_id: body.matchId,
     innings_number: body.inningsNumber,
@@ -130,7 +137,8 @@ export async function POST(req: NextRequest) {
   const deliveries = candidates.filter((d) => claimedKeySet.has(`${d.over}.${d.ball}`))
 
   if (deliveries.length === 0) {
-    // Every candidate was already claimed by a concurrent request.
+    // Every candidate was already claimed by a concurrent request —
+    // nothing to do, that other request owns resolving them.
     return NextResponse.json({ commentary: [], claimed: 0 })
   }
 
@@ -155,7 +163,10 @@ export async function POST(req: NextRequest) {
   try {
     groqRes = await fetch(GROQ_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         model: GROQ_MODEL,
         temperature: 0.9,
@@ -169,7 +180,10 @@ export async function POST(req: NextRequest) {
     })
   } catch (err) {
     await markFailed(body.matchId, body.inningsNumber, deliveries)
-    return NextResponse.json({ error: "Groq request failed", detail: String(err), failed: deliveries }, { status: 502 })
+    return NextResponse.json(
+      { error: "Groq request failed", detail: String(err), failed: deliveries },
+      { status: 502 },
+    )
   }
 
   if (!groqRes.ok) {
@@ -178,7 +192,12 @@ export async function POST(req: NextRequest) {
     await markFailed(body.matchId, body.inningsNumber, deliveries)
     const isRateLimit = groqRes.status === 429
     return NextResponse.json(
-      { error: "Groq returned an error", detail, code: isRateLimit ? "rate_limit_exceeded" : undefined, failed: deliveries },
+      {
+        error: "Groq returned an error",
+        detail,
+        code: isRateLimit ? "rate_limit_exceeded" : undefined,
+        failed: deliveries,
+      },
       { status: 502 },
     )
   }
@@ -228,7 +247,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (validated.length === 0) {
-    return NextResponse.json({ error: "No valid commentary entries after validation", raw: content, failed: missing }, { status: 502 })
+    return NextResponse.json(
+      { error: "No valid commentary entries after validation", raw: content, failed: missing },
+      { status: 502 },
+    )
   }
 
   const rows = validated.map((c) => ({
