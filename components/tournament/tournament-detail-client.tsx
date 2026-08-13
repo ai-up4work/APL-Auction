@@ -528,10 +528,28 @@ function LockedTabPlaceholder({
 // ─────────────────────────────────────────────────────────────
 // POINTS TABLE PANEL — card-row standings with a visible
 // qualification line, per-team NRR bar, and form pills.
+//
+// FIXED (col mislabel): the desktop header row has 8 columns
+// instead of 7 — "Form" and "Pts" are separate labeled columns,
+// so a team's point total never visually reads as part of their
+// form streak.
+//
+// REDESIGNED (visual polish + "why do only 4 teams look real"):
+// Every team is rendered — that part was never actually broken —
+// but rows below the qualification line used to be heavily dimmed
+// (near-invisible border/background), which read as "disabled"
+// rather than "still in the tournament." Now every row gets the
+// same solid card treatment and full-strength text regardless of
+// rank; the top-4 cutoff is communicated with a single slim
+// "Qualification Line" divider inserted between rank 4 and 5
+// (only rendered when there are more than 4 teams) plus a small
+// gold rank badge/medal on qualifying rows — not by fading
+// everyone else out.
 // ─────────────────────────────────────────────────────────────
 function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   const sorted = [...rows].sort((a, b) => b.points - a.points)
   const maxPoints = Math.max(1, ...sorted.map((r) => r.points))
+  const QUALIFY_COUNT = 4
 
   // NRR bar needs a symmetric scale around 0 so positive/negative
   // net run rates both read proportionally against each other.
@@ -539,20 +557,26 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   const maxAbsNrr = Math.max(0.5, ...nrrValues.map((v) => Math.abs(v)))
 
   return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
-      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
-        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
-          <ListOrdered className="h-5 w-5 text-gold" />
+    <div className="relative bg-black/50 border border-gold/20 rounded-xl p-6 mb-8 overflow-hidden">
+      {/* faint decorative glow, purely aesthetic */}
+      <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-gold/[0.06] blur-3xl" />
+
+      <div className="relative flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2.5">
+          <span className="h-9 w-9 rounded-lg bg-gold/10 border border-gold/25 flex items-center justify-center">
+            <ListOrdered className="h-4 w-4 text-gold" />
+          </span>
           POINTS TABLE
         </h2>
-        <p className="text-gray-500 text-[11px] font-cinzel uppercase tracking-widest flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-gold" />
-          Top 4 qualify for playoffs
+        <p className="text-gray-400 text-[11px] font-cinzel uppercase tracking-widest flex items-center gap-1.5 bg-white/[0.03] border border-white/10 rounded-full px-3 py-1.5">
+          <span className="h-2 w-2 rounded-full bg-gold shadow-[0_0_6px_rgba(212,175,55,0.8)]" />
+          Top {QUALIFY_COUNT} qualify for playoffs
         </p>
       </div>
 
-      {/* Column headers — hidden on small screens; cards carry their own labels there */}
-      <div className="hidden sm:grid grid-cols-[2.5rem_1fr_3.5rem_3.5rem_3.5rem_8rem_7rem] gap-2 px-4 pb-2 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">
+      {/* Column headers — hidden on small screens; cards carry their own labels there.
+          8 columns: #, Team, P, W, L, NRR, Form, Pts. */}
+      <div className="relative hidden sm:grid grid-cols-[2.75rem_1fr_3rem_3rem_3rem_8rem_6.5rem_3.5rem] gap-2 px-4 pb-2.5 mb-1 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel border-b border-white/5">
         <span>#</span>
         <span>Team</span>
         <span className="text-center">P</span>
@@ -560,20 +584,47 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
         <span className="text-center">L</span>
         <span>NRR</span>
         <span className="text-right">Form</span>
+        <span className="text-right">Pts</span>
       </div>
 
-      <div className="space-y-2">
-        {sorted.map((row, i) => (
-          <PointsTableRow
-            key={row.short}
-            row={row}
-            rank={i + 1}
-            qualified={i < 4}
-            pointsBarWidth={Math.max(6, (row.points / maxPoints) * 100)}
-            maxAbsNrr={maxAbsNrr}
-          />
-        ))}
+      <div className="relative space-y-2">
+        {sorted.map((row, i) => {
+          const rank = i + 1
+          const showQualifyDivider = rank === QUALIFY_COUNT + 1 && sorted.length > QUALIFY_COUNT
+          return (
+            <div key={row.short}>
+              {showQualifyDivider && <QualificationDivider />}
+              <PointsTableRow
+                row={row}
+                rank={rank}
+                qualified={rank <= QUALIFY_COUNT}
+                pointsBarWidth={Math.max(6, (row.points / maxPoints) * 100)}
+                maxAbsNrr={maxAbsNrr}
+              />
+            </div>
+          )
+        })}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Slim horizontal divider marking the qualification cutoff, shown
+ * once between the last qualifying team and the first non-qualifying
+ * one (only when the table has more teams than qualify). Replaces the
+ * old approach of just dimming every row below the cutoff — this way
+ * every team keeps full-strength styling and stays easy to read, and
+ * the cutoff itself is still unambiguous.
+ */
+function QualificationDivider() {
+  return (
+    <div className="flex items-center gap-3 py-1.5 px-1">
+      <span className="h-px flex-1 bg-gradient-to-r from-gold/50 to-transparent" />
+      <span className="text-gold/70 text-[9px] font-cinzel uppercase tracking-[0.2em] whitespace-nowrap">
+        Qualification Line
+      </span>
+      <span className="h-px flex-1 bg-gradient-to-l from-gold/50 to-transparent" />
     </div>
   )
 }
@@ -582,6 +633,12 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
  * One team's row in the Points Table — split out from PointsTablePanel
  * so the (fairly involved) per-row NRR-bar / form-pill / qualification
  * styling logic doesn't have to live inline inside the sort+map above.
+ *
+ * Every row (qualified or not) uses the same solid card background and
+ * full-opacity text — only the rank badge changes (gold/medal for the
+ * top 4, a neutral but still clearly legible badge below that) so
+ * teams outside the qualification zone stay fully readable instead of
+ * fading into a "disabled" look.
  */
 function PointsTableRow({
   row,
@@ -600,53 +657,62 @@ function PointsTableRow({
   const nrrPositive = nrrVal >= 0
   const nrrBarWidth = Math.min(100, (Math.abs(nrrVal) / maxAbsNrr) * 100)
 
+  const medal =
+    rank === 1
+      ? { Icon: Crown, badge: "bg-gradient-to-br from-yellow-300 to-gold text-black" }
+      : rank === 2
+        ? { Icon: Medal, badge: "bg-gradient-to-br from-gray-200 to-gray-400 text-black" }
+        : rank === 3
+          ? { Icon: Medal, badge: "bg-gradient-to-br from-amber-600 to-amber-800 text-white" }
+          : null
+
   return (
     <div
-      className={`group relative grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_3.5rem_3.5rem_3.5rem_8rem_7rem] items-center gap-2 rounded-lg border px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 ${
+      className={`group relative grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.75rem_1fr_3rem_3rem_3rem_8rem_6.5rem_3.5rem] items-center gap-2 rounded-xl border px-4 py-3.5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(0,0,0,0.6)] ${
         qualified
-          ? "border-gold/30 bg-gold/[0.06] hover:border-gold/50"
-          : "border-white/5 bg-white/[0.015] hover:border-gold/20"
+          ? "border-gold/25 bg-gradient-to-r from-gold/[0.07] via-white/[0.02] to-transparent hover:border-gold/45"
+          : "border-white/10 bg-white/[0.03] hover:border-white/20"
       }`}
     >
       {/* qualification tick on the left edge */}
-      {qualified && <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg bg-gold" />}
+      {qualified && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-gold" />}
 
-      {/* Rank */}
+      {/* Rank — medal styling for top 3, clean numbered badge otherwise (always fully legible) */}
       <span
-        className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold font-cinzel shrink-0 ${
-          qualified ? "bg-gold text-black" : "bg-white/5 text-gray-400 border border-white/10"
+        className={`relative h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold font-cinzel shrink-0 ${
+          medal ? medal.badge : qualified ? "bg-gold/15 text-gold border border-gold/40" : "bg-white/10 text-gray-200 border border-white/15"
         }`}
       >
-        {rank}
+        {medal ? <medal.Icon className="h-3.5 w-3.5" /> : rank}
       </span>
 
       {/* Team + points bar (mobile: also carries P/W/L inline) */}
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-white font-semibold font-cinzel truncate">{row.team}</span>
-          <span className="text-gray-500 text-[10px] uppercase tracking-wide sm:hidden">
+          <span className="text-gray-400 text-[10px] uppercase tracking-wide sm:hidden">
             {row.played}P · {row.won}W · {row.lost}L
           </span>
         </div>
-        <div className="h-1 rounded-full bg-white/5 overflow-hidden mt-1.5 max-w-[220px]">
+        <div className="h-1 rounded-full bg-white/10 overflow-hidden mt-1.5 max-w-[220px]">
           <div
-            className="h-full rounded-full bg-gold/70 transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-gold/70 to-gold transition-all duration-500"
             style={{ width: `${pointsBarWidth}%` }}
           />
         </div>
       </div>
 
       {/* P / W / L — desktop only */}
-      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.played}</span>
-      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.won}</span>
-      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.lost}</span>
+      <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.played}</span>
+      <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.won}</span>
+      <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.lost}</span>
 
       {/* NRR bar — desktop only */}
       <div className="hidden sm:flex items-center gap-2">
-        <span className={`text-xs font-semibold w-12 shrink-0 ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
+        <span className={`text-xs font-bold w-12 shrink-0 ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
           {row.nrr}
         </span>
-        <div className="h-1.5 flex-1 rounded-full bg-white/5 overflow-hidden">
+        <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${nrrPositive ? "bg-green-500" : "bg-red-500"}`}
             style={{ width: `${nrrBarWidth}%` }}
@@ -654,25 +720,47 @@ function PointsTableRow({
         </div>
       </div>
 
-      {/* Points chip + form — right side, always visible */}
-      <div className="col-start-3 sm:col-auto flex items-center gap-3 justify-self-end">
+      {/* Mobile: combined form pills + points chip in one cell */}
+      <div className="col-start-3 sm:hidden flex items-center gap-3 justify-self-end">
         <div className="flex gap-1">
           {row.form?.map((f, j) => (
-            <span
-              key={j}
-              className={`h-5 w-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
-                f === "W" ? "bg-green-600 text-white" : f === "L" ? "bg-red-600/80 text-white" : "bg-gray-600 text-white"
-              }`}
-            >
-              {f}
-            </span>
+            <FormPill key={j} result={f} />
           ))}
         </div>
         <span className="min-w-[2.5rem] text-right text-gold font-bold font-cinzel text-lg leading-none">
           {row.points}
         </span>
       </div>
+
+      {/* Desktop: Form — its own column, under the "Form" header */}
+      <div className="hidden sm:flex items-center gap-1 justify-self-end">
+        {row.form?.map((f, j) => (
+          <FormPill key={j} result={f} />
+        ))}
+      </div>
+
+      {/* Desktop: Points — its own column, under the "Pts" header */}
+      <span className="hidden sm:block text-right text-gold font-bold font-cinzel text-xl leading-none">
+        {row.points}
+      </span>
     </div>
+  )
+}
+
+/** Single W/L/NR form-pill, shared by the mobile and desktop form cells. */
+function FormPill({ result }: { result: "W" | "L" | "NR" }) {
+  return (
+    <span
+      className={`h-5 w-5 flex items-center justify-center rounded-full text-[10px] font-bold ring-1 ${
+        result === "W"
+          ? "bg-green-600 text-white ring-green-400/40"
+          : result === "L"
+            ? "bg-red-600/90 text-white ring-red-400/40"
+            : "bg-gray-600 text-white ring-white/20"
+      }`}
+    >
+      {result}
+    </span>
   )
 }
 
