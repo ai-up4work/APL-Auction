@@ -27,6 +27,8 @@ function displayNameFor(user: { email?: string | null; user_metadata?: Record<st
   return "Account"
 }
 
+
+
 export function SiteHeader({
   activeSection,
   isNavOpen,
@@ -99,6 +101,13 @@ export function SiteHeader({
     handleNavigation("/")
   }
 
+  // Navigate to a given path (used for nav items)
+  function navigate(path: string) {
+    if (typeof window !== "undefined") {
+      handleNavigation(path)
+    }
+  }
+
   // Navigate to the organization route
   const goToOrganization = () => {
     handleNavigation("/organization")
@@ -115,12 +124,12 @@ export function SiteHeader({
 
   // "Home" removed — clicking the logo / SaaS name now serves that purpose
   const navItems = [
-    { id: "tournaments", label: "All Tournaments" },
-    { id: "matches", label: "All Matches" },
-    { id: "players", label: "Players" },
-    { id: "teams", label: "Teams" },
-    { id: "standings", label: "Standings" },
-    { id: "stats", label: "Stats" },
+    { id: "tournaments", label: "Tournaments", href: "/all-tournaments", disabled: false },
+    { id: "matches", label: "Matches", href: "/all-matches", disabled: false },
+    { id: "players", label: "Players", href: "/all-players", disabled: false },
+    { id: "teams", label: "Teams", href: "/all-teams", disabled: false },
+    { id: "standings", label: "Standings", href: "/standings", disabled: false },
+    { id: "gallery", label: "Gallery", href: "/gallery", disabled: true },
   ]
 
   return (
@@ -192,13 +201,14 @@ export function SiteHeader({
               key={item.id}
               variant="ghost"
               size="sm"
+              disabled={item.disabled}
               className={cn(
                 "font-cinzel text-xs xl:text-sm rounded-full px-3.5 h-8 transition-all duration-300",
                 activeSection === item.id
                   ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
                   : "text-gray-300 hover:text-gold hover:bg-white/5"
               )}
-              onClick={() => scrollToSection(item.id)}
+              onClick={() => navigate(item.href)}
             >
               {item.label}
             </Button>

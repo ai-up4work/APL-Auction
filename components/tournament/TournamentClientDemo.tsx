@@ -56,7 +56,7 @@ export default function TournamentClient() {
           HEADER — same section-pattern + section-gradient treatment
           as every section in HomeContent, typewriter title
       ═══════════════════════════════════════════════════════════ */}
-      <section className="pt-32 sm:pt-40 pb-16 relative section-pattern">
+      <section className="pt-24 sm:pt-32 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-16 fade-in">
