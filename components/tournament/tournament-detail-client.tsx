@@ -71,6 +71,18 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  yet, the tab trigger is disabled + shows a lock icon, and its       */
 /*  content renders a "coming soon" placeholder instead of being        */
 /*  hidden outright.                                                    */
+/*                                                                        */
+/*  FIXED (tab-switch glitch): every <TabsContent> below now renders    */
+/*  with `forceMount` and toggles visibility purely via CSS              */
+/*  (`data-[state=inactive]:hidden`) instead of letting Radix unmount    */
+/*  the panel on every switch. Previously, switching away from a tab    */
+/*  containing next/image components (Squads, Schedule) tore that       */
+/*  whole subtree out of the DOM, and switching back remounted it from  */
+/*  scratch — every image had to re-fetch/re-decode and the page height */
+/*  snapped instead of just showing/hiding, which read as a visible     */
+/*  "glitch"/flash on every tab change. Keeping panels mounted and just  */
+/*  hiding them fixes that; the extra always-mounted DOM is cheap next  */
+/*  to what it was doing before (destroy + rebuild on every click).     */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -110,6 +122,35 @@ function initials(name: string) {
     .toUpperCase()
 }
 
+/**
+ * Shared player avatar for the Stats tab: real photo when
+ * PlayerStatRow/BowlingStatRow.img is set, falling back to an
+ * initials badge otherwise (or if the image URL 404s/fails to load).
+ *
+ * FIXED: this didn't exist before — StatsSpotlightRow and
+ * StatsLeaderboardCard rendered nothing but text (Spotlight) or a
+ * hardcoded initials circle (Leaderboard), even though PlayerStatRow /
+ * BowlingStatRow already carry a best-effort `img` resolved server-side
+ * in getTournamentStats (data/match-data.ts). The data was there, it
+ * just was never read on this page.
+ */
+function StatAvatar({ name, img, size = "md" }: { name: string; img?: string; size?: "sm" | "md" }) {
+  const [failed, setFailed] = useState(false)
+  const dims = size === "md" ? "h-12 w-12 text-sm" : "h-9 w-9 text-[10px]"
+  const showPhoto = !!img && !failed
+  return (
+    <div
+      className={`relative ${dims} rounded-full overflow-hidden bg-gradient-to-br from-gold/20 via-black/40 to-black/60 border border-gold/20 flex items-center justify-center shrink-0`}
+    >
+      {showPhoto ? (
+        <Image src={img} alt={name} className="w-full h-full object-cover" onError={() => setFailed(true)} width={48} height={48} />
+      ) : (
+        <span className="font-bold text-gold font-cinzel">{initials(name)}</span>
+      )}
+    </div>
+  )
+}
+
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
@@ -147,6 +188,12 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
   const hasAwards = !!tournament.awards?.length
   const hasPrizes = !!tournament.prizes?.length
+
+  // Shared class applied to every TabsContent so panels stay mounted
+  // (forceMount) and are only ever shown/hidden via CSS driven off
+  // Radix's own data-state attribute — see the NOTE ON TABS glitch fix
+  // above.
+  const tabContentClass = "mt-0 data-[state=inactive]:hidden"
 
   return (
     <main className="overflow-hidden">
@@ -265,7 +312,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsList>
 
                 {/* OVERVIEW */}
-                <TabsContent value="overview" className="mt-0">
+                <TabsContent value="overview" forceMount className={tabContentClass}>
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel">ABOUT THE TOURNAMENT</h2>
                     {tournament.description ? (
@@ -282,7 +329,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* POINTS TABLE */}
-                <TabsContent value="points" className="mt-0">
+                <TabsContent value="points" forceMount className={tabContentClass}>
                   {hasPoints ? (
                     <PointsTablePanel rows={tournament.pointsTable!} />
                   ) : (
@@ -295,7 +342,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* SCHEDULE */}
-                <TabsContent value="schedule" className="mt-0">
+                <TabsContent value="schedule" forceMount className={tabContentClass}>
                   {hasFixtures ? (
                     <SchedulePanel fixtures={tournament.fixtures!} squads={tournament.squads} slug={slug} />
                   ) : (
@@ -308,7 +355,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* BRACKET */}
-                <TabsContent value="bracket" className="mt-0">
+                <TabsContent value="bracket" forceMount className={tabContentClass}>
                   {hasBracket ? (
                     tournament.bracketFormat === "double" ? (
                       <BracketPreviewPanel format="double" slug={slug} doubleElimData={tournament.doubleElimData} />
@@ -329,7 +376,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* SQUADS */}
-                <TabsContent value="squads" className="mt-0">
+                <TabsContent value="squads" forceMount className={tabContentClass}>
                   {hasSquads ? (
                     <SquadsPanel squads={tournament.squads!} />
                   ) : (
@@ -342,7 +389,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* STATS / LEADERBOARD */}
-                <TabsContent value="stats" className="mt-0">
+                <TabsContent value="stats" forceMount className={tabContentClass}>
                   {hasLeaderboard ? (
                     <TournamentStatsPanel
                       batting={tournament.battingStats || []}
@@ -359,7 +406,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 </TabsContent>
 
                 {/* PRIZES & AWARDS */}
-                <TabsContent value="prizes" className="mt-0">
+                <TabsContent value="prizes" forceMount className={tabContentClass}>
                   <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
                     <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
                       <Award className="h-5 w-5 text-gold" />
@@ -530,43 +577,19 @@ function LockedTabPlaceholder({
 // ─────────────────────────────────────────────────────────────
 // POINTS TABLE PANEL — card-row standings with a visible
 // qualification line, per-team NRR bar, and form pills.
-//
-// FIXED (col mislabel): the desktop header row has 8 columns
-// instead of 7 — "Form" and "Pts" are separate labeled columns,
-// so a team's point total never visually reads as part of their
-// form streak.
-//
-// REDESIGNED (visual polish + "why do only 4 teams look real"):
-// Every team is rendered — that part was never actually broken —
-// but rows below the qualification line used to be heavily dimmed
-// (near-invisible border/background), which read as "disabled"
-// rather than "still in the tournament." Now every row gets the
-// same solid card treatment and full-strength text regardless of
-// rank; the top-4 cutoff is communicated with a single slim
-// "Qualification Line" divider inserted between rank 4 and 5
-// (only rendered when there are more than 4 teams) plus a small
-// gold rank badge/medal on qualifying rows — not by fading
-// everyone else out.
 // ─────────────────────────────────────────────────────────────
 function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   const sorted = [...rows].sort((a, b) => b.points - a.points)
   const maxPoints = Math.max(1, ...sorted.map((r) => r.points))
   const QUALIFY_COUNT = 4
 
-  // NRR bar needs a symmetric scale around 0 so positive/negative
-  // net run rates both read proportionally against each other.
   const nrrValues = sorted.map((r) => parseFloat(r.nrr) || 0)
   const maxAbsNrr = Math.max(0.5, ...nrrValues.map((v) => Math.abs(v)))
 
-  // Which team's calculation overlay is currently open, if any. Storing
-  // the row + its rank together (rather than just a team id) means the
-  // overlay doesn't need to re-look-up the row from `sorted` — it just
-  // renders whatever was open when the row was clicked.
   const [openCalc, setOpenCalc] = useState<{ row: PointsRow; rank: number } | null>(null)
 
   return (
     <div className="relative bg-black/50 border border-gold/20 rounded-xl p-6 mb-8 overflow-hidden">
-      {/* faint decorative glow, purely aesthetic */}
       <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-gold/[0.06] blur-3xl" />
 
       <div className="relative flex items-center justify-between gap-3 mb-6 flex-wrap">
@@ -582,8 +605,6 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
         </p>
       </div>
 
-      {/* Column headers — hidden on small screens; cards carry their own labels there.
-          8 columns: #, Team, P, W, L, NRR, Form, Pts. */}
       <div className="relative hidden sm:grid grid-cols-[2.75rem_1fr_3rem_3rem_3rem_8rem_6.5rem_3.5rem] gap-2 px-4 pb-2.5 mb-1 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel border-b border-white/5">
         <span>#</span>
         <span>Team</span>
@@ -632,14 +653,6 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   )
 }
 
-/**
- * Slim horizontal divider marking the qualification cutoff, shown
- * once between the last qualifying team and the first non-qualifying
- * one (only when the table has more teams than qualify). Replaces the
- * old approach of just dimming every row below the cutoff — this way
- * every team keeps full-strength styling and stays easy to read, and
- * the cutoff itself is still unambiguous.
- */
 function QualificationDivider() {
   return (
     <div className="flex items-center gap-3 py-1.5 px-1">
@@ -652,17 +665,6 @@ function QualificationDivider() {
   )
 }
 
-/**
- * One team's row in the Points Table — split out from PointsTablePanel
- * so the (fairly involved) per-row NRR-bar / form-pill / qualification
- * styling logic doesn't have to live inline inside the sort+map above.
- *
- * Every row (qualified or not) uses the same solid card background and
- * full-opacity text — only the rank badge changes (gold/medal for the
- * top 4, a neutral but still clearly legible badge below that) so
- * teams outside the qualification zone stay fully readable instead of
- * fading into a "disabled" look.
- */
 function PointsTableRow({
   row,
   rank,
@@ -702,16 +704,12 @@ function PointsTableRow({
           : "border-white/10 bg-white/[0.03] hover:border-white/20"
       }`}
     >
-      {/* calculator affordance — appears on hover/focus so it doesn't
-          clutter the row by default, hints that the row is clickable */}
       <span className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gold text-black flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-200 shadow-md">
         <Calculator className="h-3 w-3" />
       </span>
 
-      {/* qualification tick on the left edge */}
       {qualified && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-gold" />}
 
-      {/* Rank — medal styling for top 3, clean numbered badge otherwise (always fully legible) */}
       <span
         className={`relative h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold font-cinzel shrink-0 ${
           medal ? medal.badge : qualified ? "bg-gold/15 text-gold border border-gold/40" : "bg-white/10 text-gray-200 border border-white/15"
@@ -720,7 +718,6 @@ function PointsTableRow({
         {medal ? <medal.Icon className="h-3.5 w-3.5" /> : rank}
       </span>
 
-      {/* Team + points bar (mobile: also carries P/W/L inline) */}
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-white font-semibold font-cinzel truncate">{row.team}</span>
@@ -736,19 +733,16 @@ function PointsTableRow({
         </div>
       </div>
 
-      {/* P / W / L — desktop only */}
       <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.played}</span>
       <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.won}</span>
       <span className="hidden sm:block text-center text-gray-200 text-sm font-medium">{row.lost}</span>
 
-      {/* NRR bar — desktop only */}
       <div className="hidden sm:flex items-center gap-2">
         <span className={`text-xs font-bold w-12 shrink-0 ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
           {row.nrr}
         </span>
       </div>
 
-      {/* Mobile: combined form pills + points chip in one cell */}
       <div className="col-start-3 sm:hidden flex items-center gap-3 justify-self-end">
         <div className="flex gap-1">
           {row.form?.map((f, j) => (
@@ -760,14 +754,12 @@ function PointsTableRow({
         </span>
       </div>
 
-      {/* Desktop: Form — its own column, under the "Form" header */}
       <div className="hidden sm:flex items-center gap-1 justify-self-end">
         {row.form?.map((f, j) => (
           <FormPill key={j} result={f} />
         ))}
       </div>
 
-      {/* Desktop: Points — its own column, under the "Pts" header */}
       <span className="hidden sm:block text-right text-gold font-bold font-cinzel text-xl leading-none">
         {row.points}
       </span>
@@ -775,7 +767,6 @@ function PointsTableRow({
   )
 }
 
-/** Single W/L/NR form-pill, shared by the mobile and desktop form cells. */
 function FormPill({ result }: { result: "W" | "L" | "NR" }) {
   return (
     <span
@@ -793,30 +784,7 @@ function FormPill({ result }: { result: "W" | "L" | "NR" }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// POINTS CALCULATION OVERLAY — click any team row to see exactly how
-// their points total was derived (Won×2 + Tied×1 + Lost×0), plus a
-// match-by-match NRR breakdown and the final NRR formula for context.
-//
-// DATA NOTE: `PointsRow` (what getPointsTableForTournament returns)
-// only carries played/won/lost/nrr/form/points directly on the row —
-// it doesn't expose a `tied` count as its own field, so:
-//   - Tied matches are back-derived algebraically from the numbers we
-//     DO have: since points = won*2 + tied*1 (see standings.ts),
-//     tied = points - won*2. This is exact, not an estimate, given
-//     that formula — it just isn't a separately-stored field.
-//
-// `row.matches` (added via getMatchNrrBreakdownForTournament in
-// lib/tournament/standings.ts) carries the actual runs/overs each
-// completed match contributed to this team's NRR. This is NOT a
-// per-match NRR value — the real ICC NRR sums runs and overs across
-// every match first and divides once at the end, so a per-match rate
-// wouldn't compose into the season total the way it looks like it
-// should. Showing the raw per-match inputs instead lets someone verify
-// the total themselves without introducing a number that doesn't
-// actually exist in the real calculation. If `row.matches` is empty
-// (e.g. standings were computed before this breakdown existed, or the
-// tournament has ties/manual results with no bracket_matches rows
-// behind them), the overlay falls back to just the final NRR + formula.
+// POINTS CALCULATION OVERLAY
 // ─────────────────────────────────────────────────────────────
 function PointsCalculationOverlay({
   row,
@@ -847,15 +815,11 @@ function PointsCalculationOverlay({
       aria-modal="true"
       aria-label={`Points calculation for ${row.team}`}
     >
-      {/* backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-      {/* modal card */}
       <div className="relative w-full max-w-md bg-[#0d0d0f] border border-gold/25 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
-        {/* decorative glow */}
         <div className="pointer-events-none absolute -top-20 -right-20 h-56 w-56 rounded-full bg-gold/[0.08] blur-3xl" />
 
-        {/* header */}
         <div className="relative flex items-start justify-between gap-3 p-5 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <span
@@ -886,9 +850,7 @@ function PointsCalculationOverlay({
           </button>
         </div>
 
-        {/* body */}
         <div className="relative p-5 space-y-6 overflow-y-auto">
-          {/* Points formula */}
           <div>
             <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-1.5">
               <Calculator className="h-3.5 w-3.5" />
@@ -916,7 +878,6 @@ function PointsCalculationOverlay({
             </p>
           </div>
 
-          {/* NRR */}
           <div>
             <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3">Net Run Rate</h4>
 
@@ -979,7 +940,6 @@ function PointsCalculationOverlay({
             </p>
           </div>
 
-          {/* Form */}
           {row.form && row.form.length > 0 && (
             <div>
               <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3">
@@ -1015,8 +975,6 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
 
   const filtered = filter === "all" ? fixtures : fixtures.filter((f) => f.status === filter)
 
-  // Stage/round grouping (falls back to a single "Matches" bucket
-  // if fixtures don't carry a stage field yet).
   const stageOf = (f: Fixture) => (f as any).stage ?? "Matches"
   const stageOrder = ["Group Stage", "Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final", "Matches"]
 
@@ -1058,12 +1016,9 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   const statusBadgeClass = (s: Fixture["status"], liveAccent: "red" | "green" = "red") => {
     if (s === "live") return liveAccent === "green" ? "bg-green-600 hover:bg-green-700" : "bg-yellow-600 hover:bg-yellow-700"
     if (s === "completed") return "bg-green-600 hover:bg-green-700"
-    return "bg-blue-600 text-black hover:bg-blue-700/90" // upcoming — matches the site's gold accent instead of blue
+    return "bg-blue-600 text-black hover:bg-blue-700/90"
   }
 
-  // A match is "unconfirmed" if either side is still a TBD slot —
-  // these should sink to the bottom of their stage so the schedule
-  // reads "what's actually set to happen" first.
   const isTBD = (f: Fixture) => f.team1 === "TBD" || f.team2 === "TBD"
 
   return (
@@ -1098,9 +1053,6 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
       ) : (
         <div className="space-y-10">
           {stages.map((stage) => {
-            // Completed matches first, then live, then upcoming.
-            // Within each status group, matches with both teams
-            // already confirmed come before TBD placeholder slots.
             const stageFixtures = [...stageGroups.get(stage)!].sort((a, b) => {
               const statusRank = (f: Fixture) =>
                 f.status === "completed" ? 0 : f.status === "live" ? 1 : 2
@@ -1111,7 +1063,6 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
               return tbdRank(a) - tbdRank(b)
             })
 
-            // date sub-grouping within the stage, same logic as before
             const dateGroups: { date: string; items: Fixture[] }[] = []
             for (const f of stageFixtures) {
               const current = dateGroups[dateGroups.length - 1]
@@ -1229,7 +1180,6 @@ function FixtureCard({
           : ""
       }`}
     >
-      {/* Duel banner — diagonal split, team-colored halves */}
       <div className="relative h-36 bg-black/60">
         <div
           className="absolute inset-0"
@@ -1245,7 +1195,6 @@ function FixtureCard({
             background: `linear-gradient(225deg, ${team2Color}80, rgba(0,0,0,0.92))`,
           }}
         />
-        {/* seam highlight */}
         <div
           className="absolute inset-0 pointer-events-none"
           style={{ clipPath: "polygon(57% 0, 60% 0, 44% 100%, 41% 100%)", background: "rgba(255,255,255,0.08)" }}
@@ -1266,7 +1215,6 @@ function FixtureCard({
           {statusLabel}
         </span>
 
-        {/* Team 1 */}
         <div className="absolute left-[16%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
           {team1Logo ? (
             <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team1Color }}>
@@ -1282,14 +1230,12 @@ function FixtureCard({
           </span>
         </div>
 
-        {/* VS seam badge */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
           <span className="h-8 w-8 rounded-full border border-gold/40 bg-black/70 flex items-center justify-center text-gold font-cinzel text-[10px] font-bold">
             VS
           </span>
         </div>
 
-        {/* Team 2 */}
         <div className="absolute left-[84%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
           {team2Logo ? (
             <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40" style={{ borderColor: team2Color }}>
@@ -1306,7 +1252,6 @@ function FixtureCard({
         </div>
       </div>
 
-      {/* Info footer */}
       <div className="bg-black/50 p-4 flex-1">
         <p className="text-gray-300 text-xs font-medium text-center">{timeLabel}</p>
         {(dateLabel || venueLabel) && (
@@ -1336,14 +1281,9 @@ function FixtureCard({
 }
 
 // ─────────────────────────────────────────────────────────────
-// BRACKET PANEL (legacy flat-array fallback) — groups matches
-// into round columns instead of a flat grid, so it scales
-// cleanly from a 4-team final up to a 32-team draw.
+// BRACKET PANEL (legacy flat-array fallback)
 // ─────────────────────────────────────────────────────────────
 function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string }) {
-  // Group by round. Falls back to inferring round from `label`
-  // (e.g. "Round of 32 - Match 3" -> "Round of 32") if `round`
-  // isn't set on the data yet.
   const roundOf = (m: BracketMatch) =>
     (m as any).round ?? m.label.replace(/\s*-?\s*Match\s*\d+$/i, "").trim()
 
@@ -1355,8 +1295,6 @@ function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string
     grouped.get(r)!.push(m)
   }
 
-  // Order rounds: known rounds first in bracket order, then any
-  // unrecognized round names appended alphabetically as a fallback.
   const rounds = [...grouped.keys()].sort((a, b) => {
     const ai = roundOrder.indexOf(a)
     const bi = roundOrder.indexOf(b)
@@ -1383,8 +1321,6 @@ function BracketPanel({ matches, slug }: { matches: BracketMatch[]; slug: string
       >
         {rounds.map((round, colIdx) => {
           const roundMatches = grouped.get(round)!
-          // Vertical spacing doubles each round so brackets converge
-          // visually toward the final, like a real knockout tree.
           const spacingMultiplier = Math.pow(2, colIdx)
           const topOffset = colIdx === 0 ? 0 : (CARD_HEIGHT + CARD_GAP) * (spacingMultiplier / 2 - 0.5)
           const gapBetween = (CARD_HEIGHT + CARD_GAP) * spacingMultiplier - CARD_HEIGHT
@@ -1515,14 +1451,6 @@ function SquadsPanel({ squads }: { squads: Squad[] }) {
   )
 }
 
-/**
- * Photo-forward player card: square headshot (or an initials avatar
- * with a deterministic gold-tinted gradient when no image is set),
- * a small captain armband badge overlaid on the corner when
- * applicable, and the name/role beneath — mirrors the same
- * "portrait card" language used for team logos elsewhere on the page
- * rather than the flatter pill-chip treatment.
- */
 function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean; image?: string; role?: string } }) {
   return (
     <div className="group flex flex-col items-center gap-2 text-center">
@@ -1539,7 +1467,6 @@ function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean
             <span className="text-gold text-lg font-bold font-cinzel">{initials(p.name)}</span>
           </div>
         )}
-        {/* subtle bottom scrim so any future overlaid text (role, jersey #) stays legible */}
         <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
         {p.isCaptain && (
           <span className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-gold text-black text-[10px] font-bold font-cinzel flex items-center justify-center shadow-md">
@@ -1557,17 +1484,6 @@ function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean
 
 // ─────────────────────────────────────────────────────────────
 // TOURNAMENT STATS — MAIN COMPONENT
-//
-// Split into a main orchestrator (owns the batting/bowling toggle
-// state and derives team-scoring totals from fixtures) plus three
-// focused sub-components:
-//   - StatsSpotlightRow  → top scorer / top wicket-taker / highest
-//     team total, shown as headline cards above the leaderboard
-//   - StatsLeaderboardCard → the ranked batting/bowling list
-//   - TeamScoringCard    → per-team run totals + match-by-match list
-//
-// Each sub-component only receives the data it needs, so the parent
-// stays readable and each piece can be reused or restyled on its own.
 // ─────────────────────────────────────────────────────────────
 function TournamentStatsPanel({
   batting,
@@ -1601,18 +1517,10 @@ function TournamentStatsPanel({
       <StatsSpotlightRow topBatter={topBatter} topBowler={topBowler} highestTeamTotal={highestTeamTotal} />
 
       <StatsLeaderboardCard batting={batting} bowling={bowling} mode={mode} onModeChange={setMode} />
-
-      <TeamScoringCard teams={teams} playedFixtures={playedFixtures} />
     </div>
   )
 }
 
-/**
- * Deterministic per-team accent color, shared by TeamScoringCard and
- * anywhere else on the page that needs a stable color for a team name
- * without a real `teams.color` value available (same hashing approach
- * used in SchedulePanel).
- */
 function hashTeamColor(name: string) {
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
@@ -1622,8 +1530,11 @@ function hashTeamColor(name: string) {
 
 // ─────────────────────────────────────────────────────────────
 // SUB-COMPONENT: spotlight cards (top scorer / top wicket-taker /
-// highest team total). Silently omits a card if its underlying stat
-// isn't available, and renders nothing at all if none are.
+// highest team total).
+//
+// FIXED: each card now shows the leader's actual photo (StatAvatar,
+// backed by PlayerStatRow.img / BowlingStatRow.img) instead of just
+// printing their name as plain text with no avatar at all.
 // ─────────────────────────────────────────────────────────────
 function StatsSpotlightRow({
   topBatter,
@@ -1638,6 +1549,7 @@ function StatsSpotlightRow({
     topBatter && {
       label: "Leading Run Scorer",
       name: topBatter.player,
+      img: topBatter.img,
       value: `${topBatter.runs}`,
       unit: "runs",
       meta: `${topBatter.matches} matches · SR ${topBatter.sr.toFixed(1)}`,
@@ -1648,6 +1560,7 @@ function StatsSpotlightRow({
     topBowler && {
       label: "Leading Wicket Taker",
       name: topBowler.player,
+      img: topBowler.img,
       value: `${topBowler.wkts}`,
       unit: "wickets",
       meta: `Best ${topBowler.best} · Econ ${topBowler.econ.toFixed(2)}`,
@@ -1658,6 +1571,7 @@ function StatsSpotlightRow({
     highestTeamTotal && {
       label: "Highest Team Total",
       name: highestTeamTotal[0],
+      img: undefined,
       value: `${highestTeamTotal[1].scored.toLocaleString()}`,
       unit: "runs",
       meta: `${highestTeamTotal[1].games} matches played`,
@@ -1668,6 +1582,7 @@ function StatsSpotlightRow({
   ].filter(Boolean) as {
     label: string
     name: string
+    img?: string
     value: string
     unit: string
     meta: string
@@ -1689,7 +1604,10 @@ function StatsSpotlightRow({
             <span className="text-gray-400 text-[10px] font-cinzel uppercase tracking-widest">{c.label}</span>
             <c.Icon className={`h-4 w-4 ${c.iconColor}`} />
           </div>
-          <p className="text-white font-bold font-cinzel text-lg leading-tight truncate mb-1">{c.name}</p>
+          <div className="flex items-center gap-3 mb-1">
+            <StatAvatar name={c.name} img={c.img} size="md" />
+            <p className="text-white font-bold font-cinzel text-lg leading-tight truncate">{c.name}</p>
+          </div>
           <p className="flex items-baseline gap-1.5">
             <span className="text-2xl font-bold font-cinzel text-white">{c.value}</span>
             <span className="text-gray-400 text-xs">{c.unit}</span>
@@ -1702,9 +1620,12 @@ function StatsSpotlightRow({
 }
 
 // ─────────────────────────────────────────────────────────────
-// SUB-COMPONENT: ranked batting/bowling leaderboard with the
-// toggle. rankStyle gives the top 3 medal styling, matching the
-// top-4 highlight treatment used on the Points Table tab.
+// SUB-COMPONENT: ranked batting/bowling leaderboard with the toggle.
+//
+// FIXED: rows previously rendered a hardcoded initials circle
+// regardless of whether a real photo was available. They now use
+// StatAvatar, which shows r.img when present and only falls back to
+// initials when there's no photo (or it fails to load).
 // ─────────────────────────────────────────────────────────────
 function StatsLeaderboardCard({
   batting,
@@ -1773,9 +1694,7 @@ function StatsLeaderboardCard({
                 <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold font-cinzel shrink-0 ${badge}`}>
                   {Icon ? <Icon className="h-3 w-3" /> : i + 1}
                 </span>
-                <span className="h-10 w-10 rounded-full bg-gradient-to-br from-gold/20 via-black/40 to-black/60 border border-gold/15 text-gold text-[11px] font-bold flex items-center justify-center font-cinzel shrink-0">
-                  {initials(r.player)}
-                </span>
+                <StatAvatar name={r.player} img={r.img} size="sm" />
                 <div>
                   <p className="text-white text-sm font-semibold">{r.player}</p>
                   <p className="text-gray-400 text-xs">
@@ -1798,86 +1717,9 @@ function StatsLeaderboardCard({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// SUB-COMPONENT: per-team run totals (relative bars) plus a
-// match-by-match score list, derived from fixtures with recorded
-// scores.
-// ─────────────────────────────────────────────────────────────
-function TeamScoringCard({
-  teams,
-  playedFixtures,
-}: {
-  teams: [string, { scored: number; conceded: number; games: number }][]
-  playedFixtures: Fixture[]
-}) {
-  const maxScored = Math.max(1, ...teams.map(([, s]) => s.scored))
-
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-      <h2 className="text-xl font-bold text-white mb-5 font-cinzel flex items-center gap-2">
-        <Trophy className="h-5 w-5 text-gold" />
-        TEAM SCORING
-      </h2>
-
-      {teams.length > 0 ? (
-        <>
-          <div className="space-y-3 mb-8">
-            {teams.map(([team, s], i) => (
-              <div key={team} className="flex items-center gap-3">
-                <span className="text-gold font-bold font-cinzel w-5 text-center shrink-0">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1.5 gap-2">
-                    <span className="text-white text-sm font-semibold truncate">{team}</span>
-                    <span className="text-xs text-gray-400 shrink-0">
-                      <b className="text-gold font-cinzel text-sm">{s.scored.toLocaleString()}</b> runs · {s.games} matches
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${Math.max(4, (s.scored / maxScored) * 100)}%`, background: hashTeamColor(team) }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-3">
-            <span className="h-px flex-1 bg-gold/10" />
-            Match by Match
-            <span className="h-px flex-1 bg-gold/10" />
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {playedFixtures.map((f) => (
-              <div
-                key={f.id}
-                className="flex items-center gap-2 border border-gold/10 rounded-md px-3 py-2.5 bg-white/[0.02] hover:border-gold/30 transition-colors text-sm"
-              >
-                <span className="text-gray-300 truncate flex-1 text-right">{f.team1}</span>
-                <span className="text-white font-bold font-cinzel whitespace-nowrap px-2">
-                  {f.team1Score}
-                  <span className="text-gray-500 mx-1">–</span>
-                  {f.team2Score}
-                </span>
-                <span className="text-gray-300 truncate flex-1">{f.team2}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <p className="text-gray-500 text-sm italic text-center py-6">
-          Team scoring will appear once tournament matches have recorded final scores.
-        </p>
-      )}
-    </div>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────
-// LEADERBOARD PANEL (legacy, run/wicket LeaderboardRow shape —
-// kept for tournament.runsLeaderboard/wicketsLeaderboard callers,
-// separate from the per-player-stats leaderboard above)
+// LEADERBOARD PANEL (legacy, run/wicket LeaderboardRow shape)
 // ─────────────────────────────────────────────────────────────
 function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: LeaderboardRow[] }) {
   const [tab, setTab] = useState<"runs" | "wickets">(runs.length ? "runs" : "wickets")
@@ -1914,7 +1756,7 @@ function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: 
             <div className="flex items-center gap-3">
               <span className="text-gold font-bold font-cinzel w-5 text-center">{row.rank}</span>
               <span className="h-8 w-8 rounded-full bg-gold/20 text-gold text-[10px] font-bold flex items-center justify-center font-cinzel">
-                {initials(row.player)}
+                {row.img && <Image src={row.img} alt={row.player} width={32} height={32} className="rounded-full object-cover" />}
               </span>
               <div>
                 <p className="text-white text-sm font-semibold">{row.player}</p>
@@ -1933,17 +1775,7 @@ function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: 
 }
 
 // ─────────────────────────────────────────────────────────────
-// AWARDS GRID — rendered inside the Prizes & Awards tab's card
-// alongside the legacy place/reward list, not as its own separate
-// card/section. Mirrors the same award-type / prize-category badge
-// language AwardsManager uses in the admin UI, so every field an
-// organizer sets (title, description, award type, prize category,
-// prize value, image) actually shows up here instead of being
-// silently dropped. Awards come from tournament_award_templates (via
-// getAwardsForTournament in lib/tournament/tournament.ts), same data
-// AwardsManager edits — plus the static showcase demo data in
-// tournament-data.ts, which only ever sets label/name/note and simply
-// renders fewer badges as a result (no error, just less shown).
+// AWARDS GRID
 // ─────────────────────────────────────────────────────────────
 const PUBLIC_PRIZE_CATEGORY_META: Record<
   NonNullable<AwardEntry["prizeCategory"]>,

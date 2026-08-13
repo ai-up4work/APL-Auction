@@ -124,6 +124,7 @@ export interface LeaderboardRow {
   team: string
   value: number
   meta: string
+  img?: string
 }
 
 export interface AwardEntry {
