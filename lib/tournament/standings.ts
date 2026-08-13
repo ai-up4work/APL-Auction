@@ -20,18 +20,37 @@
 //   already read for the Schedule/Bracket tabs, so a match only counts
 //   here once it's already visible as "completed" elsewhere on the page.
 //
-// NRR:
-//   Real net run rate needs balls actually faced/bowled, not just final
-//   scores. bracket_matches only stores score_a/score_b (no overs data).
-//   Where a bracket_match is linked to a real scored match
-//   (overlay_match_id -> matches.id), this pulls legal-ball counts from
-//   `balls` for an accurate figure. Where it isn't linked (a bracket
-//   result entered manually, with no ball-by-ball data behind it), it
-//   falls back to assuming the full overs quota was used by both teams
-//   (matches.match_setup.overs, defaulting to 20) — the same convention
-//   real cricket NRR uses for a team bowled out inside their overs, so
-//   it's not a wild guess, just not exact for a team that simply didn't
-//   need all their overs to chase a target.
+// NRR — exact ICC rule:
+//   NRR = (runs scored / overs faced) − (runs conceded / overs bowled),
+//   summed across every match, one subtraction at the end (not averaged
+//   per match). "Overs faced" for a given team's innings is resolved
+//   PER TEAM, PER INNINGS, independently, as:
+//     - ALL OUT (10 wickets down) before using the full overs quota ->
+//       overs faced = the FULL quota (e.g. 20.0 in a T20), not the actual
+//       balls it took to lose the 10th wicket. This is the real ICC rule
+//       — it exists specifically so a team can't inflate its own NRR by
+//       batting slowly, and a fast collapse doesn't get double-punished
+//       beyond the runs already conceded.
+//     - NOT all out (overs completed normally, or the innings ended early
+//       because a successful chase reached its target) -> overs faced =
+//       the ACTUAL legal balls faced. A team finishing a chase in fewer
+//       overs is correctly rewarded with a better NRR.
+//   One team can be bowled out while the other chases successfully in the
+//   SAME match — resolveOversForNrr() below is evaluated independently
+//   per team for exactly this reason, never as one shared match-level
+//   decision.
+//
+//   This needs real ball-by-ball data (`balls.is_wicket` count, plus
+//   legal-delivery count) to know which case applies. Where a
+//   bracket_match is linked to a real scored match (overlay_match_id ->
+//   matches.id), getMatchBallsSummary() pulls that from `balls`. Where
+//   it isn't linked (a bracket result entered manually, with no
+//   ball-by-ball data behind it), there's no way to know whether either
+//   team was bowled out, so it falls back to assuming the full overs
+//   quota for both sides (matches.match_setup.overs, defaulting to 20) —
+//   the same number the all-out rule would produce anyway, just applied
+//   without being able to verify it, so it undercounts NRR for any team
+//   that actually finished a chase early without ball data to prove it.
 //
 // POINTS:
 //   2 for a win, 1 for a tie, 0 for a loss — the common T20-league
@@ -106,15 +125,22 @@ function emptyAgg(teamId: string): TeamAgg {
   }
 }
 
+interface TeamBallsSummary {
+  legalBalls: number
+  wickets: number
+}
+
 /**
- * Legal (non-wide, non-no-ball) delivery count per batting_team_id for a
- * single match, from `balls`. Used for real NRR when a bracket_matches
- * row is linked to a scored match via overlay_match_id.
+ * Per-team legal (non-wide, non-no-ball) delivery count AND wicket count
+ * for a single match, from `balls`. Both are needed to apply the real ICC
+ * NRR rule correctly — see resolveOversForNrr below, which is where
+ * legalBalls vs. wickets actually gets turned into "overs faced for NRR
+ * purposes."
  */
-async function getLegalBallsByTeam(matchId: string): Promise<Map<string, number>> {
+async function getMatchBallsSummary(matchId: string): Promise<Map<string, TeamBallsSummary>> {
   const { data, error } = await supabase
     .from("balls")
-    .select("batting_team_id, extra_type")
+    .select("batting_team_id, extra_type, is_wicket")
     .eq("match_id", matchId)
 
   if (error) {
@@ -122,14 +148,46 @@ async function getLegalBallsByTeam(matchId: string): Promise<Map<string, number>
     return new Map()
   }
 
-  const legalByTeam = new Map<string, number>()
+  const summaryByTeam = new Map<string, TeamBallsSummary>()
   for (const row of data ?? []) {
     if (!row.batting_team_id) continue
+    if (!summaryByTeam.has(row.batting_team_id)) {
+      summaryByTeam.set(row.batting_team_id, { legalBalls: 0, wickets: 0 })
+    }
+    const s = summaryByTeam.get(row.batting_team_id)!
+
     const isLegal = row.extra_type !== "wide" && row.extra_type !== "no_ball"
-    if (!isLegal) continue
-    legalByTeam.set(row.batting_team_id, (legalByTeam.get(row.batting_team_id) ?? 0) + 1)
+    if (isLegal) s.legalBalls += 1
+
+    // Every dismissal counts toward "all out," including run-outs — a
+    // team is bowled out at 10 wickets down regardless of dismissal type.
+    if (row.is_wicket) s.wickets += 1
   }
-  return legalByTeam
+  return summaryByTeam
+}
+
+/**
+ * THE ICC NRR RULE, applied exactly:
+ *   - If the team was all out (10 wickets down) before using their full
+ *     overs quota, their overs-faced for NRR purposes is the FULL quota
+ *     (e.g. 20.0 overs in a T20), not the actual balls it took to lose
+ *     the 10th wicket. This stops a team boosting its own NRR by batting
+ *     slowly, and stops a fast collapse from unfairly tanking NRR further
+ *     than the runs conceded already do.
+ *   - Otherwise (overs completed normally, or the innings ended early
+ *     because a chase was completed / target reached), overs-faced is the
+ *     ACTUAL legal balls faced. A team finishing a chase in fewer overs
+ *     is correctly rewarded with a better NRR for doing so.
+ *
+ * This must be evaluated per team per innings, independently — one team
+ * can be bowled out while the other successfully chases, in the same
+ * match, and each side's overs-for-NRR is resolved by its own outcome,
+ * not a shared match-level flag.
+ */
+function resolveOversForNrr(summary: TeamBallsSummary | undefined, oversLimitBalls: number): number {
+  if (!summary) return oversLimitBalls // no ball data at all — full-quota fallback
+  if (summary.wickets >= 10) return oversLimitBalls // all out -> full quota, per ICC rule
+  return summary.legalBalls // otherwise -> actual balls faced (chase completed, or overs played out)
 }
 
 /**
@@ -205,28 +263,28 @@ export async function recomputeStandingsForTournament(tournamentId: string): Pro
     b.runsScored += m.score_b
     b.runsConceded += m.score_a
 
-    // ── balls faced/bowled for NRR ──
-    let aLegalBalls: number | undefined
-    let bLegalBalls: number | undefined
+    // ── balls faced/bowled for NRR, per the exact ICC all-out rule ──
+    const oversLimitBalls = (await getOversLimit(m.overlay_match_id)) * 6
 
+    let aSummary: TeamBallsSummary | undefined
+    let bSummary: TeamBallsSummary | undefined
     if (m.overlay_match_id) {
-      const legalByTeam = await getLegalBallsByTeam(m.overlay_match_id)
-      aLegalBalls = legalByTeam.get(m.team_a_id)
-      bLegalBalls = legalByTeam.get(m.team_b_id)
+      const summaryByTeam = await getMatchBallsSummary(m.overlay_match_id)
+      aSummary = summaryByTeam.get(m.team_a_id)
+      bSummary = summaryByTeam.get(m.team_b_id)
     }
 
-    if (aLegalBalls === undefined || bLegalBalls === undefined) {
-      const oversLimit = await getOversLimit(m.overlay_match_id)
-      const fullQuota = oversLimit * 6
-      if (aLegalBalls === undefined) aLegalBalls = fullQuota
-      if (bLegalBalls === undefined) bLegalBalls = fullQuota
-    }
+    // Each team's overs-for-NRR is resolved independently — one side can
+    // be bowled out (-> full quota) while the other chased successfully
+    // (-> actual balls), in the very same match.
+    const aOversForNrr = resolveOversForNrr(aSummary, oversLimitBalls)
+    const bOversForNrr = resolveOversForNrr(bSummary, oversLimitBalls)
 
-    a.ballsFaced += aLegalBalls
-    b.ballsFaced += bLegalBalls
+    a.ballsFaced += aOversForNrr
+    b.ballsFaced += bOversForNrr
     // one team's balls faced batting = the other team's balls bowled
-    a.ballsBowled += bLegalBalls
-    b.ballsBowled += aLegalBalls
+    a.ballsBowled += bOversForNrr
+    b.ballsBowled += aOversForNrr
 
     // ── result + points + form ──
     if (m.winner_team_id === m.team_a_id) {
