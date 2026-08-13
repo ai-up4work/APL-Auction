@@ -443,6 +443,12 @@ interface MatchTabsProps {
    *  the deterministic phrase-bank text. */
   getCommentaryText?: (over: number, ball: number) => string | undefined
   isCommentaryOverPending?: (over: number) => boolean
+  /** Resolved, guaranteed-distinct team colors computed once in
+   *  MatchDetailClient (lib/team-colors.ts) — passed straight through to
+   *  the Graphs tab so every chart there agrees with the score-strip
+   *  colors instead of MatchGraphs recomputing its own, undistinct pair. */
+  teamAColor: string
+  teamBColor: string
 }
 
 export default function MatchTabs({
@@ -468,6 +474,8 @@ export default function MatchTabs({
   playerImageMap,
   getCommentaryText,
   isCommentaryOverPending,
+  teamAColor,
+  teamBColor,
 }: MatchTabsProps) {
   const isTabLocked = (t: Tab): boolean => {
     switch (t) {
@@ -880,6 +888,8 @@ export default function MatchTabs({
             overs2={getOverByOverData(2)}
             innings2Started={innings2Started}
             completed={completed}
+            teamAColor={teamAColor}
+            teamBColor={teamBColor}
           />
         ))}
 

@@ -56,6 +56,14 @@ interface MatchGraphsProps {
    *  it once and passes the same value to both the score strip and here,
    *  so the two never disagree. */
   completed: boolean
+  /** Resolved, guaranteed-distinct team colors — computed once in
+   *  MatchDetailClient via ensureDistinctColors() (lib/team-colors.ts)
+   *  and passed down here so every chart (worm, run rate, partnerships,
+   *  win prob) agrees with the score-strip colors and never renders two
+   *  same-looking swatches. This replaces the old local `safeColor()`-only
+   *  derivation, which had no distinctness check of its own. */
+  teamAColor: string
+  teamBColor: string
 }
 
 type GraphTab = "ballmap" | "winprob" | "partnerships" | "runrate" | "worm"
@@ -67,22 +75,13 @@ const GRAPH_TABS: { key: GraphTab; label: string }[] = [
   { key: "worm", label: "Worm" },
 ]
 
-// Fallback / neutral-UI colors — used whenever a team has no `color` set
-// on match.teamA/teamB (older matches, or matches created before the
-// Match Editor's per-team color picker existed), and for chart elements
-// that are intentionally team-neutral (the pre-chase flat line, general
-// tab styling) rather than tied to either team's identity.
+// Fallback / neutral-UI colors — used for chart elements that are
+// intentionally team-neutral (the pre-chase flat line, reference lines)
+// rather than tied to either team's identity. Actual team colors now
+// always come in as props (teamAColor/teamBColor), already resolved and
+// guaranteed distinct by the caller.
 const GOLD = "#F5A623"
-const RED = "#EF4444"
 const GREY = "#6b7280"
-
-/** Basic hex-color sanity check — falls back to the default rather than
- *  handing recharts/gradients something malformed if match_setup ever
- *  has a stray empty string or non-hex value in team1Color/team2Color. */
-function safeColor(value: string | undefined, fallback: string): string {
-  if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())) return value.trim()
-  return fallback
-}
 
 function ballTone(b: string) {
   const isWicket = b.toUpperCase() === "W"
@@ -711,18 +710,10 @@ export default function MatchGraphs({
   overs2,
   innings2Started,
   completed,
+  teamAColor,
+  teamBColor,
 }: MatchGraphsProps) {
   const [graphTab, setGraphTab] = useState<GraphTab>("winprob")
-
-  // Per-match team colors — read straight from match.teamA.color /
-  // match.teamB.color (populated either from the real `teams` table for
-  // bracket-linked matches, or from match_setup.team1/team2.color for
-  // standalone matches, see data/match-data.ts). Falls back to the
-  // original gold/red defaults when a team has no color set, so older
-  // matches or matches without a color chosen still render sensibly
-  // instead of both teams defaulting to the same color or an invalid one.
-  const teamAColor = safeColor((match.teamA as { color?: string }).color, GOLD)
-  const teamBColor = safeColor((match.teamB as { color?: string }).color, RED)
 
   const teamAOverRuns = match.innings1.overRuns
   const teamBOverRuns = live ? overRunsB : match.innings2Final.overRuns

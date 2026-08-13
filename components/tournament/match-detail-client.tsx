@@ -16,6 +16,7 @@ import { SiteFooter } from "@/components/landing/site-footer"
 import SectionDivider from "@/components/section-divider"
 import { pageStyles } from "@/data/site-data"
 import { MatchEndToast } from "@/components/tournament/match-end-toast"
+import { safeColor, ensureDistinctColors } from "@/lib/team-colors"
 import type {
   MatchDetail,
   BattingRow,
@@ -99,11 +100,6 @@ function determineWinner(match: MatchDetail): "a" | "b" | "tie" {
   const totalB = match.innings2Final.total
   if (totalA === totalB) return "tie"
   return totalB > totalA ? "b" : "a"
-}
-
-function safeColor(value: string | undefined, fallback: string): string {
-  if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())) return value.trim()
-  return fallback
 }
 
 function currentPartnership(
@@ -374,6 +370,22 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
   const playerImageMap = useMemo(() => buildPlayerImageMap(match), [match.squads])
 
+  // Resolved, guaranteed-distinct team colors — validated by safeColor()
+  // then passed through ensureDistinctColors() (both from lib/team-colors)
+  // so a same/near-same color collision (from either match_setup or the
+  // teams table) never renders as two indistinguishable swatches. Computed
+  // once here and passed down through MatchTabs -> MatchGraphs so every
+  // chart on the page (win-prob strip, worm, run-rate, partnerships,
+  // win-probability graph) agrees on the same resolved pair.
+  const [teamAColor, teamBColor] = useMemo(
+    () =>
+      ensureDistinctColors(
+        safeColor(match.teamA.color, "#F5A623"),
+        safeColor(match.teamB.color, "#EF4444"),
+      ),
+    [match.teamA.color, match.teamB.color],
+  )
+
   // ── Groq-generated commentary for the tab currently being viewed. ──
   // Innings + team direction mirror the same logic the Commentary/Overs
   // tabs already use internally: innings 1 = teamA batting / teamB
@@ -625,8 +637,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   winProb={winProb}
                   teamAShort={match.teamA.short}
                   teamBShort={match.teamB.short}
-                  teamAColor={safeColor(match.teamA.color, "#F5A623")}
-                  teamBColor={safeColor(match.teamB.color, "#EF4444")}
+                  teamAColor={teamAColor}
+                  teamBColor={teamBColor}
                   completed={completed}
                 />
               </>
@@ -663,6 +675,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
               playerImageMap={playerImageMap}
               getCommentaryText={getCommentaryText}
               isCommentaryOverPending={isCommentaryOverPending}
+              teamAColor={teamAColor}
+              teamBColor={teamBColor}
             />
           )}
         </div>

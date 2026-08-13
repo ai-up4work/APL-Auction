@@ -7,6 +7,7 @@ interface MatchPageProps {
   params: Promise<{ matchId: string }>
 }
 
+
 export async function generateMetadata({ params }: MatchPageProps): Promise<Metadata> {
   const { matchId } = await params
   const result = await getMatchDetailById(matchId)
