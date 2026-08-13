@@ -275,7 +275,7 @@ function FolderCard({
   deleting: boolean
 }) {
   return (
-    <div className="relative group pt-3">
+    <div className="relative group pt-3 border-2 border-transparent group-hover:border-gold/40 transition-all duration-300">
       {/* Unified hover outline — a ring drawn slightly LARGER than the card
           (offset outward on all sides), not the same size sitting behind
           it. It has to be bigger: the card is opaque (bg-black/50 + its
@@ -287,7 +287,7 @@ function FolderCard({
           pulled up further than the sides/bottom to clear the ribbon tab
           (positioned at -top-3 on its own), so the ring wraps ribbon +
           card as one shape instead of just the card. */}
-      <div className="pointer-events-none absolute -top-4 -left-1.5 -right-1.5 -bottom-1.5 rounded-lg border-2 border-transparent group-hover:border-gold/40 group-hover:shadow-[0_0_20px_rgba(201,151,31,0.15)] transition-all duration-300" />
+      <div className="pointer-events-none absolute -top-4 -left-1.5 -right-1.5 -bottom-1.5 rounded-lg" />
 
       <RibbonTab index={index} />
 
