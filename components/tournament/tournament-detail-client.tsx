@@ -746,12 +746,6 @@ function PointsTableRow({
         <span className={`text-xs font-bold w-12 shrink-0 ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
           {row.nrr}
         </span>
-        <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${nrrPositive ? "bg-green-500" : "bg-red-500"}`}
-            style={{ width: `${nrrBarWidth}%` }}
-          />
-        </div>
       </div>
 
       {/* Mobile: combined form pills + points chip in one cell */}
@@ -800,24 +794,29 @@ function FormPill({ result }: { result: "W" | "L" | "NR" }) {
 
 // ─────────────────────────────────────────────────────────────
 // POINTS CALCULATION OVERLAY — click any team row to see exactly how
-// their points total was derived (Won×2 + Tied×1 + Lost×0), plus the
-// NRR formula for context.
+// their points total was derived (Won×2 + Tied×1 + Lost×0), plus a
+// match-by-match NRR breakdown and the final NRR formula for context.
 //
 // DATA NOTE: `PointsRow` (what getPointsTableForTournament returns)
-// only carries played/won/lost/nrr/form/points — it doesn't expose a
-// `tied` count directly, and the frontend has no access to the
-// underlying match-by-match `bracket_matches`/`balls` rows recompute
-// StandingsForTournament used to build this in the first place. So:
+// only carries played/won/lost/nrr/form/points directly on the row —
+// it doesn't expose a `tied` count as its own field, so:
 //   - Tied matches are back-derived algebraically from the numbers we
 //     DO have: since points = won*2 + tied*1 (see standings.ts),
 //     tied = points - won*2. This is exact, not an estimate, given
 //     that formula — it just isn't a separately-stored field.
-//   - NRR is shown as the final computed value with the formula and a
-//     plain-language explanation of the ICC all-out rule, rather than
-//     a runs/overs-faced breakdown, since the raw ball-by-ball figures
-//     that fed into it aren't part of PointsRow and would need a
-//     separate query (see getMatchBallsSummary in standings.ts) to
-//     show match-by-match.
+//
+// `row.matches` (added via getMatchNrrBreakdownForTournament in
+// lib/tournament/standings.ts) carries the actual runs/overs each
+// completed match contributed to this team's NRR. This is NOT a
+// per-match NRR value — the real ICC NRR sums runs and overs across
+// every match first and divides once at the end, so a per-match rate
+// wouldn't compose into the season total the way it looks like it
+// should. Showing the raw per-match inputs instead lets someone verify
+// the total themselves without introducing a number that doesn't
+// actually exist in the real calculation. If `row.matches` is empty
+// (e.g. standings were computed before this breakdown existed, or the
+// tournament has ties/manual results with no bracket_matches rows
+// behind them), the overlay falls back to just the final NRR + formula.
 // ─────────────────────────────────────────────────────────────
 function PointsCalculationOverlay({
   row,
@@ -833,6 +832,7 @@ function PointsCalculationOverlay({
   const tied = Math.max(0, row.points - row.won * 2)
   const nrrVal = parseFloat(row.nrr) || 0
   const nrrPositive = nrrVal >= 0
+  const matchBreakdown = row.matches ?? []
 
   const formulaRows = [
     { label: "Wins", count: row.won, per: 2, subtotal: row.won * 2 },
@@ -851,12 +851,12 @@ function PointsCalculationOverlay({
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* modal card */}
-      <div className="relative w-full max-w-md bg-[#0d0d0f] border border-gold/25 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-md bg-[#0d0d0f] border border-gold/25 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
         {/* decorative glow */}
         <div className="pointer-events-none absolute -top-20 -right-20 h-56 w-56 rounded-full bg-gold/[0.08] blur-3xl" />
 
         {/* header */}
-        <div className="relative flex items-start justify-between gap-3 p-5 border-b border-white/10">
+        <div className="relative flex items-start justify-between gap-3 p-5 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <span
               className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold font-cinzel shrink-0 ${
@@ -887,7 +887,7 @@ function PointsCalculationOverlay({
         </div>
 
         {/* body */}
-        <div className="relative p-5 space-y-6">
+        <div className="relative p-5 space-y-6 overflow-y-auto">
           {/* Points formula */}
           <div>
             <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-1.5">
@@ -919,6 +919,48 @@ function PointsCalculationOverlay({
           {/* NRR */}
           <div>
             <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3">Net Run Rate</h4>
+
+            {matchBreakdown.length > 0 ? (
+              <>
+                <div className="space-y-1.5 mb-3">
+                  {matchBreakdown.map((m) => (
+                    <div
+                      key={m.matchId}
+                      className="flex items-center justify-between text-xs bg-white/[0.03] border border-white/5 rounded-md px-3 py-2 gap-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                            m.result === "W"
+                              ? "bg-green-600 text-white"
+                              : m.result === "L"
+                                ? "bg-red-600/90 text-white"
+                                : "bg-gray-600 text-white"
+                          }`}
+                        >
+                          {m.result}
+                        </span>
+                        <span className="text-gray-300 truncate">vs {m.opponent}</span>
+                      </div>
+                      <span className="text-gray-400 font-mono shrink-0 text-right whitespace-nowrap">
+                        {m.runsScored}/{m.oversFaced}ov
+                        <span className="text-gray-600 mx-1">·</span>
+                        conceded {m.runsConceded}/{m.oversBowled}ov
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-gray-500 text-[10px] mb-3 leading-relaxed">
+                  NRR isn't averaged match-to-match — every match's runs and overs above are summed first,
+                  then the rate is taken once across the total.
+                </p>
+              </>
+            ) : (
+              <p className="text-gray-500 text-[10px] mb-3 italic">
+                Match-by-match breakdown not available for this team yet.
+              </p>
+            )}
+
             <div className="bg-white/[0.03] border border-white/5 rounded-md px-3 py-3">
               <p className="text-gray-400 text-xs font-mono mb-2 leading-relaxed">
                 NRR = (runs scored ÷ overs faced) − (runs conceded ÷ overs bowled)

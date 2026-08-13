@@ -9,6 +9,7 @@ import { showcaseSlides, slugify, type ShowcaseSlide } from "@/data/site-data"
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket"
 import type { DoubleElimData } from "@/lib/tournament/doubleElim"
 import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
+import { MatchNrrBreakdownRow } from "@/lib/tournament/standings"
 
 
 // ─────────────────────────────────────────────────────────────
@@ -47,7 +48,8 @@ export interface PointsRow {
   lost: number
   nrr: string
   points: number
-  form?: ("W" | "L" | "NR")[]
+  form?: ("W" | "L" | "NR")[],
+  matches?: MatchNrrBreakdownRow[]   // <-- new, optional
 }
 
 export interface Fixture {

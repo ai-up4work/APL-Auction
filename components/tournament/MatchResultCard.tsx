@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Radio, Loader2, Pencil } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
+import Image from "next/image";
 
 export default function MatchResultCard({
   match,
@@ -280,9 +281,15 @@ function TeamResultRow({
     >
       <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md" style={{ backgroundColor: team.color }} />
       <div className="flex items-center gap-2 pl-1.5 min-w-0">
-        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px]">
+        <span className="relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 bg-background overflow-hidden font-label-mono font-black text-[10px]">
           {team.logo ? (
-            <img src={team.logo} alt="" className="w-full h-full object-cover p-0.5" />
+            <Image
+              src={team.logo}
+              alt=""
+              fill
+              sizes="48px"
+              className="object-cover"
+            />
           ) : (
             <span style={{ color: team.color }}>{team.code}</span>
           )}

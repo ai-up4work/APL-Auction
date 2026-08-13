@@ -13,6 +13,12 @@
 //   derives played/won/lost/points/nrr/form from real match results and
 //   upserts one row per team into `standings`.
 //
+//   It also exports getMatchNrrBreakdownForTournament, which returns the
+//   same per-match runs/overs inputs used to build the aggregate NRR, but
+//   kept as one row per match instead of summed — so the public page's
+//   "how was this calculated" overlay can show match-by-match figures
+//   instead of just the final number.
+//
 // SOURCE OF TRUTH FOR RESULTS:
 //   `bracket_matches` rows with status = 'completed' and both team_a_id /
 //   team_b_id / score_a / score_b / winner_team_id set. This is the same
@@ -67,7 +73,7 @@
 //   only reliable chronological signal bracket_matches carries; swap in
 //   scheduled_at if you want actual match-date ordering instead.
 //
-// WHEN TO CALL THIS:
+// WHEN TO CALL recomputeStandingsForTournament:
 //   Not on every page load — it's a write, and the public tournament
 //   page (getTournamentById) should stay read-only. Call it:
 //     - after a bracket_matches row is marked 'completed' (wherever that
@@ -78,6 +84,10 @@
 //   A cron/scheduled recompute is also fine if per-match triggering isn't
 //   convenient yet — this function is idempotent (delete + reinsert per
 //   tournament), so calling it repeatedly is always safe.
+//
+// getMatchNrrBreakdownForTournament, by contrast, IS read-only and safe
+// to call on every page load — it's a plain SELECT + in-memory grouping,
+// no writes, called from getPointsTableForTournament() in tournament.ts.
 
 import { supabase } from "@/lib/supabase"
 
@@ -136,8 +146,12 @@ interface TeamBallsSummary {
  * NRR rule correctly — see resolveOversForNrr below, which is where
  * legalBalls vs. wickets actually gets turned into "overs faced for NRR
  * purposes."
+ *
+ * Exported so getMatchNrrBreakdownForTournament (below) can reuse the
+ * exact same per-match numbers the aggregate standings computation uses,
+ * rather than re-deriving them differently.
  */
-async function getMatchBallsSummary(matchId: string): Promise<Map<string, TeamBallsSummary>> {
+export async function getMatchBallsSummary(matchId: string): Promise<Map<string, TeamBallsSummary>> {
   const { data, error } = await supabase
     .from("balls")
     .select("batting_team_id, extra_type, is_wicket")
@@ -183,8 +197,10 @@ async function getMatchBallsSummary(matchId: string): Promise<Map<string, TeamBa
  * can be bowled out while the other successfully chases, in the same
  * match, and each side's overs-for-NRR is resolved by its own outcome,
  * not a shared match-level flag.
+ *
+ * Exported for reuse by getMatchNrrBreakdownForTournament.
  */
-function resolveOversForNrr(summary: TeamBallsSummary | undefined, oversLimitBalls: number): number {
+export function resolveOversForNrr(summary: TeamBallsSummary | undefined, oversLimitBalls: number): number {
   if (!summary) return oversLimitBalls // no ball data at all — full-quota fallback
   if (summary.wickets >= 10) return oversLimitBalls // all out -> full quota, per ICC rule
   return summary.legalBalls // otherwise -> actual balls faced (chase completed, or overs played out)
@@ -196,8 +212,10 @@ function resolveOversForNrr(summary: TeamBallsSummary | undefined, oversLimitBal
  * overlay_match_id if present (even without balls rows), else defaults
  * to 20-over matches — matching the same default used throughout
  * data/match-data.ts (`setup.overs ?? 20`).
+ *
+ * Exported for reuse by getMatchNrrBreakdownForTournament.
  */
-async function getOversLimit(overlayMatchId: string | null): Promise<number> {
+export async function getOversLimit(overlayMatchId: string | null): Promise<number> {
   if (!overlayMatchId) return 20
   const { data, error } = await supabase
     .from("matches")
@@ -330,7 +348,7 @@ export async function recomputeStandingsForTournament(tournamentId: string): Pro
       runs_conceded: agg.runsConceded,
       balls_bowled: agg.ballsBowled,
       nrr,
-      form: agg.formSeq.slice(-5),
+      form: agg.formSeq,
     }
   })
 
@@ -363,4 +381,112 @@ export async function recomputeStandingsForTournament(tournamentId: string): Pro
   if (pruneErr) console.error("[standings] prune failed:", pruneErr.message)
 
   return true
+}
+
+// ─────────────────────────────────────────────────────────────
+// PER-MATCH NRR BREAKDOWN — read-only, safe to call on every page load.
+// Returns the exact runs/overs inputs each team's aggregate NRR was
+// built from, one row per completed match, so the public page's
+// "how was this calculated" overlay can show match-by-match figures
+// instead of just the final summed number.
+// ─────────────────────────────────────────────────────────────
+
+export interface MatchNrrBreakdownRow {
+  matchId: string
+  opponent: string
+  result: "W" | "L" | "T"
+  runsScored: number
+  oversFaced: number // decimal overs, e.g. 18.4 — for display only
+  runsConceded: number
+  oversBowled: number // decimal overs, e.g. 20.0 — for display only
+}
+
+/**
+ * Per-match NRR inputs for every team in a tournament, keyed by team_id.
+ * Mirrors the aggregation loop in recomputeStandingsForTournament exactly
+ * (same getOversLimit / getMatchBallsSummary / resolveOversForNrr calls),
+ * but keeps one row per match instead of summing.
+ *
+ * IMPORTANT: this does NOT compute a "per-match NRR." The real ICC NRR is
+ * (sum of runs scored / sum of overs faced) − (sum of runs conceded / sum
+ * of overs bowled), taken once across ALL matches — a per-match rate
+ * doesn't compose into that total the way people expect, and would be
+ * misleading to show as if it were "this match's NRR contribution." What
+ * this returns instead is the raw runs/overs each match contributed to
+ * those two sums, so a reader can verify the final total themselves.
+ */
+export async function getMatchNrrBreakdownForTournament(
+  tournamentId: string
+): Promise<Map<string, MatchNrrBreakdownRow[]>> {
+  const { data: matches, error } = await supabase
+    .from("bracket_matches")
+    .select(
+      `
+      id, round, team_a_id, team_b_id, score_a, score_b, winner_team_id, overlay_match_id,
+      team_a:team_a_id ( name ),
+      team_b:team_b_id ( name )
+      `
+    )
+    .eq("tournament_id", tournamentId)
+    .eq("status", "completed")
+    .not("team_a_id", "is", null)
+    .not("team_b_id", "is", null)
+    .not("score_a", "is", null)
+    .not("score_b", "is", null)
+    .order("round", { ascending: true })
+
+  if (error) {
+    console.error("[standings] breakdown bracket_matches lookup failed:", error.message)
+    return new Map()
+  }
+
+  const breakdown = new Map<string, MatchNrrBreakdownRow[]>()
+  const push = (teamId: string, row: MatchNrrBreakdownRow) => {
+    if (!breakdown.has(teamId)) breakdown.set(teamId, [])
+    breakdown.get(teamId)!.push(row)
+  }
+
+  const toOvers = (balls: number) => Math.round((balls / 6) * 10) / 10
+
+  for (const m of (matches ?? []) as any[]) {
+    const teamA = Array.isArray(m.team_a) ? m.team_a[0] : m.team_a
+    const teamB = Array.isArray(m.team_b) ? m.team_b[0] : m.team_b
+
+    const oversLimitBalls = (await getOversLimit(m.overlay_match_id)) * 6
+
+    let aSummary: TeamBallsSummary | undefined
+    let bSummary: TeamBallsSummary | undefined
+    if (m.overlay_match_id) {
+      const summaryByTeam = await getMatchBallsSummary(m.overlay_match_id)
+      aSummary = summaryByTeam.get(m.team_a_id)
+      bSummary = summaryByTeam.get(m.team_b_id)
+    }
+
+    const aBalls = resolveOversForNrr(aSummary, oversLimitBalls)
+    const bBalls = resolveOversForNrr(bSummary, oversLimitBalls)
+
+    const resultFor = (teamId: string): "W" | "L" | "T" =>
+      !m.winner_team_id ? "T" : m.winner_team_id === teamId ? "W" : "L"
+
+    push(m.team_a_id, {
+      matchId: m.id,
+      opponent: teamB?.name ?? "Unknown",
+      result: resultFor(m.team_a_id),
+      runsScored: m.score_a,
+      oversFaced: toOvers(aBalls),
+      runsConceded: m.score_b,
+      oversBowled: toOvers(bBalls),
+    })
+    push(m.team_b_id, {
+      matchId: m.id,
+      opponent: teamA?.name ?? "Unknown",
+      result: resultFor(m.team_b_id),
+      runsScored: m.score_b,
+      oversFaced: toOvers(bBalls),
+      runsConceded: m.score_a,
+      oversBowled: toOvers(aBalls),
+    })
+  }
+
+  return breakdown
 }

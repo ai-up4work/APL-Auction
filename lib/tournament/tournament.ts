@@ -23,6 +23,10 @@ import { slugify } from "@/data/tournament-data";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 import { getAwardsForTournament as getAwardTemplatesForTournament } from "@/lib/tournament/awards";
+import {
+  getMatchNrrBreakdownForTournament,
+  type MatchNrrBreakdownRow,
+} from "@/lib/tournament/standings";
 // Tournament = ShowcaseSlide & TournamentExtras. ShowcaseSlide only requires
 // tag, slug, title, by, image — everything else on it (and all of
 // TournamentExtras) is optional, so a partial DB mapping is a valid
@@ -394,11 +398,36 @@ async function getAwardsForTournament(tournamentId: string) {
  * whole join is built on — so it's now returned as `id` for the client to
  * key on instead.
  */
+/**
+ * Points table, read directly from `standings` — it already carries a
+ * direct tournament_id FK plus computed nrr/form, no join through auctions
+ * needed. This is match-result-derived data, not something the edit page
+ * writes to; it's populated by recomputeStandingsForTournament (see
+ * lib/tournament/standings.ts) as matches complete.
+ *
+ * Each row also carries `matches`: the per-match runs/overs breakdown
+ * behind that team's NRR, from getMatchNrrBreakdownForTournament — this is
+ * what lets the public page's calculation overlay show match-by-match
+ * figures instead of just the final aggregate NRR. This is a second
+ * read-only query (not a write), so it's safe to run on every page load
+ * alongside the `standings` select.
+ *
+ * `team_id` is selected and returned explicitly as `id`. teams.code is NOT
+ * guaranteed unique across the whole `teams` table (different auctions can
+ * each create their own team with the same short code, e.g. two unrelated
+ * "KKR" teams from two different auctions both ending up in this
+ * tournament's standings), so `team_id` — the FK this whole join is built
+ * on — is the only field on this row guaranteed unique, and is what the
+ * client should key its list on instead of `short`.
+ */
 async function getPointsTableForTournament(tournamentId: string) {
-  const { data, error } = await supabase
-    .from("standings")
-    .select("team_id, played, won, lost, points, nrr, form, teams:team_id ( name, code )")
-    .eq("tournament_id", tournamentId);
+  const [{ data, error }, breakdownByTeam] = await Promise.all([
+    supabase
+      .from("standings")
+      .select("team_id, played, won, lost, points, nrr, form, teams:team_id ( name, code )")
+      .eq("tournament_id", tournamentId),
+    getMatchNrrBreakdownForTournament(tournamentId),
+  ]);
 
   if (error) {
     console.error("getPointsTableForTournament failed:", error.message);
@@ -418,6 +447,7 @@ async function getPointsTableForTournament(tournamentId: string) {
       nrr: String(row.nrr),
       points: row.points,
       form: (row.form ?? []) as ("W" | "L" | "NR")[],
+      matches: breakdownByTeam.get(row.team_id) ?? [],
     };
   });
 }

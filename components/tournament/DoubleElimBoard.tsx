@@ -379,7 +379,11 @@ export default function DoubleElimBoard({
       addConnector(lbFinalId ?? null, data.grandFinal, "B", null);
 
       if (data.bracketReset) {
-        const gfEl = cardEls.current["GF"];
+        // FIX: was `cardEls.current["GF"]` — a hardcoded key that only
+        // ever matched if data.grandFinal.id happened to literally be
+        // "GF". The card itself is registered via getRef(data.grandFinal.id)
+        // below, so this lookup now uses the same key consistently.
+        const gfEl = cardEls.current[data.grandFinal.id];
         const rEl = cardEls.current[data.bracketReset.id];
         if (gfEl && rEl) {
           const gR = gfEl.getBoundingClientRect();
@@ -585,7 +589,7 @@ export default function DoubleElimBoard({
                     match={data.grandFinal}
                     editable={editable}
                     onRecordResult={onRecordResult}
-                    cardRef={getRef("GF")}
+                    cardRef={getRef(data.grandFinal.id)}
                     hoveredTeamCode={activeTeamCode}
                     onTeamHover={setHoveredTeamCode}
                     onTeamClick={handleTeamClick}
