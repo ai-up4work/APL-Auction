@@ -20,8 +20,8 @@ import {
 type FormatType = "single_elimination" | "double_elimination";
 
 const FORMAT_LABELS: Record<FormatType, string> = {
-  single_elimination: "Single Elim",
-  double_elimination: "Double Elim",
+  single_elimination: "Single Elimination",
+  double_elimination: "Double Elimination",
 };
 const FORMAT_LABELS_LONG: Record<FormatType, string> = {
   single_elimination: "Single Elimination",

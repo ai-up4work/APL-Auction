@@ -924,9 +924,9 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                           <div className="flex flex-wrap gap-1.5 mb-3">
                             <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-gold/30 text-gold bg-gold/5">
                               {format === "single_elimination"
-                                ? "Single Elim"
+                                ? "Single Elimination"
                                 : format === "double_elimination"
-                                  ? "Double Elim"
+                                  ? "Double Elimination"
                                   : "Round Robin"}
                             </span>
                             <span className="text-[9px] uppercase tracking-wider font-cinzel px-2 py-0.5 rounded-full border border-white/15 text-gray-300">

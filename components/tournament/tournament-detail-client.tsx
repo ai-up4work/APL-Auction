@@ -238,9 +238,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
                 <div className="absolute bottom-0 left-0 p-6">
-                  <Badge className="bg-gold text-black hover:bg-gold/90 font-cinzel mb-3">{tournament.tag}</Badge>
                   <h1 className="text-3xl md:text-4xl font-bold text-white font-cinzel">{tournament.title}</h1>
-                  <p className="text-gray-300 mt-2 text-sm md:text-base">{tournament.by}</p>
                 </div>
               </div>
             </div>

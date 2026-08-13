@@ -108,7 +108,7 @@ export async function getTournamentsForOrg(
       id: t.id,
       title: t.name,
       by: org?.name ?? "Unknown Org",
-      tag: t.format === "single_elimination" ? "Knockout" : "Double Elim",
+      tag: t.format === "single_elimination" ? "Knockout" : "Double Elimination",
       // Prefer the tournament's own image, fall back to the org logo,
       // then the placeholder — same priority order as getTournamentById.
       image: t.image_url || org?.logo_url || "/placeholder.svg",
