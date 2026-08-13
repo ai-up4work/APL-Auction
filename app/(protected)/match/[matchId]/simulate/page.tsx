@@ -165,56 +165,99 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 }
 
 // ── DB cleanup helper ────────────────────────────────────────────
-// Every delete call in this page was previously fire-and-forget: RLS
-// denying a delete doesn't throw in supabase-js, it just resolves with
-// `{ error }` (or lets the row silently not match), so a blind
-// `await supabase.from(...).delete()...` with the result discarded can
-// look like it worked while nothing actually happened server-side.
-// This wrapper always inspects the error, always logs a row count via
-// `count: "exact"`, and returns a message string on failure so callers
-// can surface it in the UI (`errorMsg`) instead of pretending success.
-async function deleteRows(
-  table: string,
-  column: string,
-  value: string
-): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
-  // Check how many rows exist first, so a delete that matches 0 rows
-  // due to an RLS policy (not because there was nothing to delete) can
-  // be told apart from a genuinely empty table.
-  const { count: beforeCount, error: countErr } = await supabase
-    .from(table)
-    .select("*", { count: "exact", head: true })
-    .eq(column, value)
-
-  if (countErr) {
-    console.error(`[deleteRows] ${table} pre-count failed:`, countErr.message)
-    return { ok: false, error: `${table}: ${countErr.message}` }
-  }
-
-  const { error, count } = await supabase
-    .from(table)
-    .delete({ count: "exact" })
-    .eq(column, value)
+// CHANGED — was a client-side delete loop (deleteRows per table) that
+// compared a pre-delete SELECT count against the delete's affected-row
+// count to detect RLS-blocked deletes. That check can't catch the case
+// where RLS's SELECT policy hides rows entirely (e.g. rows written by a
+// different session/role — the real live-scoring flow, not this
+// simulator): both the count and the delete come back 0, it looks like
+// "nothing to delete," and the old rows are still sitting in the table
+// — which is exactly what caused "duplicate key value violates unique
+// constraint balls_match_id_innings_number_sequence_key" when
+// resimulating an already-completed match.
+//
+// Now calls reset_match_scoring(p_match_id), a SECURITY DEFINER Postgres
+// function that bypasses RLS for this one well-scoped cleanup and
+// reliably deletes every balls/match_state/engine_state/ball_commentary
+// row for the match regardless of who originally wrote them — and also
+// resets the linked bracket_matches row (status/score_a/score_b) in the
+// same call, so handleClear() no longer needs its own separate update
+// for that.
+//
+// NOTE: reset_match_scoring should also delete this match's
+// match_team_stats rows and roll back its previously-applied standings
+// entry (mirror of upsert_standing_after_match but subtracting) — see
+// the accompanying SQL migration notes. Not shown here since it's a
+// change to that existing function, not new code in this file.
+async function clearMatchData(matchId: string): Promise<{ allOk: boolean; failures: string[] }> {
+  const { data, error } = await supabase.rpc("reset_match_scoring", { p_match_id: matchId })
 
   if (error) {
-    console.error(`[deleteRows] ${table} delete failed:`, error.message)
-    return { ok: false, error: `${table}: ${error.message}` }
+    console.error("[reset_match_scoring] failed:", error.message)
+    return { allOk: false, failures: [error.message] }
   }
 
-  const deleted = count ?? 0
-  console.log(`[deleteRows] ${table}: existed=${beforeCount ?? 0}, deleted=${deleted}`)
+  console.log("[reset_match_scoring] result:", data)
+  return { allOk: true, failures: [] }
+}
 
-  // RLS-blocked deletes return no error but delete 0 rows — that's
-  // indistinguishable from "nothing to delete" unless we compare
-  // against the pre-delete count.
-  if ((beforeCount ?? 0) > 0 && deleted === 0) {
-    return {
-      ok: false,
-      error: `${table}: ${beforeCount} row(s) exist but delete matched 0 — likely blocked by a missing DELETE RLS policy`,
-    }
+// ── Bracket team resolution ──────────────────────────────────────
+// bracket_matches.team_a_id / team_b_id reference public.teams, while
+// teamAPool/teamBPool below are built from match_setup.team1/team2
+// (names/shorts only, no team_id). Nothing in the files available
+// guarantees team_a_id always corresponds to team1 positionally — so
+// rather than assume that mapping, this fetches both team rows and
+// matches them by code/name against setup.team1/team2. If it can't
+// confidently resolve both sides, it logs a warning and skips the
+// score/winner write (falls back to just marking the match
+// 'completed', same as before) rather than risking a swapped score.
+async function resolveBracketTeamSides(
+  bracketRow: { team_a_id: string | null; team_b_id: string | null },
+  setup: MatchSetup
+): Promise<{ teamAIsSetupTeam1: boolean } | null> {
+  if (!bracketRow.team_a_id || !bracketRow.team_b_id) return null
+
+  const { data: teamRows, error } = await supabase
+    .from("teams")
+    .select("id, code, name")
+    .in("id", [bracketRow.team_a_id, bracketRow.team_b_id])
+
+  if (error || !teamRows || teamRows.length !== 2) {
+    console.warn("[resolveBracketTeamSides] couldn't load both bracket teams:", error?.message)
+    return null
   }
 
-  return { ok: true, count: deleted }
+  const teamARow = teamRows.find((t) => t.id === bracketRow.team_a_id)
+  const teamBRow = teamRows.find((t) => t.id === bracketRow.team_b_id)
+  if (!teamARow || !teamBRow) return null
+
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase()
+  const t1Code = norm(setup.team1.short)
+  const t1Name = norm(setup.team1.name)
+  const t2Code = norm(setup.team2.short)
+  const t2Name = norm(setup.team2.name)
+
+  const matchesTeam1 = (code: string, name: string) =>
+    (t1Code && (code === t1Code)) || (t1Name && name === t1Name)
+  const matchesTeam2 = (code: string, name: string) =>
+    (t2Code && (code === t2Code)) || (t2Name && name === t2Name)
+
+  const aCode = norm(teamARow.code)
+  const aName = norm(teamARow.name)
+  const bCode = norm(teamBRow.code)
+  const bName = norm(teamBRow.name)
+
+  if (matchesTeam1(aCode, aName) && matchesTeam2(bCode, bName)) {
+    return { teamAIsSetupTeam1: true }
+  }
+  if (matchesTeam2(aCode, aName) && matchesTeam1(bCode, bName)) {
+    return { teamAIsSetupTeam1: false }
+  }
+
+  console.warn(
+    `[resolveBracketTeamSides] ambiguous mapping — bracket team_a="${teamARow.name}" team_b="${teamBRow.name}" vs setup team1="${setup.team1.name}" team2="${setup.team2.name}". Skipping bracket score/winner write.`
+  )
+  return null
 }
 
 export default function SimulateMatchPage() {
@@ -233,6 +276,23 @@ export default function SimulateMatchPage() {
   const runStateRef = useRef<RunState>("idle")
   const speedRef = useRef(speedMs)
   const logIdRef = useRef(0)
+
+  // NEW — synchronous re-entrancy guard. `runState === "running"` (used
+  // to disable the Start button) is a React state value: it doesn't
+  // actually change until the next render, so there's a real window
+  // between a click and the button visually disabling where a second
+  // click, or a second tab open on the same match, could call
+  // handleStart() again before the first call had disabled anything.
+  // Both calls would then run their own fully-correct innings-1 ->
+  // innings-2 sequence independently, writing to the same match_id at
+  // the same time — which looks exactly like "both innings simulating
+  // in parallel" even though neither run, on its own, ever does that.
+  // runTokenRef (below) only ever protected one run from racing itself;
+  // it does nothing to stop a second independent call. isRunningRef is
+  // checked and set synchronously as the very first thing in
+  // handleStart(), before any `await`, so a second call can never get
+  // past that check while a run is genuinely in progress.
+  const isRunningRef = useRef(false)
 
   // Every call to handleStart() bumps this to a new unique value ("this
   // run's token"). Any in-flight delivery loop from a PREVIOUS run
@@ -270,7 +330,12 @@ export default function SimulateMatchPage() {
   }
 
   async function insertBall(matchId: string, row: SimBallRow) {
-    const { error } = await supabase.from("balls").insert({ match_id: matchId, ...row })
+    // upsert, not insert — a safety net against the rare remaining race
+    // (e.g. a run that outlives a Clear click's delete), not a
+    // substitute for isRunningRef actually preventing overlapping runs.
+    const { error } = await supabase
+      .from("balls")
+      .upsert({ match_id: matchId, ...row }, { onConflict: "match_id,innings_number,sequence" })
     if (error) throw new Error(`Failed writing ball: ${error.message}`)
   }
 
@@ -302,26 +367,18 @@ export default function SimulateMatchPage() {
     return current
   }
 
-  // Deletes balls/match_state/engine_state/ball_commentary for a match,
-  // checking every delete's error/count and collecting failures instead
-  // of firing them blind. Shared by handleStart's reset branch and
-  // handleClear so both surface the same failure detail.
-  async function clearMatchData(matchId: string): Promise<{ allOk: boolean; failures: string[] }> {
-    const results = await Promise.all([
-      deleteRows("balls", "match_id", matchId),
-      deleteRows("match_state", "match_id", matchId),
-      deleteRows("engine_state", "match_id", matchId),
-      deleteRows("ball_commentary", "match_id", matchId),
-    ])
-
-    const failures = results
-      .filter((r): r is { ok: false; error: string } => !r.ok)
-      .map((r) => r.error)
-
-    return { allOk: failures.length === 0, failures }
-  }
-
   async function handleStart(reset: boolean) {
+    // Synchronous guard — must be the very first thing in this function,
+    // before any await, so a second overlapping call is rejected
+    // immediately rather than slipping through while `runState` hasn't
+    // re-rendered yet. See isRunningRef's declaration above for why this
+    // is necessary in addition to runTokenRef.
+    if (isRunningRef.current) {
+      console.warn("[handleStart] ignored — a run is already in progress for this page instance.")
+      return
+    }
+    isRunningRef.current = true
+
     setErrorMsg(null)
     setLog([])
     setUsedRealSquads(null)
@@ -329,6 +386,7 @@ export default function SimulateMatchPage() {
     const matchId = matchIdInput.trim()
     if (!matchId) {
       setErrorMsg("Paste a match_id first.")
+      isRunningRef.current = false
       return
     }
 
@@ -364,7 +422,7 @@ export default function SimulateMatchPage() {
 
       const { data: bracketRow } = await supabase
         .from("bracket_matches")
-        .select("id, status")
+        .select("id, status, team_a_id, team_b_id, tournament_id")
         .eq("overlay_match_id", matchId)
         .maybeSingle()
 
@@ -455,17 +513,134 @@ export default function SimulateMatchPage() {
       innings2 = await runInnings(matchId, innings2, teamBPool.teamShort, myToken)
       if (myToken !== runTokenRef.current) return
 
-      const resultText =
-        innings2.runs >= target
+      const teamAWon = innings2.runs < target - 1
+      const isTie = innings2.runs === target - 1
+      const resultText = isTie
+        ? "Match tied."
+        : innings2.runs >= target
           ? `${teamBPool.teamName} win by ${10 - innings2.wkts} wicket${10 - innings2.wkts === 1 ? "" : "s"}.`
-          : innings2.runs === target - 1
-            ? "Match tied."
-            : `${teamAPool.teamName} win by ${target - 1 - innings2.runs} runs.`
+          : `${teamAPool.teamName} win by ${target - 1 - innings2.runs} runs.`
 
       pushLog(`Innings 2 complete: ${teamBPool.teamName} ${innings2.runs}/${innings2.wkts}. ${resultText}`, true)
 
+      // ── Mark the match complete on `matches` itself ──────────────
+      // Previously nothing durable recorded "this match finished" on
+      // the matches row for standalone (non-bracket) matches —
+      // currentInnings stayed at 2 forever. matchComplete is added
+      // alongside the runtime fields so the live page (or anything
+      // else reading match_setup) can detect completion without a
+      // bracket link.
+      const { error: completeUpdateErr } = await supabase
+        .from("matches")
+        .update({
+          match_setup: {
+            ...setup,
+            overs: oversLimit,
+            target,
+            currentInnings: 2,
+            matchComplete: true,
+            resultText,
+          },
+        })
+        .eq("id", matchId)
+      if (completeUpdateErr) {
+        // Non-fatal — the simulation itself succeeded and bracket/
+        // standings writes below still matter, so log and continue
+        // rather than throwing here.
+        console.error("[handleStart] failed setting matchComplete flag:", completeUpdateErr.message)
+      }
+
+      // ── Bracket + match_team_stats + standings (via DB trigger) ──
       if (bracketRow) {
-        await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", bracketRow.id)
+        const sides = await resolveBracketTeamSides(bracketRow, setup)
+
+        if (sides) {
+          const { teamAIsSetupTeam1 } = sides
+          // bracket "team A" maps to whichever of our pools actually
+          // corresponds to bracket_matches.team_a_id, per resolveBracketTeamSides.
+          const bracketTeamAId = bracketRow.team_a_id as string
+          const bracketTeamBId = bracketRow.team_b_id as string
+
+          const bracketTeamAStats = teamAIsSetupTeam1
+            ? { runs: innings1.runs, ballsFaced: innings1.legalBalls, runsConceded: innings2.runs, ballsBowled: innings2.legalBalls, isWinner: teamAWon }
+            : { runs: innings2.runs, ballsFaced: innings2.legalBalls, runsConceded: innings1.runs, ballsBowled: innings1.legalBalls, isWinner: !teamAWon }
+
+          const bracketTeamBStats = teamAIsSetupTeam1
+            ? { runs: innings2.runs, ballsFaced: innings2.legalBalls, runsConceded: innings1.runs, ballsBowled: innings1.legalBalls, isWinner: !teamAWon }
+            : { runs: innings1.runs, ballsFaced: innings1.legalBalls, runsConceded: innings2.runs, ballsBowled: innings2.legalBalls, isWinner: teamAWon }
+
+          if (isTie) {
+            bracketTeamAStats.isWinner = false
+            bracketTeamBStats.isWinner = false
+          }
+
+          const { error: statsErr } = await supabase.from("match_team_stats").upsert(
+            [
+              {
+                match_id: matchId,
+                team_id: bracketTeamAId,
+                runs_scored: bracketTeamAStats.runs,
+                balls_faced: bracketTeamAStats.ballsFaced,
+                runs_conceded: bracketTeamAStats.runsConceded,
+                balls_bowled: bracketTeamAStats.ballsBowled,
+                is_winner: bracketTeamAStats.isWinner,
+              },
+              {
+                match_id: matchId,
+                team_id: bracketTeamBId,
+                runs_scored: bracketTeamBStats.runs,
+                balls_faced: bracketTeamBStats.ballsFaced,
+                runs_conceded: bracketTeamBStats.runsConceded,
+                balls_bowled: bracketTeamBStats.ballsBowled,
+                is_winner: bracketTeamBStats.isWinner,
+              },
+            ],
+            { onConflict: "match_id,team_id" }
+          )
+
+          if (statsErr) {
+            // Don't let a stats-write failure block marking the bracket
+            // match completed at all — but skip the score/winner write
+            // below since the trigger depends on match_team_stats and
+            // would otherwise warn/skip anyway.
+            console.error("[handleStart] failed writing match_team_stats:", statsErr.message)
+            pushLog(`Warning: could not record match_team_stats — standings won't update for this match. (${statsErr.message})`)
+            await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", bracketRow.id)
+          } else {
+            // This single UPDATE, once match_team_stats above has
+            // committed, is what fires
+            // trg_bracket_match_completed_update_standings and rolls
+            // the result into `standings` automatically.
+            const { error: bracketUpdateErr } = await supabase
+              .from("bracket_matches")
+              .update({
+                score_a: bracketTeamAStats.runs,
+                score_b: bracketTeamBStats.runs,
+                winner_team_id: isTie ? null : bracketTeamAStats.isWinner ? bracketTeamAId : bracketTeamBId,
+                result_source: "overlay",
+                status: "completed",
+              })
+              .eq("id", bracketRow.id)
+
+            if (bracketUpdateErr) {
+              console.error("[handleStart] failed updating bracket_matches:", bracketUpdateErr.message)
+              pushLog(`Warning: bracket match update failed — ${bracketUpdateErr.message}`)
+            } else {
+              pushLog("Bracket match marked completed — standings updated.", true)
+            }
+          }
+        } else {
+          // Couldn't confidently map bracket team_a/team_b to
+          // setup.team1/team2 — mark completed so the bracket UI
+          // reflects the match finished, but deliberately skip
+          // score_a/score_b/winner_team_id to avoid writing a
+          // possibly-swapped result. Standings trigger won't fire
+          // usefully anyway without match_team_stats.
+          pushLog(
+            "Warning: couldn't confidently match bracket teams to this match's squads — bracket marked completed, but score/winner and standings were skipped. Check bracket_matches.team_a_id/team_b_id for this match.",
+          )
+          await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", bracketRow.id)
+        }
       }
 
       setRun("done")
@@ -473,6 +648,13 @@ export default function SimulateMatchPage() {
       if (myToken !== runTokenRef.current) return // a stale run's error — ignore it, a newer run is active
       setErrorMsg(err instanceof Error ? err.message : "Something went wrong.")
       setRun("error")
+    } finally {
+      // Always released, on every exit path (success, throw, or an early
+      // `return` from a superseded-token check) — otherwise a single
+      // stuck `true` here would permanently block every future
+      // Start/Reset click on this page instance, even after a genuine
+      // error or a Stop.
+      isRunningRef.current = false
     }
   }
 
@@ -483,15 +665,21 @@ export default function SimulateMatchPage() {
 
   function handleStop() {
     runTokenRef.current++ // invalidates any in-flight loop immediately
+    // NOTE: isRunningRef is intentionally left alone here — the
+    // in-flight handleStart() call's own `finally` block will clear it
+    // once its current await resolves and its next token check bails
+    // it out. Clearing it here too, from a different call stack, would
+    // race that finally block and could very rarely re-open the guard's
+    // window a moment before the stale run has actually stopped writing.
     setRun("idle")
   }
 
   // Wipes every trace of this match's simulated data — balls, live/engine
   // state, ball-by-ball commentary, bracket score/status, and the
-  // runtime-only match_setup keys (target, currentInnings) — while
-  // leaving team1/team2/venue/etc alone. This is what makes the live
-  // match page fall back to "not_started" and empty scorecards the
-  // instant it's clicked, via Realtime.
+  // runtime-only match_setup keys (target, currentInnings, matchComplete,
+  // resultText) — while leaving team1/team2/venue/etc alone. This is
+  // what makes the live match page fall back to "not_started" and empty
+  // scorecards the instant it's clicked, via Realtime.
   async function handleClear() {
     const matchId = matchIdInput.trim()
     if (!matchId) {
@@ -507,28 +695,18 @@ export default function SimulateMatchPage() {
     setUsedRealSquads(null)
 
     try {
-      // Checks each delete's error/count instead of firing blind — an
-      // RLS-denied delete doesn't throw in supabase-js, so this is the
-      // only way to know a table like ball_commentary actually got
-      // wiped versus silently not matching any rows.
+      // clearMatchData now also resets the linked bracket_matches row
+      // (status -> 'upcoming', score_a/score_b -> null) as part of the
+      // same reset_match_scoring() call. NOTE: reset_match_scoring
+      // should also be extended to delete match_team_stats rows and
+      // reverse the standings entry for this match (see the SQL
+      // migration notes) — otherwise clearing a match after it's been
+      // rolled into standings leaves the standings numbers stale.
       const { allOk, failures } = await clearMatchData(matchId)
       if (!allOk) {
         throw new Error(
-          `Some data failed to clear (likely a missing RLS policy) — ${failures.join("; ")}`
+          `Some data failed to clear — ${failures.join("; ")}`
         )
-      }
-
-      const { data: bracketRow } = await supabase
-        .from("bracket_matches")
-        .select("id")
-        .eq("overlay_match_id", matchId)
-        .maybeSingle()
-
-      if (bracketRow) {
-        await supabase
-          .from("bracket_matches")
-          .update({ status: "upcoming", score_a: null, score_b: null })
-          .eq("id", bracketRow.id)
       }
 
       const { data: matchRow } = await supabase
@@ -538,7 +716,7 @@ export default function SimulateMatchPage() {
         .maybeSingle()
 
       if (matchRow?.match_setup) {
-        const { target, currentInnings, ...rest } = matchRow.match_setup as Record<string, unknown>
+        const { target, currentInnings, matchComplete, resultText, ...rest } = matchRow.match_setup as Record<string, unknown>
         await supabase.from("matches").update({ match_setup: rest }).eq("id", matchId)
       }
 
@@ -636,7 +814,7 @@ export default function SimulateMatchPage() {
               </label>
               <input
                 type="range"
-                min={10000}
+                min={1000}
                 max={60000}
                 step={100}
                 value={speedMs}
