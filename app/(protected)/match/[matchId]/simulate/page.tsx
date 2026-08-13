@@ -150,6 +150,16 @@ const statusMeta: Record<RunState, { label: string; accent: string }> = {
   error: { label: "ERROR", accent: "#F87171" },
 }
 
+/** Shared normalization for comparing team name/code strings — trim +
+ *  lowercase, so "Kolkata Knight Riders " and "kolkata knight riders"
+ *  compare equal. Used both by resolveBracketTeamSides (comparing a
+ *  match_setup snapshot against live bracket teams) and by the
+ *  bracket-team resync step in handleStart (deciding whether that
+ *  snapshot has actually drifted and needs rewriting). */
+function normField(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase()
+}
+
 // Same card shell used across the admin dashboard (OrganizationClient,
 // MatchesTab, TeamsManager, the match editor) — kept consistent here
 // since this page is only ever reached from the editor's "Go to
@@ -231,7 +241,7 @@ async function resolveBracketTeamSides(
   const teamBRow = teamRows.find((t) => t.id === bracketRow.team_b_id)
   if (!teamARow || !teamBRow) return null
 
-  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase()
+  const norm = normField
   const t1Code = norm(setup.team1.short)
   const t1Name = norm(setup.team1.name)
   const t2Code = norm(setup.team2.short)
@@ -426,6 +436,72 @@ export default function SimulateMatchPage() {
         .eq("overlay_match_id", matchId)
         .maybeSingle()
 
+      // ── Resync match_setup.team1/team2 from the CURRENT bracket teams ──
+      // bracket_matches.team_a_id/team_b_id is the live source of truth
+      // for which two teams actually occupy this bracket slot right now
+      // — it can change any time an earlier feeder match gets
+      // re-simulated with a different winner. match_setup.team1/team2 is
+      // only ever written once, when this `matches` row is first created
+      // and linked via overlay_match_id, and NOTHING previously kept it
+      // in sync afterward. So re-simulating an earlier round left this
+      // match still "remembering" whichever teams occupied the slot the
+      // very first time it ran — which is exactly what produced the
+      // "couldn't confidently match bracket teams" warning and
+      // placeholder player names on a resimulate: resolveBracketTeamSides
+      // was correctly comparing a stale snapshot against live data and
+      // finding no match.
+      //
+      // Runs whenever this match is linked to a bracket slot at all, not
+      // only when reset=true — the bracket's teams could just as easily
+      // have changed between two runs regardless of the reset flag.
+      // team_a_id is treated as team1 and team_b_id as team2 here (rather
+      // than inferring which is which, the way resolveBracketTeamSides
+      // has to for a possibly-stale row) — this write IS what makes them
+      // match going forward, so there's nothing to infer. Stale squads
+      // are cleared in the same step (any roster in match_setup.squads
+      // was tied to whichever teams occupied this slot before) so
+      // poolFromSetup cleanly falls back to placeholder players instead
+      // of silently mixing an old roster in under a new team name.
+      let bracketTeamsResynced = false
+      if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
+        const { data: currentBracketTeams, error: currentTeamsErr } = await supabase
+          .from("teams")
+          .select("id, code, name")
+          .in("id", [bracketRow.team_a_id, bracketRow.team_b_id])
+
+        if (currentTeamsErr) {
+          console.error("[handleStart] failed loading current bracket teams for resync:", currentTeamsErr.message)
+        } else if (currentBracketTeams && currentBracketTeams.length === 2) {
+          const liveTeamA = currentBracketTeams.find((t) => t.id === bracketRow.team_a_id)
+          const liveTeamB = currentBracketTeams.find((t) => t.id === bracketRow.team_b_id)
+
+          if (liveTeamA && liveTeamB) {
+            const teamsDrifted =
+              normField(parsedSetup.team1?.name) !== normField(liveTeamA.name) ||
+              normField(parsedSetup.team1?.short) !== normField(liveTeamA.code) ||
+              normField(parsedSetup.team2?.name) !== normField(liveTeamB.name) ||
+              normField(parsedSetup.team2?.short) !== normField(liveTeamB.code)
+
+            if (teamsDrifted) {
+              const prevTeam1Name = parsedSetup.team1?.name ?? "(unset)"
+              const prevTeam2Name = parsedSetup.team2?.name ?? "(unset)"
+              parsedSetup.team1 = { ...parsedSetup.team1, name: liveTeamA.name, short: liveTeamA.code }
+              parsedSetup.team2 = { ...parsedSetup.team2, name: liveTeamB.name, short: liveTeamB.code }
+              // Old roster belonged to whichever teams previously sat in
+              // this slot — no longer meaningful once the teams change,
+              // so clear it rather than let poolFromSetup silently pair
+              // it with the wrong team.
+              ;(parsedSetup as any).squads = []
+              bracketTeamsResynced = true
+              pushLog(
+                `Bracket teams for this match changed since it was last simulated (was "${prevTeam1Name}" vs "${prevTeam2Name}", now "${liveTeamA.name}" vs "${liveTeamB.name}") — match info and squads have been resynced.`,
+                true
+              )
+            }
+          }
+        }
+      }
+
       if (reset) {
         pushLog("Clearing any existing balls/state/commentary for this match…")
         const { allOk, failures } = await clearMatchData(matchId)
@@ -551,6 +627,22 @@ export default function SimulateMatchPage() {
       }
 
       // ── Bracket + match_team_stats + standings (via DB trigger) ──
+      //
+      // FIXED (was: silently marking bracket_matches 'completed' with
+      // no score_a/score_b/winner_team_id when the team-side mapping
+      // was ambiguous, or when match_team_stats failed to write).
+      // `status = 'completed'` with no winner is exactly the state
+      // that stalls a live/losers-bracket match's downstream slot
+      // forever — nothing propagates, and it's silent: the bracket UI
+      // shows a "completed" card with no score and no visible error.
+      //
+      // Both fallback branches below now leave the bracket match at
+      // `status: 'live'` instead of `'completed'` when the result
+      // can't be safely written. This keeps the match visibly
+      // unresolved on the bracket (so it doesn't look done when it
+      // isn't) rather than quietly locking in a dead end. The engine
+      // simulation itself still completed fine either way — this only
+      // affects whether the *bracket* reflects that.
       if (bracketRow) {
         const sides = await resolveBracketTeamSides(bracketRow, setup)
 
@@ -599,13 +691,24 @@ export default function SimulateMatchPage() {
           )
 
           if (statsErr) {
-            // Don't let a stats-write failure block marking the bracket
-            // match completed at all — but skip the score/winner write
-            // below since the trigger depends on match_team_stats and
-            // would otherwise warn/skip anyway.
+            // FIXED: previously wrote status: "completed" here with no
+            // score/winner — the bracket would show this match as
+            // finished while every downstream slot stayed stuck
+            // forever, with no visible sign of why. Leaving status at
+            // "live" instead means the bracket keeps showing the match
+            // as unresolved, matching reality, until this is retried
+            // or fixed manually.
             console.error("[handleStart] failed writing match_team_stats:", statsErr.message)
-            pushLog(`Warning: could not record match_team_stats — standings won't update for this match. (${statsErr.message})`)
-            await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", bracketRow.id)
+            pushLog(
+              `Warning: could not record match_team_stats — standings won't update for this match, and the bracket match has been LEFT LIVE (not marked completed) so it doesn't silently stall. (${statsErr.message})`
+            )
+            const { error: statusErr } = await supabase
+              .from("bracket_matches")
+              .update({ status: "live" })
+              .eq("id", bracketRow.id)
+            if (statusErr) {
+              console.error("[handleStart] failed to leave bracket_matches status as 'live':", statusErr.message)
+            }
           } else {
             // This single UPDATE, once match_team_stats above has
             // committed, is what fires
@@ -623,6 +726,11 @@ export default function SimulateMatchPage() {
               .eq("id", bracketRow.id)
 
             if (bracketUpdateErr) {
+              // The write that actually sets status: 'completed' failed
+              // outright — the row is still whatever it was before this
+              // call (we set it to 'live' earlier in this same run), so
+              // there's no risk of a "completed but no result" state
+              // here. Just surface it.
               console.error("[handleStart] failed updating bracket_matches:", bracketUpdateErr.message)
               pushLog(`Warning: bracket match update failed — ${bracketUpdateErr.message}`)
             } else {
@@ -630,16 +738,25 @@ export default function SimulateMatchPage() {
             }
           }
         } else {
-          // Couldn't confidently map bracket team_a/team_b to
-          // setup.team1/team2 — mark completed so the bracket UI
-          // reflects the match finished, but deliberately skip
-          // score_a/score_b/winner_team_id to avoid writing a
-          // possibly-swapped result. Standings trigger won't fire
-          // usefully anyway without match_team_stats.
+          // FIXED: previously wrote status: "completed" here too, with
+          // score_a/score_b/winner_team_id all left null "to avoid
+          // writing a possibly-swapped result." The intent (don't guess
+          // a swapped score) was right, but marking it 'completed'
+          // anyway created exactly the same stuck-forever bracket node
+          // as the statsErr branch above, just from a different cause.
+          // Leaving status at "live" keeps the bracket honest — this
+          // match visibly still needs attention — instead of quietly
+          // dead-ending downstream slots with no result to propagate.
           pushLog(
-            "Warning: couldn't confidently match bracket teams to this match's squads — bracket marked completed, but score/winner and standings were skipped. Check bracket_matches.team_a_id/team_b_id for this match.",
+            "Warning: couldn't confidently match bracket teams to this match's squads — bracket match has been LEFT LIVE (not marked completed), and score/winner/standings were skipped. Check bracket_matches.team_a_id/team_b_id and match_setup.team1/team2 for this match, then re-run or fix the row manually.",
           )
-          await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", bracketRow.id)
+          const { error: statusErr } = await supabase
+            .from("bracket_matches")
+            .update({ status: "live" })
+            .eq("id", bracketRow.id)
+          if (statusErr) {
+            console.error("[handleStart] failed to leave bracket_matches status as 'live':", statusErr.message)
+          }
         }
       }
 

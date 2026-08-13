@@ -29,6 +29,8 @@ import {
   Medal,
   Target,
   TrendingUp,
+  Calculator,
+  X,
 } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { SiteHeader } from "@/components/landing/site-header"
@@ -556,6 +558,12 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   const nrrValues = sorted.map((r) => parseFloat(r.nrr) || 0)
   const maxAbsNrr = Math.max(0.5, ...nrrValues.map((v) => Math.abs(v)))
 
+  // Which team's calculation overlay is currently open, if any. Storing
+  // the row + its rank together (rather than just a team id) means the
+  // overlay doesn't need to re-look-up the row from `sorted` — it just
+  // renders whatever was open when the row was clicked.
+  const [openCalc, setOpenCalc] = useState<{ row: PointsRow; rank: number } | null>(null)
+
   return (
     <div className="relative bg-black/50 border border-gold/20 rounded-xl p-6 mb-8 overflow-hidden">
       {/* faint decorative glow, purely aesthetic */}
@@ -600,11 +608,26 @@ function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
                 qualified={rank <= QUALIFY_COUNT}
                 pointsBarWidth={Math.max(6, (row.points / maxPoints) * 100)}
                 maxAbsNrr={maxAbsNrr}
+                onShowCalculation={() => setOpenCalc({ row, rank })}
               />
             </div>
           )
         })}
       </div>
+
+      <p className="relative text-gray-500 text-[10px] text-center mt-4 flex items-center justify-center gap-1.5">
+        <Calculator className="h-3 w-3" />
+        Tap any team to see how their points are calculated
+      </p>
+
+      {openCalc && (
+        <PointsCalculationOverlay
+          row={openCalc.row}
+          rank={openCalc.rank}
+          qualified={openCalc.rank <= QUALIFY_COUNT}
+          onClose={() => setOpenCalc(null)}
+        />
+      )}
     </div>
   )
 }
@@ -646,12 +669,14 @@ function PointsTableRow({
   qualified,
   pointsBarWidth,
   maxAbsNrr,
+  onShowCalculation,
 }: {
   row: PointsRow
   rank: number
   qualified: boolean
   pointsBarWidth: number
   maxAbsNrr: number
+  onShowCalculation: () => void
 }) {
   const nrrVal = parseFloat(row.nrr) || 0
   const nrrPositive = nrrVal >= 0
@@ -667,13 +692,22 @@ function PointsTableRow({
           : null
 
   return (
-    <div
-      className={`group relative grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.75rem_1fr_3rem_3rem_3rem_8rem_6.5rem_3.5rem] items-center gap-2 rounded-xl border px-4 py-3.5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(0,0,0,0.6)] ${
+    <button
+      type="button"
+      onClick={onShowCalculation}
+      aria-label={`See how ${row.team}'s points were calculated`}
+      className={`group relative w-full text-left grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.75rem_1fr_3rem_3rem_3rem_8rem_6.5rem_3.5rem] items-center gap-2 rounded-xl border px-4 py-3.5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(0,0,0,0.6)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 ${
         qualified
           ? "border-gold/25 bg-gradient-to-r from-gold/[0.07] via-white/[0.02] to-transparent hover:border-gold/45"
           : "border-white/10 bg-white/[0.03] hover:border-white/20"
       }`}
     >
+      {/* calculator affordance — appears on hover/focus so it doesn't
+          clutter the row by default, hints that the row is clickable */}
+      <span className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gold text-black flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-200 shadow-md">
+        <Calculator className="h-3 w-3" />
+      </span>
+
       {/* qualification tick on the left edge */}
       {qualified && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-gold" />}
 
@@ -743,7 +777,7 @@ function PointsTableRow({
       <span className="hidden sm:block text-right text-gold font-bold font-cinzel text-xl leading-none">
         {row.points}
       </span>
-    </div>
+    </button>
   )
 }
 
@@ -761,6 +795,164 @@ function FormPill({ result }: { result: "W" | "L" | "NR" }) {
     >
       {result}
     </span>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// POINTS CALCULATION OVERLAY — click any team row to see exactly how
+// their points total was derived (Won×2 + Tied×1 + Lost×0), plus the
+// NRR formula for context.
+//
+// DATA NOTE: `PointsRow` (what getPointsTableForTournament returns)
+// only carries played/won/lost/nrr/form/points — it doesn't expose a
+// `tied` count directly, and the frontend has no access to the
+// underlying match-by-match `bracket_matches`/`balls` rows recompute
+// StandingsForTournament used to build this in the first place. So:
+//   - Tied matches are back-derived algebraically from the numbers we
+//     DO have: since points = won*2 + tied*1 (see standings.ts),
+//     tied = points - won*2. This is exact, not an estimate, given
+//     that formula — it just isn't a separately-stored field.
+//   - NRR is shown as the final computed value with the formula and a
+//     plain-language explanation of the ICC all-out rule, rather than
+//     a runs/overs-faced breakdown, since the raw ball-by-ball figures
+//     that fed into it aren't part of PointsRow and would need a
+//     separate query (see getMatchBallsSummary in standings.ts) to
+//     show match-by-match.
+// ─────────────────────────────────────────────────────────────
+function PointsCalculationOverlay({
+  row,
+  rank,
+  qualified,
+  onClose,
+}: {
+  row: PointsRow
+  rank: number
+  qualified: boolean
+  onClose: () => void
+}) {
+  const tied = Math.max(0, row.points - row.won * 2)
+  const nrrVal = parseFloat(row.nrr) || 0
+  const nrrPositive = nrrVal >= 0
+
+  const formulaRows = [
+    { label: "Wins", count: row.won, per: 2, subtotal: row.won * 2 },
+    ...(tied > 0 ? [{ label: "Ties", count: tied, per: 1, subtotal: tied * 1 }] : []),
+    { label: "Losses", count: row.lost, per: 0, subtotal: 0 },
+  ]
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 mt-16"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Points calculation for ${row.team}`}
+    >
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+
+      {/* modal card */}
+      <div className="relative w-full max-w-md bg-[#0d0d0f] border border-gold/25 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        {/* decorative glow */}
+        <div className="pointer-events-none absolute -top-20 -right-20 h-56 w-56 rounded-full bg-gold/[0.08] blur-3xl" />
+
+        {/* header */}
+        <div className="relative flex items-start justify-between gap-3 p-5 border-b border-white/10">
+          <div className="flex items-center gap-3 min-w-0">
+            <span
+              className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold font-cinzel shrink-0 ${
+                rank === 1
+                  ? "bg-gradient-to-br from-yellow-300 to-gold text-black"
+                  : qualified
+                    ? "bg-gold/15 text-gold border border-gold/40"
+                    : "bg-white/10 text-gray-200 border border-white/15"
+              }`}
+            >
+              {rank}
+            </span>
+            <div className="min-w-0">
+              <p className="text-white font-bold font-cinzel truncate">{row.team}</p>
+              <p className="text-gray-400 text-[11px] uppercase tracking-widest">
+                {qualified ? "In playoff position" : "Outside playoff position"}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 h-8 w-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* body */}
+        <div className="relative p-5 space-y-6">
+          {/* Points formula */}
+          <div>
+            <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-1.5">
+              <Calculator className="h-3.5 w-3.5" />
+              Points Calculation
+            </h4>
+            <div className="space-y-1.5">
+              {formulaRows.map((f) => (
+                <div
+                  key={f.label}
+                  className="flex items-center justify-between text-sm bg-white/[0.03] border border-white/5 rounded-md px-3 py-2"
+                >
+                  <span className="text-gray-300">
+                    {f.label} <span className="text-gray-500">({f.count} × {f.per})</span>
+                  </span>
+                  <span className="text-white font-semibold font-cinzel">{f.subtotal}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-sm rounded-md px-3 py-2.5 bg-gold/10 border border-gold/30 mt-2">
+                <span className="text-gold font-cinzel uppercase tracking-wide text-xs">Total Points</span>
+                <span className="text-gold font-bold font-cinzel text-lg">{row.points}</span>
+              </div>
+            </div>
+            <p className="text-gray-500 text-[10px] mt-2">
+              {row.played} matches played · win = 2 pts, tie = 1 pt, loss = 0 pts
+            </p>
+          </div>
+
+          {/* NRR */}
+          <div>
+            <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3">Net Run Rate</h4>
+            <div className="bg-white/[0.03] border border-white/5 rounded-md px-3 py-3">
+              <p className="text-gray-400 text-xs font-mono mb-2 leading-relaxed">
+                NRR = (runs scored ÷ overs faced) − (runs conceded ÷ overs bowled)
+              </p>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-300 text-sm">Current NRR</span>
+                <span className={`font-bold font-cinzel text-lg ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
+                  {row.nrr}
+                </span>
+              </div>
+            </div>
+            <p className="text-gray-500 text-[10px] mt-2 leading-relaxed">
+              Calculated across all {row.played} completed matches per ICC rules — if a team is bowled out, their
+              overs faced count as the full quota rather than the actual balls used, so a collapse can't inflate
+              their own rate.
+            </p>
+          </div>
+
+          {/* Form */}
+          {row.form && row.form.length > 0 && (
+            <div>
+              <h4 className="text-gold text-[11px] font-cinzel uppercase tracking-widest mb-3">
+                Recent Form (last {row.form.length})
+              </h4>
+              <div className="flex gap-1.5">
+                {row.form.map((f, j) => (
+                  <FormPill key={j} result={f} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
