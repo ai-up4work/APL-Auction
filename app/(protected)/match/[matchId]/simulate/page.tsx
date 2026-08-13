@@ -419,17 +419,6 @@ export default function SimulateMatchPage() {
         )
       }
 
-      const setup = withDefaultMatchInfo(parsedSetup)
-      const infoWasFilled =
-        setup.venue !== parsedSetup.venue ||
-        setup.date !== parsedSetup.date ||
-        setup.time !== parsedSetup.time ||
-        setup.toss !== parsedSetup.toss ||
-        setup.officials?.format !== parsedSetup.officials?.format ||
-        setup.officials?.referee !== parsedSetup.officials?.referee ||
-        setup.officials?.umpires !== parsedSetup.officials?.umpires ||
-        setup.officials?.thirdUmpire !== parsedSetup.officials?.thirdUmpire
-
       const { data: bracketRow } = await supabase
         .from("bracket_matches")
         .select("id, status, team_a_id, team_b_id, tournament_id")
@@ -499,6 +488,30 @@ export default function SimulateMatchPage() {
               )
             }
           }
+        }
+      }
+
+      // Build the authoritative setup only after bracket synchronization. The
+      // previous code captured `setup` before the resync, so the database was
+      // updated with the new teams but pools/results still used the old teams.
+      const setup = withDefaultMatchInfo(parsedSetup)
+      const infoWasFilled =
+        setup.venue !== parsedSetup.venue ||
+        setup.date !== parsedSetup.date ||
+        setup.time !== parsedSetup.time ||
+        setup.toss !== parsedSetup.toss ||
+        setup.officials?.format !== parsedSetup.officials?.format ||
+        setup.officials?.referee !== parsedSetup.officials?.referee ||
+        setup.officials?.umpires !== parsedSetup.officials?.umpires ||
+        setup.officials?.thirdUmpire !== parsedSetup.officials?.thirdUmpire
+
+      // A feeder-team change makes the previous scoring state invalid even if
+      // the operator did not press Reset explicitly.
+      if (bracketTeamsResynced && !reset) {
+        pushLog("Clearing stale scoring state because the bracket teams changed…")
+        const { allOk, failures } = await clearMatchData(matchId)
+        if (!allOk) {
+          throw new Error(`Failed clearing stale data after bracket resync: ${failures.join("; ")}`)
         }
       }
 
@@ -931,7 +944,7 @@ export default function SimulateMatchPage() {
               </label>
               <input
                 type="range"
-                min={1000}
+                min={500}
                 max={60000}
                 step={100}
                 value={speedMs}
