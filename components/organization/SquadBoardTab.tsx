@@ -39,6 +39,7 @@ import {
   type BankPlayer,
   type TeamRosterPlayer,
 } from "@/lib/organization/organization"
+import Image from "next/image"
 
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -97,7 +98,7 @@ export function PoolTeamPickerCard({
       >
         {team.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={team.logo} alt="" className="h-full w-full object-cover" />
+          <Image src={team.logo} alt="" className="h-full w-full object-cover" width={32} height={32} />
         ) : (
           <Shield className="h-3.5 w-3.5 text-white/70" />
         )}
@@ -130,7 +131,7 @@ export function BankPlayerPickerCard({
       <div className="relative h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
         {player.img ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={player.img} alt="" className="h-full w-full object-cover" />
+          <Image src={player.img} alt="" className="h-full w-full object-cover" width={24} height={24} />
         ) : (
           <UserPlus className="h-3.5 w-3.5 text-white/40" />
         )}
@@ -186,7 +187,7 @@ function LogoFan({ logos }: { logos: string[] }) {
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logo} alt="" className="h-full w-full object-cover" />
+          <Image src={logo} alt="" className="h-full w-full object-cover" width={40} height={40} />
         </div>
       ))}
       {overflow > 0 && (
@@ -756,7 +757,7 @@ function SquadBoardTeamCard({
         <div className="h-8 w-8 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
           {team.logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={team.logo} alt="" className="h-full w-full object-cover" />
+            <Image src={team.logo} alt="" className="h-full w-full object-cover" width={32} height={32} />
           ) : (
             <Shield className="h-3.5 w-3.5 text-gray-500" />
           )}
@@ -783,7 +784,7 @@ function SquadBoardTeamCard({
               <div className="relative h-6 w-6 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
                 {p.img ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.img} alt="" className="h-full w-full object-cover" />
+                  <Image src={p.img} alt="" className="h-full w-full object-cover" width={24} height={24} />
                 ) : (
                   <UserPlus className="h-2.5 w-2.5 text-white/40" />
                 )}
