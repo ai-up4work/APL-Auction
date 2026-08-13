@@ -526,58 +526,152 @@ function LockedTabPlaceholder({
 }
 
 // ─────────────────────────────────────────────────────────────
-// POINTS TABLE PANEL
+// POINTS TABLE PANEL — card-row standings with a visible
+// qualification line, per-team NRR bar, and form pills.
 // ─────────────────────────────────────────────────────────────
 function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
   const sorted = [...rows].sort((a, b) => b.points - a.points)
+  const maxPoints = Math.max(1, ...sorted.map((r) => r.points))
+
+  // NRR bar needs a symmetric scale around 0 so positive/negative
+  // net run rates both read proportionally against each other.
+  const nrrValues = sorted.map((r) => parseFloat(r.nrr) || 0)
+  const maxAbsNrr = Math.max(0.5, ...nrrValues.map((v) => Math.abs(v)))
+
   return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8 overflow-x-auto">
-      <h2 className="text-2xl font-bold text-white mb-4 font-cinzel flex items-center gap-2">
-        <ListOrdered className="h-5 w-5 text-gold" />
-        POINTS TABLE
-      </h2>
-      <table className="w-full text-sm min-w-[560px]">
-        <thead>
-          <tr className="text-gray-400 text-left border-b border-gold/10">
-            <th className="py-2 pr-2 font-normal">#</th>
-            <th className="py-2 pr-2 font-normal">Team</th>
-            <th className="py-2 pr-2 font-normal text-center">P</th>
-            <th className="py-2 pr-2 font-normal text-center">W</th>
-            <th className="py-2 pr-2 font-normal text-center">L</th>
-            <th className="py-2 pr-2 font-normal text-center">NRR</th>
-            <th className="py-2 pr-2 font-normal text-center">Pts</th>
-            <th className="py-2 pr-2 font-normal text-right">Form</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row, i) => (
-            <tr key={row.short} className={`border-b border-gold/5 ${i < 4 ? "bg-gold/[0.04]" : ""}`}>
-              <td className="py-3 pr-2 text-gray-400">{i + 1}</td>
-              <td className="py-3 pr-2 text-white font-semibold whitespace-nowrap">{row.team}</td>
-              <td className="py-3 pr-2 text-center text-gray-300">{row.played}</td>
-              <td className="py-3 pr-2 text-center text-gray-300">{row.won}</td>
-              <td className="py-3 pr-2 text-center text-gray-300">{row.lost}</td>
-              <td className="py-3 pr-2 text-center text-gray-300">{row.nrr}</td>
-              <td className="py-3 pr-2 text-center text-gold font-bold">{row.points}</td>
-              <td className="py-3 pr-2">
-                <div className="flex gap-1 justify-end">
-                  {row.form?.map((f, j) => (
-                    <span
-                      key={j}
-                      className={`h-5 w-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
-                        f === "W" ? "bg-yellow-600 text-white" : f === "L" ? "bg-red-600/80 text-white" : "bg-green-600 text-white"
-                      }`}
-                    >
-                      {f}
-                    </span>
-                  ))}
-                </div>
-              </td>
-            </tr>
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-8">
+      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
+          <ListOrdered className="h-5 w-5 text-gold" />
+          POINTS TABLE
+        </h2>
+        <p className="text-gray-500 text-[11px] font-cinzel uppercase tracking-widest flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-gold" />
+          Top 4 qualify for playoffs
+        </p>
+      </div>
+
+      {/* Column headers — hidden on small screens; cards carry their own labels there */}
+      <div className="hidden sm:grid grid-cols-[2.5rem_1fr_3.5rem_3.5rem_3.5rem_8rem_7rem] gap-2 px-4 pb-2 text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">
+        <span>#</span>
+        <span>Team</span>
+        <span className="text-center">P</span>
+        <span className="text-center">W</span>
+        <span className="text-center">L</span>
+        <span>NRR</span>
+        <span className="text-right">Form</span>
+      </div>
+
+      <div className="space-y-2">
+        {sorted.map((row, i) => (
+          <PointsTableRow
+            key={row.short}
+            row={row}
+            rank={i + 1}
+            qualified={i < 4}
+            pointsBarWidth={Math.max(6, (row.points / maxPoints) * 100)}
+            maxAbsNrr={maxAbsNrr}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One team's row in the Points Table — split out from PointsTablePanel
+ * so the (fairly involved) per-row NRR-bar / form-pill / qualification
+ * styling logic doesn't have to live inline inside the sort+map above.
+ */
+function PointsTableRow({
+  row,
+  rank,
+  qualified,
+  pointsBarWidth,
+  maxAbsNrr,
+}: {
+  row: PointsRow
+  rank: number
+  qualified: boolean
+  pointsBarWidth: number
+  maxAbsNrr: number
+}) {
+  const nrrVal = parseFloat(row.nrr) || 0
+  const nrrPositive = nrrVal >= 0
+  const nrrBarWidth = Math.min(100, (Math.abs(nrrVal) / maxAbsNrr) * 100)
+
+  return (
+    <div
+      className={`group relative grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_3.5rem_3.5rem_3.5rem_8rem_7rem] items-center gap-2 rounded-lg border px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 ${
+        qualified
+          ? "border-gold/30 bg-gold/[0.06] hover:border-gold/50"
+          : "border-white/5 bg-white/[0.015] hover:border-gold/20"
+      }`}
+    >
+      {/* qualification tick on the left edge */}
+      {qualified && <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg bg-gold" />}
+
+      {/* Rank */}
+      <span
+        className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold font-cinzel shrink-0 ${
+          qualified ? "bg-gold text-black" : "bg-white/5 text-gray-400 border border-white/10"
+        }`}
+      >
+        {rank}
+      </span>
+
+      {/* Team + points bar (mobile: also carries P/W/L inline) */}
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-white font-semibold font-cinzel truncate">{row.team}</span>
+          <span className="text-gray-500 text-[10px] uppercase tracking-wide sm:hidden">
+            {row.played}P · {row.won}W · {row.lost}L
+          </span>
+        </div>
+        <div className="h-1 rounded-full bg-white/5 overflow-hidden mt-1.5 max-w-[220px]">
+          <div
+            className="h-full rounded-full bg-gold/70 transition-all duration-500"
+            style={{ width: `${pointsBarWidth}%` }}
+          />
+        </div>
+      </div>
+
+      {/* P / W / L — desktop only */}
+      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.played}</span>
+      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.won}</span>
+      <span className="hidden sm:block text-center text-gray-300 text-sm">{row.lost}</span>
+
+      {/* NRR bar — desktop only */}
+      <div className="hidden sm:flex items-center gap-2">
+        <span className={`text-xs font-semibold w-12 shrink-0 ${nrrPositive ? "text-green-400" : "text-red-400"}`}>
+          {row.nrr}
+        </span>
+        <div className="h-1.5 flex-1 rounded-full bg-white/5 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${nrrPositive ? "bg-green-500" : "bg-red-500"}`}
+            style={{ width: `${nrrBarWidth}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Points chip + form — right side, always visible */}
+      <div className="col-start-3 sm:col-auto flex items-center gap-3 justify-self-end">
+        <div className="flex gap-1">
+          {row.form?.map((f, j) => (
+            <span
+              key={j}
+              className={`h-5 w-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
+                f === "W" ? "bg-green-600 text-white" : f === "L" ? "bg-red-600/80 text-white" : "bg-gray-600 text-white"
+              }`}
+            >
+              {f}
+            </span>
           ))}
-        </tbody>
-      </table>
-      <p className="text-gray-500 text-xs mt-3">Top 4 (highlighted) advance to the playoffs.</p>
+        </div>
+        <span className="min-w-[2.5rem] text-right text-gold font-bold font-cinzel text-lg leading-none">
+          {row.points}
+        </span>
+      </div>
     </div>
   )
 }
@@ -1140,13 +1234,18 @@ function PlayerCard({ player: p }: { player: { name: string; isCaptain?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────
-// TOURNAMENT STATS — split into a leaderboard card (batting /
-// bowling toggle, medal-style rank treatment for the top 3, same
-// avatar + hover language as SquadsPanel/FixtureCard) and a team
-// scoring card (relative run bars using each team's deterministic
-// color, plus a cleaner match-by-match score list). Mirrors the
-// icon-in-header, gold-accent, hover-lift visual language used by
-// every other panel on the page instead of the old flat rows.
+// TOURNAMENT STATS — MAIN COMPONENT
+//
+// Split into a main orchestrator (owns the batting/bowling toggle
+// state and derives team-scoring totals from fixtures) plus three
+// focused sub-components:
+//   - StatsSpotlightRow  → top scorer / top wicket-taker / highest
+//     team total, shown as headline cards above the leaderboard
+//   - StatsLeaderboardCard → the ranked batting/bowling list
+//   - TeamScoringCard    → per-team run totals + match-by-match list
+//
+// Each sub-component only receives the data it needs, so the parent
+// stays readable and each piece can be reused or restyled on its own.
 // ─────────────────────────────────────────────────────────────
 function TournamentStatsPanel({
   batting,
@@ -1169,27 +1268,138 @@ function TournamentStatsPanel({
     teamScores.set(f.team1, a); teamScores.set(f.team2, b)
   }
   const teams = [...teamScores.entries()].sort((a, b) => b[1].scored - a[1].scored)
-  const maxScored = Math.max(1, ...teams.map(([, s]) => s.scored))
+  const playedFixtures = fixtures.filter((f) => f.team1Score != null && f.team2Score != null)
+
+  const topBatter = batting.length ? [...batting].sort((a, b) => b.runs - a.runs)[0] : undefined
+  const topBowler = bowling.length ? [...bowling].sort((a, b) => b.wkts - a.wkts)[0] : undefined
+  const highestTeamTotal = teams[0]
+
+  return (
+    <div className="space-y-6 mb-8">
+      <StatsSpotlightRow topBatter={topBatter} topBowler={topBowler} highestTeamTotal={highestTeamTotal} />
+
+      <StatsLeaderboardCard batting={batting} bowling={bowling} mode={mode} onModeChange={setMode} />
+
+      <TeamScoringCard teams={teams} playedFixtures={playedFixtures} />
+    </div>
+  )
+}
+
+/**
+ * Deterministic per-team accent color, shared by TeamScoringCard and
+ * anywhere else on the page that needs a stable color for a team name
+ * without a real `teams.color` value available (same hashing approach
+ * used in SchedulePanel).
+ */
+function hashTeamColor(name: string) {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  const hue = Math.abs(hash) % 360
+  return `hsl(${hue}, 62%, 42%)`
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUB-COMPONENT: spotlight cards (top scorer / top wicket-taker /
+// highest team total). Silently omits a card if its underlying stat
+// isn't available, and renders nothing at all if none are.
+// ─────────────────────────────────────────────────────────────
+function StatsSpotlightRow({
+  topBatter,
+  topBowler,
+  highestTeamTotal,
+}: {
+  topBatter?: PlayerStatRow
+  topBowler?: BowlingStatRow
+  highestTeamTotal?: [string, { scored: number; conceded: number; games: number }]
+}) {
+  const cards = [
+    topBatter && {
+      label: "Leading Run Scorer",
+      name: topBatter.player,
+      value: `${topBatter.runs}`,
+      unit: "runs",
+      meta: `${topBatter.matches} matches · SR ${topBatter.sr.toFixed(1)}`,
+      Icon: TrendingUp,
+      accent: "from-emerald-500/15 via-black/40 to-black/60 border-emerald-500/20",
+      iconColor: "text-emerald-400",
+    },
+    topBowler && {
+      label: "Leading Wicket Taker",
+      name: topBowler.player,
+      value: `${topBowler.wkts}`,
+      unit: "wickets",
+      meta: `Best ${topBowler.best} · Econ ${topBowler.econ.toFixed(2)}`,
+      Icon: Target,
+      accent: "from-sky-500/15 via-black/40 to-black/60 border-sky-500/20",
+      iconColor: "text-sky-400",
+    },
+    highestTeamTotal && {
+      label: "Highest Team Total",
+      name: highestTeamTotal[0],
+      value: `${highestTeamTotal[1].scored.toLocaleString()}`,
+      unit: "runs",
+      meta: `${highestTeamTotal[1].games} matches played`,
+      Icon: Trophy,
+      accent: "from-gold/15 via-black/40 to-black/60 border-gold/25",
+      iconColor: "text-gold",
+    },
+  ].filter(Boolean) as {
+    label: string
+    name: string
+    value: string
+    unit: string
+    meta: string
+    Icon: React.ComponentType<{ className?: string }>
+    accent: string
+    iconColor: string
+  }[]
+
+  if (cards.length === 0) return null
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {cards.map((c) => (
+        <div
+          key={c.label}
+          className={`relative overflow-hidden rounded-lg border bg-gradient-to-br p-5 transition-all duration-300 hover:-translate-y-0.5 ${c.accent}`}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-gray-400 text-[10px] font-cinzel uppercase tracking-widest">{c.label}</span>
+            <c.Icon className={`h-4 w-4 ${c.iconColor}`} />
+          </div>
+          <p className="text-white font-bold font-cinzel text-lg leading-tight truncate mb-1">{c.name}</p>
+          <p className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-bold font-cinzel text-white">{c.value}</span>
+            <span className="text-gray-400 text-xs">{c.unit}</span>
+          </p>
+          <p className="text-gray-500 text-[11px] mt-1.5">{c.meta}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUB-COMPONENT: ranked batting/bowling leaderboard with the
+// toggle. rankStyle gives the top 3 medal styling, matching the
+// top-4 highlight treatment used on the Points Table tab.
+// ─────────────────────────────────────────────────────────────
+function StatsLeaderboardCard({
+  batting,
+  bowling,
+  mode,
+  onModeChange,
+}: {
+  batting: PlayerStatRow[]
+  bowling: BowlingStatRow[]
+  mode: "batting" | "bowling"
+  onModeChange: (mode: "batting" | "bowling") => void
+}) {
   const rows =
     mode === "batting"
       ? [...batting].sort((a, b) => b.runs - a.runs)
       : [...bowling].sort((a, b) => b.wkts - a.wkts)
-  const playedFixtures = fixtures.filter((f) => f.team1Score != null && f.team2Score != null)
 
-  // Deterministic per-team accent color, same hashing approach used
-  // in the Schedule tab so team identity stays visually consistent
-  // across tabs even without a squad logo/color on record.
-  function teamColor(name: string) {
-    let hash = 0
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-    const hue = Math.abs(hash) % 360
-    return `hsl(${hue}, 62%, 42%)`
-  }
-
-  // Medal styling for the top 3 ranks — gold/silver/bronze badge
-  // with a crown/medal icon, everyone else gets a plain numbered
-  // gold chip. Mirrors the top-4 highlight treatment on the Points
-  // Table tab.
   const rankStyle = (i: number) => {
     if (i === 0) return { ring: "border-gold/40 bg-gold/[0.05]", badge: "bg-gold text-black", Icon: Crown }
     if (i === 1) return { ring: "border-gray-300/25 bg-white/[0.02]", badge: "bg-gray-300 text-black", Icon: Medal }
@@ -1198,132 +1408,68 @@ function TournamentStatsPanel({
   }
 
   return (
-    <div className="space-y-6 mb-8">
-      {/* LEADERBOARD */}
-      <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-        <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-          <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
-            <Award className="h-5 w-5 text-gold" />
-            TOURNAMENT LEADERBOARD
-          </h2>
-          <div className="flex flex-wrap gap-1.5">
-            {batting.length > 0 && (
-              <button
-                onClick={() => setMode("batting")}
-                className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
-                  mode === "batting" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
-                }`}
-              >
-                <TrendingUp className="h-3 w-3" /> Batting
-              </button>
-            )}
-            {bowling.length > 0 && (
-              <button
-                onClick={() => setMode("bowling")}
-                className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
-                  mode === "bowling" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
-                }`}
-              >
-                <Target className="h-3 w-3" /> Bowling
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          {rows.map((r, i) => {
-            const { ring, badge, Icon } = rankStyle(i)
-            const value = mode === "batting" ? (r as PlayerStatRow).runs : (r as BowlingStatRow).wkts
-            return (
-              <div
-                key={r.player}
-                className={`group flex items-center justify-between border rounded-md p-3 transition-all duration-300 hover:border-gold/50 hover:-translate-y-0.5 ${ring}`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold font-cinzel shrink-0 ${badge}`}>
-                    {/* <Image src={Icon ? Icon : Medal} alt="Rank" width={16} height={16} className="h-3 w-3" /> */}
-                    {Icon ? <Icon className="h-3 w-3" /> : i + 1}
-                  </span>
-                  <span className="h-10 w-10 rounded-full bg-gradient-to-br from-gold/20 via-black/40 to-black/60 border border-gold/15 text-gold text-[11px] font-bold flex items-center justify-center font-cinzel shrink-0">
-                    {initials(r.player)}
-                  </span>
-                  <div>
-                    <p className="text-white text-sm font-semibold">{r.player}</p>
-                    <p className="text-gray-400 text-xs">
-                      {r.matches} matches · {r.inns} innings
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-gold font-bold font-cinzel text-lg leading-none">{value}</p>
-                  <p className="text-gray-400 text-xs mt-1">{mode === "batting" ? "runs" : "wickets"}</p>
-                </div>
-              </div>
-            )
-          })}
-          {rows.length === 0 && (
-            <p className="text-gray-500 text-sm italic text-center py-6">No {mode} stats recorded yet.</p>
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+        <h2 className="text-2xl font-bold text-white font-cinzel flex items-center gap-2">
+          <Award className="h-5 w-5 text-gold" />
+          TOURNAMENT LEADERBOARD
+        </h2>
+        <div className="flex flex-wrap gap-1.5">
+          {batting.length > 0 && (
+            <button
+              onClick={() => onModeChange("batting")}
+              className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
+                mode === "batting" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
+              }`}
+            >
+              <TrendingUp className="h-3 w-3" /> Batting
+            </button>
+          )}
+          {bowling.length > 0 && (
+            <button
+              onClick={() => onModeChange("bowling")}
+              className={`text-xs font-cinzel uppercase tracking-wide px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
+                mode === "bowling" ? "bg-gold text-black border-gold" : "border-gold/20 text-gray-300 hover:border-gold/50"
+              }`}
+            >
+              <Target className="h-3 w-3" /> Bowling
+            </button>
           )}
         </div>
       </div>
 
-      {/* TEAM SCORING */}
-      <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
-        <h2 className="text-xl font-bold text-white mb-5 font-cinzel flex items-center gap-2">
-          <Trophy className="h-5 w-5 text-gold" />
-          TEAM SCORING
-        </h2>
-
-        {teams.length > 0 ? (
-          <>
-            <div className="space-y-3 mb-8">
-              {teams.map(([team, s], i) => (
-                <div key={team} className="flex items-center gap-3">
-                  <span className="text-gold font-bold font-cinzel w-5 text-center shrink-0">{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1.5 gap-2">
-                      <span className="text-white text-sm font-semibold truncate">{team}</span>
-                      <span className="text-xs text-gray-400 shrink-0">
-                        <b className="text-gold font-cinzel text-sm">{s.scored.toLocaleString()}</b> runs · {s.games} matches
-                      </span>
-                    </div>
-                    <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${Math.max(4, (s.scored / maxScored) * 100)}%`, background: teamColor(team) }}
-                      />
-                    </div>
-                  </div>
+      <div className="space-y-2">
+        {rows.map((r, i) => {
+          const { ring, badge, Icon } = rankStyle(i)
+          const value = mode === "batting" ? (r as PlayerStatRow).runs : (r as BowlingStatRow).wkts
+          return (
+            <div
+              key={r.player}
+              className={`group flex items-center justify-between border rounded-md p-3 transition-all duration-300 hover:border-gold/50 hover:-translate-y-0.5 ${ring}`}
+            >
+              <div className="flex items-center gap-3">
+                <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-bold font-cinzel shrink-0 ${badge}`}>
+                  {Icon ? <Icon className="h-3 w-3" /> : i + 1}
+                </span>
+                <span className="h-10 w-10 rounded-full bg-gradient-to-br from-gold/20 via-black/40 to-black/60 border border-gold/15 text-gold text-[11px] font-bold flex items-center justify-center font-cinzel shrink-0">
+                  {initials(r.player)}
+                </span>
+                <div>
+                  <p className="text-white text-sm font-semibold">{r.player}</p>
+                  <p className="text-gray-400 text-xs">
+                    {r.matches} matches · {r.inns} innings
+                  </p>
                 </div>
-              ))}
+              </div>
+              <div className="text-right">
+                <p className="text-gold font-bold font-cinzel text-lg leading-none">{value}</p>
+                <p className="text-gray-400 text-xs mt-1">{mode === "batting" ? "runs" : "wickets"}</p>
+              </div>
             </div>
-
-            <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-3">
-              <span className="h-px flex-1 bg-gold/10" />
-              Match by Match
-              <span className="h-px flex-1 bg-gold/10" />
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {playedFixtures.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex items-center gap-2 border border-gold/10 rounded-md px-3 py-2.5 bg-white/[0.02] hover:border-gold/30 transition-colors text-sm"
-                >
-                  <span className="text-gray-300 truncate flex-1 text-right">{f.team1}</span>
-                  <span className="text-white font-bold font-cinzel whitespace-nowrap px-2">
-                    {f.team1Score}
-                    <span className="text-gray-500 mx-1">–</span>
-                    {f.team2Score}
-                  </span>
-                  <span className="text-gray-300 truncate flex-1">{f.team2}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <p className="text-gray-500 text-sm italic text-center py-6">
-            Team scoring will appear once tournament matches have recorded final scores.
-          </p>
+          )
+        })}
+        {rows.length === 0 && (
+          <p className="text-gray-500 text-sm italic text-center py-6">No {mode} stats recorded yet.</p>
         )}
       </div>
     </div>
@@ -1331,7 +1477,85 @@ function TournamentStatsPanel({
 }
 
 // ─────────────────────────────────────────────────────────────
-// LEADERBOARD PANEL
+// SUB-COMPONENT: per-team run totals (relative bars) plus a
+// match-by-match score list, derived from fixtures with recorded
+// scores.
+// ─────────────────────────────────────────────────────────────
+function TeamScoringCard({
+  teams,
+  playedFixtures,
+}: {
+  teams: [string, { scored: number; conceded: number; games: number }][]
+  playedFixtures: Fixture[]
+}) {
+  const maxScored = Math.max(1, ...teams.map(([, s]) => s.scored))
+
+  return (
+    <div className="bg-black/50 border border-gold/20 rounded-lg p-6">
+      <h2 className="text-xl font-bold text-white mb-5 font-cinzel flex items-center gap-2">
+        <Trophy className="h-5 w-5 text-gold" />
+        TEAM SCORING
+      </h2>
+
+      {teams.length > 0 ? (
+        <>
+          <div className="space-y-3 mb-8">
+            {teams.map(([team, s], i) => (
+              <div key={team} className="flex items-center gap-3">
+                <span className="text-gold font-bold font-cinzel w-5 text-center shrink-0">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1.5 gap-2">
+                    <span className="text-white text-sm font-semibold truncate">{team}</span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      <b className="text-gold font-cinzel text-sm">{s.scored.toLocaleString()}</b> runs · {s.games} matches
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.max(4, (s.scored / maxScored) * 100)}%`, background: hashTeamColor(team) }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-3 flex items-center gap-3">
+            <span className="h-px flex-1 bg-gold/10" />
+            Match by Match
+            <span className="h-px flex-1 bg-gold/10" />
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {playedFixtures.map((f) => (
+              <div
+                key={f.id}
+                className="flex items-center gap-2 border border-gold/10 rounded-md px-3 py-2.5 bg-white/[0.02] hover:border-gold/30 transition-colors text-sm"
+              >
+                <span className="text-gray-300 truncate flex-1 text-right">{f.team1}</span>
+                <span className="text-white font-bold font-cinzel whitespace-nowrap px-2">
+                  {f.team1Score}
+                  <span className="text-gray-500 mx-1">–</span>
+                  {f.team2Score}
+                </span>
+                <span className="text-gray-300 truncate flex-1">{f.team2}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-gray-500 text-sm italic text-center py-6">
+          Team scoring will appear once tournament matches have recorded final scores.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEADERBOARD PANEL (legacy, run/wicket LeaderboardRow shape —
+// kept for tournament.runsLeaderboard/wicketsLeaderboard callers,
+// separate from the per-player-stats leaderboard above)
 // ─────────────────────────────────────────────────────────────
 function LeaderboardPanel({ runs, wickets }: { runs: LeaderboardRow[]; wickets: LeaderboardRow[] }) {
   const [tab, setTab] = useState<"runs" | "wickets">(runs.length ? "runs" : "wickets")

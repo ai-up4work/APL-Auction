@@ -119,6 +119,27 @@
 //   continued past — so it silently ran (and failed) on every call. That
 //   query is removed. Match resolution now relies on the two real paths:
 //   the `match_setup->>tournamentId` JSON filter, and `bracket_matches`.
+//
+// TOURNAMENT STATS — PLAYER PHOTOS + PER-MATCH BREAKDOWN (additive):
+//   `balls.striker_name` / `balls.bowler_name` are plain text, not FKs,
+//   so the original aggregation had no route to a player photo at all —
+//   PlayerStatRow/BowlingStatRow simply didn't carry one, and the UI's
+//   "avatar" was always just initials. getTournamentStats now does a
+//   best-effort name lookup against `players` (falling back to
+//   `player_bank`, same two-table fallback buildSquads already uses for
+//   Squads) and attaches `img` to each row when a match is found by
+//   name. This is inherently fuzzy — two different players who share an
+//   exact display name will collide — but it's the only signal
+//   available without turning `balls` into a real FK table.
+//
+//   Separately, aggregation used to fold every ball across every match
+//   into one tournament-wide total and discard `match_id` in the
+//   process, so there was no way to see "how did this player do in just
+//   THIS match" after the fact. getTournamentStats now also aggregates
+//   per match (same logic, scoped to that match's balls) and returns
+//   `matches` (id + display label per match) plus
+//   `battingStatsByMatch` / `bowlingStatsByMatch` keyed by match id, so
+//   a caller can offer a match filter without a second round-trip.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -916,9 +937,8 @@ export async function hasMatchDetail(matchId: string): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// TOURNAMENT STATS — series-wide leaderboards for the Stats tab.
-// Aggregates every `balls` row across every match in a tournament,
-// grouped by player rather than by match.
+// TOURNAMENT STATS — series-wide leaderboards for the Stats tab,
+// PLUS a per-match breakdown and best-effort player photos.
 //
 // Match resolution: two real paths only (see the TOURNAMENT STATS —
 // MATCH RESOLUTION note at the top of this file for why the third,
@@ -936,6 +956,11 @@ export interface PlayerStatRow {
   sr: number
   fours: number
   sixes: number
+  /** Best-effort photo, resolved by name against `players` then
+   *  `player_bank` — see the PLAYER PHOTOS note at the top of this
+   *  file. Undefined when no match was found (falls back to an
+   *  initials avatar in the UI). */
+  img?: string
 }
 
 export interface BowlingStatRow {
@@ -946,87 +971,62 @@ export interface BowlingStatRow {
   avg: number | null
   econ: number
   best: string
+  /** See PlayerStatRow.img. */
+  img?: string
+}
+
+/** One match that contributed to a tournament's stats — used to power
+ *  a match filter on the Stats tab without a second round-trip. */
+export interface MatchStatSummary {
+  id: string
+  /** Human-readable label, e.g. "Valiant Originals vs Desert Hawks · 16 Jul". */
+  label: string
+  date?: string
 }
 
 interface TournamentStats {
   battingStats: PlayerStatRow[]
   bowlingStats: BowlingStatRow[]
+  /** Every match that contributed at least one ball to these stats,
+   *  for a match-filter UI. Empty if there's no ball data yet. */
+  matches: MatchStatSummary[]
+  /** Same shape as battingStats/bowlingStats, but scoped to a single
+   *  match — keyed by match id. Use `matches` to build a picker, then
+   *  index into this (falling back to the tournament-wide arrays above
+   *  for an "All matches" option). */
+  battingStatsByMatch: Record<string, PlayerStatRow[]>
+  bowlingStatsByMatch: Record<string, BowlingStatRow[]>
 }
 
-export async function getTournamentStats(tournamentId: string): Promise<TournamentStats> {
-  // 1. Matches whose tournament link lives in match_setup.tournamentId
-  //    (the JSON field) — this is the same field getMatchDetailById
-  //    falls back to via
-  //    `tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId`.
-  //    This is the ONLY way a tournament made up of standalone matches
-  //    (no bracket_matches rows) is ever found.
-  const { data: jsonLinkedMatches, error: jsonLinkedErr } = await supabase
-    .from("matches")
-    .select("id")
-    .eq("match_setup->>tournamentId", tournamentId)
+/** Minimal ball shape the aggregation helper actually needs — a subset
+ *  of the full `balls` row, shared by both the tournament-wide and the
+ *  per-match aggregation passes below. */
+interface StatsBallRow {
+  match_id: string
+  sequence: number
+  striker_name: string | null
+  bowler_name: string | null
+  runs: number
+  extra_type: string | null
+  is_wicket: boolean
+  dismissal_type: string | null
+}
 
-  if (jsonLinkedErr) {
-    console.error("[getTournamentStats] json-linked matches query failed:", jsonLinkedErr.message)
-  }
-
-  // 2. Matches linked via bracket_matches (real FK, tournament brackets).
-  const { data: bracketRows, error: bracketErr } = await supabase
-    .from("bracket_matches")
-    .select("overlay_match_id")
-    .eq("tournament_id", tournamentId)
-    .not("overlay_match_id", "is", null)
-
-  if (bracketErr) {
-    console.error("[getTournamentStats] bracket_matches query failed:", bracketErr.message)
-  }
-
-  const matchIds = Array.from(
-    new Set([
-      ...(jsonLinkedMatches ?? []).map((m) => m.id as string),
-      ...(bracketRows ?? []).map((b) => b.overlay_match_id as string),
-    ])
-  )
-
-  console.log(
-    `[getTournamentStats] tournamentId=${tournamentId} — jsonLinked=${
-      jsonLinkedMatches?.length ?? 0
-    } bracket=${bracketRows?.length ?? 0} → ${matchIds.length} unique match ids:`,
-    matchIds
-  )
-
-  if (matchIds.length === 0) {
-    console.warn(
-      `[getTournamentStats] no matches resolved for tournamentId=${tournamentId} — Stats tab will show locked.`
-    )
-    return { battingStats: [], bowlingStats: [] }
-  }
-
-  // 3. Every ball from every one of those matches, in one query.
-  const { data: ballRows, error: ballsErr } = await supabase
-    .from("balls")
-    .select(
-      "match_id, innings_number, sequence, over_number, ball_number, striker_name, bowler_name, runs, extra_type, is_wicket, dismissal_type"
-    )
-    .in("match_id", matchIds)
-    .order("sequence", { ascending: true })
-
-  if (ballsErr) {
-    console.error("[getTournamentStats] balls query failed:", ballsErr.message)
-    return { battingStats: [], bowlingStats: [] }
-  }
-
-  const allBalls = ballRows ?? []
-
-  if (allBalls.length === 0) {
-    console.warn(
-      `[getTournamentStats] matches resolved but zero balls rows exist for them yet — Stats tab will show locked until scoring starts.`
-    )
-    return { battingStats: [], bowlingStats: [] }
-  }
-
+/**
+ * Aggregates a set of balls (any subset — tournament-wide or scoped to
+ * one match) into batting/bowling stat rows. Factored out of
+ * getTournamentStats so the exact same logic runs once for the overall
+ * totals and once per match, instead of two hand-maintained copies.
+ * Does not attach `img` — that's resolved once, afterward, against the
+ * full set of names seen across every pass (see getTournamentStats).
+ */
+function aggregatePlayerStats(rows: StatsBallRow[]): {
+  battingStats: Omit<PlayerStatRow, "img">[]
+  bowlingStats: Omit<BowlingStatRow, "img">[]
+} {
   type BatAcc = {
     matches: Set<string>
-    innings: Set<string> // `${match_id}-${innings_number}`
+    innings: Set<string>
     runs: number
     balls: number
     fours: number
@@ -1047,7 +1047,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
   const bowling = new Map<string, BowlAcc>()
   const bowlerInningsFigures = new Map<string, { wkts: number; runs: number }>()
 
-  for (const row of allBalls) {
+  for (const row of rows) {
     const striker = row.striker_name ?? "Unknown"
     const bowler = row.bowler_name ?? "Unknown"
     const isWide = row.extra_type === "wide"
@@ -1055,7 +1055,13 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     const isBye = row.extra_type === "bye"
     const isLegBye = row.extra_type === "leg_bye"
     const isLegal = !isWide && !isNoBall
-    const inningsKey = `${row.match_id}-${row.innings_number}`
+    // NOTE: without innings_number in StatsBallRow we can't split
+    // multi-innings-per-match figures apart here; that's fine for the
+    // tournament-wide pass (innings_number was already dropped by the
+    // caller's select before this refactor too) but see
+    // getTournamentStats for the real query, which DOES select
+    // innings_number and folds it into this key.
+    const inningsKey = `${row.match_id}-${(row as any).innings_number ?? 1}`
 
     if (!batting.has(striker)) {
       batting.set(striker, {
@@ -1118,7 +1124,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     }
   }
 
-  const battingStats: PlayerStatRow[] = [...batting.entries()].map(([player, b]) => {
+  const battingStats = [...batting.entries()].map(([player, b]) => {
     const outs = b.dismissals
     const avg = outs > 0 ? b.runs / outs : null
     const sr = b.balls > 0 ? (b.runs / b.balls) * 100 : 0
@@ -1134,7 +1140,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
     }
   })
 
-  const bowlingStats: BowlingStatRow[] = [...bowling.entries()]
+  const bowlingStats = [...bowling.entries()]
     .filter(([, b]) => b.legalBalls > 0)
     .map(([player, b]) => {
       const oversFaced = b.legalBalls / 6
@@ -1152,6 +1158,193 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
       }
     })
 
-
   return { battingStats, bowlingStats }
+}
+
+/**
+ * Best-effort player-name → photo lookup, same two-table fallback
+ * (`players` then `player_bank`) buildSquads already uses for Squads.
+ * `balls.striker_name`/`bowler_name` are plain text, so this is a name
+ * match, not an FK join — two players sharing an exact display name
+ * will collide onto the same photo. That's an acceptable trade-off
+ * given the schema; a real fix would mean turning `balls` into a
+ * player-FK table, which is a bigger migration than this function.
+ */
+async function resolvePlayerPhotosByName(names: string[]): Promise<Map<string, string>> {
+  const imgByName = new Map<string, string>()
+  const uniqueNames = [...new Set(names)].filter((n) => n && n !== "Unknown")
+  if (uniqueNames.length === 0) return imgByName
+
+  const { data: playerRows, error: playersErr } = await supabase
+    .from("players")
+    .select("name, img")
+    .in("name", uniqueNames)
+
+  if (playersErr) {
+    console.error("[resolvePlayerPhotosByName] players lookup failed:", playersErr.message)
+  }
+  playerRows?.forEach((p) => {
+    if (p.img) imgByName.set(p.name, p.img)
+  })
+
+  const missing = uniqueNames.filter((n) => !imgByName.has(n))
+  if (missing.length > 0) {
+    const { data: bankRows, error: bankErr } = await supabase
+      .from("player_bank")
+      .select("name, img")
+      .in("name", missing)
+
+    if (bankErr) {
+      console.error("[resolvePlayerPhotosByName] player_bank lookup failed:", bankErr.message)
+    }
+    bankRows?.forEach((p: any) => {
+      if (p.img && !imgByName.has(p.name)) imgByName.set(p.name, p.img)
+    })
+  }
+
+  return imgByName
+}
+
+export async function getTournamentStats(tournamentId: string): Promise<TournamentStats> {
+  const emptyResult: TournamentStats = {
+    battingStats: [],
+    bowlingStats: [],
+    matches: [],
+    battingStatsByMatch: {},
+    bowlingStatsByMatch: {},
+  }
+
+  // 1. Matches whose tournament link lives in match_setup.tournamentId
+  //    (the JSON field) — this is the same field getMatchDetailById
+  //    falls back to via
+  //    `tournamentIdToResolve = bracketRow?.tournament_id ?? setup.tournamentId`.
+  //    This is the ONLY way a tournament made up of standalone matches
+  //    (no bracket_matches rows) is ever found.
+  const { data: jsonLinkedMatches, error: jsonLinkedErr } = await supabase
+    .from("matches")
+    .select("id, match_setup")
+    .eq("match_setup->>tournamentId", tournamentId)
+
+  if (jsonLinkedErr) {
+    console.error("[getTournamentStats] json-linked matches query failed:", jsonLinkedErr.message)
+  }
+
+  // 2. Matches linked via bracket_matches (real FK, tournament brackets).
+  const { data: bracketRows, error: bracketErr } = await supabase
+    .from("bracket_matches")
+    .select("overlay_match_id")
+    .eq("tournament_id", tournamentId)
+    .not("overlay_match_id", "is", null)
+
+  if (bracketErr) {
+    console.error("[getTournamentStats] bracket_matches query failed:", bracketErr.message)
+  }
+
+  const matchIds = Array.from(
+    new Set([
+      ...(jsonLinkedMatches ?? []).map((m) => m.id as string),
+      ...(bracketRows ?? []).map((b) => b.overlay_match_id as string),
+    ])
+  )
+
+  if (matchIds.length === 0) {
+    console.warn(
+      `[getTournamentStats] no matches resolved for tournamentId=${tournamentId} — Stats tab will show locked.`
+    )
+    return emptyResult
+  }
+
+  // 3. Every ball from every one of those matches, in one query.
+  const { data: ballRows, error: ballsErr } = await supabase
+    .from("balls")
+    .select(
+      "match_id, innings_number, sequence, over_number, ball_number, striker_name, bowler_name, runs, extra_type, is_wicket, dismissal_type"
+    )
+    .in("match_id", matchIds)
+    .order("sequence", { ascending: true })
+
+  if (ballsErr) {
+    console.error("[getTournamentStats] balls query failed:", ballsErr.message)
+    return emptyResult
+  }
+
+  const allBalls = ballRows ?? []
+
+  if (allBalls.length === 0) {
+    console.warn(
+      `[getTournamentStats] matches resolved but zero balls rows exist for them yet — Stats tab will show locked until scoring starts.`
+    )
+    return emptyResult
+  }
+
+  // 4. Build match labels for whichever matches actually have ball data
+  //    (no point listing a match filter option for a match nobody has
+  //    scored yet). Reads match_setup for team names, which every row
+  //    in `matches` has regardless of whether it's bracket-linked.
+  const matchIdsWithBalls = [...new Set(allBalls.map((b) => b.match_id as string))]
+  const { data: matchRows, error: matchRowsErr } = await supabase
+    .from("matches")
+    .select("id, match_setup")
+    .in("id", matchIdsWithBalls)
+
+  if (matchRowsErr) {
+    console.error("[getTournamentStats] match label lookup failed:", matchRowsErr.message)
+  }
+
+  const matches: MatchStatSummary[] = (matchRows ?? []).map((m: any) => {
+    const setup = m.match_setup ?? {}
+    const t1 = setup.team1?.name ?? "Team A"
+    const t2 = setup.team2?.name ?? "Team B"
+    const date: string | undefined = setup.date || undefined
+    return {
+      id: m.id,
+      label: date ? `${t1} vs ${t2} · ${date}` : `${t1} vs ${t2}`,
+      date,
+    }
+  })
+
+  // 5. Aggregate overall, then again per match — same helper both times.
+  const overall = aggregatePlayerStats(allBalls as StatsBallRow[])
+
+  const ballsByMatch = new Map<string, StatsBallRow[]>()
+  for (const b of allBalls as StatsBallRow[]) {
+    const arr = ballsByMatch.get(b.match_id) ?? []
+    arr.push(b)
+    ballsByMatch.set(b.match_id, arr)
+  }
+
+  const perMatchRaw = new Map<
+    string,
+    { battingStats: Omit<PlayerStatRow, "img">[]; bowlingStats: Omit<BowlingStatRow, "img">[] }
+  >()
+  for (const [matchId, rows] of ballsByMatch) {
+    perMatchRaw.set(matchId, aggregatePlayerStats(rows))
+  }
+
+  // 6. Resolve player photos once, against every name seen anywhere
+  //    (overall totals cover every name a per-match pass could produce,
+  //    so one lookup is enough for both).
+  const allNames = [
+    ...overall.battingStats.map((r) => r.player),
+    ...overall.bowlingStats.map((r) => r.player),
+  ]
+  const imgByName = await resolvePlayerPhotosByName(allNames)
+
+  const battingStats: PlayerStatRow[] = overall.battingStats.map((r) => ({
+    ...r,
+    img: imgByName.get(r.player),
+  }))
+  const bowlingStats: BowlingStatRow[] = overall.bowlingStats.map((r) => ({
+    ...r,
+    img: imgByName.get(r.player),
+  }))
+
+  const battingStatsByMatch: Record<string, PlayerStatRow[]> = {}
+  const bowlingStatsByMatch: Record<string, BowlingStatRow[]> = {}
+  for (const [matchId, agg] of perMatchRaw) {
+    battingStatsByMatch[matchId] = agg.battingStats.map((r) => ({ ...r, img: imgByName.get(r.player) }))
+    bowlingStatsByMatch[matchId] = agg.bowlingStats.map((r) => ({ ...r, img: imgByName.get(r.player) }))
+  }
+
+  return { battingStats, bowlingStats, matches, battingStatsByMatch, bowlingStatsByMatch }
 }
