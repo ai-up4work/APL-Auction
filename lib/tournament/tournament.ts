@@ -371,16 +371,33 @@ async function getAwardsForTournament(tournamentId: string) {
     return [];
   }
 }
+
 /**
  * Points table, read directly from `standings` — it already carries a
  * direct tournament_id FK plus computed nrr/form, no join through auctions
  * needed. This is match-result-derived data, not something the edit page
- * writes to; it updates as matches are scored.
+ * writes to; it's populated by recomputeStandingsForTournament (see
+ * lib/tournament/standings.ts) as matches complete.
+ *
+ * FIXED: `team_id` is now selected and returned explicitly as `id`.
+ * Previously this only returned `short` (teams.code) and `team` (teams.name)
+ * for identity — but teams.code is NOT guaranteed unique across the whole
+ * `teams` table (different auctions can each create their own team with
+ * the same short code, e.g. two unrelated "KKR" teams from two different
+ * auctions both ending up in this tournament's standings). The client
+ * (PointsTablePanel/PointsTableRow in tournament-detail-client.tsx) was
+ * using `row.short` as its React list key, so two teams sharing a code
+ * produced a duplicate-key warning and undefined render behavior even
+ * though the underlying `standings` rows were each perfectly valid and
+ * distinct (different team_id, different stats). `team_id` is the only
+ * field on this row that's actually guaranteed unique — it's the FK this
+ * whole join is built on — so it's now returned as `id` for the client to
+ * key on instead.
  */
 async function getPointsTableForTournament(tournamentId: string) {
   const { data, error } = await supabase
     .from("standings")
-    .select("played, won, lost, points, nrr, form, teams:team_id ( name, code )")
+    .select("team_id, played, won, lost, points, nrr, form, teams:team_id ( name, code )")
     .eq("tournament_id", tournamentId);
 
   if (error) {
@@ -391,6 +408,8 @@ async function getPointsTableForTournament(tournamentId: string) {
   return (data ?? []).map((row: any) => {
     const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
     return {
+      // Genuinely unique per row — use this as the React key, not `short`.
+      id: row.team_id as string,
       team: team?.name ?? "Unknown",
       short: team?.code ?? "???",
       played: row.played,

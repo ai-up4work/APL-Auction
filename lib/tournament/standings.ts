@@ -181,7 +181,8 @@ export async function recomputeStandingsForTournament(tournamentId: string): Pro
   if (completed.length === 0) {
     // Nothing to compute. Clear any stale rows for this tournament rather
     // than leaving old standings behind (e.g. if every completed match
-    // got reset to 'upcoming').
+    // got reset to 'upcoming'). This delete is safe even under overlap —
+    // deleting twice is a no-op the second time, unlike delete-then-insert.
     const { error: clearErr } = await supabase.from("standings").delete().eq("tournament_id", tournamentId)
     if (clearErr) console.error("[standings] clear failed:", clearErr.message)
     return !clearErr
@@ -275,17 +276,33 @@ export async function recomputeStandingsForTournament(tournamentId: string): Pro
     }
   })
 
-  const { error: deleteErr } = await supabase.from("standings").delete().eq("tournament_id", tournamentId)
-  if (deleteErr) {
-    console.error("[standings] delete before reinsert failed:", deleteErr.message)
+  // Upsert instead of delete-then-insert: two overlapping calls (e.g. this
+  // running on every page load, plus Next.js link-prefetch triggering it
+  // again before the first finishes) can no longer produce duplicate rows,
+  // because (tournament_id, team_id) has a DB-level unique constraint —
+  // see the migration that adds it. Each call just overwrites the same
+  // row with its own freshly computed numbers; worst case under a race is
+  // "last write wins" on the values, never duplicate rows.
+  const { error: upsertErr } = await supabase
+    .from("standings")
+    .upsert(rows, { onConflict: "tournament_id,team_id" })
+  if (upsertErr) {
+    console.error("[standings] upsert failed:", upsertErr.message)
     return false
   }
 
-  const { error: insertErr } = await supabase.from("standings").insert(rows)
-  if (insertErr) {
-    console.error("[standings] insert failed:", insertErr.message)
-    return false
-  }
+  // Clean up any team that WAS in standings for this tournament but no
+  // longer has a completed match backing it (e.g. a match got reverted
+  // from 'completed' back to 'live'/'upcoming'). Upsert alone never
+  // removes rows, only delete-then-insert did — so without this, a
+  // reverted match would leave a stale, now-inaccurate team row behind.
+  const currentTeamIds = rows.map((r) => r.team_id)
+  const { error: pruneErr } = await supabase
+    .from("standings")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .not("team_id", "in", `(${currentTeamIds.map((id) => `"${id}"`).join(",")})`)
+  if (pruneErr) console.error("[standings] prune failed:", pruneErr.message)
 
   return true
 }
