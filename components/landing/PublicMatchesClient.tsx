@@ -196,9 +196,9 @@ export default function PublicMatchesClient() {
       {/* FIXTURES */}
       <section className="pb-20 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
-        <div className="container mx-auto px-4 relative z-10 max-w-5xl">
+        <div className="container mx-auto px-4 relative z-10 max-w-8xl">
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               <LoadingCard />
               <LoadingCard />
               <LoadingCard />
@@ -225,7 +225,7 @@ export default function PublicMatchesClient() {
                       {rows.length} {rows.length === 1 ? "match" : "matches"}
                     </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                     {rows.map((match) => (
                       <MatchCard key={match.id} match={match} />
                     ))}
