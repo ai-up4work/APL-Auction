@@ -97,6 +97,20 @@ import Image from "next/image"
 // matches/{matchId}/banner/{filename}. Manual URL paste is still
 // allowed alongside upload, same as everywhere else ImageUploadField
 // is used.
+//
+// ── TEAM IDENTITY FALLBACK (NEW) ──
+// match_setup.team1/team2 is a JSON snapshot, not a foreign key — for a
+// tournament-linked match whose bracket slot was created before real
+// teams were assigned to it, that snapshot can be blank even though the
+// real teams already exist in bracket_matches.team_a_id/team_b_id (the
+// same source getFixturesForTournament and backfillTeamsFromBracket in
+// organization.ts already fall back to). Without this, the editor would
+// load and show empty "Team 1 Name"/"Team 2 Name" fields for a match
+// that clearly has real teams on the public Schedule tab. See the load()
+// effect below — this only backfills name/short/logo/color; it does NOT
+// backfill squads/players (those live in the `players` table keyed by
+// sold_to_team_id, a separate lookup), so an empty Squads tab for such a
+// match still needs to be synced/populated separately.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -815,7 +829,57 @@ export default function EditMatchPage() {
       }
       const raw = (data.match_setup as Record<string, any>) ?? null
       rawSetupRef.current = raw
-      setForm(fromRawSetup(raw))
+      let parsed = fromRawSetup(raw)
+
+      // ── TEAM IDENTITY FALLBACK ──
+      // match_setup.team1/team2 is a JSON snapshot, not a foreign key —
+      // for a tournament-linked match whose bracket slot was created
+      // before real teams were assigned to it, that snapshot can be
+      // blank even though the real teams already exist in
+      // bracket_matches.team_a_id/team_b_id. This is the same gap
+      // getFixturesForTournament/backfillTeamsFromBracket in
+      // organization.ts already work around for the public Schedule
+      // tab and the admin dashboard's tournament collapsible — without
+      // this, the editor loads showing empty team fields for a match
+      // that clearly has real teams elsewhere. Only fires when a team
+      // name is actually missing, and only fills fields that are still
+      // empty — anything already present in match_setup wins.
+      if (!parsed.team1Name.trim() || !parsed.team2Name.trim()) {
+        const { data: bracketRow, error: bracketErr } = await supabase
+          .from("bracket_matches")
+          .select(
+            `
+            team_a:team_a_id ( name, code, logo, color ),
+            team_b:team_b_id ( name, code, logo, color )
+            `
+          )
+          .eq("overlay_match_id", matchId)
+          .maybeSingle()
+
+        if (bracketErr) {
+          console.error("[edit] bracket team fallback lookup failed:", bracketErr.message)
+        } else if (bracketRow) {
+          const teamA: any = Array.isArray(bracketRow.team_a) ? bracketRow.team_a[0] : bracketRow.team_a
+          const teamB: any = Array.isArray(bracketRow.team_b) ? bracketRow.team_b[0] : bracketRow.team_b
+
+          parsed = {
+            ...parsed,
+            team1Name: parsed.team1Name.trim() || teamA?.name || "",
+            team1Short: parsed.team1Short.trim() || teamA?.code || "",
+            team1Logo: parsed.team1Logo.trim() || teamA?.logo || "",
+            team1Color:
+              parsed.team1Color !== DEFAULT_TEAM_COLOR ? parsed.team1Color : teamA?.color || DEFAULT_TEAM_COLOR,
+            team2Name: parsed.team2Name.trim() || teamB?.name || "",
+            team2Short: parsed.team2Short.trim() || teamB?.code || "",
+            team2Logo: parsed.team2Logo.trim() || teamB?.logo || "",
+            team2Color:
+              parsed.team2Color !== DEFAULT_TEAM_COLOR ? parsed.team2Color : teamB?.color || DEFAULT_TEAM_COLOR,
+          }
+        }
+      }
+
+      if (cancelled) return
+      setForm(parsed)
       setShowImportedHint(hadFlatSquads(raw))
       setState("idle")
     }

@@ -786,6 +786,9 @@ export interface BracketTeamFallback {
   team1Logo?: string;
   team2Name?: string;
   team2Logo?: string;
+  venue?: string;
+  date?: string;
+  time?: string;
 }
 
 /** Same self-healing pattern as backfillLogosFromPool/backfillImagesFromBank
@@ -818,7 +821,7 @@ async function backfillTeamsFromBracket(matchIds: string[]): Promise<Map<string,
 
   const { data: bracketRows, error: bracketErr } = await supabase
     .from("bracket_matches")
-    .select("overlay_match_id, team_a_id, team_b_id")
+    .select("overlay_match_id, team_a_id, team_b_id, venue, scheduled_at")
     .in("overlay_match_id", matchIds);
 
   if (bracketErr) {
@@ -826,12 +829,16 @@ async function backfillTeamsFromBracket(matchIds: string[]): Promise<Map<string,
     return result;
   }
 
-  const rows = (bracketRows ?? []).filter((r: any) => r.overlay_match_id && (r.team_a_id || r.team_b_id));
+  const rows = (bracketRows ?? []).filter((r: any) => r.overlay_match_id);
   if (rows.length === 0) return result;
 
-  const teamIds = Array.from(new Set(rows.flatMap((r: any) => [r.team_a_id, r.team_b_id]).filter(Boolean)));
+  const teamIds = Array.from(
+    new Set(rows.flatMap((r: any) => [r.team_a_id, r.team_b_id]).filter(Boolean))
+  );
 
-  const { data: teamRows, error: teamErr } = await supabase.from("teams").select("id, name, logo").in("id", teamIds);
+  const { data: teamRows, error: teamErr } = teamIds.length
+    ? await supabase.from("teams").select("id, name, logo").in("id", teamIds)
+    : { data: [], error: null };
 
   if (teamErr) {
     console.error("backfillTeamsFromBracket(teams lookup) failed:", teamErr.message);
@@ -843,11 +850,16 @@ async function backfillTeamsFromBracket(matchIds: string[]): Promise<Map<string,
   rows.forEach((r: any) => {
     const teamA = r.team_a_id ? teamById.get(r.team_a_id) : null;
     const teamB = r.team_b_id ? teamById.get(r.team_b_id) : null;
+    const scheduled = r.scheduled_at ? new Date(r.scheduled_at) : null;
+
     result.set(r.overlay_match_id, {
       team1Name: teamA?.name || undefined,
       team1Logo: teamA?.logo || undefined,
       team2Name: teamB?.name || undefined,
       team2Logo: teamB?.logo || undefined,
+      venue: r.venue || undefined,
+      date: scheduled ? scheduled.toLocaleDateString() : undefined,
+      time: scheduled ? scheduled.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : undefined,
     });
   });
 
@@ -2253,10 +2265,10 @@ export async function getTournamentMatchesForOrg(orgId: string): Promise<Friendl
       tournamentName: m.tournaments?.name ?? tournamentNameByMatch.get(m.id) ?? null,
       tournamentId: m.tournament_id ?? tournamentIdByMatch.get(m.id) ?? null,
       overlayConfigured: overlaySet.has(m.id),
-      auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
-      venue: setup.venue || null,
-      date: setup.date || null,
-      time: setup.time || null,
+      auctionLinked: (Array.isArray(setup.squads) && setup.squads.length > 0) || !!fallback,
+      venue: setup.venue || fallback?.venue || null,
+      date: setup.date || fallback?.date || null,
+      time: setup.time || fallback?.time || null,
     };
   });
 }
