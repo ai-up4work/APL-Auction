@@ -361,7 +361,7 @@ export function HomeContent({ scrollToSection, handleNavigation }: HomeContentPr
             {showcaseSlides.filter((slide) => slide.featured).slice(0, 3).map((t, i) => (
               <Link
                 key={t.title}
-                href={`/all-tournaments/${slugify(t.title)}`}
+                href={`/tournaments/${slugify(t.title)}`}
                 onClick={(e) => e.preventDefault()}
                 className={`block rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${i + 1} hover:border-gold/80 transition-all duration-300`}
               >
