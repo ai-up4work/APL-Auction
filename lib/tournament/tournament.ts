@@ -72,6 +72,40 @@ function mapBracketFormat(dbFormat: string): "single" | "double" | undefined {
 /**
  * Fetches every tournament belonging to the given org.
  */
+export async function getTournamentsForPublic(): Promise<TournamentCardData[]> {
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select(
+      `
+      id,
+      name,
+      format,
+      status,
+      image_url,
+      created_at,
+      organizations ( name, logo_url )
+    `
+    )
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("getTournamentsForPublic failed:", error.message)
+    return []
+  }
+
+  return (data ?? []).map((t) => {
+    const org = Array.isArray(t.organizations) ? t.organizations[0] : t.organizations
+    return {
+      id: t.id,
+      title: t.name,
+      by: org?.name ?? "Valiant League",
+      tag: t.format === "single_elimination" ? "Knockout" : t.format === "round_robin" ? "League" : "Double Elimination",
+      image: t.image_url || org?.logo_url || "/placeholder.svg",
+      status: mapTournamentStatus(t.status ?? "setup"),
+    }
+  })
+}
+
 export async function getTournamentsForOrg(
   orgId: string
 ): Promise<TournamentCardData[]> {

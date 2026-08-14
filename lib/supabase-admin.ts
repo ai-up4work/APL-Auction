@@ -1,4 +1,4 @@
-// lib/supabaseAdmin.ts
+// lib/supabase-admin.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVER-ONLY Supabase client, using the service role key.
 //

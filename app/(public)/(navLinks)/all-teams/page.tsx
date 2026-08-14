@@ -1,5 +1,5 @@
-import TournamentClient from "@/components/tournament/TournamentClient"
+import PublicDirectoryClient from "@/components/landing/PublicDirectoryClient"
 
-export default function TournamentPage() {
-  return <TournamentClient />
+export default function TeamsPage() {
+  return <PublicDirectoryClient kind="teams" />
 }

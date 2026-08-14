@@ -1,6 +1,6 @@
 // app/api/invites/send/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 interface SendInviteBody {
   email: string;

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -12,55 +12,31 @@ import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import SectionDivider from "@/components/section-divider"
 import { pageStyles } from "@/data/site-data"
-import { useAuth } from "@/context/AuthContext"
-import { getTournamentsForUser, type TournamentCardData } from "@/lib/tournament/tournament"
+import { getTournamentsForPublic, type TournamentCardData } from "@/lib/tournament/tournament"
 
 export default function TournamentClient() {
   useScrollTop()
 
   const router = useRouter()
-  const { user, loading: authLoading } = useAuth()
 
   const [searchQuery, setSearchQuery] = useState("")
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [tournaments, setTournaments] = useState<TournamentCardData[]>([])
-  const [hasOrg, setHasOrg] = useState(true)
   const [dataLoading, setDataLoading] = useState(true)
 
-  // Supabase re-checks the session on tab focus and fires onAuthStateChange
-  // with a freshly-created session/user object even when it's the same
-  // user — that's a new object reference, not a new user. Track the id
-  // we last fetched for so we don't re-run the fetch (and flash the
-  // loading state) every time the tab regains focus.
-  const fetchedForUserId = useRef<string | null>(null)
-
   useEffect(() => {
-    // Wait for the auth session to resolve before deciding anything.
-    if (authLoading) return
-
-    if (!user) {
-      fetchedForUserId.current = null
-      router.push("/login")
-      return
-    }
-
-    if (fetchedForUserId.current === user.id) return
-
     let cancelled = false
 
-    setDataLoading(true)
-    getTournamentsForUser(user.id).then(({ orgId, tournaments }) => {
+    getTournamentsForPublic().then((publicTournaments) => {
       if (cancelled) return
-      fetchedForUserId.current = user.id
-      setHasOrg(!!orgId)
-      setTournaments(tournaments)
+      setTournaments(publicTournaments)
       setDataLoading(false)
     })
 
     return () => {
       cancelled = true
     }
-  }, [authLoading, user, router])
+  }, [])
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -81,7 +57,7 @@ export default function TournamentClient() {
       t.tag.toLowerCase().includes(q)
   )
 
-  const isLoading = authLoading || dataLoading
+  const isLoading = dataLoading
 
   return (
     <main className="overflow-hidden">
@@ -149,9 +125,12 @@ export default function TournamentClient() {
                       />
                     </div>
                     <div className="p-5 md:p-6">
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-3 gap-2">
                         <span className="bg-gold text-black text-[10px] font-bold px-2.5 py-1 rounded font-cinzel tracking-wide">
                           {t.tag}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-[0.18em] text-gray-400">
+                          {t.status}
                         </span>
                       </div>
                       <h3 className="text-lg font-bold text-white font-cinzel mb-1">{t.title}</h3>
@@ -163,10 +142,8 @@ export default function TournamentClient() {
 
               {filteredTournaments.length === 0 && (
                 <p className="text-center text-gray-400 mt-12 fade-in">
-                  {!hasOrg
-                    ? "You're not part of an organization yet."
-                    : tournaments.length === 0
-                    ? "Your organization hasn't created any tournaments yet."
+                  {tournaments.length === 0
+                    ? "No public tournaments are available yet."
                     : "No tournaments match your search."}
                 </p>
               )}
