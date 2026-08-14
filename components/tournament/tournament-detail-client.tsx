@@ -154,7 +154,7 @@ function StatAvatar({ name, img, size = "md" }: { name: string; img?: string; si
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState("overview")
+  const [activeTab, setActiveTab] = useState("points")
   const [isNavOpen, setIsNavOpen] = useState(false)
 
   const handleNavigation = (path: string) => {
