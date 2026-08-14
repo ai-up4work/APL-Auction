@@ -39,6 +39,7 @@ export default function PublicMatchesClient() {
   const [matches, setMatches] = useState<PublicMatch[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>("all")
+  const [tournament, setTournament] = useState<string>("all")
   const [query, setQuery] = useState("")
   const [isNavOpen, setIsNavOpen] = useState(false)
 
@@ -74,37 +75,53 @@ export default function PublicMatchesClient() {
     setIsNavOpen(false)
   }
 
+  // Unique tournaments derived from the loaded matches, for the filter dropdown.
+  const tournaments = useMemo(() => {
+    const map = new Map<string, string>()
+    matches.forEach((m) => {
+      if (m.tournamentId) map.set(m.tournamentId, m.tournamentName ?? m.tournamentId)
+    })
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [matches])
+
   const q = query.toLowerCase()
   const filtered = useMemo(
     () =>
       matches.filter((match) => {
         const text = `${match.teamA} ${match.teamB} ${match.venue ?? ""}`.toLowerCase()
-        return (filter === "all" || match.status === filter) && (!q || text.includes(q))
+        const matchesTournament = tournament === "all" || match.tournamentId === tournament
+        return (
+          (filter === "all" || match.status === filter) &&
+          matchesTournament &&
+          (!q || text.includes(q))
+        )
       }),
-    [filter, matches, q],
+    [filter, tournament, matches, q],
   )
 
-  const counts = useMemo(
-    () => ({
-      all: matches.length,
-      upcoming: matches.filter((m) => m.status === "upcoming").length,
-      live: matches.filter((m) => m.status === "live").length,
-      completed: matches.filter((m) => m.status === "completed").length,
-    }),
-    [matches],
-  )
+  const counts = useMemo(() => {
+    const base = tournament === "all" ? matches : matches.filter((m) => m.tournamentId === tournament)
+    return {
+      all: base.length,
+      upcoming: base.filter((m) => m.status === "upcoming").length,
+      live: base.filter((m) => m.status === "live").length,
+      completed: base.filter((m) => m.status === "completed").length,
+    }
+  }, [matches, tournament])
 
-  // Live matches always float to the top of the list, regardless of
-  // round grouping, so people don't have to hunt for the action.
-  const grouped = useMemo(() => {
-    const liveRows = filtered.filter((m) => m.status === "live")
-    const rest = filtered.filter((m) => m.status !== "live")
+  // Flat, chronological list — live matches pinned to the top so they're
+  // never missed, everything else ordered by scheduled kick-off time.
+  // Matches without a scheduledAt fall to the end.
+  const sortedMatches = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const aLive = a.status === "live" ? 0 : 1
+      const bLive = b.status === "live" ? 0 : 1
+      if (aLive !== bLive) return aLive - bLive
 
-    const groups = new Map<number, PublicMatch[]>()
-    rest.forEach((match) => groups.set(match.round, [...(groups.get(match.round) ?? []), match]))
-    const sortedGroups = [...groups.entries()].sort((a, b) => a[0] - b[0])
-
-    return liveRows.length > 0 ? ([[-1, liveRows] as [number, PublicMatch[]], ...sortedGroups]) : sortedGroups
+      const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : Infinity
+      const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : Infinity
+      return aTime - bTime
+    })
   }, [filtered])
 
   const isLoading = dataLoading
@@ -122,14 +139,10 @@ export default function PublicMatchesClient() {
       />
 
       {/* HERO */}
-      <section className="pt-36 sm:pt-44 pb-14 relative section-pattern">
+      <section className="pt-24 pb-14 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="text-center mb-12 fade-in">
-            <span className="inline-flex items-center gap-2 text-gold/70 text-[11px] font-cinzel uppercase tracking-[0.25em] bg-white/[0.03] border border-gold/20 rounded-full px-4 py-1.5 mb-5">
-              <Trophy className="h-3 w-3" />
-              Valiant League
-            </span>
             <h1 className="text-3xl md:text-5xl font-bold text-white mb-4 section-title inline-block">
               <TypeText text="Fixture " speed={45} />
               <TypeText text="Centre" speed={45} delay={280} className="text-gold" />
@@ -164,6 +177,23 @@ export default function PublicMatchesClient() {
               Search
             </Button>
           </div>
+
+          {tournaments.length > 0 && (
+            <div className="flex justify-center mt-4 fade-in-up stagger-2">
+              <select
+                value={tournament}
+                onChange={(e) => setTournament(e.target.value)}
+                className="bg-black/50 border border-gold/30 text-white text-xs font-cinzel uppercase tracking-widest rounded-full px-4 py-2 focus:outline-none focus:border-gold/60 appearance-none cursor-pointer"
+              >
+                <option value="all">All Tournaments</option>
+                {tournaments.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex justify-center gap-2 mt-6 flex-wrap fade-in-up stagger-3">
             {filters.map((item) => {
@@ -204,33 +234,12 @@ export default function PublicMatchesClient() {
               <LoadingCard />
               <LoadingCard />
             </div>
-          ) : grouped.length === 0 ? (
+          ) : sortedMatches.length === 0 ? (
             <EmptyState />
           ) : (
-            <div className="flex flex-col gap-12">
-              {grouped.map(([round, rows], groupIdx) => (
-                <section key={round} className={`fade-in-up stagger-${(groupIdx % 6) + 1}`}>
-                  <div className="mb-5 flex items-center gap-3">
-                    <span className="font-cinzel text-xs uppercase tracking-[0.2em] text-gold flex items-center gap-1.5">
-                      {round === -1 && (
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold/60" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-gold" />
-                        </span>
-                      )}
-                      {round === -1 ? "Live Now" : `Round ${round}`}
-                    </span>
-                    <div className="h-px flex-1 bg-gold/15" />
-                    <span className="text-[11px] text-gray-500">
-                      {rows.length} {rows.length === 1 ? "match" : "matches"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                    {rows.map((match) => (
-                      <MatchCard key={match.id} match={match} />
-                    ))}
-                  </div>
-                </section>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              {sortedMatches.map((match) => (
+                <MatchCard key={match.id} match={match} />
               ))}
             </div>
           )}
