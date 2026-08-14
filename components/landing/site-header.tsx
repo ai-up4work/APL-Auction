@@ -79,8 +79,7 @@ export function SiteHeader({
   }, [user?.id])
 
   const handleMobileNav = (id: string) => {
-    scrollToSection(id)
-    setIsNavOpen(false)
+    
   }
 
   const handleLogout = async () => {
@@ -352,7 +351,8 @@ export function SiteHeader({
                     ? "bg-gold/15 text-gold shadow-[inset_0_0_0_1px_rgba(212,175,55,0.5)]"
                     : "text-gray-300 hover:text-gold hover:bg-white/5"
                 )}
-                onClick={() => handleMobileNav(item.id)}
+                onClick={() => navigate(item.href)}
+                disabled={item.disabled}
               >
                 {item.label}
               </Button>
