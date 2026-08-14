@@ -23,6 +23,14 @@ const filterMeta: Record<Filter, { label: string; dot?: string }> = {
   completed: { label: "Completed", dot: "bg-emerald-400" },
 }
 
+// Section order + labels for the grouped "all" view — live first so
+// nothing in progress gets missed, then what's coming up, then results.
+const sectionMeta: { status: "live" | "upcoming" | "completed"; label: string; dot: string }[] = [
+  { status: "live", label: "Live Now", dot: "bg-gold" },
+  { status: "upcoming", label: "Upcoming", dot: "bg-blue-400" },
+  { status: "completed", label: "Completed", dot: "bg-emerald-400" },
+]
+
 /** Deterministic fallback color for teams that don't have one set,
  *  kept consistent with FixtureCard's hashing elsewhere in the app. */
 function hashTeamColor(name: string) {
@@ -109,22 +117,34 @@ export default function PublicMatchesClient() {
     }
   }, [matches, tournament])
 
-  // Flat, chronological list — live matches pinned to the top so they're
-  // never missed, everything else ordered by scheduled kick-off time.
-  // Matches without a scheduledAt fall to the end.
-  const sortedMatches = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const aLive = a.status === "live" ? 0 : 1
-      const bLive = b.status === "live" ? 0 : 1
-      if (aLive !== bLive) return aLive - bLive
+  const byScheduledAtAsc = (a: PublicMatch, b: PublicMatch) => {
+    const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : Infinity
+    const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : Infinity
+    return aTime - bTime
+  }
 
-      const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : Infinity
-      const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : Infinity
-      return aTime - bTime
-    })
+  // Grouped by status — live first, then upcoming (soonest first), then
+  // completed (most recent result first). Used for the "all" filter view.
+  const grouped = useMemo(() => {
+    const live = filtered.filter((m) => m.status === "live").sort(byScheduledAtAsc)
+    const upcoming = filtered.filter((m) => m.status === "upcoming").sort(byScheduledAtAsc)
+    const completed = filtered
+      .filter((m) => m.status === "completed")
+      .sort((a, b) => byScheduledAtAsc(b, a)) // most recent completed first
+    return { live, upcoming, completed }
   }, [filtered])
 
+  // When a single status filter is active, just show that one list,
+  // still ordered sensibly (soonest-first for live/upcoming, most
+  // recent-first for completed).
+  const singleStatusList = useMemo(() => {
+    if (filter === "all") return []
+    if (filter === "completed") return [...filtered].sort((a, b) => byScheduledAtAsc(b, a))
+    return [...filtered].sort(byScheduledAtAsc)
+  }, [filter, filtered])
+
   const isLoading = dataLoading
+  const hasAnyResults = filtered.length > 0
 
   return (
     <main className="overflow-hidden">
@@ -234,11 +254,35 @@ export default function PublicMatchesClient() {
               <LoadingCard />
               <LoadingCard />
             </div>
-          ) : sortedMatches.length === 0 ? (
+          ) : !hasAnyResults ? (
             <EmptyState />
+          ) : filter === "all" ? (
+            <div className="space-y-12">
+              {sectionMeta.map(({ status, label, dot }) => {
+                const list = grouped[status]
+                if (list.length === 0) return null
+                return (
+                  <div key={status}>
+                    <div className="flex items-center gap-2 mb-5">
+                      <span className={`h-2 w-2 rounded-full ${dot} ${status === "live" ? "animate-pulse" : ""}`} />
+                      <h2 className="font-cinzel text-sm uppercase tracking-[0.2em] text-white font-bold">
+                        {label}
+                      </h2>
+                      <span className="text-xs text-gray-500 font-mono">({list.length})</span>
+                      <div className="flex-1 h-px bg-gold/10 ml-2" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                      {list.map((match) => (
+                        <MatchCard key={match.id} match={match} />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {sortedMatches.map((match) => (
+              {singleStatusList.map((match) => (
                 <MatchCard key={match.id} match={match} />
               ))}
             </div>
@@ -290,14 +334,6 @@ function StatTile({
 // MATCH CARD — diagonal team-color split, in the same visual
 // language as the tournament schedule's FixtureCard. Surfaces
 // live score, weather, broadcast channels, and bracket stage.
-//
-// FIXED (dead link): this used to link every card to
-// `/match/${match.id}`, but `match.id` is the bracket_matches
-// fixture id, not the id the match page expects — that's
-// `match.matchId` (the linked `matches` overlay row, same field
-// FixtureCard/BracketPanel key off via `matchId`/`hasMatchDetail`).
-// Cards without a linked matchId now render as non-clickable
-// instead of silently 404ing.
 // ─────────────────────────────────────────────────────────────
 function MatchCard({ match }: { match: PublicMatch }) {
   const live = match.status === "live"

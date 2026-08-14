@@ -39,6 +39,8 @@ export type PublicMatch = {
   status: string
   scheduledAt: string | null
   venue: string | null
+  /** bracket_matches.tournament_id — used for the tournament filter dropdown. */
+  tournamentId: string | null
   tournamentName: string | null
   tournamentLogo: string | null
   /** Names of channels/streams currently broadcasting this match, if any have been added. */
@@ -105,7 +107,7 @@ export async function getPublicMatches(): Promise<PublicMatch[]> {
   const { data, error } = await supabase
     .from("bracket_matches")
     .select(`
-      id, round, status, score_a, score_b, scheduled_at, venue, bracket_type,
+      id, round, status, score_a, score_b, scheduled_at, venue, bracket_type, tournament_id,
       team_a:teams!bracket_matches_team_a_id_fkey ( name, code, color, logo ),
       team_b:teams!bracket_matches_team_b_id_fkey ( name, code, color, logo ),
       tournament:tournaments!bracket_matches_tournament_id_fkey ( name, logo_url ),
@@ -148,6 +150,10 @@ export async function getPublicMatches(): Promise<PublicMatch[]> {
       status,
       scheduledAt: row.scheduled_at ?? null,
       venue: row.venue ?? null,
+      // Needed so the public "All Tournaments" filter dropdown actually
+      // matches something — was previously missing from this mapper even
+      // though the client component filtered on it.
+      tournamentId: row.tournament_id ?? null,
       tournamentName: row.tournament?.name ?? null,
       tournamentLogo: row.tournament?.logo_url ?? null,
       channels: parseChannels(overlay?.on_air_channels?.channels),
