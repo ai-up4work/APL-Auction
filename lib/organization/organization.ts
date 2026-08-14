@@ -207,33 +207,251 @@ export async function createTournament(
   return data.id;
 }
 
-/** Deletes a tournament outright. See original notes on FK/cascade
- *  behavior — this only issues a delete on the `tournaments` row. */
-export async function deleteTournament(tournamentId: string): Promise<UpdateOrgResult> {
+export interface DeleteTournamentResult extends UpdateOrgResult {
+  /** How many matches (and their bracket/live-play data) were removed
+   *  along with the tournament, for a one-line confirmation message. */
+  deletedMatchCount?: number;
+}
+
+/** Deletes a tournament AND everything that can only exist attached to
+ *  it — matches, bracket slots, standings, prizes, awards, activity log,
+ *  award templates — rather than blocking with "still has stuff linked".
+ *
+ *  Auctions are only *unlinked* (tournament_id -> null), never deleted:
+ *  an auction (or Squad Board) has a life of its own outside a
+ *  tournament and shouldn't disappear just because the tournament did.
+ *
+ *  Order matters because of two FKs that point at each other:
+ *    matches.bracket_match_id -> bracket_matches(id)
+ *    bracket_matches.overlay_match_id -> matches(id)
+ *  So matches.bracket_match_id is nulled out BEFORE bracket_matches rows
+ *  are deleted, and the match rows (plus every live-play/broadcast child
+ *  row keyed on match_id) are removed only after that.
+ *
+ *  Not run as a single DB transaction — each step is a separate Supabase
+ *  call. A failure partway through can leave things partially cleaned up;
+ *  if that matters, move this into a Postgres RPC/function instead. */
+/** Deletes rows matching `column = value` in `table`, then re-counts to
+ *  confirm they're actually gone. Supabase/PostgREST does NOT return an
+ *  error when a DELETE is silently blocked by Row Level Security and
+ *  matches zero rows — it just reports success on a no-op. Without this
+ *  verification, deleteTournament below can believe a step succeeded
+ *  (e.g. clearing `standings`) when RLS actually left every row in
+ *  place, and only find out several steps later when the tournament's
+ *  own FK constraint finally rejects the delete — which is exactly what
+ *  produced the confusing "standings_tournament_id_fkey" 409 here. */
+async function deleteAndVerify(
+  table: string,
+  column: string,
+  value: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error: deleteErr } = await supabase.from(table).delete().eq(column, value);
+  if (deleteErr) {
+    console.error(`deleteAndVerify(${table}) delete failed:`, deleteErr.message);
+    return { ok: false, error: `Couldn't delete from ${table.replace(/_/g, " ")} — please try again.` };
+  }
+
+  const { count, error: countErr } = await supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .eq(column, value);
+
+  if (countErr) {
+    console.error(`deleteAndVerify(${table}) verify failed:`, countErr.message);
+    // Can't confirm either way — fail closed rather than risk the caller
+    // proceeding to delete the parent row against a real FK.
+    return { ok: false, error: `Couldn't confirm ${table.replace(/_/g, " ")} was cleared — please try again.` };
+  }
+
+  if ((count ?? 0) > 0) {
+    console.error(`deleteAndVerify(${table}) blocked: ${count} row(s) still present after delete — likely RLS.`);
+    return {
+      ok: false,
+      error: `${count} row${count === 1 ? "" : "s"} in ${table.replace(
+        /_/g,
+        " "
+      )} couldn't be deleted — this is usually a permissions (Row Level Security) issue rather than something you can retry your way past. Contact support if it persists.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+export async function deleteTournament(tournamentId: string): Promise<DeleteTournamentResult> {
+  // 1. Which matches belong to this tournament?
+  const { data: matchRows, error: matchLookupErr } = await supabase
+    .from("matches")
+    .select("id")
+    .eq("tournament_id", tournamentId);
+
+  if (matchLookupErr) {
+    console.error("deleteTournament(match lookup) failed:", matchLookupErr.message);
+    return { ok: false, error: "Couldn't check this tournament's matches — please try again." };
+  }
+
+  const matchIds = (matchRows ?? []).map((m: any) => m.id);
+
+  if (matchIds.length > 0) {
+    // Break matches -> bracket_matches before bracket_matches rows go away.
+    const { data: unlinkedRows, error: unlinkBracketErr } = await supabase
+      .from("matches")
+      .update({ bracket_match_id: null })
+      .in("id", matchIds)
+      .select("id");
+    if (unlinkBracketErr) {
+      console.error("deleteTournament(unlink bracket_match_id) failed:", unlinkBracketErr.message);
+      return { ok: false, error: "Couldn't detach this tournament's bracket matches — please try again." };
+    }
+    if ((unlinkedRows ?? []).length !== matchIds.length) {
+      console.error(
+        `deleteTournament(unlink bracket_match_id) blocked: expected ${matchIds.length}, updated ${
+          (unlinkedRows ?? []).length
+        } — likely RLS.`
+      );
+      return {
+        ok: false,
+        error: "Couldn't update all of this tournament's matches — this looks like a permissions issue. Please try again or contact support.",
+      };
+    }
+  }
+
+  // 2. Bracket slots (tournament_id is NOT NULL — must be deleted, can't unlink).
+  const bracketResult = await deleteAndVerify("bracket_matches", "tournament_id", tournamentId);
+  if (!bracketResult.ok) return bracketResult;
+
+  if (matchIds.length > 0) {
+    // 3. Every table hanging off a match's live-play/broadcast data.
+    const matchChildTables = [
+      "balls",
+      "ball_commentary",
+      "match_state",
+      "engine_state",
+      "weather_readings",
+      "on_air_channels",
+      "match_team_stats",
+      "match_sim_control",
+    ] as const;
+
+    for (const table of matchChildTables) {
+      for (const matchId of matchIds) {
+        const result = await deleteAndVerify(table, "match_id", matchId);
+        if (!result.ok) return result;
+      }
+    }
+  }
+
+  // 4. Award templates — tournament-scoped (and some are match-scoped too,
+  //    but deleting by tournament_id covers both).
+  const templatesResult = await deleteAndVerify("tournament_award_templates", "tournament_id", tournamentId);
+  if (!templatesResult.ok) return templatesResult;
+
+  // 5. The matches themselves, now that every child row is gone.
+  if (matchIds.length > 0) {
+    const { data: deletedMatches, error: matchDelErr } = await supabase
+      .from("matches")
+      .delete()
+      .in("id", matchIds)
+      .select("id");
+    if (matchDelErr) {
+      console.error("deleteTournament(matches) failed:", matchDelErr.message);
+      return {
+        ok: false,
+        error: "One of this tournament's matches still has data that couldn't be removed — please try again.",
+      };
+    }
+    if ((deletedMatches ?? []).length !== matchIds.length) {
+      console.error(
+        `deleteTournament(matches) blocked: expected ${matchIds.length}, deleted ${
+          (deletedMatches ?? []).length
+        } — likely RLS.`
+      );
+      return {
+        ok: false,
+        error: "Not all of this tournament's matches could be deleted — this looks like a permissions issue. Please try again or contact support.",
+      };
+    }
+  }
+
+  // 6. Standings, prizes, awards, selections, activity log — all
+  //    tournament-scoped (NOT NULL tournament_id), so deleted outright.
+  const tournamentScopedTables = [
+    "standings",
+    "tournament_prizes",
+    "tournament_awards",
+    "tournament_team_selections",
+    "tournament_activity",
+  ] as const;
+
+  for (const table of tournamentScopedTables) {
+    const result = await deleteAndVerify(table, "tournament_id", tournamentId);
+    if (!result.ok) return result;
+  }
+
+  // 7. Auctions are NEVER deleted here — just unlinked. An auction (or a
+  //    Squad Board) can exist independently of any tournament.
+  const { data: unlinkedAuctions, error: unlinkAuctionsErr } = await supabase
+    .from("auctions")
+    .update({ tournament_id: null })
+    .eq("tournament_id", tournamentId)
+    .select("id");
+  if (unlinkAuctionsErr) {
+    console.error("deleteTournament(unlink auctions) failed:", unlinkAuctionsErr.message);
+    return { ok: false, error: "Couldn't unlink this tournament's auctions — please try again." };
+  }
+  // Verify none are left pointing at this tournament (covers the same
+  // silent-RLS-no-op case as everything else above).
+  const { count: remainingAuctions, error: auctionCountErr } = await supabase
+    .from("auctions")
+    .select("*", { count: "exact", head: true })
+    .eq("tournament_id", tournamentId);
+  if (auctionCountErr) {
+    console.error("deleteTournament(verify auctions unlinked) failed:", auctionCountErr.message);
+    return { ok: false, error: "Couldn't confirm this tournament's auctions were unlinked — please try again." };
+  }
+  if ((remainingAuctions ?? 0) > 0) {
+    console.error(`deleteTournament(unlink auctions) blocked: ${remainingAuctions} still linked — likely RLS.`);
+    return {
+      ok: false,
+      error: "Couldn't unlink this tournament's auctions — this looks like a permissions issue. Please try again or contact support.",
+    };
+  }
+
+  // 8. Finally, the tournament row itself.
   const { error } = await supabase.from("tournaments").delete().eq("id", tournamentId);
   if (error) {
     console.error("deleteTournament failed:", error.message);
     if (error.code === "23503") {
       return {
         ok: false,
-        error: "This tournament still has auctions, teams, or matches linked to it and can't be deleted yet.",
+        error:
+          "This tournament still has linked data that couldn't be cleared (likely a permissions/RLS restriction on one of its related tables) — please contact support.",
       };
     }
     return { ok: false, error: "Couldn't delete that tournament — please try again." };
   }
-  return { ok: true };
+
+  return { ok: true, deletedMatchCount: matchIds.length };
 }
 
-/** Bulk delete — same FK caveats as the single-row version apply per id. */
-export async function deleteTournaments(tournamentIds: string[]): Promise<{ okIds: string[]; failedIds: string[] }> {
+/** Bulk delete — same cascading behavior as the single-row version per id,
+ *  plus a running total of how many matches were removed across the whole
+ *  batch, so the caller can show one summary line. */
+export async function deleteTournaments(
+  tournamentIds: string[]
+): Promise<{ okIds: string[]; failedIds: string[]; totalMatchesDeleted: number }> {
   const okIds: string[] = [];
   const failedIds: string[] = [];
+  let totalMatchesDeleted = 0;
   for (const id of tournamentIds) {
     const result = await deleteTournament(id);
-    if (result.ok) okIds.push(id);
-    else failedIds.push(id);
+    if (result.ok) {
+      okIds.push(id);
+      totalMatchesDeleted += result.deletedMatchCount ?? 0;
+    } else {
+      failedIds.push(id);
+    }
   }
-  return { okIds, failedIds };
+  return { okIds, failedIds, totalMatchesDeleted };
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -261,7 +479,18 @@ export type AuctionOption = AuctionSummary;
  *  'setup' | 'live' | 'paused' | 'completed' — there is no synthetic-only
  *  status value, so a Squad Board row's `status` is a normal, valid value
  *  (defaults to 'setup'). `is_synthetic` is the actual real-vs-synthetic
- *  marker. */
+ *  marker.
+ *
+ *  DEFENSIVE CHECK: `is_synthetic` alone has been observed to be
+ *  unreliable — a friendly-match placeholder auction (see
+ *  createFriendlyMatch, which self-references matches.id as
+ *  matches.auction_id, relying on a DB trigger to mark the resulting
+ *  auctions row is_synthetic = true) has shown up here with
+ *  is_synthetic = false, most likely because the trigger doesn't cover
+ *  every insert path or is missing entirely. Same defensive pattern as
+ *  getSquadBoardsForOrg below: any candidate id that also exists in
+ *  `matches` is definitely a placeholder, regardless of what the flag
+ *  says, and is excluded here too. */
 export async function getAuctionsForOrg(orgId: string): Promise<AuctionSummary[]> {
   const { data, error } = await supabase
     .from("auctions")
@@ -274,13 +503,39 @@ export async function getAuctionsForOrg(orgId: string): Promise<AuctionSummary[]
     console.error("getAuctionsForOrg failed:", error.message);
     return [];
   }
-  return (data ?? []).map((a: any) => ({
-    id: a.id,
-    name: a.name,
-    status: a.status,
-    tournamentName: a.tournaments?.name ?? null,
-    createdAt: a.created_at,
-  }));
+
+  const candidates = data ?? [];
+  if (candidates.length === 0) return [];
+
+  const candidateIds = candidates.map((a: any) => a.id);
+  const { data: matchRows, error: matchErr } = await supabase
+    .from("matches")
+    .select("id")
+    .in("id", candidateIds);
+
+  if (matchErr) {
+    console.error("getAuctionsForOrg(match-placeholder check) failed:", matchErr.message);
+    // Fail open rather than silently hiding real auctions if this lookup breaks.
+    return candidates.map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      tournamentName: a.tournaments?.name ?? null,
+      createdAt: a.created_at,
+    }));
+  }
+
+  const matchPlaceholderIds = new Set((matchRows ?? []).map((m: any) => m.id));
+
+  return candidates
+    .filter((a: any) => !matchPlaceholderIds.has(a.id))
+    .map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      tournamentName: a.tournaments?.name ?? null,
+      createdAt: a.created_at,
+    }));
 }
 
 export interface CreateAuctionInput {
@@ -313,27 +568,99 @@ export async function createAuction(
   return data.id;
 }
 
+/** Deletes an auction and everything scoped to it.
+ *
+ *  Unlike tournaments (see deleteTournament above), teams here can't be
+ *  "unlinked" — `teams.auction_id` is NOT NULL, so a team can never exist
+ *  independent of an auction. The reusable, org-level concept is
+ *  `team_pool` (see TEAM POOL section below), which has no auction_id at
+ *  all; assignPoolTeamToAuction COPIES a pool team into a fresh `teams`
+ *  row per auction. So deleting an auction's teams never touches the
+ *  pool master — it's still assignable into a new auction afterward.
+ *
+ *  Order matters:
+ *    1. players (auction_id NOT NULL, and sold players FK to teams.id
+ *       via sold_to_team_id — must go before teams or that FK blocks).
+ *    2. player_bank_assignments / team_pool_assignments /
+ *       tournament_team_selections rows referencing these teams — all
+ *       nullable FKs so they won't block a teams delete, but left as-is
+ *       they'd be stale references to a deleted team, confusing anything
+ *       that joins through them later (e.g. getAssignableTeamsForOrg).
+ *    3. teams themselves (auction_id NOT NULL — delete, not unlink).
+ *    4. the auction row.
+ *
+ *  NOTE: previously this unlinked from a table called "auction_teams",
+ *  which does not exist in the schema (the real table is "teams"), and
+ *  tried to null out teams.auction_id, which is NOT NULL — both always
+ *  failed. Fixed to delete the real rows instead. */
 export async function deleteAuction(auctionId: string): Promise<UpdateOrgResult> {
-  // First, unlink all teams from this auction by setting auction_id to NULL
-  const { error: unlinkTeamsError } = await supabase
-    .from("auction_teams")
-    .update({ auction_id: null })
+  // Which teams belong to this auction — needed to clean up rows that
+  // reference teams.id but aren't cleared automatically (nullable FKs,
+  // not ON DELETE CASCADE).
+  const { data: teamRows, error: teamLookupErr } = await supabase
+    .from("teams")
+    .select("id")
     .eq("auction_id", auctionId);
 
-  if (unlinkTeamsError) {
-    console.error("Failed to unlink teams from auction:", unlinkTeamsError.message);
-    return { ok: false, error: "Couldn't unlink teams from this auction — please try again." };
+  if (teamLookupErr) {
+    console.error("deleteAuction(team lookup) failed:", teamLookupErr.message);
+    return { ok: false, error: "Couldn't check this auction's teams — please try again." };
+  }
+  const teamIds = (teamRows ?? []).map((t: any) => t.id);
+
+  // Players are auction-scoped (auction_id NOT NULL) — delete before
+  // teams, since sold players FK to teams.id via sold_to_team_id.
+  const { error: deletePlayersError } = await supabase
+    .from("players")
+    .delete()
+    .eq("auction_id", auctionId);
+
+  if (deletePlayersError) {
+    console.error("Failed to delete players for auction:", deletePlayersError.message);
+    return { ok: false, error: "Couldn't remove this auction's players — please try again." };
   }
 
-  // Then, unlink all players from this auction by setting auction_id to NULL
-  const { error: unlinkPlayersError } = await supabase
-    .from("auction_roster_players")
-    .update({ auction_id: null })
+  if (teamIds.length > 0) {
+    // Stale player_bank_assignments pointing at these teams.
+    const { error: unlinkBankAssignErr } = await supabase
+      .from("player_bank_assignments")
+      .delete()
+      .in("team_id", teamIds);
+    if (unlinkBankAssignErr) {
+      console.error("deleteAuction(player_bank_assignments cleanup) failed:", unlinkBankAssignErr.message);
+    }
+
+    // Stale team_pool_assignments — this auction's copy of each pool team
+    // is going away. The team_pool master row itself is untouched, so
+    // it's still assignable to a new auction afterward.
+    const { error: unlinkPoolAssignErr } = await supabase
+      .from("team_pool_assignments")
+      .delete()
+      .in("teams_row_id", teamIds);
+    if (unlinkPoolAssignErr) {
+      console.error("deleteAuction(team_pool_assignments cleanup) failed:", unlinkPoolAssignErr.message);
+    }
+
+    // Stale tournament_team_selections — if any of these teams were
+    // selected into a tournament, that selection is no longer valid.
+    const { error: unlinkSelectionsErr } = await supabase
+      .from("tournament_team_selections")
+      .delete()
+      .in("team_id", teamIds);
+    if (unlinkSelectionsErr) {
+      console.error("deleteAuction(tournament_team_selections cleanup) failed:", unlinkSelectionsErr.message);
+    }
+  }
+
+  // Teams themselves — auction_id is NOT NULL, so delete rather than unlink.
+  const { error: deleteTeamsError } = await supabase
+    .from("teams")
+    .delete()
     .eq("auction_id", auctionId);
 
-  if (unlinkPlayersError) {
-    console.error("Failed to unlink players from auction:", unlinkPlayersError.message);
-    return { ok: false, error: "Couldn't unlink players from this auction — please try again." };
+  if (deleteTeamsError) {
+    console.error("Failed to delete teams for auction:", deleteTeamsError.message);
+    return { ok: false, error: "Couldn't remove this auction's teams — please try again." };
   }
 
   // Now delete the auction itself
@@ -454,6 +781,79 @@ async function backfillImagesFromBank(missingImgPlayerIds: string[]): Promise<Ma
   return result;
 }
 
+export interface BracketTeamFallback {
+  team1Name?: string;
+  team1Logo?: string;
+  team2Name?: string;
+  team2Logo?: string;
+}
+
+/** Same self-healing pattern as backfillLogosFromPool/backfillImagesFromBank
+ *  above, but for a match's team names/logos.
+ *
+ *  WHY THIS EXISTS: match_setup.team1/team2 is a JSON snapshot copied in
+ *  ONCE at match-creation time (see createFriendlyMatch) — it isn't a
+ *  foreign key, so there's nothing to re-fetch from `teams` by id if the
+ *  snapshot ever ends up with an empty name (e.g. a bracket slot that was
+ *  pre-created before real teams were assigned to it). For a
+ *  tournament-linked match, though, there IS a second place the real team
+ *  lives: bracket_matches.team_a_id / team_b_id, once that slot has been
+ *  filled in. This looks the team up there and returns its name/logo so
+ *  callers can fall back to real data instead of a bare "Team 1"/"Team 2"
+ *  placeholder.
+ *
+ *  ASSUMES team_a -> team1 and team_b -> team2 by position. There's no
+ *  stored mapping tying "team1 in this match's JSON" to "team_a in this
+ *  bracket slot" — this holds for how bracket slots normally get filled,
+ *  but isn't a hard guarantee if a match was ever edited independently of
+ *  its slot.
+ *
+ *  Only useful for matches with a real bracket_matches row (i.e.
+ *  tournament-linked matches) — standalone matches have no slot to fall
+ *  back to and simply won't appear in the returned map. Safe to call with
+ *  an empty array. */
+async function backfillTeamsFromBracket(matchIds: string[]): Promise<Map<string, BracketTeamFallback>> {
+  const result = new Map<string, BracketTeamFallback>();
+  if (matchIds.length === 0) return result;
+
+  const { data: bracketRows, error: bracketErr } = await supabase
+    .from("bracket_matches")
+    .select("overlay_match_id, team_a_id, team_b_id")
+    .in("overlay_match_id", matchIds);
+
+  if (bracketErr) {
+    console.error("backfillTeamsFromBracket(bracket lookup) failed:", bracketErr.message);
+    return result;
+  }
+
+  const rows = (bracketRows ?? []).filter((r: any) => r.overlay_match_id && (r.team_a_id || r.team_b_id));
+  if (rows.length === 0) return result;
+
+  const teamIds = Array.from(new Set(rows.flatMap((r: any) => [r.team_a_id, r.team_b_id]).filter(Boolean)));
+
+  const { data: teamRows, error: teamErr } = await supabase.from("teams").select("id, name, logo").in("id", teamIds);
+
+  if (teamErr) {
+    console.error("backfillTeamsFromBracket(teams lookup) failed:", teamErr.message);
+    return result;
+  }
+
+  const teamById = new Map((teamRows ?? []).map((t: any) => [t.id, t]));
+
+  rows.forEach((r: any) => {
+    const teamA = r.team_a_id ? teamById.get(r.team_a_id) : null;
+    const teamB = r.team_b_id ? teamById.get(r.team_b_id) : null;
+    result.set(r.overlay_match_id, {
+      team1Name: teamA?.name || undefined,
+      team1Logo: teamA?.logo || undefined,
+      team2Name: teamB?.name || undefined,
+      team2Logo: teamB?.logo || undefined,
+    });
+  });
+
+  return result;
+}
+
 export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeamOption[]> {
   const { data, error } = await supabase
     .from("teams")
@@ -480,7 +880,7 @@ export async function getTeamsForAuction(auctionId: string): Promise<AuctionTeam
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  FRIENDLY MATCHES                                                   */
-/* ───────────────────────────────────────────────────────��────────── */
+/* ────────────────────────────────────────────────────────────────── */
 
 export interface FriendlyMatchSummary {
   id: string;
@@ -784,9 +1184,10 @@ export async function getMatchesForTournament(tournamentId: string): Promise<Fri
   const matchIds = matches.map((m) => m.id);
   if (matchIds.length === 0) return [];
 
-  const [{ data: channelRows }, { data: weatherRows }] = await Promise.all([
+  const [{ data: channelRows }, { data: weatherRows }, bracketFallbackByMatch] = await Promise.all([
     supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
     supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+    backfillTeamsFromBracket(matchIds),
   ]);
 
   const overlaySet = new Set<string>();
@@ -800,13 +1201,14 @@ export async function getMatchesForTournament(tournamentId: string): Promise<Fri
 
   return matches.map((m: any) => {
     const setup = (m.match_setup ?? {}) as Record<string, any>;
+    const fallback = bracketFallbackByMatch.get(m.id);
     return {
       id: m.id,
       auctionId: m.id,
-      team1Name: setup.team1?.name ?? "Team 1",
-      team2Name: setup.team2?.name ?? "Team 2",
-      team1Logo: setup.team1?.logo || null,
-      team2Logo: setup.team2?.logo || null,
+      team1Name: setup.team1?.name || fallback?.team1Name || "Team 1",
+      team2Name: setup.team2?.name || fallback?.team2Name || "Team 2",
+      team1Logo: setup.team1?.logo || fallback?.team1Logo || null,
+      team2Logo: setup.team2?.logo || fallback?.team2Logo || null,
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
       tournamentName: null,
@@ -1559,27 +1961,77 @@ export async function createSquadBoard(orgId: string, userId: string, name: stri
   return data.id;
 }
 
+/** Deletes a Squad Board and everything scoped to it. Same shape as
+ *  deleteAuction above — Squad Board "teams" are just `teams` rows with
+ *  auction_id pointing at a synthetic auction, so they have exactly the
+ *  same NOT NULL constraint and can't be unlinked, only deleted.
+ *
+ *  NOTE: previously this unlinked from a table called "auction_teams",
+ *  which does not exist in the schema, and tried to null out
+ *  teams.auction_id, which is NOT NULL — both always failed. Fixed to
+ *  delete the real rows instead, in FK-safe order. */
 export async function deleteSquadBoard(boardId: string): Promise<UpdateOrgResult> {
-  // First, unlink all teams from this board by setting auction_id to NULL
-  const { error: unlinkTeamsError } = await supabase
-    .from("auction_teams")
-    .update({ auction_id: null })
+  // Which teams belong to this board — needed to clean up rows that
+  // reference teams.id but aren't cleared automatically (nullable FKs,
+  // not ON DELETE CASCADE).
+  const { data: teamRows, error: teamLookupErr } = await supabase
+    .from("teams")
+    .select("id")
     .eq("auction_id", boardId);
 
-  if (unlinkTeamsError) {
-    console.error("Failed to unlink teams from squad board:", unlinkTeamsError.message);
-    return { ok: false, error: "Couldn't unlink teams from this board — please try again." };
+  if (teamLookupErr) {
+    console.error("deleteSquadBoard(team lookup) failed:", teamLookupErr.message);
+    return { ok: false, error: "Couldn't check this board's teams — please try again." };
+  }
+  const teamIds = (teamRows ?? []).map((t: any) => t.id);
+
+  // Players are auction-scoped (auction_id NOT NULL) — delete before
+  // teams, since sold players FK to teams.id via sold_to_team_id.
+  const { error: deletePlayersError } = await supabase
+    .from("players")
+    .delete()
+    .eq("auction_id", boardId);
+
+  if (deletePlayersError) {
+    console.error("Failed to delete players for squad board:", deletePlayersError.message);
+    return { ok: false, error: "Couldn't remove this board's players — please try again." };
   }
 
-  // Then, unlink all players from this board by setting auction_id to NULL
-  const { error: unlinkPlayersError } = await supabase
-    .from("auction_roster_players")
-    .update({ auction_id: null })
+  if (teamIds.length > 0) {
+    const { error: unlinkBankAssignErr } = await supabase
+      .from("player_bank_assignments")
+      .delete()
+      .in("team_id", teamIds);
+    if (unlinkBankAssignErr) {
+      console.error("deleteSquadBoard(player_bank_assignments cleanup) failed:", unlinkBankAssignErr.message);
+    }
+
+    const { error: unlinkPoolAssignErr } = await supabase
+      .from("team_pool_assignments")
+      .delete()
+      .in("teams_row_id", teamIds);
+    if (unlinkPoolAssignErr) {
+      console.error("deleteSquadBoard(team_pool_assignments cleanup) failed:", unlinkPoolAssignErr.message);
+    }
+
+    const { error: unlinkSelectionsErr } = await supabase
+      .from("tournament_team_selections")
+      .delete()
+      .in("team_id", teamIds);
+    if (unlinkSelectionsErr) {
+      console.error("deleteSquadBoard(tournament_team_selections cleanup) failed:", unlinkSelectionsErr.message);
+    }
+  }
+
+  // Teams themselves — auction_id is NOT NULL, so delete rather than unlink.
+  const { error: deleteTeamsError } = await supabase
+    .from("teams")
+    .delete()
     .eq("auction_id", boardId);
 
-  if (unlinkPlayersError) {
-    console.error("Failed to unlink players from squad board:", unlinkPlayersError.message);
-    return { ok: false, error: "Couldn't unlink players from this board — please try again." };
+  if (deleteTeamsError) {
+    console.error("Failed to delete teams for squad board:", deleteTeamsError.message);
+    return { ok: false, error: "Couldn't remove this board's teams — please try again." };
   }
 
   // Now delete the board itself
@@ -1638,18 +2090,20 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
   const matchIds = matches.map((m) => m.id);
   if (matchIds.length === 0) return [];
 
-  const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }] = await Promise.all([
-    supabase
-      .from("bracket_matches")
-      // `tournament_id` is selected alongside the joined tournament name so
-      // callers (e.g. the Tournaments tab) can group matches by tournament
-      // id — the name alone isn't a safe grouping key since two
-      // tournaments could share one.
-      .select("overlay_match_id, tournament_id, tournaments(name)")
-      .in("overlay_match_id", matchIds),
-    supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
-    supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
-  ]);
+  const [{ data: brackets, error: bracketsErr }, { data: channelRows }, { data: weatherRows }, bracketFallbackByMatch] =
+    await Promise.all([
+      supabase
+        .from("bracket_matches")
+        // `tournament_id` is selected alongside the joined tournament name so
+        // callers (e.g. the Tournaments tab) can group matches by tournament
+        // id — the name alone isn't a safe grouping key since two
+        // tournaments could share one.
+        .select("overlay_match_id, tournament_id, tournaments(name)")
+        .in("overlay_match_id", matchIds),
+      supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
+      supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+      backfillTeamsFromBracket(matchIds),
+    ]);
 
   if (bracketsErr) {
     console.error("getFriendlyMatchesForOrg(brackets) failed:", bracketsErr.message);
@@ -1677,13 +2131,14 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
 
   return matches.map((m: any) => {
     const setup = (m.match_setup ?? {}) as Record<string, any>;
+    const fallback = bracketFallbackByMatch.get(m.id);
     return {
       id: m.id,
       auctionId: m.auction_id ?? m.id,
-      team1Name: setup.team1?.name ?? "Team 1",
-      team2Name: setup.team2?.name ?? "Team 2",
-      team1Logo: setup.team1?.logo || null,
-      team2Logo: setup.team2?.logo || null,
+      team1Name: setup.team1?.name || fallback?.team1Name || "Team 1",
+      team2Name: setup.team2?.name || fallback?.team2Name || "Team 2",
+      team1Logo: setup.team1?.logo || fallback?.team1Logo || null,
+      team2Logo: setup.team2?.logo || fallback?.team2Logo || null,
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
       tournamentName: tournamentByMatch.get(m.id) ?? null,
@@ -1701,31 +2156,77 @@ export async function getFriendlyMatchesForOrg(orgId: string): Promise<FriendlyM
 
 
 /** Tournament-linked matches only — the mirror of
- *  getStandaloneMatchesForOrg. Filtered directly via
- *  `tournament_id is not null`, and resolves tournamentName straight off
- *  the `tournaments` table (not just the bracket_matches join), so a
- *  match shows the right tournament name even before it's been dropped
- *  into an actual bracket slot. */
+ *  getStandaloneMatchesForOrg. A match can be linked to a tournament in
+ *  TWO independent ways (matches.tournament_id, set at creation, and
+ *  bracket_matches.tournament_id, set when the match is slotted into a
+ *  bracket) and nothing in the schema keeps these two FKs in sync — so
+ *  this now unions both sources instead of trusting matches.tournament_id
+ *  alone. This is the same union getFriendlyMatchesForOrg already does
+ *  via tournamentIdByMatch; this function was previously missing it,
+ *  which is why a match could show correctly on the public Schedule tab
+ *  (driven by bracket_matches.tournament_id) but be invisible in this
+ *  tab's collapsible (driven by matches.tournament_id only). */
 export async function getTournamentMatchesForOrg(orgId: string): Promise<FriendlyMatchSummary[]> {
-  const { data, error } = await supabase
+  const { data: directMatches, error: directErr } = await supabase
     .from("matches")
     .select("id, auction_id, match_setup, created_at, tournament_id, tournaments(name)")
     .eq("org_id", orgId)
     .not("tournament_id", "is", null)
     .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("getTournamentMatchesForOrg failed:", error.message);
+  if (directErr) {
+    console.error("getTournamentMatchesForOrg(direct) failed:", directErr.message);
     return [];
   }
 
-  const matches = data ?? [];
-  const matchIds = matches.map((m) => m.id);
+  const { data: bracketLinks, error: bracketErr } = await supabase
+    .from("bracket_matches")
+    .select("overlay_match_id, tournament_id, tournaments(name)")
+    .not("overlay_match_id", "is", null);
+
+  if (bracketErr) {
+    console.error("getTournamentMatchesForOrg(bracket links) failed:", bracketErr.message);
+  }
+
+  const directIds = new Set((directMatches ?? []).map((m: any) => m.id));
+  const tournamentIdByMatch = new Map<string, string>();
+  const tournamentNameByMatch = new Map<string, string>();
+  (bracketLinks ?? []).forEach((b: any) => {
+    if (!b.overlay_match_id || !b.tournament_id) return;
+    tournamentIdByMatch.set(b.overlay_match_id, b.tournament_id);
+    if (b.tournaments?.name) tournamentNameByMatch.set(b.overlay_match_id, b.tournaments.name);
+  });
+
+  const bracketOnlyIds = [...tournamentIdByMatch.keys()].filter((id) => !directIds.has(id));
+
+  let bracketOnlyMatches: any[] = [];
+  if (bracketOnlyIds.length > 0) {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("id, auction_id, match_setup, created_at, tournament_id, tournaments(name)")
+      .eq("org_id", orgId)
+      .in("id", bracketOnlyIds);
+
+    if (error) {
+      console.error("getTournamentMatchesForOrg(bracket-only matches) failed:", error.message);
+    } else {
+      bracketOnlyMatches = data ?? [];
+    }
+  }
+
+  const matches = [...(directMatches ?? []), ...bracketOnlyMatches];
+  const matchIds = matches.map((m: any) => m.id);
   if (matchIds.length === 0) return [];
 
-  const [{ data: channelRows }, { data: weatherRows }] = await Promise.all([
+  // Team-identity fallback for EVERY match here (not just bracket-only
+  // ones) — a bracket slot can be linked before real teams are filled
+  // in, leaving match_setup.team1/team2 empty even for a match found via
+  // the direct tournament_id path. Same fallback getFriendlyMatchesForOrg
+  // already applies, via the same private backfillTeamsFromBracket().
+  const [{ data: channelRows }, { data: weatherRows }, bracketTeamFallback] = await Promise.all([
     supabase.from("on_air_channels").select("match_id, channels").in("match_id", matchIds),
     supabase.from("weather_readings").select("match_id, coords").in("match_id", matchIds),
+    backfillTeamsFromBracket(matchIds),
   ]);
 
   const overlaySet = new Set<string>();
@@ -1739,17 +2240,18 @@ export async function getTournamentMatchesForOrg(orgId: string): Promise<Friendl
 
   return matches.map((m: any) => {
     const setup = (m.match_setup ?? {}) as Record<string, any>;
+    const fallback = bracketTeamFallback.get(m.id);
     return {
       id: m.id,
       auctionId: m.auction_id ?? m.id,
-      team1Name: setup.team1?.name ?? "Team 1",
-      team2Name: setup.team2?.name ?? "Team 2",
-      team1Logo: setup.team1?.logo || null,
-      team2Logo: setup.team2?.logo || null,
+      team1Name: setup.team1?.name || fallback?.team1Name || "Team 1",
+      team2Name: setup.team2?.name || fallback?.team2Name || "Team 2",
+      team1Logo: setup.team1?.logo || fallback?.team1Logo || null,
+      team2Logo: setup.team2?.logo || fallback?.team2Logo || null,
       round: setup.round ?? "Friendly",
       createdAt: m.created_at,
-      tournamentName: m.tournaments?.name ?? null,
-      tournamentId: m.tournament_id ?? null,
+      tournamentName: m.tournaments?.name ?? tournamentNameByMatch.get(m.id) ?? null,
+      tournamentId: m.tournament_id ?? tournamentIdByMatch.get(m.id) ?? null,
       overlayConfigured: overlaySet.has(m.id),
       auctionLinked: Array.isArray(setup.squads) && setup.squads.length > 0,
       venue: setup.venue || null,

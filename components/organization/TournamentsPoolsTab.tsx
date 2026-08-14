@@ -118,6 +118,15 @@ function TournamentThumb({ tournament }: { tournament: TournamentSummary }) {
 /*  TOURNAMENTS — search, multi-select + bulk delete, realtime sync,    */
 /*  and each tournament's own connected matches shown inline below it   */
 /*  using the same MatchCard used on the Matches tab.                   */
+/*                                                                        */
+/*  Deleting a tournament is a CASCADE, not a block: matches, bracket    */
+/*  slots, standings, prizes, awards, activity, and award templates all  */
+/*  go with it (organization.ts's deleteTournament handles the actual    */
+/*  child-table cleanup). Auctions/Squad Boards are only unlinked, never */
+/*  deleted, since they can exist independently of any tournament. The   */
+/*  confirm dialogs below tell the user this up front using the match    */
+/*  counts already loaded into matchesByTournament — no extra fetch      */
+/*  needed.                                                              */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -130,7 +139,9 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
   // Matches, grouped by the tournament they're linked to — this is what
   // lets each tournament's row show its own bracket matches inline,
   // right below it, instead of duplicating them in the Matches tab
-  // (which is scoped to standalone matches only).
+  // (which is scoped to standalone matches only). Also doubles as the
+  // source of the "this will delete N matches" counts shown in the
+  // delete confirmation dialogs below.
   const [matchesByTournament, setMatchesByTournament] = useState<Map<string, FriendlyMatchSummary[]>>(new Map())
   const [expandedMatches, setExpandedMatches] = useState<Set<string>>(new Set())
 
@@ -140,6 +151,10 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Success confirmation after a cascade delete — separate from
+  // deleteError so both can never show at once, and so it clears itself
+  // out the next time a delete starts.
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null)
 
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -216,9 +231,15 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
   }
 
   const handleDelete = async (t: TournamentSummary) => {
+    const linkedMatches = matchesByTournament.get(t.id)?.length ?? 0
     const ok = await confirm({
       title: "Delete this tournament?",
-      description: `"${t.name}" will be permanently deleted. This fails if it still has auctions, teams, or bracket matches attached.`,
+      description:
+        linkedMatches > 0
+          ? `"${t.name}" and its ${linkedMatches} match${
+              linkedMatches === 1 ? "" : "es"
+            } — including scores, bracket slots, and any recorded play data — will be permanently deleted. Any auction it used stays intact, just unlinked from this tournament. This can't be undone.`
+          : `"${t.name}" will be permanently deleted. This can't be undone.`,
       confirmText: "Delete tournament",
       tone: "danger",
     })
@@ -226,6 +247,7 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
     setDeletingId(t.id)
     setDeleteError(null)
+    setDeleteNotice(null)
     const result = await deleteTournament(t.id)
     setDeletingId(null)
     if (!result.ok) {
@@ -238,18 +260,33 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
       next.delete(t.id)
       return next
     })
+    // The tournament's matches are genuinely gone now (not just
+    // "still blocked from deleting") — drop them from local state right
+    // away rather than waiting on the next realtime/reload tick.
+    setMatchesByTournament((prev) => {
+      const next = new Map(prev)
+      next.delete(t.id)
+      return next
+    })
+    const count = result.deletedMatchCount ?? 0
+    setDeleteNotice(
+      count > 0
+        ? `Deleted "${t.name}" along with ${count} match${count === 1 ? "" : "es"} and its bracket data.`
+        : `Deleted "${t.name}".`
+    )
   }
 
   // Every match shown here is tournament-linked by definition (that's how
   // it ended up in matchesByTournament), so it can never be deleted
-  // directly — same rule the Matches tab enforces: disconnect it from its
-  // bracket slot first.
+  // directly on its own — same rule the Matches tab enforces for a
+  // standalone match's bracket link. Deleting the whole tournament above
+  // is what removes it.
   const handleDeleteMatch = async (match: FriendlyMatchSummary) => {
     await confirm({
-      title: "Can't delete this match",
-      description: `"${match.team1Name} vs ${match.team2Name}" is connected to the ${
+      title: "Can't delete this match on its own",
+      description: `"${match.team1Name} vs ${match.team2Name}" is part of the ${
         match.tournamentName ?? "this tournament's"
-      } bracket. Disconnect it from the bracket on this tournament's edit page before deleting it here.`,
+      } bracket. Delete the whole tournament to remove it, or disconnect it from the bracket on the tournament's edit page first.`,
       confirmText: "Got it",
       cancelText: "Close",
       tone: "default",
@@ -292,13 +329,22 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
     })
   }
 
-  
+
 
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
+    const totalMatches = Array.from(selected).reduce(
+      (sum, id) => sum + (matchesByTournament.get(id)?.length ?? 0),
+      0
+    )
     const ok = await confirm({
       title: `Delete ${selected.size} tournament${selected.size === 1 ? "" : "s"}?`,
-      description: "This can't be undone, and will skip any that still have auctions, teams, or matches attached.",
+      description:
+        totalMatches > 0
+          ? `This also permanently deletes ${totalMatches} linked match${
+              totalMatches === 1 ? "" : "es"
+            } and their bracket/scoring data across the selected tournaments. Any auctions they used stay intact, just unlinked. This can't be undone.`
+          : "This can't be undone.",
       confirmText: `Delete ${selected.size}`,
       tone: "danger",
     })
@@ -306,13 +352,27 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
 
     setBulkDeleting(true)
     setDeleteError(null)
-    const { okIds, failedIds } = await deleteTournaments(Array.from(selected))
+    setDeleteNotice(null)
+    const { okIds, failedIds, totalMatchesDeleted } = await deleteTournaments(Array.from(selected))
     setBulkDeleting(false)
     setTournaments((prev) => prev.filter((t) => !okIds.includes(t.id)))
+    setMatchesByTournament((prev) => {
+      const next = new Map(prev)
+      okIds.forEach((id) => next.delete(id))
+      return next
+    })
     setSelected(new Set())
+    if (okIds.length > 0) {
+      setDeleteNotice(
+        `Deleted ${okIds.length} tournament${okIds.length === 1 ? "" : "s"}` +
+          (totalMatchesDeleted > 0
+            ? ` along with ${totalMatchesDeleted} match${totalMatchesDeleted === 1 ? "" : "es"} and their bracket data.`
+            : ".")
+      )
+    }
     if (failedIds.length > 0) {
       setDeleteError(
-        `${failedIds.length} tournament${failedIds.length === 1 ? "" : "s"} couldn't be deleted — they still have auctions, teams, or matches attached.`
+        `${failedIds.length} tournament${failedIds.length === 1 ? "" : "s"} couldn't be deleted — please try again.`
       )
     }
   }
@@ -365,6 +425,11 @@ export function TournamentsTab({ org, userId }: { org: OrgSummary; userId: strin
           <p className="text-gray-500 text-sm italic">No tournaments match "{query}".</p>
         ) : (
           <div className="space-y-2">
+            {deleteNotice && (
+              <p className="flex items-center gap-1.5 text-gold text-sm mb-2">
+                <Trophy className="h-4 w-4" /> {deleteNotice}
+              </p>
+            )}
             {deleteError && (
               <p className="flex items-center gap-1.5 text-red-500 text-sm mb-2">
                 <AlertCircle className="h-4 w-4" /> {deleteError}
