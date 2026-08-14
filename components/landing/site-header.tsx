@@ -123,8 +123,8 @@ export function SiteHeader({
 
   // "Home" removed — clicking the logo / SaaS name now serves that purpose
   const navItems = [
-    { id: "tournaments", label: "Tournaments", href: "/all-tournaments", disabled: false },
-    { id: "matches", label: "Matches", href: "/all-matches", disabled: false },
+    { id: "tournaments", label: "Tournaments", href: "/all-tournaments", disabled: true },
+    { id: "matches", label: "Matches", href: "/all-matches", disabled: true },
     // { id: "players", label: "Players", href: "/all-players", disabled: false },
     // { id: "teams", label: "Teams", href: "/all-teams", disabled: false },
     // { id: "standings", label: "Standings", href: "/standings", disabled: false },

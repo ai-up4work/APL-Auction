@@ -216,7 +216,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
         handleNavigation={handleNavigation}
       />
 
-      <section className="pt-26 sm:pt-30 pb-16 relative section-pattern">
+      <section className="pt-24 pb-16 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
 
             <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10">          {/* Row 1: Banner + Tournament Information.
