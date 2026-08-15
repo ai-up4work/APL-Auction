@@ -125,7 +125,7 @@ export function SiteHeader({
   const navItems = [
     { id: "tournaments", label: "Tournaments", href: "/all-tournaments", disabled: true },
     { id: "matches", label: "Matches", href: "/all-matches", disabled: true },
-    { id: "players", label: "Players", href: "/all-players", disabled: truea },
+    { id: "players", label: "Players", href: "/all-players", disabled: true },
     // { id: "teams", label: "Teams", href: "/all-teams", disabled: false },
     // { id: "standings", label: "Standings", href: "/standings", disabled: false },
     { id: "gallery", label: "Gallery", href: "/gallery", disabled: true },
