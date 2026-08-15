@@ -317,12 +317,72 @@ function fmtDecimal(n: number | null | undefined) {
   return n === null || n === undefined ? "—" : n.toFixed(2)
 }
 
-type ProfileTab = "overview" | "matches"
+type ProfileTab = "stats" | "matches" | "awards" | "teams" | "badges"
 
-/** Tabs not wired up yet — shown same as CrickPro's real tab set
- *  (Stats · Matches · Awards · Teams · Badges) so the strip reads as
- *  complete, but disabled/locked until the underlying data exists. */
-const LOCKED_TABS = ["Awards", "Teams", "Badges"] as const
+const TAB_CONFIG: { key: ProfileTab; label: string }[] = [
+  { key: "stats", label: "Stats" },
+  { key: "matches", label: "Matches" },
+  { key: "awards", label: "Awards" },
+  { key: "teams", label: "Teams" },
+  { key: "badges", label: "Badges" },
+]
+
+// ─────────────────────────────────────────────────────────────
+// MOCK DATA — Awards / Teams / Badges
+//
+// These three tabs don't have real queries wired up yet. Shapes below
+// are loosely modeled on tables that already exist in the schema
+// (tournament_awards for Awards; teams/auction history for Teams) so
+// swapping in a real fetch later should mean writing a query function
+// with this same return shape, not redesigning these tabs.
+// ─────────────────────────────────────────────────────────────
+
+interface PlayerAward {
+  id: string
+  title: string
+  context: string
+  date: string | null
+  icon: "trophy" | "medal" | "star"
+}
+
+const MOCK_AWARDS: PlayerAward[] = [
+  { id: "a1", title: "Player of the Tournament", context: "Valiant Cup 2026", date: "2026-08-14", icon: "trophy" },
+  { id: "a2", title: "Orange Cap — Most Runs", context: "Valiant Cup 2026", date: "2026-08-14", icon: "medal" },
+  { id: "a3", title: "Player of the Match", context: "vs Mumbai Indians", date: "2026-08-09", icon: "star" },
+  { id: "a4", title: "Best Bowling Figures", context: "4/18 vs Royal Challengers", date: "2026-07-28", icon: "medal" },
+]
+
+interface PlayerTeamStint {
+  id: string
+  teamName: string
+  teamLogo: string | null
+  teamColor: string | null
+  season: string
+  role: string
+  price: number | null
+}
+
+const MOCK_TEAMS: PlayerTeamStint[] = [
+  { id: "t1", teamName: "Chennai Super Kings", teamLogo: null, teamColor: "#F5C518", season: "2026", role: "Sold", price: 18500 },
+  { id: "t2", teamName: "Mumbai Indians", teamLogo: null, teamColor: "#2563EB", season: "2025", role: "Sold", price: 14200 },
+  { id: "t3", teamName: "Royal Challengers", teamLogo: null, teamColor: "#DC2626", season: "2024", role: "Unsold", price: null },
+]
+
+interface PlayerBadge {
+  id: string
+  label: string
+  description: string
+  earned: boolean
+}
+
+const MOCK_BADGES: PlayerBadge[] = [
+  { id: "b1", label: "Century Maker", description: "Scored a 100+ in an innings", earned: true },
+  { id: "b2", label: "Hat-trick Hero", description: "Took 3 wickets in 3 balls", earned: false },
+  { id: "b3", label: "50 Wicket Club", description: "50 career wickets", earned: true },
+  { id: "b4", label: "Iron Man", description: "Played every match in a season", earned: true },
+  { id: "b5", label: "Six Machine", description: "10+ sixes in a single innings", earned: false },
+  { id: "b6", label: "Death Over Specialist", description: "Sub-7 economy in the last 4 overs", earned: false },
+]
 
 export default function PlayerDetailClient({ id }: { id: string }) {
   useScrollTop()
@@ -330,14 +390,14 @@ export default function PlayerDetailClient({ id }: { id: string }) {
 
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [player, setPlayer] = useState<PlayerDetail | null | undefined>(undefined) // undefined = loading, null = not found
-  const [activeTab, setActiveTab] = useState<ProfileTab>("overview")
+  const [activeTab, setActiveTab] = useState<ProfileTab>("stats")
 
   const [matches, setMatches] = useState<PlayerMatchSummary[] | undefined>(undefined) // undefined = not yet loaded
 
   useEffect(() => {
     let cancelled = false
     setPlayer(undefined)
-    setActiveTab("overview")
+    setActiveTab("stats")
     setMatches(undefined)
     getPlayerDetailForPublic(id).then((data) => {
       if (cancelled) return
@@ -352,7 +412,7 @@ export default function PlayerDetailClient({ id }: { id: string }) {
   // opened — it's a heavier query (all balls for this player, plus
   // batch lookups) than the summary stats getPlayerDetailForPublic
   // already loads, and most visitors landing on a player page will
-  // only ever look at Overview.
+  // only ever look at Stats.
   useEffect(() => {
     if (activeTab !== "matches" || matches !== undefined || !player) return
     let cancelled = false
@@ -532,18 +592,17 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               </div>
 
-              {/* ── Tab strip ───────────────────────────────────── */}
-              <div className="flex items-center gap-1 rounded-xl border border-gold/10 bg-black/50 p-1 w-fit mx-auto sm:mx-0">
-                {(
-                  [
-                    { key: "overview", label: "Overview" },
-                    { key: "matches", label: "Matches" },
-                  ] as { key: ProfileTab; label: string }[]
-                ).map((tab) => (
+              {/* ── Tab strip ───────────────────────────────────────
+                  Full CrickPro tab set (Stats · Matches · Awards ·
+                  Teams · Badges). Awards/Teams/Badges run on mock data
+                  for now (see the MOCK_* constants above) — swap in a
+                  real fetch later and these render exactly the same. */}
+              <div className="flex items-center gap-1 rounded-xl border border-gold/10 bg-black/50 p-1 w-fit mx-auto sm:mx-0 overflow-x-auto max-w-full">
+                {TAB_CONFIG.map((tab) => (
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key)}
-                    className={`px-4 py-2 rounded-lg text-xs font-cinzel uppercase tracking-widest transition-colors ${
+                    className={`px-4 py-2 rounded-lg text-xs font-cinzel uppercase tracking-widest transition-colors shrink-0 ${
                       activeTab === tab.key ? "bg-gold text-black font-bold" : "text-gray-400 hover:text-white"
                     }`}
                   >
@@ -552,8 +611,8 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 ))}
               </div>
 
-              {/* ── Overview tab ────────────────────────────────── */}
-              {activeTab === "overview" && (
+              {/* ── Stats tab ───────────────────────────────────── */}
+              {activeTab === "stats" && (
                 <div className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-5">
                     <StatGroup
@@ -604,6 +663,33 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Awards tab (mock data) ──────────────────────── */}
+              {activeTab === "awards" && (
+                <div className="space-y-3">
+                  {MOCK_AWARDS.map((award, i) => (
+                    <AwardRow key={award.id} award={award} index={i} />
+                  ))}
+                </div>
+              )}
+
+              {/* ── Teams tab (mock data) ────────────────────────── */}
+              {activeTab === "teams" && (
+                <div className="space-y-3">
+                  {MOCK_TEAMS.map((stint, i) => (
+                    <TeamStintRow key={stint.id} stint={stint} index={i} />
+                  ))}
+                </div>
+              )}
+
+              {/* ── Badges tab (mock data) ──────────────────────── */}
+              {activeTab === "badges" && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {MOCK_BADGES.map((badge, i) => (
+                    <BadgeTile key={badge.id} badge={badge} index={i} />
+                  ))}
                 </div>
               )}
             </div>
@@ -702,6 +788,90 @@ function MatchHistoryRow({ match, index }: { match: PlayerMatchSummary; index: n
         </div>
       </div>
     </Link>
+  )
+}
+
+const AWARD_ICONS: Record<PlayerAward["icon"], React.ComponentType<{ className?: string }>> = {
+  trophy: Trophy,
+  medal: ShieldCheck,
+  star: BarChart3,
+}
+
+function AwardRow({ award, index }: { award: PlayerAward; index: number }) {
+  const Icon = AWARD_ICONS[award.icon]
+  return (
+    <div
+      className="flex items-center gap-4 rounded-xl border border-gold/10 bg-black/60 p-4 sm:p-5 fade-in-up"
+      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+    >
+      <div className="h-11 w-11 shrink-0 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
+        <Icon className="h-5 w-5 text-gold" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-cinzel text-white truncate">{award.title}</p>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          {award.context}
+          {award.date && ` · ${formatMatchDate(award.date)}`}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function TeamStintRow({ stint, index }: { stint: PlayerTeamStint; index: number }) {
+  const accent = stint.teamColor || DEFAULT_ACCENT
+  return (
+    <div
+      className="flex items-center gap-4 rounded-xl border border-gold/10 bg-black/60 p-4 sm:p-5 fade-in-up overflow-hidden relative"
+      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+    >
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: accent }} />
+      {stint.teamLogo ? (
+        <div className="relative h-11 w-11 shrink-0 rounded-full overflow-hidden border" style={{ borderColor: accent }}>
+          <Image src={stint.teamLogo} alt={stint.teamName} fill className="object-cover" />
+        </div>
+      ) : (
+        <div
+          className="h-11 w-11 shrink-0 rounded-full border flex items-center justify-center font-cinzel text-xs font-bold text-white"
+          style={{ borderColor: accent, backgroundColor: `${accent}22` }}
+        >
+          {stint.teamName.slice(0, 2).toUpperCase()}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-cinzel text-white truncate">{stint.teamName}</p>
+        <p className="text-[11px] text-gray-500 mt-0.5">Season {stint.season}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className={`text-xs font-cinzel uppercase tracking-widest ${stint.role === "Sold" ? "text-emerald-300" : "text-gray-500"}`}>
+          {stint.role}
+        </p>
+        {stint.price != null && <p className="text-xs font-mono text-gold mt-0.5">{stint.price.toLocaleString()}</p>}
+      </div>
+    </div>
+  )
+}
+
+function BadgeTile({ badge, index }: { badge: PlayerBadge; index: number }) {
+  return (
+    <div
+      className={`flex flex-col items-center text-center gap-2 rounded-xl border p-4 fade-in-up ${
+        badge.earned ? "border-gold/30 bg-gold/[0.04]" : "border-white/5 bg-black/40 opacity-50"
+      }`}
+      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+      title={badge.description}
+    >
+      <div
+        className={`h-12 w-12 rounded-full flex items-center justify-center border-2 ${
+          badge.earned ? "border-gold" : "border-gray-700"
+        }`}
+      >
+        <ShieldCheck className={`h-5 w-5 ${badge.earned ? "text-gold" : "text-gray-600"}`} />
+      </div>
+      <p className={`text-[11px] font-cinzel uppercase tracking-wide leading-tight ${badge.earned ? "text-white" : "text-gray-500"}`}>
+        {badge.label}
+      </p>
+    </div>
   )
 }
 
