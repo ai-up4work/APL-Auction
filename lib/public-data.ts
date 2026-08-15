@@ -29,6 +29,7 @@ export type PublicMatch = {
   scoreB: number | null
   status: string
   scheduledAt: string | null
+  createdAt: string | null
   venue: string | null
   tournamentId: string | null
   tournamentName: string | null
@@ -90,20 +91,20 @@ function parseLiveState(raw: any): PublicMatchLiveScore | null {
   }
 }
 
-/** CHANGED — now also pulls the fields the match simulator (the
- *  /match/[matchId]/simulate page) writes directly into match_setup:
- *  `status` ("live" | "completed" | "error"), `currentInnings`, and
- *  each side's running score (scoreA/wktsA/oversA, scoreB/wktsB/oversB).
+/** Pulls the fields the match simulator (the /match/[matchId]/simulate
+ *  page) writes directly into match_setup: `status` ("live" |
+ *  "completed" | "error"), `currentInnings`, and each side's running
+ *  score (scoreA/wktsA/oversA, scoreB/wktsB/oversB).
  *
- *  Those fields are the ONLY place a standalone/friendly match's score
- *  and in-progress status live at all — a friendly match has no
- *  bracket_matches row (so no bracket_matches.status), and
- *  match_team_stats is only ever written for matches linked to a
- *  bracket slot (see the simulator's handleStart — the stats upsert is
- *  inside `if (bracketRow) { ... }`). Without reading these fields, a
- *  friendly match could never show as "live" on the public page (it has
- *  no match_sim_control row either — nothing writes to that table) and
- *  a completed friendly match's score would always render as "—".
+ *  These fields are the ONLY place a standalone/friendly match's score
+ *  and in-progress state live — a friendly match has no bracket_matches
+ *  row, and match_team_stats is only ever written for matches linked to
+ *  a bracket slot (see the simulator's handleStart — the stats upsert
+ *  is inside `if (bracketRow) { ... }`). Overall status classification
+ *  itself now comes from matches.derived_status (a Postgres generated
+ *  column, see migration 001) rather than being re-derived here — see
+ *  mapFriendlyRow — but scores/live-state still only exist in this
+ *  jsonb blob.
  */
 function parseMatchSetup(raw: any) {
   if (!raw || typeof raw !== "object") return null
@@ -182,6 +183,7 @@ function mapBracketRow(row: any): PublicMatch {
     scoreB: row.score_b,
     status,
     scheduledAt: row.scheduled_at ?? overlaySetup?.scheduledAt ?? null,
+    createdAt: row.created_at ?? null,
     venue: row.venue ?? overlaySetup?.venue ?? null,
     tournamentId: row.tournament_id ?? null,
     tournamentName: row.tournament?.name ?? null,
@@ -195,20 +197,11 @@ function mapBracketRow(row: any): PublicMatch {
 function mapFriendlyRow(row: any): PublicMatch {
   const setup = parseMatchSetup(row.match_setup)
 
-  // CHANGED — status now comes primarily from match_setup.status, the
-  // field the simulator writes directly ("live" while either innings is
-  // in progress, "completed" once both innings are done, "error" if a
-  // run crashed). match_sim_control.status is no longer consulted here:
-  // nothing in the simulator writes to that table, so it was always
-  // null and a friendly match could previously never show as "live" on
-  // this page — only "upcoming" or "completed". matchComplete is kept
-  // as a fallback for any older rows written before `status` existed.
-  const status: MatchStatusFilter =
-    setup?.status === "completed" || (!setup?.status && setup?.matchComplete)
-      ? "completed"
-      : setup?.status === "live"
-        ? "live"
-        : "upcoming"
+  // Status now comes straight from matches.derived_status — a
+  // Postgres generated column (see migration 001) that recomputes on
+  // every write from match_setup->>'status' / matchComplete, including
+  // the 'live' case. No JS-side derivation or fallback needed anymore.
+  const status: MatchStatusFilter = (row.derived_status as MatchStatusFilter) ?? "upcoming"
 
   const statRows: any[] = row.match_team_stats ?? []
   const { scoreA: statsScoreA, scoreB: statsScoreB } = resolveFriendlyScores(
@@ -216,21 +209,18 @@ function mapFriendlyRow(row: any): PublicMatch {
     setup?.teamAName ?? "",
     setup?.teamBName ?? "",
   )
-  // CHANGED — match_setup's own scoreA/scoreB (written directly by the
-  // simulator, live and at completion) now take priority over
-  // match_team_stats. match_team_stats is only ever populated for
-  // matches linked to a bracket slot (see the simulator's handleStart),
-  // so a standalone friendly match has no match_team_stats rows at all
-  // and would previously always show "—" for its score, even once
-  // completed. The match_team_stats lookup is kept as a fallback for
-  // older rows or any friendly match that somehow does have stats rows.
+  // match_setup's own scoreA/scoreB (written directly by the simulator,
+  // live and at completion) take priority over match_team_stats.
+  // match_team_stats is only ever populated for matches linked to a
+  // bracket slot, so a standalone friendly match has no rows there at
+  // all — this fallback only matters for older rows or edge cases.
   const scoreA = setup?.scoreA ?? statsScoreA
   const scoreB = setup?.scoreB ?? statsScoreB
 
-  // NEW — a live score object built straight from match_setup, so a
-  // friendly match shows a running score card while live. There's no
-  // match_state row for these matches (nothing in the simulator writes
-  // to that table), so this is the only source available.
+  // Live score object built straight from match_setup, so a friendly
+  // match shows a running score card while live. There's no match_state
+  // row for these matches (nothing in the simulator writes to that
+  // table), so this is the only source available.
   const live: PublicMatchLiveScore | null =
     status === "live" && setup
       ? setup.currentInnings === 2
@@ -255,6 +245,7 @@ function mapFriendlyRow(row: any): PublicMatch {
     scoreB,
     status,
     scheduledAt: setup?.scheduledAt ?? null,
+    createdAt: row.created_at ?? null,
     venue: setup?.venue ?? null,
     tournamentId: row.tournament_id ?? null,
     tournamentName: null,
@@ -265,8 +256,10 @@ function mapFriendlyRow(row: any): PublicMatch {
   }
 }
 
+// created_at included so bracket rows can be ordered/merged with
+// friendly rows by creation time (see getPublicMatchesPriorityFill).
 const BRACKET_SELECT = `
-  id, round, status, score_a, score_b, scheduled_at, venue, bracket_type, tournament_id,
+  id, round, status, score_a, score_b, scheduled_at, venue, bracket_type, tournament_id, created_at,
   team_a:teams!bracket_matches_team_a_id_fkey ( name, code, color, logo ),
   team_b:teams!bracket_matches_team_b_id_fkey ( name, code, color, logo ),
   tournament:tournaments!bracket_matches_tournament_id_fkey ( name, logo_url ),
@@ -279,12 +272,12 @@ const BRACKET_SELECT = `
   )
 `
 
-// CHANGED — match_sim_control(status) dropped from this select. Nothing
-// in the simulator writes to that table, so it was always null and only
-// ever added a needless join; friendly-match status is read from
-// match_setup.status instead (see mapFriendlyRow / parseMatchSetup).
+// derived_status included so friendly-match status can be filtered and
+// counted directly in Postgres (see migration 001) instead of being
+// derived and filtered in JS. match_sim_control is still not joined —
+// nothing in the simulator writes to that table.
 const FRIENDLY_SELECT = `
-  id, match_setup, created_at, tournament_id,
+  id, match_setup, created_at, tournament_id, derived_status,
   on_air_channels ( channels ),
   weather_readings ( data ),
   match_state ( live_state ),
@@ -348,6 +341,11 @@ async function fetchBracketPage(opts: {
   return { rows: rows.slice(0, opts.pageSize).map(mapBracketRow), hasMore: rows.length > opts.pageSize }
 }
 
+/** Friendly-match page fetch. Mirrors fetchBracketPage exactly now:
+ *  status is a real, indexed column (matches.derived_status — see
+ *  migration 001), so it's a normal .eq() filter with real range-based
+ *  pagination and an accurate hasMore. No more overfetch-and-filter
+ *  workaround. */
 async function fetchFriendlyPage(opts: {
   status?: MatchStatusFilter
   tournamentId?: string | null
@@ -355,13 +353,8 @@ async function fetchFriendlyPage(opts: {
   page: number
   pageSize: number
 }): Promise<{ rows: PublicMatch[]; hasMore: boolean }> {
-  // Friendly status is derived (match_setup.status / matchComplete),
-  // not a stored column, so it can't be pushed into .eq(). We over-fetch
-  // a larger raw window and filter after mapping when a status is active.
-  // See the file-level note for the DB-view fix that removes this need.
-  const rawPageSize = opts.status ? opts.pageSize * 3 : opts.pageSize
-  const from = opts.page * rawPageSize
-  const to = from + rawPageSize
+  const from = opts.page * opts.pageSize
+  const to = from + opts.pageSize // fetch one extra row to detect "more"
 
   let query = supabase
     .from("matches")
@@ -370,17 +363,14 @@ async function fetchFriendlyPage(opts: {
     .order("created_at", { ascending: false })
     .range(from, to)
 
+  if (opts.status) query = query.eq("derived_status", opts.status)
   if (opts.tournamentId) query = query.eq("tournament_id", opts.tournamentId)
   query = applyFriendlySearch(query, opts.search)
 
   const { data, error } = await query
   if (error) console.error("[public] friendly page:", error.message)
-  const rawRows = data ?? []
-  const rawHasMore = rawRows.length > rawPageSize
-  let mapped = rawRows.slice(0, rawPageSize).map(mapFriendlyRow)
-  if (opts.status) mapped = mapped.filter((m) => m.status === opts.status)
-
-  return { rows: mapped.slice(0, opts.pageSize), hasMore: rawHasMore || mapped.length > opts.pageSize }
+  const rows = data ?? []
+  return { rows: rows.slice(0, opts.pageSize).map(mapFriendlyRow), hasMore: rows.length > opts.pageSize }
 }
 
 export type MatchPageParams = {
@@ -468,9 +458,9 @@ export async function getPublicMatchesOverview(opts: MatchOverviewParams): Promi
 export type MatchCounts = { all: number; upcoming: number; live: number; completed: number }
 
 /** Cheap counts for the status filter pills — head-only queries for
- *  bracket matches (real DB count), plus a lightweight projection for
- *  friendly matches (id + derived-status fields only, no jsonb payload)
- *  since there's no stored status column to count against directly. */
+ *  both bracket matches (real status column) and friendly matches
+ *  (matches.derived_status, see migration 001). No row-by-row JS
+ *  aggregation anymore on either side. */
 export async function getPublicMatchesCounts(opts: {
   tournamentId?: string | null
   type?: MatchTypeFilter
@@ -493,45 +483,151 @@ export async function getPublicMatchesCounts(opts: {
     return count ?? 0
   }
 
-  // CHANGED — reads match_setup->>status instead of match_sim_control,
-  // for the same reason as mapFriendlyRow above: match_sim_control is
-  // never written by the simulator, so it was always null and every
-  // friendly match counted as "upcoming" no matter its real state.
-  const friendlyCounts = async () => {
+  const friendlyCount = async (status?: MatchStatusFilter): Promise<number> => {
     let query = supabase
       .from("matches")
-      .select("id, complete:match_setup->>matchComplete, simStatus:match_setup->>status")
+      .select("id", { count: "exact", head: true })
       .is("bracket_match_id", null)
+    if (status) query = query.eq("derived_status", status)
     if (tournamentId) query = query.eq("tournament_id", tournamentId)
     query = applyFriendlySearch(query, q)
-    const { data, error } = await query
-    if (error) console.error("[public] friendly counts:", error.message)
-    const rows = (data ?? []) as any[]
-    let upcoming = 0
-    let live = 0
-    let completed = 0
-    for (const r of rows) {
-      if (r.simStatus === "completed" || (!r.simStatus && r.complete === "true")) completed++
-      else if (r.simStatus === "live") live++
-      else upcoming++
-    }
-    return { upcoming, live, completed, all: rows.length }
+    const { count, error } = await query
+    if (error) console.error("[public] friendly count:", error.message)
+    return count ?? 0
   }
 
-  const [bAll, bUpcoming, bLive, bCompleted, f] = await Promise.all([
+  const [bAll, bUpcoming, bLive, bCompleted, fAll, fUpcoming, fLive, fCompleted] = await Promise.all([
     bracketCount(),
     bracketCount("upcoming"),
     bracketCount("live"),
     bracketCount("completed"),
-    friendlyCounts(),
+    friendlyCount(),
+    friendlyCount("upcoming"),
+    friendlyCount("live"),
+    friendlyCount("completed"),
   ])
 
   return {
-    all: bAll + f.all,
-    upcoming: bUpcoming + f.upcoming,
-    live: bLive + f.live,
-    completed: bCompleted + f.completed,
+    all: bAll + fAll,
+    upcoming: bUpcoming + fUpcoming,
+    live: bLive + fLive,
+    completed: bCompleted + fCompleted,
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Priority-fill fetch: live -> upcoming -> completed, capped at a
+// total limit, ordered by creation time within each band.
+// ─────────────────────────────────────────────────────────────
+
+type PriorityFillOpts = {
+  tournamentId?: string | null
+  type?: MatchTypeFilter
+  search?: string
+  limit?: number // total across all three statuses, default 50
+}
+
+type PriorityFillResult = {
+  matches: PublicMatch[]
+  breakdown: { live: number; upcoming: number; completed: number }
+}
+
+/** Fetches up to `limit` rows of a single status band (bracket + friendly
+ *  combined), ordered by creation time descending (newest first). Both
+ *  sides now filter status as a real column (bracket_matches.status,
+ *  matches.derived_status), so no overfetch-and-filter is needed on
+ *  either side. */
+async function fetchStatusBandByCreation(opts: {
+  status: MatchStatusFilter
+  tournamentId: string | null
+  type: MatchTypeFilter
+  matchingTeamIds: string[]
+  search: string
+  limit: number
+}): Promise<PublicMatch[]> {
+  const { status, tournamentId, type, matchingTeamIds, search, limit } = opts
+  const wantsBracket = type !== "friendly"
+
+  const bracketPromise = wantsBracket
+    ? (async () => {
+        let query = supabase
+          .from("bracket_matches")
+          .select(BRACKET_SELECT)
+          .eq("status", status)
+          .order("created_at", { ascending: false })
+          .limit(limit)
+        if (tournamentId) query = query.eq("tournament_id", tournamentId)
+        query = applyBracketSearch(query, search, matchingTeamIds)
+        const { data, error } = await query
+        if (error) console.error("[public] priority-fill bracket:", error.message)
+        return (data ?? []).map(mapBracketRow)
+      })()
+    : Promise.resolve([] as PublicMatch[])
+
+  const friendlyPromise = (async () => {
+    let query = supabase
+      .from("matches")
+      .select(FRIENDLY_SELECT)
+      .is("bracket_match_id", null)
+      .eq("derived_status", status)
+      .order("created_at", { ascending: false })
+      .limit(limit)
+    if (tournamentId) query = query.eq("tournament_id", tournamentId)
+    query = applyFriendlySearch(query, search)
+    const { data, error } = await query
+    if (error) console.error("[public] priority-fill friendly:", error.message)
+    return (data ?? []).map(mapFriendlyRow)
+  })()
+
+  const [bracketRows, friendlyRows] = await Promise.all([bracketPromise, friendlyPromise])
+
+  // Merge the two sources and re-sort by creation time before truncating,
+  // so neither source is unfairly favored just because it resolved first.
+  const merged = [...bracketRows, ...friendlyRows].sort((a, b) => {
+    const at = a.createdAt ? new Date(a.createdAt).getTime() : 0
+    const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0
+    return bt - at // newest first
+  })
+
+  return merged.slice(0, limit)
+}
+
+/** Priority-fill fetch: live first, then upcoming, then completed,
+ *  stopping once `limit` total matches have been collected. Each band
+ *  is ordered by creation time (newest first). This is a one-shot top-N
+ *  fetch, not a paginated feed — there's no "load more" cursor here. */
+export async function getPublicMatchesPriorityFill(
+  opts: PriorityFillOpts,
+): Promise<PriorityFillResult> {
+  const { tournamentId = null, type = "all", search = "", limit = 50 } = opts
+  const q = search.trim()
+
+  const wantsBracket = type !== "friendly"
+  const matchingTeamIds = wantsBracket ? await resolveMatchingTeamIds(q) : []
+
+  const order: MatchStatusFilter[] = ["live", "upcoming", "completed"]
+  const collected: PublicMatch[] = []
+  const breakdown = { live: 0, upcoming: 0, completed: 0 }
+  let remaining = limit
+
+  for (const status of order) {
+    if (remaining <= 0) break
+
+    const rows = await fetchStatusBandByCreation({
+      status,
+      tournamentId,
+      type,
+      matchingTeamIds,
+      search: q,
+      limit: remaining,
+    })
+
+    collected.push(...rows)
+    breakdown[status] = rows.length
+    remaining -= rows.length
+  }
+
+  return { matches: collected, breakdown }
 }
 
 /** Tournament dropdown options — fetched directly from `tournaments`
