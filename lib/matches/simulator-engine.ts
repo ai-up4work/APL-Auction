@@ -9,9 +9,30 @@
 // This file has NO Supabase dependency — it's just state + randomness —
 // so it can be unit tested or reused (e.g. server-side) independently of
 // the admin page that drives it.
+//
+// CHANGED — every player and team now carries an optional database id
+// alongside its display name. Previously this engine was pure
+// name-in/name-out, so `balls.striker_player_id`, `non_striker_player_id`,
+// `bowler_player_id`, `batting_team_id`, and `bowling_team_id` were never
+// populated by a simulated match — those columns silently stayed NULL
+// even when the squad came from real `match_setup.squads` data, because
+// nothing upstream of this file ever resolved a name back to a row in
+// `public.players` / `public.teams`. The caller (the simulate page) is
+// responsible for doing that resolution and handing this file
+// `SimPlayer { name, id }` / a `teamId` on each `SimPlayerPool` — this
+// file just has to thread those ids through untouched. `id` is always
+// nullable: a placeholder pool, an unresolved squad, or an auction-less
+// match all legitimately have no id to attach, and this file must keep
+// working (falling back to NULL ids) rather than require one.
 
 export type ExtraType = "wide" | "no_ball" | "bye" | "leg_bye" | null
 export type DismissalType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "hit_wicket"
+
+/** A player as the engine sees it — display name plus, when resolvable, the `public.players.id` row it corresponds to. */
+export interface SimPlayer {
+  name: string
+  id: string | null
+}
 
 /** Row shape ready to insert into `balls`, minus id/match_id (caller adds those). */
 export interface SimBallRow {
@@ -28,15 +49,25 @@ export interface SimBallRow {
   dismissal_type: DismissalType | null
   batsman_out: string | null
   fielder: string | null
+  // NEW — FK columns on `balls`. All nullable: populated whenever the
+  // caller could resolve a name to a real row, left null otherwise
+  // (placeholder players, unresolved squads, auction-less matches).
+  batting_team_id: string | null
+  bowling_team_id: string | null
+  striker_player_id: string | null
+  non_striker_player_id: string | null
+  bowler_player_id: string | null
 }
 
 export interface SimPlayerPool {
   teamName: string
   teamShort: string
+  /** `public.teams.id` for this side, when resolvable. Null for a placeholder or unresolved team. */
+  teamId: string | null
   /** Batting order, index 0 bats first. */
-  battingOrder: string[]
+  battingOrder: SimPlayer[]
   /** Pool of bowlers available to this team when fielding. */
-  bowlers: string[]
+  bowlers: SimPlayer[]
 }
 
 export interface InningsSimState {
@@ -49,12 +80,13 @@ export interface InningsSimState {
   sequence: number
 
   nextBatterIdx: number
-  strikerName: string
-  nonStrikerName: string
-  outBatters: Set<string>
+  striker: SimPlayer
+  nonStriker: SimPlayer
+  outBatters: Set<string> // keyed by name — dismissal tracking has always been name-keyed and stays that way
 
-  currentBowlerName: string | null
-  lastOverBowlerName: string | null
+  currentBowler: SimPlayer | null
+  lastOverBowler: SimPlayer | null
+  /** Legal balls bowled this innings, keyed by bowler name (names are unique within a single bowling pool). */
   bowlerLegalBalls: Record<string, number>
 
   over: number // 1-indexed over currently in progress
@@ -86,10 +118,16 @@ function weightedPick<T>(items: { value: T; weight: number }[]): T {
   return items[items.length - 1].value
 }
 
-/** Generates fallback player names when a match has no real squads set up. */
-export function generatePlaceholderPool(teamName: string, teamShort: string): SimPlayerPool {
-  const names = Array.from({ length: 11 }, (_, i) => `${teamShort} Player ${i + 1}`)
-  return { teamName, teamShort, battingOrder: names, bowlers: names.slice(0, 6) }
+/**
+ * Generates fallback player names when a match has no real squads set up.
+ * `teamId` is accepted (and defaults to null) so a caller that resolved a
+ * real `teams` row but has no usable roster for it can still pass the team
+ * id through — `balls.batting_team_id`/`bowling_team_id` get populated
+ * even though the individual players are fictional and carry `id: null`.
+ */
+export function generatePlaceholderPool(teamName: string, teamShort: string, teamId: string | null = null): SimPlayerPool {
+  const names: SimPlayer[] = Array.from({ length: 11 }, (_, i) => ({ name: `${teamShort} Player ${i + 1}`, id: null }))
+  return { teamName, teamShort, teamId, battingOrder: names, bowlers: names.slice(0, 6) }
 }
 
 // ── Defensive fallbacks ──────────────────────────────────────────
@@ -105,16 +143,16 @@ export function generatePlaceholderPool(teamName: string, teamShort: string): Si
 const FALLBACK_BATTER_NAME = "Player TBD"
 const FALLBACK_BOWLER_NAME = "Bowler TBD"
 
-function safeBattingOrder(order: string[]): string[] {
+function safeBattingOrder(order: SimPlayer[]): SimPlayer[] {
   if (order.length >= 2) return order
-  // Pad up to 2 so strikerName/nonStrikerName are never undefined.
+  // Pad up to 2 so striker/nonStriker are never undefined.
   const padded = [...order]
-  while (padded.length < 2) padded.push(`${FALLBACK_BATTER_NAME} ${padded.length + 1}`)
+  while (padded.length < 2) padded.push({ name: `${FALLBACK_BATTER_NAME} ${padded.length + 1}`, id: null })
   return padded
 }
 
-function safeBowlerPool(bowlers: string[]): string[] {
-  return bowlers.length > 0 ? bowlers : [FALLBACK_BOWLER_NAME]
+function safeBowlerPool(bowlers: SimPlayer[]): SimPlayer[] {
+  return bowlers.length > 0 ? bowlers : [{ name: FALLBACK_BOWLER_NAME, id: null }]
 }
 
 export function createInningsState(params: {
@@ -147,11 +185,11 @@ export function createInningsState(params: {
     target: target ?? null,
     sequence: startSequence,
     nextBatterIdx: 2,
-    strikerName: battingOrder[0],
-    nonStrikerName: battingOrder[1],
+    striker: battingOrder[0],
+    nonStriker: battingOrder[1],
     outBatters: new Set(),
-    currentBowlerName: null,
-    lastOverBowlerName: null,
+    currentBowler: null,
+    lastOverBowler: null,
     bowlerLegalBalls: {},
     over: 1,
     ballInOver: 0,
@@ -163,29 +201,29 @@ export function createInningsState(params: {
   }
 }
 
-function pickBowler(state: InningsSimState): string {
+function pickBowler(state: InningsSimState): SimPlayer {
   const pool = state.bowlingTeam.bowlers
   // pool is guaranteed non-empty by safeBowlerPool() in createInningsState,
   // but keep this fallback so pickBowler never returns undefined even if
   // called against a state built some other way.
-  if (pool.length === 0) return FALLBACK_BOWLER_NAME
+  if (pool.length === 0) return { name: FALLBACK_BOWLER_NAME, id: null }
 
   const eligible = pool.filter((b) => {
-    if (b === state.lastOverBowlerName) return false
-    const bowled = state.bowlerLegalBalls[b] ?? 0
+    if (b.name === state.lastOverBowler?.name) return false
+    const bowled = state.bowlerLegalBalls[b.name] ?? 0
     return bowled < state.maxOversPerBowler * 6
   })
-  const candidates = eligible.length > 0 ? eligible : pool.filter((b) => b !== state.lastOverBowlerName)
+  const candidates = eligible.length > 0 ? eligible : pool.filter((b) => b.name !== state.lastOverBowler?.name)
   const finalCandidates = candidates.length > 0 ? candidates : pool
   return finalCandidates[Math.floor(Math.random() * finalCandidates.length)] ?? pool[0]
 }
 
-function pickNextBatter(state: InningsSimState): string | null {
+function pickNextBatter(state: InningsSimState): SimPlayer | null {
   const order = state.battingTeam.battingOrder
   while (state.nextBatterIdx < order.length) {
-    const name = order[state.nextBatterIdx]
+    const player = order[state.nextBatterIdx]
     state.nextBatterIdx += 1
-    if (!state.outBatters.has(name)) return name
+    if (!state.outBatters.has(player.name)) return player
   }
   return null
 }
@@ -228,9 +266,9 @@ export function simulateNextDelivery(prev: InningsSimState): {
   const state: InningsSimState = { ...prev, outBatters: new Set(prev.outBatters), bowlerLegalBalls: { ...prev.bowlerLegalBalls } }
 
   if (state.ballInOver === 0) {
-    state.currentBowlerName = pickBowler(state)
+    state.currentBowler = pickBowler(state)
   }
-  const bowler = state.currentBowlerName!
+  const bowler = state.currentBowler!
 
   const weights = outcomeWeights(state)
   const outcome = weightedPick([
@@ -247,8 +285,18 @@ export function simulateNextDelivery(prev: InningsSimState): {
 
   state.sequence += 1
   const seq = state.sequence
-  const strikerName = state.strikerName
-  const nonStrikerName = state.nonStrikerName
+  const striker = state.striker
+  const nonStriker = state.nonStriker
+
+  // Shared FK fields — identical on every branch below, so built once
+  // here instead of repeated on each row literal.
+  const fkFields = {
+    batting_team_id: state.battingTeam.teamId,
+    bowling_team_id: state.bowlingTeam.teamId,
+    striker_player_id: striker.id,
+    non_striker_player_id: nonStriker.id,
+    bowler_player_id: bowler.id,
+  }
 
   let row: SimBallRow
   let commentary: string
@@ -267,18 +315,19 @@ export function simulateNextDelivery(prev: InningsSimState): {
         sequence: seq,
         over_number: overForRow,
         ball_number: ballNumberForRow,
-        striker_name: strikerName,
-        non_striker_name: nonStrikerName,
-        bowler_name: bowler,
+        striker_name: striker.name,
+        non_striker_name: nonStriker.name,
+        bowler_name: bowler.name,
         runs: 1,
         extra_type: "wide",
         is_wicket: false,
         dismissal_type: null,
         batsman_out: null,
         fielder: null,
+        ...fkFields,
       }
       state.runs += 1
-      commentary = `Wide, ${bowler} to ${strikerName}.`
+      commentary = `Wide, ${bowler.name} to ${striker.name}.`
       break
     }
     case "no_ball": {
@@ -288,18 +337,19 @@ export function simulateNextDelivery(prev: InningsSimState): {
         sequence: seq,
         over_number: overForRow,
         ball_number: ballNumberForRow,
-        striker_name: strikerName,
-        non_striker_name: nonStrikerName,
-        bowler_name: bowler,
+        striker_name: striker.name,
+        non_striker_name: nonStriker.name,
+        bowler_name: bowler.name,
         runs: 1,
         extra_type: "no_ball",
         is_wicket: false,
         dismissal_type: null,
         batsman_out: null,
         fielder: null,
+        ...fkFields,
       }
       state.runs += 1
-      commentary = `No ball, ${bowler} to ${strikerName}.`
+      commentary = `No ball, ${bowler.name} to ${striker.name}.`
       break
     }
     case "wicket": {
@@ -313,20 +363,24 @@ export function simulateNextDelivery(prev: InningsSimState): {
         sequence: seq,
         over_number: overForRow,
         ball_number: ballNumberForRow,
-        striker_name: strikerName,
-        non_striker_name: nonStrikerName,
-        bowler_name: bowler,
+        striker_name: striker.name,
+        non_striker_name: nonStriker.name,
+        bowler_name: bowler.name,
         runs: 0,
         extra_type: null,
         is_wicket: true,
         dismissal_type: dismissal,
-        batsman_out: strikerName,
-        fielder,
+        batsman_out: striker.name,
+        // `fielder` on `balls` is a text column only — there's no
+        // fielder_player_id FK on the schema to populate, so this stays
+        // a name (or null), same as before.
+        fielder: fielder?.name ?? null,
+        ...fkFields,
       }
-      state.outBatters.add(strikerName)
+      state.outBatters.add(striker.name)
       state.wkts += 1
       wicketFell = true
-      commentary = `WICKET! ${strikerName} ${dismissal.replace("_", " ")}${fielder ? ` (${fielder})` : ""}, off ${bowler}.`
+      commentary = `WICKET! ${striker.name} ${dismissal.replace("_", " ")}${fielder ? ` (${fielder.name})` : ""}, off ${bowler.name}.`
       break
     }
     default: {
@@ -342,22 +396,23 @@ export function simulateNextDelivery(prev: InningsSimState): {
         sequence: seq,
         over_number: overForRow,
         ball_number: ballNumberForRow,
-        striker_name: strikerName,
-        non_striker_name: nonStrikerName,
-        bowler_name: bowler,
+        striker_name: striker.name,
+        non_striker_name: nonStriker.name,
+        bowler_name: bowler.name,
         runs,
         extra_type: extraType,
         is_wicket: false,
         dismissal_type: null,
         batsman_out: null,
         fielder: null,
+        ...fkFields,
       }
       state.runs += runs
       rotateStrike = runs % 2 === 1
       commentary =
         runs === 0
-          ? `${bowler} to ${strikerName}, no run.`
-          : `${bowler} to ${strikerName}, ${runs}${isBoundary ? (runs === 4 ? " runs, FOUR!" : " runs, SIX!") : runs === 1 ? " run" : " runs"}.`
+          ? `${bowler.name} to ${striker.name}, no run.`
+          : `${bowler.name} to ${striker.name}, ${runs}${isBoundary ? (runs === 4 ? " runs, FOUR!" : " runs, SIX!") : runs === 1 ? " run" : " runs"}.`
       break
     }
   }
@@ -365,34 +420,34 @@ export function simulateNextDelivery(prev: InningsSimState): {
   if (isLegal) {
     state.legalBalls += 1
     state.ballInOver += 1
-    state.bowlerLegalBalls[bowler] = (state.bowlerLegalBalls[bowler] ?? 0) + 1
+    state.bowlerLegalBalls[bowler.name] = (state.bowlerLegalBalls[bowler.name] ?? 0) + 1
   }
 
   if (wicketFell) {
     const next = pickNextBatter(state)
     // If there's genuinely no next batter (last-man-standing edge case),
-    // strikerName is left pointing at the just-dismissed batter — but
-    // the allOut check below fires in this same call before another
-    // delivery can ever be simulated against that stale name, so no
-    // further ball gets attributed to a batter who's already out.
+    // striker is left pointing at the just-dismissed batter — but the
+    // allOut check below fires in this same call before another delivery
+    // can ever be simulated against that stale player, so no further
+    // ball gets attributed to a batter who's already out.
     if (next) {
-      state.strikerName = next
+      state.striker = next
     }
   } else if (rotateStrike) {
-    const tmp = state.strikerName
-    state.strikerName = state.nonStrikerName
-    state.nonStrikerName = tmp
+    const tmp = state.striker
+    state.striker = state.nonStriker
+    state.nonStriker = tmp
   }
 
   const overComplete = state.ballInOver >= 6
   if (overComplete) {
-    state.lastOverBowlerName = bowler
+    state.lastOverBowler = bowler
     state.ballInOver = 0
     state.over += 1
     // swap ends between overs
-    const tmp = state.strikerName
-    state.strikerName = state.nonStrikerName
-    state.nonStrikerName = tmp
+    const tmp = state.striker
+    state.striker = state.nonStriker
+    state.nonStriker = tmp
   }
 
   const battersRemaining = state.outBatters.size < state.battingTeam.battingOrder.length - 1

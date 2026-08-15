@@ -16,6 +16,7 @@ import {
   simulateNextDelivery,
   type InningsSimState,
   type SimBallRow,
+  type SimPlayer,
   type SimPlayerPool,
 } from "@/lib/matches/simulator-engine"
 
@@ -46,19 +47,118 @@ interface LogLine {
 // that was right there in match_setup. resolveSquad() below normalizes
 // either shape into the same { players, xi } view before poolFromSetup
 // builds the actual batting/bowling pools from it.
+//
+// CHANGED — resolveSquad/poolFromSetup now also attach a `public.players.id`
+// to every resolved player (via an AuctionIdentity lookup, see below),
+// and a `public.teams.id` to each pool. Previously this file only ever
+// dealt in names, so `balls.striker_player_id` / `batting_team_id` and
+// friends were always written as NULL, even for a match using a real
+// squad — there was simply no id anywhere in the pipeline to put there.
 // ─────────────────────────────────────────────────────────────
 
 interface ResolvedSquadPlayer {
   name: string
   role: string
   xi: boolean
+  /** `public.players.id`, when resolvable via AuctionIdentity. Null for placeholder/unmatched players. */
+  id: string | null
+}
+
+// ── Auction identity resolution ──────────────────────────────────
+// `matches.auction_id` (nullable) is the only link back to `public.teams`
+// / `public.players` a standalone match has — bracket-linked matches also
+// get team ids from bracket_matches.team_a_id/team_b_id, but that path
+// (resolveBracketTeamSides) only ever resolves TEAM ids, never individual
+// PLAYER ids, and only when a bracket row exists at all. AuctionIdentity
+// is the one lookup used for every match, bracket-linked or not, so both
+// team ids and player ids come from the same source and never disagree.
+//
+// Player name matching happens in two passes:
+//  1. Scoped: `${team_id}:${normalizedName}` — preferred, since it's
+//     possible (if unusual) for two different players in the same
+//     auction pool to share a display name.
+//  2. Global fallback: normalizedName only, across every player row in
+//     the auction — used when a name can't be matched to a specific
+//     team (e.g. the squad player's team side didn't resolve, or the
+//     player's `sold_to_team_id` wasn't set for some reason).
+// Either pass can still legitimately come back empty (a squad typed in
+// free-hand, names that don't match any players row) — that's fine, the
+// simulation proceeds with `id: null` for that player exactly as it did
+// before this change existed.
+interface AuctionIdentity {
+  team1Id: string | null
+  team2Id: string | null
+  lookupPlayerId: (side: "team1" | "team2", name: string) => string | null
+}
+
+const EMPTY_IDENTITY: AuctionIdentity = {
+  team1Id: null,
+  team2Id: null,
+  lookupPlayerId: () => null,
+}
+
+async function loadAuctionIdentity(auctionId: string | null, setup: MatchSetup): Promise<AuctionIdentity> {
+  if (!auctionId) return EMPTY_IDENTITY
+
+  const { data: teamRows, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, code, name")
+    .eq("auction_id", auctionId)
+
+  if (teamsErr) {
+    console.error("[loadAuctionIdentity] failed loading teams:", teamsErr.message)
+    return EMPTY_IDENTITY
+  }
+
+  const t1Code = normField(setup.team1?.short)
+  const t1Name = normField(setup.team1?.name)
+  const t2Code = normField(setup.team2?.short)
+  const t2Name = normField(setup.team2?.name)
+
+  const team1Row = (teamRows ?? []).find((t) => (t1Code && normField(t.code) === t1Code) || (t1Name && normField(t.name) === t1Name))
+  const team2Row = (teamRows ?? []).find((t) => (t2Code && normField(t.code) === t2Code) || (t2Name && normField(t.name) === t2Name))
+  const team1Id = team1Row?.id ?? null
+  const team2Id = team2Row?.id ?? null
+
+  const { data: playerRows, error: playersErr } = await supabase
+    .from("players")
+    .select("id, name, sold_to_team_id")
+    .eq("auction_id", auctionId)
+
+  if (playersErr) {
+    console.error("[loadAuctionIdentity] failed loading players:", playersErr.message)
+    return { team1Id, team2Id, lookupPlayerId: () => null }
+  }
+
+  const scoped = new Map<string, string>() // `${teamId}:${normName}` -> playerId
+  const global = new Map<string, string>() // normName -> playerId (first match wins)
+
+  for (const p of playerRows ?? []) {
+    const key = normField(p.name)
+    if (!key) continue
+    if (!global.has(key)) global.set(key, p.id)
+    if (p.sold_to_team_id) scoped.set(`${p.sold_to_team_id}:${key}`, p.id)
+  }
+
+  const lookupPlayerId = (side: "team1" | "team2", name: string): string | null => {
+    const teamId = side === "team1" ? team1Id : team2Id
+    const key = normField(name)
+    if (!key) return null
+    if (teamId) {
+      const hit = scoped.get(`${teamId}:${key}`)
+      if (hit) return hit
+    }
+    return global.get(key) ?? null
+  }
+
+  return { team1Id, team2Id, lookupPlayerId }
 }
 
 function isGroupedSquads(rawSquads: any[]): boolean {
   return rawSquads.some((s) => s && typeof s === "object" && "teamId" in s)
 }
 
-function resolveSquad(setup: MatchSetup, side: "team1" | "team2"): ResolvedSquadPlayer[] | null {
+function resolveSquad(setup: MatchSetup, side: "team1" | "team2", identity: AuctionIdentity): ResolvedSquadPlayer[] | null {
   const rawSquads: any[] = Array.isArray((setup as any).squads) ? (setup as any).squads : []
   if (rawSquads.length === 0) return null
 
@@ -70,7 +170,15 @@ function resolveSquad(setup: MatchSetup, side: "team1" | "team2"): ResolvedSquad
       return tag === side || tag === teamMeta.short?.toLowerCase() || tag === teamMeta.name?.toLowerCase()
     })
     if (!squad || !Array.isArray(squad.players)) return null
-    return squad.players.map((p: any) => ({ name: p?.name ?? "", role: p?.role ?? "Batter", xi: !!p?.xi }))
+    return squad.players.map((p: any) => {
+      const name = p?.name ?? ""
+      return {
+        name,
+        role: p?.role ?? "Batter",
+        xi: !!p?.xi,
+        id: identity.lookupPlayerId(side, name),
+      }
+    })
   }
 
   // Flat shape — bucket by short code. Anything that doesn't clearly
@@ -89,28 +197,34 @@ function resolveSquad(setup: MatchSetup, side: "team1" | "team2"): ResolvedSquad
   // treat as "no squad data" rather than an empty XI.
   if (matched.length === 0) return null
 
-  return matched.map((p: any, idx: number) => ({
-    name: p?.name ?? "",
-    role: p?.role ?? "Batter",
-    xi: idx < 11, // flat shape carries no xi flag — default first 11 in order
-  }))
+  return matched.map((p: any, idx: number) => {
+    const name = p?.name ?? ""
+    return {
+      name,
+      role: p?.role ?? "Batter",
+      xi: idx < 11, // flat shape carries no xi flag — default first 11 in order
+      id: identity.lookupPlayerId(side, name),
+    }
+  })
 }
 
-function poolFromSetup(setup: MatchSetup, side: "team1" | "team2"): SimPlayerPool | null {
-  const players = resolveSquad(setup, side)
+function poolFromSetup(setup: MatchSetup, side: "team1" | "team2", identity: AuctionIdentity): SimPlayerPool | null {
+  const players = resolveSquad(setup, side, identity)
   if (!players) return null
   const teamMeta = side === "team1" ? setup.team1 : setup.team2
+  const teamId = side === "team1" ? identity.team1Id : identity.team2Id
 
-  const xi = players.filter((p) => p.xi && p.name.trim()).map((p) => p.name)
-  if (xi.length < 2) return null
-  const bowlers = players
+  const xiPlayers: SimPlayer[] = players
     .filter((p) => p.xi && p.name.trim())
-    .map((p) => p.name)
+    .map((p) => ({ name: p.name, id: p.id }))
+  if (xiPlayers.length < 2) return null
+  const bowlerPlayers: SimPlayer[] = xiPlayers // same source list — matches prior behavior (bowlers drawn from XI)
   return {
     teamName: teamMeta.name,
     teamShort: teamMeta.short,
-    battingOrder: xi,
-    bowlers: bowlers.length >= 3 ? bowlers.slice(0, 6) : xi.slice(0, 6),
+    teamId,
+    battingOrder: xiPlayers,
+    bowlers: bowlerPlayers.length >= 3 ? bowlerPlayers.slice(0, 6) : xiPlayers.slice(0, 6),
   }
 }
 
@@ -155,7 +269,9 @@ const statusMeta: Record<RunState, { label: string; accent: string }> = {
  *  compare equal. Used both by resolveBracketTeamSides (comparing a
  *  match_setup snapshot against live bracket teams) and by the
  *  bracket-team resync step in handleStart (deciding whether that
- *  snapshot has actually drifted and needs rewriting). */
+ *  snapshot has actually drifted and needs rewriting), and by
+ *  loadAuctionIdentity (matching setup.team1/team2 against auction
+ *  `teams` rows). */
 function normField(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase()
 }
@@ -476,7 +592,7 @@ export default function SimulateMatchPage() {
     try {
       const { data: matchRow, error: matchErr } = await supabase
         .from("matches")
-        .select("id, match_setup")
+        .select("id, match_setup, auction_id")
         .eq("id", matchId)
         .maybeSingle()
 
@@ -628,11 +744,26 @@ export default function SimulateMatchPage() {
         )
       }
 
+      // NEW — resolve real player/team ids for this match's auction
+      // (once, up front) so poolFromSetup can attach them below instead
+      // of the pools being name-only. Falls back to EMPTY_IDENTITY (all
+      // nulls) for an auction-less match or on any lookup failure —
+      // the simulation still runs identically to before, just without
+      // FK ids on the balls it writes.
+      const identity = await loadAuctionIdentity(matchRow.auction_id ?? null, setup)
+      if (!matchRow.auction_id) {
+        pushLog("This match has no linked auction — simulated balls will be written without player/team ids.")
+      } else if (!identity.team1Id || !identity.team2Id) {
+        pushLog(
+          `Warning: couldn't resolve ${!identity.team1Id && !identity.team2Id ? "either team" : !identity.team1Id ? setup.team1.name : setup.team2.name} against this auction's teams — falling back to no team id for that side.`
+        )
+      }
+
       const oversLimit = setup.overs ?? 20
-      const realTeamAPool = poolFromSetup(setup, "team1")
-      const realTeamBPool = poolFromSetup(setup, "team2")
-      const teamAPool = realTeamAPool ?? generatePlaceholderPool(setup.team1.name, setup.team1.short)
-      const teamBPool = realTeamBPool ?? generatePlaceholderPool(setup.team2.name, setup.team2.short)
+      const realTeamAPool = poolFromSetup(setup, "team1", identity)
+      const realTeamBPool = poolFromSetup(setup, "team2", identity)
+      const teamAPool = realTeamAPool ?? generatePlaceholderPool(setup.team1.name, setup.team1.short, identity.team1Id)
+      const teamBPool = realTeamBPool ?? generatePlaceholderPool(setup.team2.name, setup.team2.short, identity.team2Id)
       setUsedRealSquads({ team1: !!realTeamAPool, team2: !!realTeamBPool })
 
       pushLog(`Starting simulation: ${teamAPool.teamName} vs ${teamBPool.teamName}, ${oversLimit} overs a side.`, true)
