@@ -377,7 +377,7 @@ function PlayerCard({ player: p, index }: { player: PublicPlayer; index: number 
 
   return (
     <Link
-      href={`/all-players/${p.id}`}
+      href={`/players/${p.id}`}
       className={`group rounded-lg overflow-hidden glow-effect border border-gold/20 bg-black/70 fade-in-up stagger-${
         (index % 6) + 1
       } hover:border-gold/80 transition-all duration-300 flex flex-col`}
