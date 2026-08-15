@@ -986,10 +986,10 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative h-12 w-12 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
+                  <div className="relative h-18 w-18 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
                     {p.img ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <Image src={p.img} alt="" className="h-full w-full object-cover" width={48} height={48} />
+                      <Image src={p.img} alt="" className="h-full w-full object-cover" width={72} height={72} />
                     ) : (
                       <UserPlus className="h-5 w-5 text-white/40" />
                     )}

@@ -1,6 +1,10 @@
+import { Suspense } from "react"
 import PublicMatchesClient from "@/components/landing/PublicMatchesClient"
-console.log(PublicMatchesClient) // add temporarily
 
 export default function MatchesPage() {
-  return <PublicMatchesClient />
+  return (
+    <Suspense fallback={null}>
+      <PublicMatchesClient />
+    </Suspense>
+  )
 }
