@@ -432,8 +432,6 @@ export type MatchOverviewResult = {
   completedHasMore: boolean
 }
 
-export getPublicMatches (params: MatchOverviewParams): Promise<MatchOverviewResult>
-
 /**
  * Fetch for the "All" status tab. Live and Upcoming are bounded — there's
  * only ever a handful in play or on the calendar — so they're fetched in
@@ -630,6 +628,15 @@ export async function getPublicMatchesPriorityFill(
   }
 
   return { matches: collected, breakdown }
+}
+
+/** Flat, one-shot match list for simple directory-style listings
+ *  (e.g. PublicDirectoryClient) that just want "the matches", not the
+ *  live/upcoming/completed breakdown. Backed by the same priority-fill
+ *  fetch used elsewhere, capped at 50 by default. */
+export async function getPublicMatches(): Promise<PublicMatch[]> {
+  const { matches } = await getPublicMatchesPriorityFill({})
+  return matches
 }
 
 /** Tournament dropdown options — fetched directly from `tournaments`
