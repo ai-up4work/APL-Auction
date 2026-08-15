@@ -432,6 +432,8 @@ export type MatchOverviewResult = {
   completedHasMore: boolean
 }
 
+export getPublicMatches (params: MatchOverviewParams): Promise<MatchOverviewResult>
+
 /**
  * Fetch for the "All" status tab. Live and Upcoming are bounded — there's
  * only ever a handful in play or on the calendar — so they're fetched in
