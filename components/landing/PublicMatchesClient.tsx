@@ -7,6 +7,13 @@ import Link from "next/link"
 import { CalendarDays, MapPin, Radio, Search, Trophy, Clock3, Lock, Thermometer, Tv, Handshake, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SiteHeader } from "@/components/landing/site-header"
 import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
@@ -171,6 +178,7 @@ export default function PublicMatchesClient() {
     getFriendlyMatchCount().then(setFriendlyTotal)
   }, [])
   const hasFriendlies = friendlyTotal > 0
+  const hasScopeControl = tournamentOptions.length > 0 || hasFriendlies
 
   // Status-pill counts — refetched whenever tournament/type/search change,
   // independent of which status tab is active. Also refreshed by the
@@ -367,6 +375,18 @@ export default function PublicMatchesClient() {
   const hasAnyResults = filter === "all" ? grouped.live.length + grouped.upcoming.length + grouped.completed.length > 0 : singleList.length > 0
   const totalShown = filter === "all" ? grouped.live.length + grouped.upcoming.length + grouped.completed.length : singleList.length
 
+  // Label shown on the Select trigger. react-select derives this from
+  // SelectValue's children matching the current value automatically,
+  // but since our options list is built dynamically (tournaments +
+  // an optional friendly entry) we compute it explicitly so the
+  // trigger never flashes an empty state while options are loading.
+  const scopeLabel =
+    tournament === "all"
+      ? "All Tournaments"
+      : tournament === FRIENDLY_VALUE
+        ? `Friendly Matches (${friendlyTotal})`
+        : tournamentOptions.find((t) => t.id === tournament)?.name ?? "All Tournaments"
+
   return (
     <main className="overflow-hidden">
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
@@ -409,61 +429,85 @@ export default function PublicMatchesClient() {
             </Button>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-2 mt-4 fade-in-up stagger-3">
-            {(tournamentOptions.length > 0 || hasFriendlies) && (
-              <select
-                value={tournament}
-                onChange={(e) => setTournament(e.target.value)}
-                className="bg-black/50 border border-gold/30 text-white text-xs font-cinzel uppercase tracking-widest rounded-full px-3 py-1.5 focus:outline-none focus:border-gold/60 appearance-none cursor-pointer"
-              >
-                <option value="all">All Tournaments</option>
-                {tournamentOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-                {hasFriendlies && <option value={FRIENDLY_VALUE}>Friendly Matches</option>}
-              </select>
-            )}
+          {/* FILTER BAR — grouped into a single bordered pill so "scope"
+              (tournament / friendly) and "status" (all/upcoming/live/
+              completed) read as one coherent control instead of loose
+              floating buttons. Each cluster gets a small uppercase label
+              on larger screens; on mobile the labels hide and the pills
+              wrap naturally. */}
+          <div className="flex justify-center mt-4 fade-in-up stagger-3">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-2xl sm:rounded-full border border-gold/15 bg-black/40 px-4 py-2.5">
+              {hasScopeControl && (
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:inline text-[10px] font-cinzel uppercase tracking-widest text-gray-500">
+                    Scope
+                  </span>
+                  <Select value={tournament} onValueChange={setTournament}>
+                    <SelectTrigger className="h-8 w-auto min-w-[9.5rem] gap-1.5 rounded-full border-gold/30 bg-black/50 px-3 text-xs font-cinzel uppercase tracking-widest text-white focus:ring-1 focus:ring-gold/40 focus:ring-offset-0">
+                      <SelectValue placeholder="All Tournaments">{scopeLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="border-gold/30 bg-black text-white">
+                      <SelectItem value="all" className="text-xs font-cinzel uppercase tracking-widest focus:bg-gold/10 focus:text-white">
+                        All Tournaments
+                      </SelectItem>
+                      {tournamentOptions.map((t) => (
+                        <SelectItem
+                          key={t.id}
+                          value={t.id}
+                          className="text-xs font-cinzel uppercase tracking-widest focus:bg-gold/10 focus:text-white"
+                        >
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                      {hasFriendlies && (
+                        <SelectItem
+                          value={FRIENDLY_VALUE}
+                          className="text-xs font-cinzel uppercase tracking-widest text-blue-300 focus:bg-blue-400/10 focus:text-blue-200"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Handshake className="h-3 w-3" />
+                            Friendly Matches ({friendlyTotal})
+                          </span>
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-            {hasFriendlies && (
-              <button
-                onClick={() => setTournament(tournament === FRIENDLY_VALUE ? "all" : FRIENDLY_VALUE)}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-cinzel uppercase tracking-widest border transition-colors ${
-                  tournament === FRIENDLY_VALUE
-                    ? "bg-blue-400 text-black border-blue-400 font-bold"
-                    : "border-blue-400/30 text-blue-300 hover:border-blue-400/60 hover:text-blue-200"
-                }`}
-              >
-                <Handshake className="h-3 w-3" />
-                Friendly
-                <span className={tournament === FRIENDLY_VALUE ? "opacity-70" : "opacity-60"}>({friendlyTotal})</span>
-              </button>
-            )}
+              {hasScopeControl && <span className="hidden sm:block h-4 w-px bg-gold/20" />}
 
-            {(tournamentOptions.length > 0 || hasFriendlies) && <span className="hidden sm:block h-4 w-px bg-gold/20 mx-1" />}
-
-            {filters.map((item) => {
-              const meta = filterMeta[item]
-              const active = filter === item
-              return (
-                <button
-                  key={item}
-                  onClick={() => setFilter(item)}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-cinzel uppercase tracking-widest border transition-colors ${
-                    active
-                      ? "bg-gold text-black border-gold font-bold"
-                      : "border-gold/20 text-gray-400 hover:border-gold/50 hover:text-white"
-                  }`}
-                >
-                  {meta.dot && (
-                    <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${item === "live" ? "animate-pulse" : ""}`} />
-                  )}
-                  {meta.label}
-                  <span className={active ? "opacity-70" : "opacity-50"}>({counts[item]})</span>
-                </button>
-              )
-            })}
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline text-[10px] font-cinzel uppercase tracking-widest text-gray-500">
+                  Status
+                </span>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {filters.map((item) => {
+                    const meta = filterMeta[item]
+                    const active = filter === item
+                    return (
+                      <button
+                        key={item}
+                        onClick={() => setFilter(item)}
+                        className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-cinzel uppercase tracking-widest transition-colors ${
+                          active
+                            ? "border-gold bg-gold font-bold text-black"
+                            : "border-gold/20 text-gray-400 hover:border-gold/50 hover:text-white"
+                        }`}
+                      >
+                        {meta.dot && (
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${item === "live" ? "animate-pulse" : ""}`}
+                          />
+                        )}
+                        {meta.label}
+                        <span className={active ? "opacity-70" : "opacity-50"}>({counts[item]})</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
