@@ -4,21 +4,40 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
-import { CalendarDays, MapPin, Radio, Search, Trophy, Clock3, Lock, Thermometer, Tv, Handshake } from "lucide-react"
+import { CalendarDays, MapPin, Radio, Search, Trophy, Clock3, Lock, Thermometer, Tv, Handshake, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { SiteHeader } from "@/components/landing/site-header"
 import { TypeText } from "@/components/landing/type-text"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { pageStyles } from "@/data/site-data"
-import { getPublicMatches, formatBracketStage, type PublicMatch } from "@/lib/public-data"
+import { supabase } from "@/lib/supabase"
+import {
+  getPublicMatchesPage,
+  getPublicMatchesOverview,
+  getPublicMatchesCounts,
+  getTournamentOptions,
+  getFriendlyMatchCount,
+  formatBracketStage,
+  type PublicMatch,
+  type MatchStatusFilter,
+  type MatchTypeFilter,
+  type MatchCounts,
+} from "@/lib/public-data"
 
 const filters = ["all", "upcoming", "live", "completed"] as const
 type Filter = (typeof filters)[number]
 
-// Sentinel used in the tournament <select> + URL to mean
-// "standalone friendly matches (no tournamentId)".
 const FRIENDLY_VALUE = "__friendly__"
+const PAGE_SIZE = 12
+const SEARCH_DEBOUNCE_MS = 350
+// Kept only as a fallback safety net for if the realtime channel below
+// ever drops (network hiccup, tab backgrounded long enough to be
+// throttled, etc.) — the primary sync mechanism is now the Supabase
+// Realtime subscription in the "live sync" effect further down, not
+// this timer. Widened from the old 30s poll-only value since realtime
+// carries the normal case now.
+const LIVE_SYNC_FALLBACK_MS = 45_000
 
 const filterMeta: Record<Filter, { label: string; dot?: string }> = {
   all: { label: "All" },
@@ -27,21 +46,33 @@ const filterMeta: Record<Filter, { label: string; dot?: string }> = {
   completed: { label: "Completed", dot: "bg-emerald-400" },
 }
 
-// Section order + labels for the grouped "all" view — live first so
-// nothing in progress gets missed, then what's coming up, then results.
 const sectionMeta: { status: "live" | "upcoming" | "completed"; label: string; dot: string }[] = [
   { status: "live", label: "Live Now", dot: "bg-gold" },
   { status: "upcoming", label: "Upcoming", dot: "bg-blue-400" },
   { status: "completed", label: "Completed", dot: "bg-emerald-400" },
 ]
 
-/** Deterministic fallback color for teams that don't have one set,
- *  kept consistent with FixtureCard's hashing elsewhere in the app. */
+/** HSL -> hex, so the fallback color is compatible with the "+80 alpha
+ *  suffix" trick used in the card gradients (that trick only works on
+ *  hex strings — appending "80" to an hsl(...) string is invalid CSS
+ *  and silently drops the whole gradient, which is why friendly-match
+ *  cards previously lost their color: they always hit this fallback,
+ *  while bracket matches almost always have a real hex color from teams.color). */
+function hslToHex(h: number, s: number, l: number): string {
+  const sNorm = s / 100
+  const lNorm = l / 100
+  const k = (n: number) => (n + h / 30) % 12
+  const a = sNorm * Math.min(lNorm, 1 - lNorm)
+  const f = (n: number) => lNorm - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))
+  const toHex = (x: number) => Math.round(255 * x).toString(16).padStart(2, "0")
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`
+}
+
 function hashTeamColor(name: string) {
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
   const hue = Math.abs(hash) % 360
-  return `hsl(${hue}, 62%, 42%)`
+  return hslToHex(hue, 62, 42)
 }
 
 function isValidFilter(value: string | null): value is Filter {
@@ -52,19 +83,6 @@ function isFriendly(match: PublicMatch) {
   return !match.tournamentId
 }
 
-/** Splits a list into tournament vs friendly matches, for sub-grouping
- *  inside a status section so the two types don't get interleaved. */
-function splitByType(list: PublicMatch[]) {
-  const tournamentList = list.filter((m) => !isFriendly(m))
-  const friendlyList = list.filter(isFriendly)
-  return { tournamentList, friendlyList }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Schedule formatting — full readable date/time plus a relative
-// countdown ("in 2h", "in 3d") for upcoming matches, or "Xh ago"
-// for very recently completed/started ones.
-// ─────────────────────────────────────────────────────────────
 type Schedule = { full: string; relative: string | null }
 
 function formatSchedule(iso: string | null): Schedule | null {
@@ -94,11 +112,24 @@ function formatSchedule(iso: string | null): Schedule | null {
     const pastMin = Math.abs(diffMin)
     if (pastMin < 60) relative = `${pastMin}m ago`
     else if (pastMin < 60 * 24) relative = `${Math.round(pastMin / 60)}h ago`
-    // Older than a day ago — skip the relative tag, the full date is enough.
   }
 
   return { full, relative }
 }
+
+/** Debounces a value, and exposes a flush() to apply the pending value
+ *  immediately — used so the Search button (and Enter key) can jump the
+ *  debounce instead of waiting out the delay. */
+function useDebouncedValue<T>(value: T, delay: number): [T, () => void] {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return [debounced, () => setDebounced(value)]
+}
+
+const EMPTY_COUNTS: MatchCounts = { all: 0, upcoming: 0, live: 0, completed: 0 }
 
 export default function PublicMatchesClient() {
   useScrollTop()
@@ -106,55 +137,218 @@ export default function PublicMatchesClient() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  const [matches, setMatches] = useState<PublicMatch[]>([])
-  const [dataLoading, setDataLoading] = useState(true)
-
-  // Seed all filter state from the URL on first render so links like
-  // /matches?status=live&tournament=xyz&q=india land on the right view.
   const [filter, setFilter] = useState<Filter>(() => {
     const s = searchParams.get("status")
     return isValidFilter(s) ? s : "all"
   })
   const [tournament, setTournament] = useState<string>(() => searchParams.get("tournament") ?? "all")
-  const [query, setQuery] = useState(() => searchParams.get("q") ?? "")
+  const [queryInput, setQueryInput] = useState(() => searchParams.get("q") ?? "")
+  const [debouncedQuery, flushSearch] = useDebouncedValue(queryInput, SEARCH_DEBOUNCE_MS)
   const [isNavOpen, setIsNavOpen] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
+  // Derived server params. A specific tournamentId already scopes both
+  // bracket AND friendly matches tagged to it — "friendly" type is only
+  // for the explicit "standalone, no tournament at all" sentinel.
+  const type: MatchTypeFilter = tournament === FRIENDLY_VALUE ? "friendly" : "all"
+  const tournamentId = tournament !== "all" && tournament !== FRIENDLY_VALUE ? tournament : null
 
-    const load = () => {
-      getPublicMatches().then((rows) => {
-        if (cancelled) return
-        setMatches(rows)
-        setDataLoading(false)
-      })
-    }
-
-    load()
-
-    // Light polling so live scores, weather, and channels stay fresh
-    // without the person needing to refresh the page.
-    const interval = setInterval(load, 30_000)
-
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [])
-
-  // Keep the URL in sync with filter/tournament/query so the current
-  // view is shareable and bookmarkable. Uses replace (not push) so
-  // typing in the search box doesn't spam browser history.
+  // Keep the URL in sync so the current view is shareable/bookmarkable.
   useEffect(() => {
     const params = new URLSearchParams()
     if (filter !== "all") params.set("status", filter)
     if (tournament !== "all") params.set("tournament", tournament)
-    if (query) params.set("q", query)
+    if (queryInput) params.set("q", queryInput)
     const qs = params.toString()
-    const next = qs ? `${pathname}?${qs}` : pathname
-    router.replace(next, { scroll: false })
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, tournament, query, pathname])
+  }, [filter, tournament, queryInput, pathname])
+
+  // Static-ish reference data — fetched once, independent of filters.
+  const [tournamentOptions, setTournamentOptions] = useState<{ id: string; name: string }[]>([])
+  const [friendlyTotal, setFriendlyTotal] = useState(0)
+  useEffect(() => {
+    getTournamentOptions().then(setTournamentOptions)
+    getFriendlyMatchCount().then(setFriendlyTotal)
+  }, [])
+  const hasFriendlies = friendlyTotal > 0
+
+  // Status-pill counts — refetched whenever tournament/type/search change,
+  // independent of which status tab is active. Also refreshed by the
+  // realtime sync effect below whenever a match's status actually changes.
+  const [counts, setCounts] = useState<MatchCounts>(EMPTY_COUNTS)
+  useEffect(() => {
+    let cancelled = false
+    getPublicMatchesCounts({ tournamentId, type, search: debouncedQuery }).then((c) => {
+      if (!cancelled) setCounts(c)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [tournamentId, type, debouncedQuery])
+
+  // "All" view state: bounded live/upcoming + paginated completed.
+  const [overview, setOverview] = useState<{ live: PublicMatch[]; upcoming: PublicMatch[]; completed: PublicMatch[] }>({
+    live: [],
+    upcoming: [],
+    completed: [],
+  })
+  const [completedPage, setCompletedPage] = useState(0)
+  const [completedHasMore, setCompletedHasMore] = useState(false)
+
+  // Single-status view state (filter !== "all"), fully paginated.
+  const [singleList, setSingleList] = useState<PublicMatch[]>([])
+  const [singlePage, setSinglePage] = useState(0)
+  const [singleHasMore, setSingleHasMore] = useState(false)
+
+  const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+
+  // Main fetch — resets to page 0 whenever the active filter combo changes.
+  useEffect(() => {
+    let cancelled = false
+    setIsLoading(true)
+    setCompletedPage(0)
+    setSinglePage(0)
+
+    if (filter === "all") {
+      getPublicMatchesOverview({ tournamentId, type, search: debouncedQuery, completedPage: 0, pageSize: PAGE_SIZE }).then(
+        (res) => {
+          if (cancelled) return
+          setOverview({ live: res.live, upcoming: res.upcoming, completed: res.completed })
+          setCompletedHasMore(res.completedHasMore)
+          setIsLoading(false)
+        },
+      )
+    } else {
+      getPublicMatchesPage({
+        status: filter as MatchStatusFilter,
+        tournamentId,
+        type,
+        search: debouncedQuery,
+        page: 0,
+        pageSize: PAGE_SIZE,
+      }).then((res) => {
+        if (cancelled) return
+        setSingleList(res.matches)
+        setSingleHasMore(res.hasMore)
+        setIsLoading(false)
+      })
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [filter, tournamentId, type, debouncedQuery])
+
+  // ── Realtime sync ─────────────────────────────────────────────────
+  // CHANGED — previously this only re-polled on a fixed 30s interval,
+  // and only ever refreshed the "live" bucket (a match transitioning
+  // from upcoming -> live wouldn't move sections, or update the pill
+  // counts, until the next tick — see the "still shows upcoming, not
+  // live" report this was written to fix). That's replaced with a
+  // Supabase Realtime subscription: the match simulator writes to
+  // `matches` (match_setup.status/scoreA/scoreB, throttled to over
+  // boundaries and wickets) and to `bracket_matches`
+  // (status/score_a/score_b) as a match progresses, so listening for
+  // UPDATE events on both tables and re-running the same fetches used
+  // elsewhere on this page gets the UI in sync within roughly a second
+  // of the write actually committing, rather than up to 30s later.
+  //
+  // The payload on a postgres_changes event is just the raw changed
+  // row — not the joined/derived PublicMatch shape this page needs
+  // (team names, tournament info, resolved status) — so this doesn't
+  // try to patch state from the event directly. It uses the event only
+  // as a "something changed, go refetch" signal, debounced slightly so
+  // a burst of per-over writes during a live simulation collapses into
+  // one refetch instead of one per event.
+  //
+  // NOTE: for this to actually receive events, Realtime replication
+  // must be enabled for the `matches` and `bracket_matches` tables in
+  // the Supabase dashboard (Database → Replication), and the anon/public
+  // role's RLS SELECT policy on those tables must allow reading the
+  // rows in question — Supabase's realtime server checks that policy
+  // before delivering a change event, independent of whatever the
+  // REST refetch below is separately allowed to see.
+  useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    const refreshLiveAndCounts = async () => {
+      const [liveRes, upcomingRes, countsRes] = await Promise.all([
+        getPublicMatchesPage({ status: "live", tournamentId, type, search: debouncedQuery, page: 0, pageSize: 50 }),
+        getPublicMatchesPage({ status: "upcoming", tournamentId, type, search: debouncedQuery, page: 0, pageSize: 50 }),
+        getPublicMatchesCounts({ tournamentId, type, search: debouncedQuery }),
+      ])
+
+      setCounts(countsRes)
+
+      if (filter === "all") {
+        setOverview((prev) => ({ ...prev, live: liveRes.matches, upcoming: upcomingRes.matches }))
+      } else if (filter === "live") {
+        const liveById = new Map(liveRes.matches.map((m) => [m.id, m]))
+        setSingleList((prev) => prev.filter((m) => liveById.has(m.id)).map((m) => liveById.get(m.id) ?? m))
+      } else if (filter === "upcoming") {
+        const upcomingById = new Set(upcomingRes.matches.map((m) => m.id))
+        setSingleList((prev) => prev.filter((m) => upcomingById.has(m.id)))
+      }
+    }
+
+    const scheduleRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(refreshLiveAndCounts, 800)
+    }
+
+    const channel = supabase
+      .channel(`public-matches-sync-${tournamentId ?? "all"}-${type}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches" }, scheduleRefresh)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "bracket_matches" }, scheduleRefresh)
+      .subscribe()
+
+    // Fallback poll — only matters if the realtime channel above is
+    // silently disconnected (e.g. Supabase project paused, network
+    // issue). Under normal operation the channel keeps things in sync
+    // well before this timer would ever fire.
+    const fallbackInterval = setInterval(refreshLiveAndCounts, LIVE_SYNC_FALLBACK_MS)
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      clearInterval(fallbackInterval)
+      supabase.removeChannel(channel)
+    }
+  }, [filter, tournamentId, type, debouncedQuery])
+
+  const loadMoreCompleted = async () => {
+    setIsLoadingMore(true)
+    const nextPage = completedPage + 1
+    const res = await getPublicMatchesPage({
+      status: "completed",
+      tournamentId,
+      type,
+      search: debouncedQuery,
+      page: nextPage,
+      pageSize: PAGE_SIZE,
+    })
+    setOverview((prev) => ({ ...prev, completed: [...prev.completed, ...res.matches] }))
+    setCompletedPage(nextPage)
+    setCompletedHasMore(res.hasMore)
+    setIsLoadingMore(false)
+  }
+
+  const loadMoreSingle = async () => {
+    setIsLoadingMore(true)
+    const nextPage = singlePage + 1
+    const res = await getPublicMatchesPage({
+      status: filter as MatchStatusFilter,
+      tournamentId,
+      type,
+      search: debouncedQuery,
+      page: nextPage,
+      pageSize: PAGE_SIZE,
+    })
+    setSingleList((prev) => [...prev, ...res.matches])
+    setSinglePage(nextPage)
+    setSingleHasMore(res.hasMore)
+    setIsLoadingMore(false)
+  }
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -165,80 +359,13 @@ export default function PublicMatchesClient() {
     setIsNavOpen(false)
   }
 
-  // Unique tournaments derived from the loaded matches, for the filter dropdown.
-  // Friendly matches (tournamentId === null) don't contribute an entry here,
-  // so they get their own explicit sentinel option below instead.
-  const tournaments = useMemo(() => {
-    const map = new Map<string, string>()
-    matches.forEach((m) => {
-      if (m.tournamentId) map.set(m.tournamentId, m.tournamentName ?? m.tournamentId)
-    })
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [matches])
-
-  const friendlyCount = useMemo(() => matches.filter(isFriendly).length, [matches])
-  const hasFriendlies = friendlyCount > 0
-
-  const q = query.toLowerCase()
-  const filtered = useMemo(
-    () =>
-      matches.filter((match) => {
-        const text = `${match.teamA} ${match.teamB} ${match.venue ?? ""}`.toLowerCase()
-        const matchesTournament =
-          tournament === "all" ||
-          (tournament === FRIENDLY_VALUE ? isFriendly(match) : match.tournamentId === tournament)
-        return (
-          (filter === "all" || match.status === filter) &&
-          matchesTournament &&
-          (!q || text.includes(q))
-        )
-      }),
-    [filter, tournament, matches, q],
+  const grouped = useMemo(
+    () => ({ live: overview.live, upcoming: overview.upcoming, completed: overview.completed }),
+    [overview],
   )
 
-  const counts = useMemo(() => {
-    const base =
-      tournament === "all"
-        ? matches
-        : tournament === FRIENDLY_VALUE
-          ? matches.filter(isFriendly)
-          : matches.filter((m) => m.tournamentId === tournament)
-    return {
-      all: base.length,
-      upcoming: base.filter((m) => m.status === "upcoming").length,
-      live: base.filter((m) => m.status === "live").length,
-      completed: base.filter((m) => m.status === "completed").length,
-    }
-  }, [matches, tournament])
-
-  const byScheduledAtAsc = (a: PublicMatch, b: PublicMatch) => {
-    const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : Infinity
-    const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : Infinity
-    return aTime - bTime
-  }
-
-  // Grouped by status — live first, then upcoming (soonest first), then
-  // completed (most recent result first). Used for the "all" filter view.
-  const grouped = useMemo(() => {
-    const live = filtered.filter((m) => m.status === "live").sort(byScheduledAtAsc)
-    const upcoming = filtered.filter((m) => m.status === "upcoming").sort(byScheduledAtAsc)
-    const completed = filtered
-      .filter((m) => m.status === "completed")
-      .sort((a, b) => byScheduledAtAsc(b, a)) // most recent completed first
-    return { live, upcoming, completed }
-  }, [filtered])
-
-  // When a single status filter is active, just show that one list,
-  // still ordered sensibly (soonest-first for live/upcoming, most
-  // recent-first for completed).
-  const singleStatusList = useMemo(() => {
-    if (filter === "all") return []
-    if (filter === "completed") return [...filtered].sort((a, b) => byScheduledAtAsc(b, a))
-    return [...filtered].sort(byScheduledAtAsc)
-  }, [filter, filtered])
-
-  const isLoading = dataLoading
-  const hasAnyResults = filtered.length > 0
+  const hasAnyResults = filter === "all" ? grouped.live.length + grouped.upcoming.length + grouped.completed.length > 0 : singleList.length > 0
+  const totalShown = filter === "all" ? grouped.live.length + grouped.upcoming.length + grouped.completed.length : singleList.length
 
   return (
     <main className="overflow-hidden">
@@ -256,9 +383,8 @@ export default function PublicMatchesClient() {
       <section className="pt-24 pb-8 relative section-pattern">
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10">
-          {/* Stat strip — echoes the "Tournament Information" panel styling */}
           <div className="max-w-3xl mx-auto grid grid-cols-3 gap-3 mb-6 fade-in-up stagger-1">
-            <StatTile label="Fixtures" value={matches.length} icon={<CalendarDays className="h-4 w-4 text-gold" />} />
+            <StatTile label="Fixtures" value={counts.all} icon={<CalendarDays className="h-4 w-4 text-gold" />} />
             <StatTile
               label="Live Now"
               value={counts.live}
@@ -273,37 +399,33 @@ export default function PublicMatchesClient() {
               type="text"
               placeholder="Search teams or venues..."
               className="bg-black/50 border-gold/30 text-white"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && flushSearch()}
             />
-            <Button className="bg-gold hover:bg-gold/90 text-black font-bold shrink-0">
+            <Button onClick={flushSearch} className="bg-gold hover:bg-gold/90 text-black font-bold shrink-0">
               <Search className="mr-2 h-4 w-4" />
               Search
             </Button>
           </div>
 
-          {/* Filters row — tournament select + status pills + a quick
-              friendly-matches toggle, all combined on one line to keep
-              the hero compact. Wraps on narrow screens. */}
           <div className="flex flex-wrap items-center justify-center gap-2 mt-4 fade-in-up stagger-3">
-            {(tournaments.length > 0 || hasFriendlies) && (
+            {(tournamentOptions.length > 0 || hasFriendlies) && (
               <select
                 value={tournament}
                 onChange={(e) => setTournament(e.target.value)}
                 className="bg-black/50 border border-gold/30 text-white text-xs font-cinzel uppercase tracking-widest rounded-full px-3 py-1.5 focus:outline-none focus:border-gold/60 appearance-none cursor-pointer"
               >
                 <option value="all">All Tournaments</option>
-                {tournaments.map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
+                {tournamentOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
                   </option>
                 ))}
                 {hasFriendlies && <option value={FRIENDLY_VALUE}>Friendly Matches</option>}
               </select>
             )}
 
-            {/* Quick toggle for friendlies — same URL param as the select
-                above, just more discoverable next to the status pills. */}
             {hasFriendlies && (
               <button
                 onClick={() => setTournament(tournament === FRIENDLY_VALUE ? "all" : FRIENDLY_VALUE)}
@@ -315,13 +437,11 @@ export default function PublicMatchesClient() {
               >
                 <Handshake className="h-3 w-3" />
                 Friendly
-                <span className={tournament === FRIENDLY_VALUE ? "opacity-70" : "opacity-60"}>
-                  ({friendlyCount})
-                </span>
+                <span className={tournament === FRIENDLY_VALUE ? "opacity-70" : "opacity-60"}>({friendlyTotal})</span>
               </button>
             )}
 
-            {(tournaments.length > 0 || hasFriendlies) && <span className="hidden sm:block h-4 w-px bg-gold/20 mx-1" />}
+            {(tournamentOptions.length > 0 || hasFriendlies) && <span className="hidden sm:block h-4 w-px bg-gold/20 mx-1" />}
 
             {filters.map((item) => {
               const meta = filterMeta[item]
@@ -337,9 +457,7 @@ export default function PublicMatchesClient() {
                   }`}
                 >
                   {meta.dot && (
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${item === "live" ? "animate-pulse" : ""}`}
-                    />
+                    <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${item === "live" ? "animate-pulse" : ""}`} />
                   )}
                   {meta.label}
                   <span className={active ? "opacity-70" : "opacity-50"}>({counts[item]})</span>
@@ -362,53 +480,43 @@ export default function PublicMatchesClient() {
               <LoadingCard />
             </div>
           ) : !hasAnyResults ? (
-            <EmptyState />
+            <EmptyState query={debouncedQuery} filter={filter} />
           ) : filter === "all" ? (
             <div className="space-y-12">
               {sectionMeta.map(({ status, label, dot }) => {
                 const list = grouped[status]
                 if (list.length === 0) return null
-                const { tournamentList, friendlyList } = splitByType(list)
-                const showSubGroups = tournament === "all" && tournamentList.length > 0 && friendlyList.length > 0
                 return (
                   <div key={status}>
                     <div className="flex items-center gap-2 mb-5">
                       <span className={`h-2 w-2 rounded-full ${dot} ${status === "live" ? "animate-pulse" : ""}`} />
-                      <h2 className="font-cinzel text-sm uppercase tracking-[0.2em] text-white font-bold">
-                        {label}
-                      </h2>
+                      <h2 className="font-cinzel text-sm uppercase tracking-[0.2em] text-white font-bold">{label}</h2>
                       <span className="text-xs text-gray-500 font-mono">({list.length})</span>
                       <div className="flex-1 h-px bg-gold/10 ml-2" />
                     </div>
 
-                    {showSubGroups ? (
-                      <div className="space-y-8">
-                        <MatchGrid list={tournamentList} />
-                        <div>
-                          <div className="flex items-center gap-2 mb-4 pl-1">
-                            <Handshake className="h-3.5 w-3.5 text-blue-300" />
-                            <h3 className="font-cinzel text-xs uppercase tracking-[0.2em] text-blue-300 font-bold">
-                              Friendly Matches
-                            </h3>
-                            <span className="text-[11px] text-gray-500 font-mono">({friendlyList.length})</span>
-                          </div>
-                          <MatchGrid list={friendlyList} />
-                        </div>
-                      </div>
-                    ) : (
-                      <MatchGrid list={list} />
+                    {/* Tournament and friendly matches sit together here — the badge
+                        on each card (stage vs "Friendly") is the only thing that
+                        tells them apart. */}
+                    <MatchGrid list={list} />
+
+                    {status === "completed" && completedHasMore && (
+                      <LoadMoreButton onClick={loadMoreCompleted} loading={isLoadingMore} />
                     )}
                   </div>
                 )
               })}
             </div>
           ) : (
-            <MatchGrid list={singleStatusList} />
+            <>
+              <MatchGrid list={singleList} />
+              {singleHasMore && <LoadMoreButton onClick={loadMoreSingle} loading={isLoadingMore} />}
+            </>
           )}
 
-          {!isLoading && (
+          {!isLoading && hasAnyResults && (
             <p className="pt-14 text-center font-mono text-[11px] uppercase tracking-[0.2em] text-gray-500">
-              Showing {filtered.length} of {matches.length} fixtures
+              Showing {totalShown} of {counts[filter]} fixtures
             </p>
           )}
         </div>
@@ -427,9 +535,22 @@ function MatchGrid({ list }: { list: PublicMatch[] }) {
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// STAT TILE — small echo of the Tournament Information panel
-// ─────────────────────────────────────────────────────────────
+function LoadMoreButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return (
+    <div className="flex justify-center mt-6">
+      <Button
+        onClick={onClick}
+        disabled={loading}
+        variant="outline"
+        className="border-gold/30 text-gold hover:bg-gold/10 hover:text-gold font-cinzel text-xs uppercase tracking-widest"
+      >
+        {loading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+        {loading ? "Loading..." : "Load more"}
+      </Button>
+    </div>
+  )
+}
+
 function StatTile({
   label,
   value,
@@ -458,18 +579,6 @@ function StatTile({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// MATCH CARD — diagonal team-color split, in the same visual
-// language as the tournament schedule's FixtureCard. Surfaces
-// live score, weather, broadcast channels, and bracket stage
-// (or a distinct "Friendly Match" badge for standalone matches
-// with no bracket link — styled in blue so it reads differently
-// from tournament fixtures at a glance).
-// Upcoming matches lead with their full schedule + countdown
-// instead of a generic "not started" message. Venue/schedule
-// fall back to "TBA" rather than disappearing when unset, so
-// missing data reads as missing data, not a broken card.
-// ─────────────────────────────────────────────────────────────
 function MatchCard({ match }: { match: PublicMatch }) {
   const live = match.status === "live"
   const completed = match.status === "completed"
@@ -502,7 +611,6 @@ function MatchCard({ match }: { match: PublicMatch }) {
           : ""
       }`}
     >
-      {/* Diagonal team-color banner */}
       <div className="relative h-32 bg-black/60">
         <div
           className="absolute inset-0"
@@ -535,30 +643,15 @@ function MatchCard({ match }: { match: PublicMatch }) {
         )}
         <StatusPill status={match.status} />
 
-        <TeamCrest
-          side="left"
-          name={match.teamA}
-          code={match.teamACode}
-          color={teamAColor}
-          logo={match.teamALogo}
-          won={aWon}
-        />
+        <TeamCrest side="left" name={match.teamA} code={match.teamACode} color={teamAColor} logo={match.teamALogo} won={aWon} />
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
           <span className="h-8 w-8 rounded-full border border-gold/40 bg-black/70 flex items-center justify-center text-gold font-cinzel text-[10px] font-bold">
             VS
           </span>
         </div>
-        <TeamCrest
-          side="right"
-          name={match.teamB}
-          code={match.teamBCode}
-          color={teamBColor}
-          logo={match.teamBLogo}
-          won={bWon}
-        />
+        <TeamCrest side="right" name={match.teamB} code={match.teamBCode} color={teamBColor} logo={match.teamBLogo} won={bWon} />
       </div>
 
-      {/* Details */}
       <div className="bg-black/50 p-4 flex-1 flex flex-col">
         {live && match.live ? (
           <div className="flex flex-col items-center gap-1 mb-2">
@@ -567,9 +660,7 @@ function MatchCard({ match }: { match: PublicMatch }) {
               <span className="ml-2 text-sm font-normal text-white/60">({match.live.overs} ov)</span>
             </p>
             {match.live.battingTeam && (
-              <p className="text-[10px] uppercase tracking-widest text-white/40">
-                {match.live.battingTeam} batting
-              </p>
+              <p className="text-[10px] uppercase tracking-widest text-white/40">{match.live.battingTeam} batting</p>
             )}
           </div>
         ) : completed ? (
@@ -579,14 +670,10 @@ function MatchCard({ match }: { match: PublicMatch }) {
             {match.scoreB ?? "—"}
           </p>
         ) : (
-          // Upcoming — lead with the schedule itself rather than a
-          // generic placeholder, since that's the actually useful info.
           <div className="flex flex-col items-center gap-1 mb-2 py-1">
             {schedule ? (
               <>
-                <p className="font-cinzel text-base font-bold text-white text-center leading-tight">
-                  {schedule.full}
-                </p>
+                <p className="font-cinzel text-base font-bold text-white text-center leading-tight">{schedule.full}</p>
                 {schedule.relative && (
                   <span className="text-[10px] uppercase tracking-widest text-gold/70">{schedule.relative}</span>
                 )}
@@ -602,8 +689,6 @@ function MatchCard({ match }: { match: PublicMatch }) {
             <MapPin className="size-3 text-gold/60" />
             {match.venue || "Venue TBA"}
           </span>
-          {/* For upcoming matches the schedule is already the headline above,
-              so only repeat it here for live/completed as a quick reference. */}
           {!upcoming && (
             <span className="flex items-center gap-1">
               <Clock3 className="size-3 text-gold/60" />
@@ -623,10 +708,7 @@ function MatchCard({ match }: { match: PublicMatch }) {
           <div className="mt-2 flex items-center justify-center gap-1.5 flex-wrap">
             <Tv className="size-3 text-gold/50" />
             {match.channels.map((c) => (
-              <span
-                key={c}
-                className="text-[9px] uppercase tracking-wider text-gold/80 border border-gold/30 rounded-full px-2 py-0.5"
-              >
+              <span key={c} className="text-[9px] uppercase tracking-wider text-gold/80 border border-gold/30 rounded-full px-2 py-0.5">
                 {c}
               </span>
             ))}
@@ -696,9 +778,7 @@ function TeamCrest({
   const position = side === "left" ? "left-[16%]" : "left-[84%]"
 
   return (
-    <div
-      className={`absolute ${position} top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5`}
-    >
+    <div className={`absolute ${position} top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5`}>
       {logo ? (
         <div
           className="relative h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40"
@@ -725,10 +805,13 @@ function TeamCrest({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// EMPTY STATE — matches the LockedTabPlaceholder pattern
-// ─────────────────────────────────────────────────────────────
-function EmptyState() {
+function EmptyState({ query, filter }: { query: string; filter: Filter }) {
+  const detail = query
+    ? `No results for "${query}"${filter !== "all" ? ` in ${filterMeta[filter].label.toLowerCase()} matches` : ""}.`
+    : filter !== "all"
+      ? `No ${filterMeta[filter].label.toLowerCase()} matches right now.`
+      : "Try another search or match status."
+
   return (
     <div className="bg-black/50 border border-gold/20 rounded-lg p-10 mb-8 flex flex-col items-center text-center gap-3 fade-in">
       <div className="h-12 w-12 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center relative">
@@ -738,7 +821,7 @@ function EmptyState() {
         </span>
       </div>
       <h2 className="text-white font-bold font-cinzel">No matches found</h2>
-      <p className="text-gray-400 text-sm max-w-sm">Try another search or match status.</p>
+      <p className="text-gray-400 text-sm max-w-sm">{detail}</p>
     </div>
   )
 }

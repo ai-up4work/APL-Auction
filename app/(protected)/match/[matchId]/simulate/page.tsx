@@ -160,6 +160,12 @@ function normField(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase()
 }
 
+/** "37 legal balls" -> "6.1" — shared by the live score patches below
+ *  and the final-score write, so both use the same over/ball format. */
+function oversLabel(legalBalls: number): string {
+  return `${Math.floor(legalBalls / 6)}.${legalBalls % 6}`
+}
+
 // Same card shell used across the admin dashboard (OrganizationClient,
 // MatchesTab, TeamsManager, the match editor) — kept consistent here
 // since this page is only ever reached from the editor's "Go to
@@ -349,11 +355,43 @@ export default function SimulateMatchPage() {
     if (error) throw new Error(`Failed writing ball: ${error.message}`)
   }
 
+  // Small helper so every `match_setup` write in this file goes through
+  // one place — makes it hard to accidentally forget the `status` field
+  // on any individual update, which is exactly the bug this page had
+  // before (bracket_matches.status flipped to "live"/"completed" while
+  // match_setup carried no equivalent marker at all, so anything
+  // reading match_setup directly — e.g. matches.derived_status, or a
+  // standalone match with no bracket_matches row — had no way to know
+  // a match was in progress).
+  async function writeMatchSetup(
+    matchId: string,
+    setupPatch: MatchSetup & Record<string, unknown>,
+    status: "live" | "completed"
+  ) {
+    return supabase
+      .from("matches")
+      .update({ match_setup: { ...setupPatch, status } })
+      .eq("id", matchId)
+  }
+
+  // Context runInnings needs to patch a running score into match_setup
+  // as it goes — separate from `state` (the engine's own innings state)
+  // because it carries the *other* innings' already-finalized score
+  // too (baseSetup), so writing team2's progress never clobbers team1's
+  // final total that was written earlier in the same match.
+  type LiveScoreContext = {
+    baseSetup: MatchSetup & Record<string, unknown>
+    side: "team1" | "team2"
+    currentInnings: 1 | 2
+    target?: number
+  }
+
   async function runInnings(
     matchId: string,
     state: InningsSimState,
     label: string,
-    token: number
+    token: number,
+    liveCtx: LiveScoreContext
   ): Promise<InningsSimState> {
     let current = state
     while (!current.finished) {
@@ -370,7 +408,40 @@ export default function SimulateMatchPage() {
         await insertBall(matchId, row)
         const overLabel = `${row.over_number}.${row.ball_number}`
         pushLog(`[${label} ${overLabel}] ${commentary}`, row.is_wicket)
-        setScoreLine(`${label}: ${current.runs}/${current.wkts} (${current.legalBalls / 6 | 0}.${current.legalBalls % 6} ov)`)
+        setScoreLine(`${label}: ${current.runs}/${current.wkts} (${oversLabel(current.legalBalls)} ov)`)
+
+        // Patch the running score into match_setup — this is the only
+        // place a standalone (non-bracket) match's score is persisted
+        // anywhere while the match is actually live. Nothing else in
+        // this file writes to match_state, and match_team_stats is only
+        // ever written for bracket-linked matches (see handleStart) —
+        // so without this, the public matches page has no source for a
+        // friendly match's score until (and unless) it's fully
+        // complete. Throttled to over boundaries and wickets rather
+        // than every single ball, since this is a second write on top
+        // of the ball insert above and per-ball granularity isn't
+        // needed for a card that just shows "runs/wkts (overs)".
+        if (current.legalBalls % 6 === 0 || row.is_wicket) {
+          if (token !== runTokenRef.current) return current
+          const scoreField = liveCtx.side === "team1" ? "scoreA" : "scoreB"
+          const wktsField = liveCtx.side === "team1" ? "wktsA" : "wktsB"
+          const oversField = liveCtx.side === "team1" ? "oversA" : "oversB"
+          const { error: liveErr } = await supabase
+            .from("matches")
+            .update({
+              match_setup: {
+                ...liveCtx.baseSetup,
+                currentInnings: liveCtx.currentInnings,
+                ...(liveCtx.target != null ? { target: liveCtx.target } : {}),
+                status: "live",
+                [scoreField]: current.runs,
+                [wktsField]: current.wkts,
+                [oversField]: oversLabel(current.legalBalls),
+              },
+            })
+            .eq("id", matchId)
+          if (liveErr) console.error("[runInnings] live score patch failed:", liveErr.message)
+        }
       }
       await sleep(speedRef.current)
     }
@@ -535,11 +606,21 @@ export default function SimulateMatchPage() {
       // currentInnings is the explicit source of truth for which innings
       // is in progress — the UI reads this instead of guessing from ball
       // counts, so "Team B need X runs" never shows up while team A is
-      // still batting.
-      const { error: infoUpdateErr } = await supabase
-        .from("matches")
-        .update({ match_setup: { ...setup, currentInnings: 1 } })
-        .eq("id", matchId)
+      // still batting. `status: "live"` is written into match_setup
+      // itself (not just bracket_matches) so that anything reading
+      // match_setup directly — matches.derived_status, a standalone
+      // match with no bracket_matches row, the live match page — can
+      // tell a simulation is in progress without joining out to
+      // bracket_matches. scoreA/wktsA/oversA are reset to zero here too
+      // — runInnings will overwrite them as deliveries come in, but a
+      // resimulated match should not start out still showing the
+      // previous run's final score.
+      const setupAtInnings1Start = { ...setup, scoreA: 0, wktsA: 0, oversA: "0.0", scoreB: 0, wktsB: 0, oversB: "0.0" }
+      const { error: infoUpdateErr } = await writeMatchSetup(
+        matchId,
+        { ...setupAtInnings1Start, currentInnings: 1 },
+        "live"
+      )
       if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
       if (infoWasFilled) {
         pushLog(
@@ -571,20 +652,38 @@ export default function SimulateMatchPage() {
         oversLimit,
         startSequence: 0,
       })
-      innings1 = await runInnings(matchId, innings1, teamAPool.teamShort, myToken)
+      innings1 = await runInnings(matchId, innings1, teamAPool.teamShort, myToken, {
+        baseSetup: setupAtInnings1Start,
+        side: "team1",
+        currentInnings: 1,
+      })
       if (myToken !== runTokenRef.current) return // a newer run took over — abandon silently
 
       const target = innings1.runs + 1
       pushLog(`Innings 1 complete: ${teamAPool.teamName} ${innings1.runs}/${innings1.wkts}. Target: ${target}.`, true)
 
+      // Innings 1's final score is folded into the setup object carried
+      // forward from here on, so every later write — the innings-2-start
+      // write below, each live patch inside runInnings during innings 2,
+      // and the final completion write — keeps reporting team1's
+      // finished score instead of losing it once team2 starts batting.
+      const setupAfterInnings1 = {
+        ...setup,
+        scoreA: innings1.runs,
+        wktsA: innings1.wkts,
+        oversA: oversLabel(innings1.legalBalls),
+      }
+
       // Flip currentInnings to 2 in the SAME write that sets the target,
       // so the two facts ("2nd innings has started" and "this is the
       // target") always land together — no window where one has updated
-      // and the other hasn't.
-      const { error: setupUpdateErr } = await supabase
-        .from("matches")
-        .update({ match_setup: { ...setup, overs: oversLimit, target, currentInnings: 2 } })
-        .eq("id", matchId)
+      // and the other hasn't. status stays "live" here — the match is
+      // still very much in progress, just in its second innings.
+      const { error: setupUpdateErr } = await writeMatchSetup(
+        matchId,
+        { ...setupAfterInnings1, overs: oversLimit, target, currentInnings: 2, scoreB: 0, wktsB: 0, oversB: "0.0" },
+        "live"
+      )
       if (setupUpdateErr) throw new Error(`Failed updating target: ${setupUpdateErr.message}`)
 
       if (myToken !== runTokenRef.current) return
@@ -599,7 +698,12 @@ export default function SimulateMatchPage() {
         target,
         startSequence: innings1.sequence,
       })
-      innings2 = await runInnings(matchId, innings2, teamBPool.teamShort, myToken)
+      innings2 = await runInnings(matchId, innings2, teamBPool.teamShort, myToken, {
+        baseSetup: setupAfterInnings1,
+        side: "team2",
+        currentInnings: 2,
+        target,
+      })
       if (myToken !== runTokenRef.current) return
 
       const teamAWon = innings2.runs < target - 1
@@ -613,25 +717,30 @@ export default function SimulateMatchPage() {
       pushLog(`Innings 2 complete: ${teamBPool.teamName} ${innings2.runs}/${innings2.wkts}. ${resultText}`, true)
 
       // ── Mark the match complete on `matches` itself ──────────────
-      // Previously nothing durable recorded "this match finished" on
-      // the matches row for standalone (non-bracket) matches —
-      // currentInnings stayed at 2 forever. matchComplete is added
-      // alongside the runtime fields so the live page (or anything
-      // else reading match_setup) can detect completion without a
-      // bracket link.
-      const { error: completeUpdateErr } = await supabase
-        .from("matches")
-        .update({
-          match_setup: {
-            ...setup,
-            overs: oversLimit,
-            target,
-            currentInnings: 2,
-            matchComplete: true,
-            resultText,
-          },
-        })
-        .eq("id", matchId)
+      // matchComplete + status: "completed" are both added alongside
+      // the runtime fields so the live page (or anything else reading
+      // match_setup) can detect completion — whether by checking the
+      // boolean flag or the status string — without a bracket link.
+      // scoreA/scoreB (with wkts/overs) are the final numbers for each
+      // side — this is what makes a standalone (non-bracket) match show
+      // a real score on the public matches page once it's done, since
+      // match_team_stats is only ever written for bracket-linked
+      // matches (see the bracketRow branch below).
+      const { error: completeUpdateErr } = await writeMatchSetup(
+        matchId,
+        {
+          ...setupAfterInnings1,
+          overs: oversLimit,
+          target,
+          currentInnings: 2,
+          matchComplete: true,
+          resultText,
+          scoreB: innings2.runs,
+          wktsB: innings2.wkts,
+          oversB: oversLabel(innings2.legalBalls),
+        },
+        "completed"
+      )
       if (completeUpdateErr) {
         // Non-fatal — the simulation itself succeeded and bracket/
         // standings writes below still matter, so log and continue
@@ -655,7 +764,10 @@ export default function SimulateMatchPage() {
       // unresolved on the bracket (so it doesn't look done when it
       // isn't) rather than quietly locking in a dead end. The engine
       // simulation itself still completed fine either way — this only
-      // affects whether the *bracket* reflects that.
+      // affects whether the *bracket* reflects that. NOTE: match_setup
+      // was already written as "completed" above regardless, since the
+      // simulation engine itself did finish — only the bracket's
+      // record of the result is left unresolved in these branches.
       if (bracketRow) {
         const sides = await resolveBracketTeamSides(bracketRow, setup)
 
@@ -776,8 +888,31 @@ export default function SimulateMatchPage() {
       setRun("done")
     } catch (err) {
       if (myToken !== runTokenRef.current) return // a stale run's error — ignore it, a newer run is active
-      setErrorMsg(err instanceof Error ? err.message : "Something went wrong.")
+      const message = err instanceof Error ? err.message : "Something went wrong."
+      setErrorMsg(message)
       setRun("error")
+
+      // Mark match_setup as errored too, so a crashed run doesn't sit
+      // forever showing status: "live" to anything reading match_setup
+      // directly (e.g. derived_status, the live match page) even though
+      // this page's own runState already shows "error". Best-effort —
+      // if this write itself fails, the original error above still
+      // surfaced via setErrorMsg, so just log and move on.
+      try {
+        const { data: currentRow } = await supabase
+          .from("matches")
+          .select("match_setup")
+          .eq("id", matchId)
+          .maybeSingle()
+        if (currentRow?.match_setup) {
+          await supabase
+            .from("matches")
+            .update({ match_setup: { ...(currentRow.match_setup as object), status: "error" } })
+            .eq("id", matchId)
+        }
+      } catch (innerErr) {
+        console.error("[handleStart] failed writing status: 'error' to match_setup:", innerErr)
+      }
     } finally {
       // Always released, on every exit path (success, throw, or an early
       // `return` from a superseded-token check) — otherwise a single
@@ -807,9 +942,10 @@ export default function SimulateMatchPage() {
   // Wipes every trace of this match's simulated data — balls, live/engine
   // state, ball-by-ball commentary, bracket score/status, and the
   // runtime-only match_setup keys (target, currentInnings, matchComplete,
-  // resultText) — while leaving team1/team2/venue/etc alone. This is
-  // what makes the live match page fall back to "not_started" and empty
-  // scorecards the instant it's clicked, via Realtime.
+  // resultText, status, scoreA/wktsA/oversA, scoreB/wktsB/oversB) — while
+  // leaving team1/team2/venue/etc alone. This is what makes the live
+  // match page fall back to "not_started" and empty scorecards the
+  // instant it's clicked, via Realtime.
   async function handleClear() {
     const matchId = matchIdInput.trim()
     if (!matchId) {
@@ -846,7 +982,20 @@ export default function SimulateMatchPage() {
         .maybeSingle()
 
       if (matchRow?.match_setup) {
-        const { target, currentInnings, matchComplete, resultText, ...rest } = matchRow.match_setup as Record<string, unknown>
+        const {
+          target,
+          currentInnings,
+          matchComplete,
+          resultText,
+          status,
+          scoreA,
+          wktsA,
+          oversA,
+          scoreB,
+          wktsB,
+          oversB,
+          ...rest
+        } = matchRow.match_setup as Record<string, unknown>
         await supabase.from("matches").update({ match_setup: rest }).eq("id", matchId)
       }
 

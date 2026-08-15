@@ -59,7 +59,7 @@ function econTone(econ: string | number): string {
 
 function LogoSlot({ src, alt }: { src?: string; alt: string }) {
   return (
-    <div className="relative h-32 w-32 bg-gradient-to-b from-white/10 to-black/40 backdrop-blur-md rounded-2xl border border-gold/30 mb-3 flex items-center justify-center overflow-hidden shrink-0 shadow-[0_0_20px_rgba(245,166,35,0.15)]">
+    <div className="relative h-32 w-32 rounded-2xl mb-3 flex items-center justify-center overflow-hidden shrink-0">
       {src ? (
         <Image src={src} alt={alt} fill className="object-cover" sizes="96px" />
       ) : (
