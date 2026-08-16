@@ -1,3 +1,4 @@
+// app/(public)/auction/results/[auctionId]/page.tsx
 "use client";
 
 import React, { use, useEffect, useMemo, useRef, useState } from "react";
