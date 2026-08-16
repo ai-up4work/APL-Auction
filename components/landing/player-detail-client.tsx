@@ -98,6 +98,7 @@ interface PlayerMatchSummary {
   outcome: MatchOutcome
   batting: PlayerMatchBatting | null
   bowling: PlayerMatchBowling | null
+  hatTrick: boolean
 }
 
 function oversFromLegalBalls(legalBalls: number): string {
@@ -204,16 +205,27 @@ async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSumma
     }
 
     let bowling: PlayerMatchBowling | null = null
+    let hatTrick = false
     if (bowlingRows.length > 0) {
       let legalBalls = 0
       let runsConceded = 0
       let wickets = 0
+      let consecutiveWicketBalls = 0
 
       for (const r of bowlingRows) {
         const isLegal = r.extra_type !== "wide" && r.extra_type !== "no_ball"
         if (isLegal) legalBalls += 1
         if (r.extra_type !== "bye" && r.extra_type !== "leg_bye") runsConceded += r.runs
         if (r.is_wicket && r.dismissal_type !== "run_out") wickets += 1
+
+        // Hat-trick: 3 wickets on 3 consecutive LEGAL deliveries by this
+        // bowler. Wides/no-balls don't count as a "ball" for this and
+        // don't break the streak; a non-wicket legal ball does.
+        if (isLegal) {
+          const takesWicket = r.is_wicket && r.dismissal_type !== "run_out"
+          consecutiveWicketBalls = takesWicket ? consecutiveWicketBalls + 1 : 0
+          if (consecutiveWicketBalls >= 3) hatTrick = true
+        }
       }
       bowling = { legalBalls, runsConceded, wickets }
     }
@@ -255,6 +267,7 @@ async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSumma
       outcome: deriveOutcome(resultText, playerTeamName),
       batting,
       bowling,
+      hatTrick,
     })
   }
 
@@ -328,13 +341,10 @@ const TAB_CONFIG: { key: ProfileTab; label: string }[] = [
 ]
 
 // ─────────────────────────────────────────────────────────────
-// MOCK DATA — Awards / Teams / Badges
-//
-// These three tabs don't have real queries wired up yet. Shapes below
-// are loosely modeled on tables that already exist in the schema
-// (tournament_awards for Awards; teams/auction history for Teams) so
-// swapping in a real fetch later should mean writing a query function
-// with this same return shape, not redesigning these tabs.
+// AWARDS — real data, matched against tournament_awards via the
+// player_awards_view (see player-detail-views.sql). player_name on
+// that table is free text with no FK, so matching is by normalized
+// name rather than id.
 // ─────────────────────────────────────────────────────────────
 
 interface PlayerAward {
@@ -345,12 +355,44 @@ interface PlayerAward {
   icon: "trophy" | "medal" | "star"
 }
 
-const MOCK_AWARDS: PlayerAward[] = [
-  { id: "a1", title: "Player of the Tournament", context: "Valiant Cup 2026", date: "2026-08-14", icon: "trophy" },
-  { id: "a2", title: "Orange Cap — Most Runs", context: "Valiant Cup 2026", date: "2026-08-14", icon: "medal" },
-  { id: "a3", title: "Player of the Match", context: "vs Mumbai Indians", date: "2026-08-09", icon: "star" },
-  { id: "a4", title: "Best Bowling Figures", context: "4/18 vs Royal Challengers", date: "2026-07-28", icon: "medal" },
-]
+function guessAwardIcon(label: string): PlayerAward["icon"] {
+  const l = label.toLowerCase()
+  if (l.includes("match")) return "star"
+  if (l.includes("cap") || l.includes("wicket") || l.includes("bowling") || l.includes("economy")) return "medal"
+  return "trophy"
+}
+
+async function getPlayerAwards(playerName: string): Promise<PlayerAward[]> {
+  const normalized = playerName.trim().toLowerCase()
+  if (!normalized) return []
+
+  const { data, error } = await supabase
+    .from("player_awards_view")
+    .select("id, label, note, awarded_at, tournament_name")
+    .eq("player_name_normalized", normalized)
+    .order("awarded_at", { ascending: false })
+
+  if (error) {
+    console.error("[getPlayerAwards] failed:", error.message)
+    return []
+  }
+
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    title: row.label,
+    context: [row.tournament_name, row.note].filter(Boolean).join(" · "),
+    date: row.awarded_at,
+    icon: guessAwardIcon(row.label),
+  }))
+}
+
+// ─────────────────────────────────────────────────────────────
+// TEAMS — real data, via player_team_history (see
+// player-detail-views.sql). Two-step lookup: resolve this player's
+// cross-season identity_key first, then pull every stint under it.
+// The view already excludes synthetic-auction rows, so this can't
+// pick up squad-board clones as phantom seasons.
+// ─────────────────────────────────────────────────────────────
 
 interface PlayerTeamStint {
   id: string
@@ -362,11 +404,51 @@ interface PlayerTeamStint {
   price: number | null
 }
 
-const MOCK_TEAMS: PlayerTeamStint[] = [
-  { id: "t1", teamName: "Chennai Super Kings", teamLogo: null, teamColor: "#F5C518", season: "2026", role: "Sold", price: 18500 },
-  { id: "t2", teamName: "Mumbai Indians", teamLogo: null, teamColor: "#2563EB", season: "2025", role: "Sold", price: 14200 },
-  { id: "t3", teamName: "Royal Challengers", teamLogo: null, teamColor: "#DC2626", season: "2024", role: "Unsold", price: null },
-]
+async function getPlayerTeamHistory(playerId: string): Promise<PlayerTeamStint[]> {
+  const { data: selfRow, error: selfErr } = await supabase
+    .from("player_team_history")
+    .select("identity_key")
+    .eq("player_row_id", playerId)
+    .maybeSingle()
+
+  if (selfErr) {
+    console.error("[getPlayerTeamHistory] failed resolving identity:", selfErr.message)
+    return []
+  }
+  // No row at all means this player's own auction was synthetic and
+  // got filtered out by the view — nothing genuine to show.
+  if (!selfRow) return []
+
+  const { data, error } = await supabase
+    .from("player_team_history")
+    .select("player_row_id, season_name, season_started_at, team_id, team_name, team_logo, team_color, player_status, sold_price, base_price")
+    .eq("identity_key", selfRow.identity_key)
+    .order("season_started_at", { ascending: false })
+
+  if (error) {
+    console.error("[getPlayerTeamHistory] failed loading stints:", error.message)
+    return []
+  }
+
+  return (data ?? []).map((row: any) => ({
+    id: row.player_row_id,
+    teamName: row.team_name ?? "Unassigned",
+    teamLogo: row.team_logo ?? null,
+    teamColor: row.team_color ?? null,
+    season: row.season_name,
+    role: row.player_status === "sold" ? "Sold" : row.player_status === "available" ? "Available" : "Unsold",
+    price: row.sold_price ?? row.base_price ?? null,
+  }))
+}
+
+// ─────────────────────────────────────────────────────────────
+// BADGES — fully derived, no new fetch. Reuses whatever the Matches
+// tab already loaded (match summaries + the hat-trick flag computed
+// alongside them) plus the career totals already on PlayerDetail.
+// "Iron Man" is a documented approximation — match summaries don't
+// currently carry a season/auction grouping, so it's a flat match-
+// count threshold rather than a true "every match in a season" check.
+// ─────────────────────────────────────────────────────────────
 
 interface PlayerBadge {
   id: string
@@ -375,14 +457,28 @@ interface PlayerBadge {
   earned: boolean
 }
 
-const MOCK_BADGES: PlayerBadge[] = [
-  { id: "b1", label: "Century Maker", description: "Scored a 100+ in an innings", earned: true },
-  { id: "b2", label: "Hat-trick Hero", description: "Took 3 wickets in 3 balls", earned: false },
-  { id: "b3", label: "50 Wicket Club", description: "50 career wickets", earned: true },
-  { id: "b4", label: "Iron Man", description: "Played every match in a season", earned: true },
-  { id: "b5", label: "Six Machine", description: "10+ sixes in a single innings", earned: false },
-  { id: "b6", label: "Death Over Specialist", description: "Sub-7 economy in the last 4 overs", earned: false },
-]
+function derivePlayerBadges(player: PlayerDetail, matches: PlayerMatchSummary[]): PlayerBadge[] {
+  const centuryMaker = matches.some((m) => (m.batting?.runs ?? 0) >= 100)
+  const hatTrickHero = matches.some((m) => m.hatTrick)
+  const fiftyWicketClub = (player.wickets ?? 0) >= 50
+  const sixMachine = matches.some((m) => (m.batting?.sixes ?? 0) >= 10)
+  const ironMan = matches.length >= 10
+  const matchWinner = matches.filter((m) => m.outcome === "won").length >= 5
+
+  return [
+    { id: "b1", label: "Century Maker", description: "Scored 100+ runs in a single innings", earned: centuryMaker },
+    { id: "b2", label: "Hat-trick Hero", description: "Took 3 wickets on 3 consecutive legal balls", earned: hatTrickHero },
+    { id: "b3", label: "50 Wicket Club", description: "50+ career wickets", earned: fiftyWicketClub },
+    {
+      id: "b4",
+      label: "Iron Man",
+      description: "Played 10+ matches (approximate — season-level tracking coming later)",
+      earned: ironMan,
+    },
+    { id: "b5", label: "Six Machine", description: "10+ sixes in a single innings", earned: sixMachine },
+    { id: "b6", label: "Match Winner", description: "On the winning side in 5+ matches", earned: matchWinner },
+  ]
+}
 
 export default function PlayerDetailClient({ id }: { id: string }) {
   useScrollTop()
@@ -393,12 +489,16 @@ export default function PlayerDetailClient({ id }: { id: string }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>("stats")
 
   const [matches, setMatches] = useState<PlayerMatchSummary[] | undefined>(undefined) // undefined = not yet loaded
+  const [awards, setAwards] = useState<PlayerAward[] | undefined>(undefined)
+  const [teamHistory, setTeamHistory] = useState<PlayerTeamStint[] | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
     setPlayer(undefined)
     setActiveTab("stats")
     setMatches(undefined)
+    setAwards(undefined)
+    setTeamHistory(undefined)
     getPlayerDetailForPublic(id).then((data) => {
       if (cancelled) return
       setPlayer(data)
@@ -408,13 +508,14 @@ export default function PlayerDetailClient({ id }: { id: string }) {
     }
   }, [id])
 
-  // Match history is only fetched once the Matches tab is actually
-  // opened — it's a heavier query (all balls for this player, plus
-  // batch lookups) than the summary stats getPlayerDetailForPublic
-  // already loads, and most visitors landing on a player page will
-  // only ever look at Stats.
+  // Match history is fetched once the Matches OR Badges tab is opened
+  // — Badges derives from the same data (hat-tricks, centuries, wins)
+  // so it reuses this fetch rather than pulling balls twice. It's a
+  // heavier query (all balls for this player, plus batch lookups) than
+  // the summary stats getPlayerDetailForPublic already loads, and most
+  // visitors landing on a player page will only ever look at Stats.
   useEffect(() => {
-    if (activeTab !== "matches" || matches !== undefined || !player) return
+    if ((activeTab !== "matches" && activeTab !== "badges") || matches !== undefined || !player) return
     let cancelled = false
     getPlayerMatchHistory(id).then((data) => {
       if (cancelled) return
@@ -424,6 +525,32 @@ export default function PlayerDetailClient({ id }: { id: string }) {
       cancelled = true
     }
   }, [activeTab, matches, player, id])
+
+  useEffect(() => {
+    if (activeTab !== "awards" || awards !== undefined || !player) return
+    let cancelled = false
+    getPlayerAwards(player.name).then((data) => {
+      if (cancelled) return
+      setAwards(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, awards, player])
+
+  useEffect(() => {
+    if (activeTab !== "teams" || teamHistory !== undefined || !player) return
+    let cancelled = false
+    getPlayerTeamHistory(id).then((data) => {
+      if (cancelled) return
+      setTeamHistory(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, teamHistory, player, id])
+
+  const badges = useMemo(() => (matches ? derivePlayerBadges(player!, matches) : undefined), [matches, player])
 
   const handleNavigation = (path: string) => {
     router.push(path)
@@ -453,7 +580,7 @@ export default function PlayerDetailClient({ id }: { id: string }) {
         <div className="absolute inset-0 z-0 section-gradient" />
         <div className="container mx-auto px-4 relative z-10 max-w-5xl">
           <Link
-            href="/players"
+            href="/all-players"
             className="inline-flex items-center gap-1.5 text-xs font-cinzel uppercase tracking-widest text-gray-400 hover:text-gold transition-colors mb-6 fade-in"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
@@ -594,9 +721,9 @@ export default function PlayerDetailClient({ id }: { id: string }) {
 
               {/* ── Tab strip ───────────────────────────────────────
                   Full CrickPro tab set (Stats · Matches · Awards ·
-                  Teams · Badges). Awards/Teams/Badges run on mock data
-                  for now (see the MOCK_* constants above) — swap in a
-                  real fetch later and these render exactly the same. */}
+                  Teams · Badges), all backed by real data now: Awards
+                  and Teams query Supabase views, Badges derive from
+                  the Matches fetch. */}
               <div className="flex items-center gap-1 rounded-xl border border-gold/10 bg-black/50 p-1 w-fit mx-auto sm:mx-0 overflow-x-auto max-w-full">
                 {TAB_CONFIG.map((tab) => (
                   <button
@@ -666,30 +793,49 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* ── Awards tab (mock data) ──────────────────────── */}
+              {/* ── Awards tab ────────────────────────────────────── */}
               {activeTab === "awards" && (
                 <div className="space-y-3">
-                  {MOCK_AWARDS.map((award, i) => (
-                    <AwardRow key={award.id} award={award} index={i} />
-                  ))}
+                  {awards === undefined && <MatchListSkeleton />}
+
+                  {awards !== undefined && awards.length === 0 && (
+                    <div className="text-center py-16 rounded-2xl border border-gold/10 bg-black/50">
+                      <p className="text-sm text-gray-400">No awards recorded for this player yet.</p>
+                    </div>
+                  )}
+
+                  {awards !== undefined &&
+                    awards.length > 0 &&
+                    awards.map((award, i) => <AwardRow key={award.id} award={award} index={i} />)}
                 </div>
               )}
 
-              {/* ── Teams tab (mock data) ────────────────────────── */}
+              {/* ── Teams tab ─────────────────────────────────────── */}
               {activeTab === "teams" && (
                 <div className="space-y-3">
-                  {MOCK_TEAMS.map((stint, i) => (
-                    <TeamStintRow key={stint.id} stint={stint} index={i} />
-                  ))}
+                  {teamHistory === undefined && <MatchListSkeleton />}
+
+                  {teamHistory !== undefined && teamHistory.length === 0 && (
+                    <div className="text-center py-16 rounded-2xl border border-gold/10 bg-black/50">
+                      <p className="text-sm text-gray-400">No team history recorded for this player yet.</p>
+                    </div>
+                  )}
+
+                  {teamHistory !== undefined &&
+                    teamHistory.length > 0 &&
+                    teamHistory.map((stint, i) => <TeamStintRow key={stint.id} stint={stint} index={i} />)}
                 </div>
               )}
 
-              {/* ── Badges tab (mock data) ──────────────────────── */}
+              {/* ── Badges tab — derived from match history, no
+                  separate fetch (see the useMemo above). ─────────── */}
               {activeTab === "badges" && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {MOCK_BADGES.map((badge, i) => (
-                    <BadgeTile key={badge.id} badge={badge} index={i} />
-                  ))}
+                  {badges === undefined
+                    ? Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="h-28 rounded-xl border border-gold/10 bg-black/50 animate-pulse" />
+                      ))
+                    : badges.map((badge, i) => <BadgeTile key={badge.id} badge={badge} index={i} />)}
                 </div>
               )}
             </div>
