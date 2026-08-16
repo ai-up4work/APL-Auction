@@ -1,6 +1,7 @@
 // components/FlowTeamCard.tsx
 "use client";
 
+import Image from "next/image";
 import React from "react";
 
 export interface FlowTeamCardProps {
@@ -50,8 +51,8 @@ export function FlowTeamCard({
         isDimmed ? "opacity-30" : "opacity-100",
       ].join(" ")}
     >
-      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden bg-surface-container flex-shrink-0 ring-2 sm:ring-0 ring-white/15">
-        {logoUrl && <img src={logoUrl} className="w-full h-full object-cover" alt="" />}
+      <div className="w-16 h-16 rounded-lg overflow-hidden bg-surface-container flex-shrink-0 ring-2 sm:ring-0 ring-white/15">
+        {logoUrl && <Image src={logoUrl} className="w-full h-full object-cover" alt="" width={40} height={40} />}
       </div>
       <div className={["min-w-0", textVisibilityClass].join(" ")}>
         <p className="font-bold text-xs truncate uppercase tracking-tight font-archivo text-white">
