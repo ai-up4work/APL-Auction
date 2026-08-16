@@ -45,6 +45,11 @@ export function FlowTeamCard({
       onClick={onClick}
       className={[
         "glass-panel p-0.5 sm:p-1 rounded-xl flex items-center gap-3 sm:gap-4 cursor-pointer transition-all duration-300",
+        // overflow-hidden + max-w cap: same reasoning as FlowPlayerCard —
+        // bounds the box so the truncated name/purse text below has a real
+        // width to clip against instead of the card growing to fit content
+        // and blowing out of the flow-franchises column on mobile.
+        "overflow-hidden max-w-[78vw] sm:max-w-none",
         isHighlighted
           ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
           : "border border-white/5 hover:border-theme-orange",

@@ -81,6 +81,14 @@ export function FlowPlayerCard({
       }}
       className={[
         "glass-panel p-0.5 sm:p-1 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
+        // Bounds the card's width on mobile so `truncate` on the name has
+        // something to truncate against once text is revealed on select.
+        // Without this, a highlighted card sizes to its content (since the
+        // list uses items-start/items-end for icon-only shrink-to-fit) and
+        // spills out of the flow-pool column into the canvas gutter.
+        // Reverts to natural width at sm: and up, where the full card
+        // layout is always shown anyway.
+        "max-w-[78vw] sm:max-w-none",
         isLocked ? "opacity-40 cursor-not-allowed" : isClickable ? "cursor-pointer" : "",
         isHighlighted
           ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
