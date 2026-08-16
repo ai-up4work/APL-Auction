@@ -77,6 +77,32 @@ function toPublicPlayer(row: PlayerViewRow): PublicPlayer {
 }
 
 /**
+ * The public view can legitimately return more than one row for a player:
+ * the same canonical player ID may exist in the organization pool and in one
+ * or more auction projections. The ID, not the name, is the identity key.
+ * Keep one display record and prefer the auction row because it carries the
+ * current auction status/team/price over the pool fallback row.
+ */
+function dedupePlayerRows(rows: PlayerViewRow[]): PlayerViewRow[] {
+  const byId = new Map<string, PlayerViewRow>()
+
+  for (const row of rows) {
+    const existing = byId.get(row.id)
+    if (!existing) {
+      byId.set(row.id, row)
+      continue
+    }
+
+    if (existing.source === "pool" && row.source === "auction") {
+      byId.set(row.id, row)
+    }
+  }
+
+  return Array.from(byId.values())
+}
+
+
+/**
  * Every player visible on the public site — both players still sitting
  * in the org's pool (source: "pool") and players already pulled into
  * an auction (source: "auction", status sold/available/unsold).
@@ -122,7 +148,7 @@ export async function getPlayersForPublic(): Promise<PublicPlayer[]> {
     return []
   }
 
-  return (data ?? []).map(toPublicPlayer)
+  return dedupePlayerRows(data ?? []).map(toPublicPlayer)
 }
 
 // ── Single-player detail (public_player_detail_view) ────────────────
