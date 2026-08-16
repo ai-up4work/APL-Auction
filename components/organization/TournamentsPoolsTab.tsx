@@ -714,12 +714,12 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className="h-12 w-12 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center shadow-md shadow-black/40"
+                    className="h-20 w-20 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center shadow-md shadow-black/40"
                     style={{ backgroundColor: t.color || "#e45d35" }}
                   >
                     {t.logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <Image src={t.logo} alt="" className="h-full w-full object-cover" width={48} height={48} />
+                      <Image src={t.logo} alt="" className="h-full w-full object-cover" width={80} height={80} />
                     ) : (
                       <Shield className="h-5 w-5 text-white/70" />
                     )}
@@ -970,66 +970,6 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   return (
     <div className="space-y-6">
             <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Player Bank</h2>
-        {!loaded ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : players.length === 0 ? (
-          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
-            <UserPlus className="h-12 w-12 text-gold/40 mx-auto mb-3" />
-            <p className="text-gray-300 font-medium mb-2">No players in your bank</p>
-            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
-              Add players to your bank in the form above. You can organize them by role, origin, and mark international players.
-            </p>
-            <p className="text-gray-600 text-xs">💡 Pro tip: Add player photos and notes to help identify them at a glance</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {players.map((p) => (
-              <div
-                key={p.id}
-                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
-                  editingId === p.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative h-18 w-18 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
-                    {p.img ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <Image src={p.img} alt="" className="h-full w-full object-cover" width={72} height={72} />
-                    ) : (
-                      <UserPlus className="h-5 w-5 text-white/40" />
-                    )}
-                    {p.capped && (
-                      <span className="absolute -bottom-0.5 -right-0.5 bg-gold rounded-full p-0.5 border border-black/60">
-                        <Crown className="h-2.5 w-2.5 text-black" />
-                      </span>
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-semibold truncate">{p.name}</p>
-                    <p className="text-gray-500 text-xs mt-0.5">
-                      {p.role} · {p.origin}
-                      {p.country ? ` · ${p.country}` : ""}
-                    </p>
-                    {p.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{p.notes}</p>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => startEdit(p)} className="text-gray-500 hover:text-gold p-1.5">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button onClick={() => handleDelete(p)} className="text-gray-500 hover:text-red-400 p-1.5">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-      <Panel>
         <div className="flex items-center justify-between gap-3 mb-4">
           <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
             <UserPlus className="h-4 w-4 text-gold" /> {editingId ? "Edit Player" : "Add a Player to the Bank"}
@@ -1123,6 +1063,67 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
           )}
         </div>
       </Panel>
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Player Bank</h2>
+        {!loaded ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        ) : players.length === 0 ? (
+          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
+            <UserPlus className="h-12 w-12 text-gold/40 mx-auto mb-3" />
+            <p className="text-gray-300 font-medium mb-2">No players in your bank</p>
+            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
+              Add players to your bank in the form above. You can organize them by role, origin, and mark international players.
+            </p>
+            <p className="text-gray-600 text-xs">💡 Pro tip: Add player photos and notes to help identify them at a glance</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {players.map((p) => (
+              <div
+                key={p.id}
+                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
+                  editingId === p.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative h-18 w-18 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
+                    {p.img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <Image src={p.img} alt="" className="h-full w-full object-cover" width={72} height={72} />
+                    ) : (
+                      <UserPlus className="h-5 w-5 text-white/40" />
+                    )}
+                    {p.capped && (
+                      <span className="absolute -bottom-0.5 -right-0.5 bg-gold rounded-full p-0.5 border border-black/60">
+                        <Crown className="h-2.5 w-2.5 text-black" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-semibold truncate">{p.name}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                      {p.role} · {p.origin}
+                      {p.country ? ` · ${p.country}` : ""}
+                    </p>
+                    {p.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{p.notes}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => startEdit(p)} className="text-gray-500 hover:text-gold p-1.5">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(p)} className="text-gray-500 hover:text-red-400 p-1.5">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
 
 
 
