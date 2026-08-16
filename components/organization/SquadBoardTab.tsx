@@ -28,6 +28,7 @@ import {
   getTeamsForAuction,
   getPlayerBank,
   assignBankPlayerToSquadBoardTeam,
+  removeBankPlayerFromSquadBoardTeam,
   getTeamRoster,
   getAssignedBankPlayerIdsForBoard,
   getAssignedPoolTeamIdsForBoard,
@@ -145,6 +146,9 @@ export function BankPlayerPickerCard({
         <p className={`text-xs font-semibold truncate ${selected ? "text-gold" : "text-white"}`}>{player.name}</p>
         <p className="text-gray-500 text-[10px] truncate">{player.role}</p>
       </div>
+      {selected && (
+        <CheckCircle2 className="h-3.5 w-3.5 text-gold flex-shrink-0 ml-auto" />
+      )}
     </button>
   )
 }
@@ -693,6 +697,14 @@ function AssignTeamPanel({
 
 /* ── One team's card on a Squad Board: its current players + an inline    */
 /*    "assign a bank player onto this team" control                       */
+/*                                                                          */
+/*    Supports bulk selection: bankPlayerIds is now a set of ids rather    */
+/*    than a single string, toggled per-tile, with Select all/Clear        */
+/*    helpers. "Make captain" only makes sense for a single selection —    */
+/*    it's hidden once more than one player is picked. Assignment is       */
+/*    fired off one call per selected player (the underlying API is        */
+/*    single-player), and partial failures are reported without losing    */
+/*    track of which players still need retrying.                         */
 
 function SquadBoardTeamCard({
   org,
@@ -713,10 +725,13 @@ function SquadBoardTeamCard({
   const [bankPlayers, setBankPlayers] = useState<BankPlayer[]>([])
   const [bankLoaded, setBankLoaded] = useState(false)
 
-  const [bankPlayerId, setBankPlayerId] = useState("")
+  const [selectedBankPlayerIds, setSelectedBankPlayerIds] = useState<string[]>([])
   const [isCaptain, setIsCaptain] = useState(false)
   const [isAssigning, setIsAssigning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [removingPlayerId, setRemovingPlayerId] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const reloadRoster = () => getTeamRoster(team.id).then((p) => setPlayers(p))
 
@@ -734,19 +749,76 @@ function SquadBoardTeamCard({
     [bankPlayers, assignedBankPlayerIds]
   )
 
+  const filteredAvailablePlayers = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return availablePlayers
+    return availablePlayers.filter((p) => p.name.toLowerCase().includes(q))
+  }, [availablePlayers, search])
+
+  // Drop any selected ids that fell out of the available list (e.g. someone
+  // else assigned them elsewhere on this board while we were selecting).
+  useEffect(() => {
+    setSelectedBankPlayerIds((prev) => prev.filter((id) => availablePlayers.some((p) => p.id === id)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availablePlayers])
+
+  const toggleSelected = (playerId: string) => {
+    setSelectedBankPlayerIds((prev) =>
+      prev.includes(playerId) ? prev.filter((id) => id !== playerId) : [...prev, playerId]
+    )
+  }
+
+  const selectAllFiltered = () =>
+    setSelectedBankPlayerIds((prev) => Array.from(new Set([...prev, ...filteredAvailablePlayers.map((p) => p.id)])))
+  const clearSelection = () => setSelectedBankPlayerIds([])
+
   const handleAssign = async () => {
-    const bankPlayer = availablePlayers.find((p) => p.id === bankPlayerId)
-    if (!bankPlayer) return
+    const selectedPlayers = availablePlayers.filter((p) => selectedBankPlayerIds.includes(p.id))
+    if (selectedPlayers.length === 0) return
+
     setIsAssigning(true)
     setError(null)
-    const result = await assignBankPlayerToSquadBoardTeam(bankPlayer, team, board, isCaptain)
+
+    // Captain only makes sense when exactly one player is being assigned.
+    const captainFlag = selectedPlayers.length === 1 && isCaptain
+
+    const failedIds: string[] = []
+    const failedNames: string[] = []
+    for (const player of selectedPlayers) {
+      const result = await assignBankPlayerToSquadBoardTeam(player, team, board, captainFlag)
+      if (!result.ok) {
+        failedIds.push(player.id)
+        failedNames.push(player.name)
+      }
+    }
+
     setIsAssigning(false)
+
+    if (failedNames.length > 0) {
+      setError(
+        failedNames.length === selectedPlayers.length
+          ? "Couldn't assign these players."
+          : `Couldn't assign: ${failedNames.join(", ")}.`
+      )
+    }
+
+    // Clear only the ones that succeeded, so failed picks stay selected for a retry.
+    setSelectedBankPlayerIds((prev) => prev.filter((id) => failedIds.includes(id)))
+    setIsCaptain(false)
+    if (failedIds.length === 0) setSearch("")
+    await reloadRoster()
+    onAssigned()
+  }
+
+  const handleRemove = async (player: TeamRosterPlayer) => {
+    setRemovingPlayerId(player.id)
+    setRemoveError(null)
+    const result = await removeBankPlayerFromSquadBoardTeam(player, team, board)
+    setRemovingPlayerId(null)
     if (!result.ok) {
-      setError(result.error ?? "Couldn't assign this player.")
+      setRemoveError(result.error ?? `Couldn't remove ${player.name}.`)
       return
     }
-    setBankPlayerId("")
-    setIsCaptain(false)
     await reloadRoster()
     onAssigned()
   }
@@ -779,7 +851,7 @@ function SquadBoardTeamCard({
           {players.map((p) => (
             <div
               key={p.id}
-              className="flex items-center gap-2 bg-black/30 border border-white/5 rounded-md px-2 py-1.5"
+              className="group/roster flex items-center gap-2 bg-black/30 border border-white/5 rounded-md px-2 py-1.5"
             >
               <div className="relative h-6 w-6 rounded-full flex-shrink-0 border border-white/10 overflow-hidden flex items-center justify-center bg-black/60">
                 {p.img ? (
@@ -794,18 +866,36 @@ function SquadBoardTeamCard({
                   </span>
                 )}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-200 truncate">{p.name}</p>
                 <p className="text-[10px] text-gray-600 truncate">{p.role}</p>
               </div>
+              <button
+                type="button"
+                onClick={() => handleRemove(p)}
+                disabled={removingPlayerId === p.id}
+                title={`Remove ${p.name} from this team`}
+                className="flex-shrink-0 text-gray-600 hover:text-red-400 transition-colors disabled:opacity-50 opacity-0 group-hover/roster:opacity-100 focus:opacity-100"
+              >
+                {removingPlayerId === p.id ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3 w-3" />
+                )}
+              </button>
             </div>
           ))}
         </div>
       )}
+      {removeError && (
+        <p className="flex items-center gap-1.5 text-red-500 text-xs mb-3">
+          <AlertCircle className="h-3.5 w-3.5" /> {removeError}
+        </p>
+      )}
 
       <div className="pt-3 border-t border-white/5">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <p className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel">Add a Bank Player</p>
+          <p className="text-[10px] uppercase tracking-widest text-gold/70 font-cinzel">Add Bank Players</p>
           {bankLoaded && bankPlayers.length > 0 && (
             <span className="text-[10px] uppercase tracking-widest font-cinzel px-1.5 py-0.5 rounded border border-white/15 text-gray-500">
               {availablePlayers.length} available
@@ -822,28 +912,73 @@ function SquadBoardTeamCard({
           </p>
         ) : (
           <>
+            {availablePlayers.length > 0 && (
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search players by name…"
+                className="bg-black/40 border-white/10 text-white text-xs h-8 mb-2 focus-visible:ring-gold/40"
+              />
+            )}
+            {availablePlayers.length > 0 && (
+              <div className="flex items-center gap-3 mb-1.5">
+                <button
+                  type="button"
+                  onClick={selectAllFiltered}
+                  disabled={
+                    filteredAvailablePlayers.length === 0 ||
+                    filteredAvailablePlayers.every((p) => selectedBankPlayerIds.includes(p.id))
+                  }
+                  className="text-[10px] uppercase tracking-widest font-cinzel text-gold/70 hover:text-gold disabled:opacity-40 disabled:hover:text-gold/70"
+                >
+                  {search.trim() ? "Select all matches" : "Select all"}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  disabled={selectedBankPlayerIds.length === 0}
+                  className="text-[10px] uppercase tracking-widest font-cinzel text-gray-500 hover:text-gray-300 disabled:opacity-40 disabled:hover:text-gray-500"
+                >
+                  Clear
+                </button>
+                {selectedBankPlayerIds.length > 0 && (
+                  <span className="text-[10px] uppercase tracking-widest font-cinzel text-gray-500 ml-auto">
+                    {selectedBankPlayerIds.length} selected
+                  </span>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-1.5 mb-2 max-h-40 overflow-y-auto pr-1">
-              {availablePlayers.map((p) => (
+              {filteredAvailablePlayers.map((p) => (
                 <BankPlayerPickerCard
                   key={p.id}
                   player={p}
-                  selected={bankPlayerId === p.id}
-                  onSelect={() => setBankPlayerId(bankPlayerId === p.id ? "" : p.id)}
+                  selected={selectedBankPlayerIds.includes(p.id)}
+                  onSelect={() => toggleSelected(p.id)}
                 />
               ))}
             </div>
+            {availablePlayers.length > 0 && filteredAvailablePlayers.length === 0 && (
+              <p className="text-gray-500 text-xs italic mb-2">No available players match "{search.trim()}".</p>
+            )}
             <AvailabilityHint count={availablePlayers.length} noun="players" />
-            <label className="flex items-center gap-2 text-xs text-gray-400 mt-2 mb-2">
-              <input type="checkbox" checked={isCaptain} onChange={(e) => setIsCaptain(e.target.checked)} />
-              Make captain
-            </label>
+            {selectedBankPlayerIds.length === 1 && (
+              <label className="flex items-center gap-2 text-xs text-gray-400 mt-2 mb-2">
+                <input type="checkbox" checked={isCaptain} onChange={(e) => setIsCaptain(e.target.checked)} />
+                Make captain
+              </label>
+            )}
             <Button
               onClick={handleAssign}
-              disabled={!bankPlayerId || isAssigning}
-              className="bg-gold hover:bg-gold/90 text-black text-xs font-bold disabled:opacity-50 whitespace-nowrap h-9 px-3 w-full"
+              disabled={selectedBankPlayerIds.length === 0 || isAssigning}
+              className="bg-gold hover:bg-gold/90 text-black text-xs font-bold disabled:opacity-50 whitespace-nowrap h-9 px-3 w-full mt-2"
             >
               <UserPlus className="mr-1.5 h-3 w-3" />
-              {isAssigning ? "Adding…" : "Add Player"}
+              {isAssigning
+                ? "Adding…"
+                : selectedBankPlayerIds.length > 1
+                ? `Add ${selectedBankPlayerIds.length} Players`
+                : "Add Player"}
             </Button>
             {error && (
               <p className="flex items-center gap-1.5 text-red-500 text-xs mt-2">

@@ -98,6 +98,62 @@ function StatusBadge({ tone, children }: { tone: BadgeTone; children: React.Reac
   )
 }
 
+/* ────────────────────────────────────────────────────────────────── */
+/*  MODAL — generic overlay dialog shell used by the Player Bank's       */
+/*  add/edit form (see PlayerBankTab below). Click-outside and the X     */
+/*  button both close it; Escape does too, while it's open. Body scroll  */
+/*  is locked while open so the page behind it doesn't scroll along      */
+/*  with the modal's own internal scroll area.                           */
+/* ────────────────────────────────────────────────────────────────── */
+
+function Modal({
+  open,
+  onClose,
+  title,
+  icon,
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  icon?: React.ReactNode
+  children: React.ReactNode
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto mt-16">
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#0a0a0a] border border-gold/30 rounded-lg shadow-2xl shadow-black/60 w-full max-w-2xl my-8">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gold/10 sticky top-0 bg-[#0a0a0a] rounded-t-lg z-10">
+          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
+            {icon}
+            {title}
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors" aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-6 md:p-8">{children}</div>
+      </div>
+    </div>
+  )
+}
+
 /** Cover thumbnail for a tournament card. Falls back to `logoUrl`, then to
  *  a plain trophy placeholder when the tournament has no image at all. */
 function TournamentThumb({ tournament }: { tournament: TournamentSummary }) {
@@ -685,68 +741,6 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
     <div className="space-y-6">
 
             <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Team Pool</h2>
-        <p className="text-gray-500 text-xs mb-6">
-          Add your teams once and reuse them across auctions and matches — pick a pool team directly when creating a
-          match from the Matches tab, or from the auction admin panel when setting up an auction.
-        </p>
-        {!loaded ? (
-          <p className="text-gray-500 text-sm flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : teams.length === 0 ? (
-          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
-            <Shield className="h-12 w-12 text-gold/40 mx-auto mb-3" />
-            <p className="text-gray-300 font-medium mb-2">No teams added yet</p>
-            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
-              Create your first team in the form above to get started. You can reuse these teams across all your tournaments and matches.
-            </p>
-            <p className="text-gray-600 text-xs">💡 Pro tip: Add team colors and logos for better visual identification</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {teams.map((t) => (
-              <div
-                key={t.id}
-                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
-                  editingId === t.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="h-20 w-20 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center shadow-md shadow-black/40"
-                    style={{ backgroundColor: t.color || "#e45d35" }}
-                  >
-                    {t.logo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <Image src={t.logo} alt="" className="h-full w-full object-cover" width={80} height={80} />
-                    ) : (
-                      <Shield className="h-5 w-5 text-white/70" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-semibold truncate">{t.name}</p>
-                    <p className="text-gray-500 text-xs mt-0.5">
-                      {t.code} · {t.tier}
-                      {t.owner ? ` · ${t.owner}` : ""}
-                    </p>
-                    {t.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{t.notes}</p>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => startEdit(t)} className="text-gray-500 hover:text-gold p-1.5">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-400 p-1.5">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-      <Panel>
         <div className="flex items-center justify-between gap-3 mb-4">
           <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
             <Shield className="h-4 w-4 text-gold" /> {editingId ? "Edit Team" : "Add a Team to the Pool"}
@@ -846,6 +840,69 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
           )}
         </div>
       </Panel>
+      <Panel>
+        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Team Pool</h2>
+        <p className="text-gray-500 text-xs mb-6">
+          Add your teams once and reuse them across auctions and matches — pick a pool team directly when creating a
+          match from the Matches tab, or from the auction admin panel when setting up an auction.
+        </p>
+        {!loaded ? (
+          <p className="text-gray-500 text-sm flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        ) : teams.length === 0 ? (
+          <div className="bg-gradient-to-br from-white/5 to-black/20 border border-gold/10 rounded-lg p-8 text-center">
+            <Shield className="h-12 w-12 text-gold/40 mx-auto mb-3" />
+            <p className="text-gray-300 font-medium mb-2">No teams added yet</p>
+            <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
+              Create your first team in the form above to get started. You can reuse these teams across all your tournaments and matches.
+            </p>
+            <p className="text-gray-600 text-xs">💡 Pro tip: Add team colors and logos for better visual identification</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {teams.map((t) => (
+              <div
+                key={t.id}
+                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
+                  editingId === t.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="h-20 w-20 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center shadow-md shadow-black/40"
+                    style={{ backgroundColor: t.color || "#e45d35" }}
+                  >
+                    {t.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <Image src={t.logo} alt="" className="h-full w-full object-cover" width={80} height={80} />
+                    ) : (
+                      <Shield className="h-5 w-5 text-white/70" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white text-sm font-semibold truncate">{t.name}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                      {t.code} · {t.tier}
+                      {t.owner ? ` · ${t.owner}` : ""}
+                    </p>
+                    {t.notes && <p className="text-gray-600 text-xs mt-1 italic truncate">{t.notes}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => startEdit(t)} className="text-gray-500 hover:text-gold p-1.5">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(t)} className="text-gray-500 hover:text-red-400 p-1.5">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
 
 
 
@@ -855,9 +912,14 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
 }
 
 /* ────────────────────────────────────────────────────────────────── */
-/*  PLAYER BANK — same edit-in-place pattern as Team Pool above.        */
-/*  Assigning a bank player onto a team's roster happens elsewhere      */
-/*  (the team/auction roster view), not here.                          */
+/*  PLAYER BANK — add/edit form lives in an overlay Modal (see Modal     */
+/*  component above) instead of inline at the top of the tab. "Add       */
+/*  Player" opens it empty; each row's pencil icon opens it pre-filled   */
+/*  via startEdit. Closing the modal (X, backdrop click, Escape, or      */
+/*  Cancel) always calls resetForm so a half-filled add/edit never       */
+/*  leaks into the next time it's opened. Assigning a bank player onto   */
+/*  a team's roster still happens elsewhere (the team/auction roster     */
+/*  view), not here.                                                     */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
@@ -865,6 +927,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
   const [players, setPlayers] = useState<BankPlayer[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [role, setRole] = useState<BankPlayer["role"]>("Batter")
@@ -900,6 +963,11 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     setSaveError(null)
   }
 
+  const openAddModal = () => {
+    resetForm()
+    setIsModalOpen(true)
+  }
+
   const startEdit = (player: BankPlayer) => {
     setEditingId(player.id)
     setName(player.name)
@@ -910,6 +978,12 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     setCapped(player.capped)
     setNotes(player.notes ?? "")
     setSaveError(null)
+    setIsModalOpen(true)
+  }
+
+  const closeModal = () => {
+    setIsModalOpen(false)
+    resetForm()
   }
 
   const handleSubmit = async () => {
@@ -939,6 +1013,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
           .map((p) => (p.id === editingId ? { ...p, ...patch, notes: patch.notes ?? null } : p))
           .sort((a, b) => a.name.localeCompare(b.name))
       )
+      setIsModalOpen(false)
       resetForm()
     } else {
       const player = await addBankPlayer(org.id, userId, patch)
@@ -948,6 +1023,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
         return
       }
       setPlayers((prev) => [...prev, player].sort((a, b) => a.name.localeCompare(b.name)))
+      setIsModalOpen(false)
       resetForm()
     }
   }
@@ -963,26 +1039,18 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     const success = await deleteBankPlayer(player.id)
     if (success) {
       setPlayers((prev) => prev.filter((p) => p.id !== player.id))
-      if (editingId === player.id) resetForm()
+      if (editingId === player.id) closeModal()
     }
   }
 
   return (
     <div className="space-y-6">
-            <Panel>
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <h2 className="text-lg font-bold text-white font-cinzel flex items-center gap-2">
-            <UserPlus className="h-4 w-4 text-gold" /> {editingId ? "Edit Player" : "Add a Player to the Bank"}
-          </h2>
-          {editingId && (
-            <button
-              onClick={resetForm}
-              className="flex items-center gap-1 text-xs font-cinzel uppercase tracking-wide text-gray-400 hover:text-gold"
-            >
-              <X className="h-3.5 w-3.5" /> Cancel
-            </button>
-          )}
-        </div>
+      <Modal
+        open={isModalOpen}
+        onClose={closeModal}
+        title={editingId ? "Edit Player" : "Add a Player to the Bank"}
+        icon={<UserPlus className="h-4 w-4 text-gold" />}
+      >
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
           <div className="sm:col-span-2">
             <FieldLabel>Name</FieldLabel>
@@ -1056,15 +1124,20 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             <Plus className="mr-2 h-4 w-4" />
             {isSaving ? (editingId ? "Saving…" : "Adding…") : editingId ? "Save Changes" : "Add to Bank"}
           </Button>
-          {editingId && (
-            <Button onClick={resetForm} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/15 font-bold">
-              Cancel
-            </Button>
-          )}
+          <Button onClick={closeModal} className="bg-transparent hover:bg-white/5 text-gray-300 border border-white/15 font-bold">
+            Cancel
+          </Button>
         </div>
-      </Panel>
+      </Modal>
+
       <Panel>
-        <h2 className="text-lg font-bold text-white font-cinzel mb-4">Player Bank</h2>
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+          <h2 className="text-lg font-bold text-white font-cinzel">Player Bank</h2>
+          <Button onClick={openAddModal} className="bg-gold hover:bg-gold/90 text-black font-bold">
+            <Plus className="mr-2 h-4 w-4" />
+            Add Player
+          </Button>
+        </div>
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -1074,7 +1147,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             <UserPlus className="h-12 w-12 text-gold/40 mx-auto mb-3" />
             <p className="text-gray-300 font-medium mb-2">No players in your bank</p>
             <p className="text-gray-500 text-sm mb-4 max-w-sm mx-auto">
-              Add players to your bank in the form above. You can organize them by role, origin, and mark international players.
+              Add players to your bank using the button above. You can organize them by role, origin, and mark international players.
             </p>
             <p className="text-gray-600 text-xs">💡 Pro tip: Add player photos and notes to help identify them at a glance</p>
           </div>
@@ -1083,9 +1156,7 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             {players.map((p) => (
               <div
                 key={p.id}
-                className={`flex items-center justify-between gap-3 bg-white/[0.02] border rounded-lg px-4 py-3 transition-colors ${
-                  editingId === p.id ? "border-gold/50" : "border-gold/10 hover:border-gold/40"
-                }`}
+                className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-lg px-4 py-3 transition-colors"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="relative h-18 w-18 rounded-full flex-shrink-0 border-2 border-white/10 overflow-hidden flex items-center justify-center bg-black/60 shadow-md shadow-black/40">
@@ -1123,9 +1194,6 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
           </div>
         )}
       </Panel>
-
-
-
 
       {ConfirmDialogElement}
     </div>

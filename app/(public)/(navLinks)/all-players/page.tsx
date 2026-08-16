@@ -405,12 +405,6 @@ function PlayerCard({ player: p, index }: { player: PublicPlayer; index: number 
           <h3 className="text-sm font-bold text-white font-cinzel leading-tight truncate group-hover:text-gold transition-colors">
             {p.name}
           </h3>
-          {p.country && (
-            <p className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5">
-              <Globe2 className="h-2.5 w-2.5" />
-              {p.country}
-            </p>
-          )}
         </div>
 
         <span

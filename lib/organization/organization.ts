@@ -2272,3 +2272,46 @@ export async function getTournamentMatchesForOrg(orgId: string): Promise<Friendl
     };
   });
 }
+
+export async function removeBankPlayerFromSquadBoardTeam(
+  player: TeamRosterPlayer,
+  team: AuctionTeamOption,
+  board: SquadBoard
+): Promise<AssignResult> {
+  // player.id is a `players` row id (see getTeamRoster). Verify it still
+  // actually belongs to this team/board before deleting — the id comes
+  // from client state, which could be stale if it was removed elsewhere
+  // in the meantime.
+  const { data: playerRow, error: lookupErr } = await supabase
+    .from("players")
+    .select("id, sold_to_team_id, auction_id")
+    .eq("id", player.id)
+    .maybeSingle();
+
+  if (lookupErr) {
+    console.error("removeBankPlayerFromSquadBoardTeam(lookup) failed:", lookupErr.message);
+    return { ok: false, error: "Couldn't verify this player — please try again." };
+  }
+  if (!playerRow || playerRow.sold_to_team_id !== team.id || playerRow.auction_id !== board.id) {
+    return { ok: false, error: "This player is no longer on this team — refresh and try again." };
+  }
+
+  // player_bank_assignments first (nullable FK, but leaving it behind
+  // would be a stale reference to a deleted players row — same cleanup
+  // order as removeAssignedPlayersForBankPlayer above).
+  const { error: deleteAssignErr } = await supabase
+    .from("player_bank_assignments")
+    .delete()
+    .eq("players_row_id", player.id);
+  if (deleteAssignErr) {
+    console.error("removeBankPlayerFromSquadBoardTeam(delete assignment) failed:", deleteAssignErr.message);
+  }
+
+  const { error: deleteErr } = await supabase.from("players").delete().eq("id", player.id);
+  if (deleteErr) {
+    console.error("removeBankPlayerFromSquadBoardTeam(delete player) failed:", deleteErr.message);
+    return { ok: false, error: "Couldn't remove this player from the team — please try again." };
+  }
+
+  return { ok: true };
+}

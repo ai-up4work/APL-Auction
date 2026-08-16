@@ -138,6 +138,10 @@ export default function SquadBoardResultsPage() {
       country: "",
     }));
 
+    // Players with a photo float to the top; within each group, the
+    // original load order (from `members`) is preserved (stable sort).
+    fp.sort((a, b) => Number(!!b.img) - Number(!!a.img));
+
     const ft: FlowTeam[] = Object.values(teams).map((t) => {
       const roster = fp.filter((p) => p.teamShortCode === t.code).length;
       return {
@@ -148,6 +152,9 @@ export default function SquadBoardResultsPage() {
         purse: `Members: ${roster}`,
       };
     });
+
+    // Same treatment for teams: ones with a logo come first.
+    ft.sort((a, b) => Number(!!b.logoUrl) - Number(!!a.logoUrl));
 
     return { flowPlayers: fp, flowTeams: ft };
   }, [members, teams]);
@@ -242,10 +249,12 @@ export default function SquadBoardResultsPage() {
               </div>
             </div>
           </div>
-
-          <div className="flex items-center gap-[16px] sm:gap-[30px]">
+          <div className="hidden sm:flex items-center gap-[16px] sm:gap-[30px]">
             <div className="live-badge flex items-center gap-[9px] bg-[rgba(120,85,0,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(245,158,11,0.30)]">
-              <div className="w-[6px] h-[6px] rounded-full bg-amber-400" style={{ boxShadow: "0 0 7px #f59e0b" }} />
+              <div
+                className="w-[6px] h-[6px] rounded-full bg-amber-400"
+                style={{ boxShadow: "0 0 7px #f59e0b" }}
+              />
               <span className="live-badge-text font-mono-geist text-amber-400 font-bold tracking-[0.18em] text-[9px]">
                 SQUAD BOARD
               </span>
