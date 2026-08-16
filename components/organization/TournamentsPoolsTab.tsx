@@ -807,17 +807,25 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
             />
           </div>
           <div>
+            {/* FIXED: this used to send context="tournament" with
+                contextId=poolId (org.id) — that routed every team logo into
+                tournaments/{orgId}/team-logo, the SAME family of folders
+                used for actual tournament banners/logos, keyed off the org
+                id standing in for a tournament id. Switched to the
+                dedicated "team-pool" kind (Style B, via
+                lib/uploadImage.ts), which resolves to its own
+                organizations/{orgId}/team-pool-logos folder — still
+                org-scoped and reusable, but never mixed with tournament
+                media, and no longer subject to any tournament-folder
+                cleanup logic. */}
             <ImageUploadField
-              {...({
-                context: "tournament",
-                contextId: poolId || "",
-                subType: "team-logo",
-                value: logo,
-                onChange: setLogo,
-                label: "Team Logo (optional)",
-                allowManualUrl: true,
-                description: "Upload a team logo or paste an image URL",
-              } as any)}
+              auctionId={poolId || ""}
+              kind="team-pool"
+              value={logo}
+              onChange={setLogo}
+              label="Team Logo (optional)"
+              allowManualUrl={true}
+              description="Upload a team logo or paste an image URL"
             />
           </div>
         </div>
@@ -1069,9 +1077,21 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
           </div>
         </div>
         <div className="mb-4">
+            {/* FIXED: this used to send kind="tournament", which — via
+                lib/uploadImage.ts's default subType mapping — routed every
+                player photo into tournaments/{orgId}/banner (poolId here is
+                org.id, not a real tournament id). That's the SAME folder
+                real tournament banner images live in, so every player photo
+                in the org piled into one shared folder never meant for
+                them. Combined with the (now-fixed) pre-upload folder-clear
+                bug on that "singleton" folder, each new player photo
+                upload was deleting the previous one. Switched to the
+                dedicated "player-bank" kind, which resolves to its own
+                organizations/{orgId}/player-bank-photos folder — org-scoped
+                and reusable, but never mixed with tournament media. */}
             <ImageUploadField
               auctionId={poolId || ""}
-              kind="tournament"
+              kind="player-bank"
               value={img}
               onChange={setImg}
               label="Photo (optional)"

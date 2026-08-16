@@ -1,4 +1,4 @@
-// app/api/uploads/route.ts
+// app/api/uploads/route.ts (placeholder marker)
 //
 // Handles image uploads for the entire application. Supports multiple contexts:
 //   - Auction Images:     {auctionId}/Auction-Images/{team|player}-images/{filename}
@@ -20,26 +20,29 @@
 //   NEXT_PUBLIC_SUPABASE_URL
 //
 // AUTOMATIC OLD-IMAGE CLEANUP:
-// Two complementary mechanisms:
 //
-// 1. `oldImageUrl` / `oldPath` (optional form fields) — the client already
-//    holds the current image's URL as its `value` state before uploading a
-//    replacement. Pass it along and the API deletes exactly that file
-//    after the new upload succeeds. This works for EVERY context,
-//    including auction team-images / player-images / match player-images,
-//    since it identifies the specific file being replaced rather than
-//    guessing based on folder contents.
+// `oldImageUrl` / `oldPath` (optional form fields) — the client already
+// holds the current image's URL as its `value` state before uploading a
+// replacement. Pass it along and the API deletes exactly that file AFTER
+// the new upload has been confirmed to succeed. This works for EVERY
+// context, including auction team-images / player-images / match
+// player-images, since it identifies the specific file being replaced
+// rather than guessing based on folder contents.
 //
-// 2. Folder-clear fallback — for contexts where a folder inherently holds
-//    exactly one image (tournament banner/logo, organization logo, award
-//    image, auction logo), the API also wipes that folder before writing
-//    the new file. This is a safety net for callers that haven't been
-//    updated to send oldImageUrl yet; it's only safe because nothing else
-//    is ever stored alongside it in that folder. It is NOT applied to
-//    team-images / player-images / match player-images, since those
-//    folders hold many different entities' images together — clearing
-//    them would delete images that were never meant to be replaced.
-
+// FIXED (orphaned DB references / "NoSuchKey" on images that used to
+// exist): this used to also wipe the ENTIRE destination folder via
+// clearFolder() BEFORE attempting the new upload, for any "singleton"
+// context (tournament banner/logo, organization logo, award image, legacy
+// auction logo). If the upload itself then failed for any reason
+// (network blip, transient Supabase error, request cancelled by
+// navigating away mid-upload, etc.), the old file was already deleted —
+// but the caller never received a new URL, so whatever DB row was
+// pointing at the old image kept referencing a file that no longer
+// existed. That is precisely the "image shows in the bucket dashboard
+// history but the stored URL now 404s/NoSuchKeys" symptom. The
+// pre-upload clearFolder() call has been removed entirely; the existing
+// precise oldRef delete below already does this cleanup safely, since it
+// only ever runs once the new file has been written successfully.
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -47,12 +50,6 @@ const BUCKET = "Valiant-League-Images";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"];
-
-// Context/subType combinations where the destination folder is guaranteed
-// to hold exactly one logical image, so it's safe to clear-then-write.
-// (Legacy auctionId+kind team/player folders and match player-images are
-// deliberately NOT here — see comment above.)
-const SINGLETON_FOLDER_TYPES = new Set(["tournament", "organization", "award"]);
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -123,22 +120,6 @@ function normalizeLegacyKind(raw: unknown): "team" | "player" | "logo" | null {
   return null;
 }
 
-// Deletes every existing file directly inside `folder`. Only ever called
-// for folders known to hold a single logical image (see
-// SINGLETON_FOLDER_TYPES). Best-effort: a listing/delete failure here
-// should not block the new upload from proceeding.
-async function clearFolder(supabase: ReturnType<typeof admin>, folder: string) {
-  const { data, error } = await supabase.storage.from(BUCKET).list(folder);
-  if (error || !data || data.length === 0) return;
-
-  // list() can return a placeholder entry for "empty" folders; filter to
-  // real files only (they have an id in supabase-js's storage response).
-  const toRemove = data.filter((f) => f.id).map((f) => `${folder}/${f.name}`);
-  if (toRemove.length > 0) {
-    await supabase.storage.from(BUCKET).remove(toRemove);
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -154,7 +135,9 @@ export async function POST(req: NextRequest) {
 
     // Precise old-image reference, when the caller has one (this is the
     // component's current `value` — see comment at top of file). May
-    // point at a different bucket than BUCKET (e.g. older images).
+    // point at a different bucket than BUCKET (e.g. older images). Only
+    // ever used to delete AFTER the new upload has succeeded — see fix
+    // note above.
     const oldRef =
       resolveStorageRef(formData.get("oldPath")) ??
       resolveStorageRef(formData.get("oldImageUrl"));
@@ -177,7 +160,6 @@ export async function POST(req: NextRequest) {
     }
 
     let folder: string;
-    let clearOldBeforeUpload = false;
 
     // Handle new multi-context API
     if (context && contextId) {
@@ -190,25 +172,18 @@ export async function POST(req: NextRequest) {
 
       if (contextType === "auction") {
         folder = `${contextId}/Auction-Images/${finalSubType}`;
-        // Multi-item folder (many teams/players share it) — do NOT clear.
       } else if (contextType === "tournament") {
         folder = `tournaments/${contextId}/${finalSubType}`;
-        clearOldBeforeUpload = true;
       } else if (contextType === "organization") {
         folder = `organizations/${contextId}/${finalSubType}`;
-        clearOldBeforeUpload = true;
       } else if (contextType === "award") {
         const awardId = formData.get("awardId") as string || "default";
         folder = `tournaments/${contextId}/awards/${awardId}`;
-        clearOldBeforeUpload = true;
       } else if (contextType === "match") {
         folder = `matches/${contextId}/${finalSubType}`;
-        // Multi-item folder (many players share it) — do NOT clear.
       } else {
         return NextResponse.json({ error: "Invalid context" }, { status: 400 });
       }
-
-      clearOldBeforeUpload = clearOldBeforeUpload && SINGLETON_FOLDER_TYPES.has(contextType);
     } else if (auctionId) {
       // Legacy API (backward compatibility)
       if (typeof auctionId !== "string" || !auctionId.trim()) {
@@ -224,11 +199,9 @@ export async function POST(req: NextRequest) {
       }
 
       if (kind === "logo") {
-        // A single auction logo — safe to treat as singleton.
         folder = `${auctionId}/Auction-Images/logos`;
-        clearOldBeforeUpload = true;
       } else {
-        // team-images / player-images hold many entities — do NOT clear.
+        // team-images / player-images hold many entities.
         const legacyFolder = kind === "team" ? "team-images" : "player-images";
         folder = `${auctionId}/Auction-Images/${legacyFolder}`;
       }
@@ -238,10 +211,11 @@ export async function POST(req: NextRequest) {
 
     const supabase = admin();
 
-    if (clearOldBeforeUpload) {
-      await clearFolder(supabase, folder);
-    }
-
+    // Upload the NEW file first. Nothing existing gets touched until this
+    // has been confirmed to succeed — see fix note at the top of this file
+    // for why the old "clear the folder before uploading" behavior was
+    // removed (it could delete a still-referenced image out from under a
+    // DB row if the subsequent upload then failed).
     const fileName = safeFileName(file.name);
     const path = `${folder}/${fileName}`;
     const arrayBuffer = await file.arrayBuffer();
@@ -259,12 +233,13 @@ export async function POST(req: NextRequest) {
 
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
-    // Best-effort precise cleanup: delete the exact old file the caller
+    // Precise, post-success cleanup: delete the exact old file the caller
     // told us about, from whichever bucket it's actually in (older images
     // may live in a different bucket than BUCKET), as long as it isn't
-    // the file we just wrote. This runs AFTER the new upload succeeds, so
-    // a failure here never leaves the user without an image — it just
-    // leaves an orphaned file.
+    // the file we just wrote. This runs ONLY after the new upload
+    // succeeds, so a failure here never leaves the user without an image
+    // — it just leaves an orphaned file behind (safe/inert, unlike
+    // deleting up front).
     let oldImageDeleted = false;
     let oldImageDeleteError: string | undefined;
 
@@ -282,7 +257,6 @@ export async function POST(req: NextRequest) {
       imageUrl: publicUrlData.publicUrl,
       url: publicUrlData.publicUrl,
       path,
-      oldImageCleared: clearOldBeforeUpload,
       ...(oldRef ? { oldImageDeleted, oldImageDeleteError } : {}),
     });
   } catch (e: any) {

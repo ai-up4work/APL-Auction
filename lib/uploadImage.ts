@@ -11,7 +11,25 @@ export interface UploadResult {
   path: string; // storage path — keep this if you want to support deleting/replacing later
 }
 
-export type UploadKind = "team" | "player" | "logo" | "tournament" | "organization" | "match" | "award";
+export type UploadKind =
+  | "team"
+  | "player"
+  | "logo"
+  | "tournament"
+  | "organization"
+  | "match"
+  | "award"
+  // FIXED: Player Bank and Team Pool used to be uploaded with
+  // kind="tournament", which routed them into
+  // tournaments/{orgId}/banner — the SAME folder as actual tournament
+  // banner images, keyed off the org id used as a stand-in "tournament
+  // id". Every player/team image in the org piled up in one folder never
+  // meant for them. These two dedicated kinds give Player Bank photos and
+  // Team Pool logos their own folders instead, still org-scoped (they're
+  // reusable across the whole org, not any one tournament/auction) but
+  // never mixed with tournament media.
+  | "player-bank"
+  | "team-pool";
 
 // Kinds in this set map to the route's LEGACY branch — sent as
 // auctionId + kind, unchanged from before. Everything else maps to the
@@ -29,6 +47,12 @@ const DEFAULT_SUBTYPE: Partial<Record<UploadKind, string>> = {
   organization: "logo",
   match: "banner",
   award: "award-images",
+  // Both live under the "organization" context (see CONTEXT_FOR_KIND
+  // below) since they're reusable at the org level, not tied to one
+  // tournament — the subType is what actually separates their folders
+  // from the org logo and from each other.
+  "player-bank": "player-bank-photos",
+  "team-pool": "team-pool-logos",
 };
 
 // Maps our UploadKind to the route's `context` value. Only relevant for
@@ -38,6 +62,11 @@ const CONTEXT_FOR_KIND: Partial<Record<UploadKind, string>> = {
   organization: "organization",
   match: "match",
   award: "award",
+  // Both map to "organization" — see DEFAULT_SUBTYPE comment above for
+  // why context alone isn't enough to keep these separate from the org
+  // logo folder.
+  "player-bank": "organization",
+  "team-pool": "organization",
 };
 
 export interface UploadOptions {
@@ -49,18 +78,19 @@ export interface UploadOptions {
   // The image this upload is replacing — pass the field's current
   // `value` (public URL) or a raw storage path here. When present, the
   // API deletes exactly that file after the new upload succeeds. This is
-  // what makes "replace" auto-clean-up work even for team-images /
-  // player-images folders that hold many different entities at once,
-  // since it targets the specific file rather than the whole folder.
+  // what makes "replace" auto-clean-up work even for folders that hold
+  // many different entities at once, since it targets the specific file
+  // rather than the whole folder.
   oldImageUrl?: string;
 }
 
 export async function uploadAuctionImage(
   // For legacy kinds (team/player/logo) this is the auction id, exactly
-  // as before. For new-style kinds (tournament/organization/match/award)
-  // this is that entity's own id (tournamentId/orgId/matchId/tournamentId
-  // respectively) — same parameter, different meaning depending on kind,
-  // so every existing call site keeps working unchanged.
+  // as before. For new-style kinds (tournament/organization/match/award/
+  // player-bank/team-pool) this is that entity's own id
+  // (tournamentId/orgId/matchId/orgId/orgId respectively) — same
+  // parameter, different meaning depending on kind, so every existing
+  // call site keeps working unchanged.
   auctionOrContextId: string,
   kind: UploadKind,
   file: File,
@@ -121,3 +151,8 @@ export async function deleteAuctionImage(pathOrUrl: string): Promise<void> {
 export const uploadTeamLogo    = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "team",   file);
 export const uploadPlayerPhoto = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "player", file);
 export const uploadAuctionLogo = (auctionId: string, file: File) => uploadAuctionImage(auctionId, "logo",   file);
+
+// New convenience wrappers for the org-scoped Player Bank / Team Pool
+// uploads — orgId is the contextId here, not an auction id.
+export const uploadPlayerBankPhoto = (orgId: string, file: File) => uploadAuctionImage(orgId, "player-bank", file);
+export const uploadTeamPoolLogo    = (orgId: string, file: File) => uploadAuctionImage(orgId, "team-pool",   file);

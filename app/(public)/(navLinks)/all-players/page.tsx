@@ -382,7 +382,7 @@ function PlayerCard({ player: p, index }: { player: PublicPlayer; index: number 
         (index % 6) + 1
       } hover:border-gold/80 transition-all duration-300 flex flex-col`}
     >
-      <div className="relative h-36 sm:h-40 border-b border-gold/20 bg-black/60">
+      <div className="relative h-40 sm:h-40 border-b border-gold/20 bg-black/60">
         <Image src={p.img || "/placeholder.svg"} alt={p.name} fill className="object-cover" />
 
         <span
