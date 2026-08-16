@@ -279,7 +279,7 @@ function FolderCard({
   deleting: boolean
 }) {
   return (
-    <div className="relative group pt-3 border-2 border-transparent group-hover:border-gold/40 transition-all duration-300">
+    <div className="relative group pt-3 border-2 border-transparent transition-all duration-300">
       {/* Unified hover outline — a ring drawn slightly LARGER than the card
           (offset outward on all sides), not the same size sitting behind
           it. It has to be bigger: the card is opaque (bg-black/50 + its
