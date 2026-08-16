@@ -80,7 +80,7 @@ export function FlowPlayerCard({
         if (isClickable) onClick?.();
       }}
       className={[
-        "glass-panel p-1.5 sm:p-3 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
+        "glass-panel p-0.5 sm:p-1 rounded-xl flex items-center gap-3 transition-all duration-300 relative overflow-hidden",
         isLocked ? "opacity-40 cursor-not-allowed" : isClickable ? "cursor-pointer" : "",
         isHighlighted
           ? "ring-1 ring-theme-orange shadow-[0_0_15px_rgba(201,151,31,0.3)] bg-white/10"
@@ -95,13 +95,13 @@ export function FlowPlayerCard({
     >
       <div
         className={[
-          "w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden flex-shrink-0 ring-2 sm:ring-0",
+          "w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 ring-2 sm:ring-0",
           STATUS_RING[status],
           isUnsoldP ? "grayscale opacity-40" : "bg-surface-container-highest",
         ].join(" ")}
       >
         {img ? (
-          <Image src={img} className="w-full h-full object-cover" alt="" width={40} height={40} />
+          <Image src={img} className="w-full h-full object-cover" alt="" width={64} height={64} />
         ) : (
           <div className="w-full h-full bg-surface-container-highest" />
         )}
