@@ -575,9 +575,20 @@ function LockedTabPlaceholder({
 // ─────────────────────────────────────────────────────────────
 // POINTS TABLE PANEL — card-row standings with a visible
 // qualification line, per-team NRR bar, and form pills.
+//
+// FIXED: standings previously sorted on `points` alone, so teams
+// tied on points kept whatever order the underlying data happened
+// to be in instead of being separated by the standard cricket
+// tiebreaker. The sort now falls back to NRR (higher first) whenever
+// two teams are level on points.
 // ─────────────────────────────────────────────────────────────
 function PointsTablePanel({ rows }: { rows: PointsRow[] }) {
-  const sorted = [...rows].sort((a, b) => b.points - a.points)
+  const sorted = [...rows].sort((a, b) => {
+    const pointsDiff = b.points - a.points
+    if (pointsDiff !== 0) return pointsDiff
+    // Tied on points -> higher NRR ranks first
+    return (parseFloat(b.nrr) || 0) - (parseFloat(a.nrr) || 0)
+  })
   const maxPoints = Math.max(1, ...sorted.map((r) => r.points))
   const QUALIFY_COUNT = 4
 
