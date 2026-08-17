@@ -171,8 +171,8 @@ function economy(runsConceded: number, legalBalls: number): string {
 function deriveOutcome(resultText: string | null, playerTeamName: string): MatchOutcome {
   if (!resultText) return null
   const t = resultText.toLowerCase()
-  if (t.includes("tied") || t.includes("draw") || t.includes("no result")) return "tied"
-  if (!t.includes("won")) return null
+  if (t.includes("tied") || t.includes("draw") || t.includes("no result") || t.includes("abandoned")) return "tied"
+  if (!t.includes("won") && !t.includes("win")) return null
   return t.includes(playerTeamName.toLowerCase()) ? "won" : "lost"
 }
 
@@ -530,6 +530,7 @@ interface PlayerBadge {
 }
 
 function derivePlayerBadges(player: PlayerDetail, matches: PlayerMatchSummary[]): PlayerBadge[] {
+  console.log(matches)
   const centuryMaker = matches.some((m) => (m.batting?.runs ?? 0) >= 100)
   const hatTrickHero = matches.some((m) => m.hatTrick)
   const fiftyWicketClub = (player.wickets ?? 0) >= 50
