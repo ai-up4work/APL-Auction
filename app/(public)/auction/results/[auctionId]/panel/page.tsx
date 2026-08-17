@@ -118,7 +118,30 @@ function buildResults(auction: any, completedLots: AuctionLot[]) {
   }
 
   const soldLots = completedLots.filter((l) => l.status === "sold");
-  const unsoldLots = completedLots.filter((l) => l.status === "unsold");
+  const soldPlayerIds = new Set(soldLots.map((l) => l.playerId));
+
+  // Unsold = total players who actually went through the live auction pool,
+  // minus however many of them ended up sold. "Went through the pool" means
+  // no ownerTeamCode — captains and manual roster-adds never had a lot at
+  // all, so they're excluded from both sides of the subtraction (same
+  // convention the captain-seeding loop above already uses). This doesn't
+  // depend on the players.is_unsold_final flag being kept perfectly in
+  // sync — it's just total minus sold, computed directly from the same
+  // ground-truth data (auction.players + completedLots) everything else on
+  // this page already uses.
+  const auctionablePlayers = ((auction?.players ?? []) as any[]).filter((p) => !p.ownerTeamCode);
+  const unsoldEntries = auctionablePlayers
+    .filter((p) => !soldPlayerIds.has(p.supabaseId))
+    .map((p) => {
+      const lot = completedLots.find((l) => l.playerId === p.supabaseId && l.status === "unsold");
+      return {
+        key: p.supabaseId ?? String(p.id),
+        playerName: p.name as string,
+        playerRole: (p.role ?? "—") as string,
+        playerCountry: (p.country ?? "") as string,
+        lotNumber: lot?.lotNumber as number | undefined,
+      };
+    });
 
   for (const lot of soldLots) {
     const team = lot.winningTeamCode ? teamByCode.get(lot.winningTeamCode) : undefined;
@@ -142,7 +165,7 @@ function buildResults(auction: any, completedLots: AuctionLot[]) {
     team.roster.sort((a, b) => b.price - a.price);
   }
 
-  return { teams, soldLots, unsoldLots };
+  return { teams, soldLots, unsoldEntries };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -183,8 +206,8 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
     setRefreshing(false);
   }
 
-  const { teams, soldLots, unsoldLots } = useMemo(
-    () => (auction ? buildResults(auction, completedLots) : { teams: [], soldLots: [], unsoldLots: [] }),
+  const { teams, soldLots, unsoldEntries } = useMemo(
+    () => (auction ? buildResults(auction, completedLots) : { teams: [], soldLots: [], unsoldEntries: [] }),
     [auction, completedLots]
   );
 
@@ -211,11 +234,11 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
           team.name,
         ])
       ),
-      ...unsoldLots.map((l) => [
-        String(l.lotNumber),
+      ...unsoldEntries.map((l) => [
+        l.lotNumber != null ? String(l.lotNumber) : "—",
         l.playerName,
         l.playerRole,
-        l.playerCountry ?? "",
+        l.playerCountry,
         "Unsold",
         "",
         "",
@@ -292,6 +315,11 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
           backdrop-filter: blur(20px);
           border: 1px solid var(--color-border-overlay, rgba(255,255,255,0.08));
         }
+        .custom-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
       `}</style>
 
       {/* Header */}
@@ -332,7 +360,7 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-4">
         {[
           { label: "Players Sold", value: soldLots.length, icon: "gavel" },
-          { label: "Unsold (Final)", value: unsoldLots.length, icon: "block" },
+          { label: "Unsold", value: unsoldEntries.length, icon: "block" },
           { label: "Total Spent", value: `${fmtPts(totalSpent)} pts`, icon: "payments" },
           {
             label: "Highest Sale",
@@ -421,7 +449,7 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
                     </div>
                   </div>
 
-                  <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+                  <div className="max-h-64 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                     {team.roster.length === 0 && (
                       <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-widest py-4 text-center">
                         No players yet
@@ -492,12 +520,12 @@ function ResultsPanelContent({ auctionId }: { auctionId: string }) {
                       </tr>
                     );
                   })}
-                {unsoldLots
+                {unsoldEntries
                   .slice()
-                  .sort((a, b) => a.lotNumber - b.lotNumber)
+                  .sort((a, b) => (a.lotNumber ?? 0) - (b.lotNumber ?? 0))
                   .map((l) => (
-                    <tr key={l.id} className="border-t border-white/5 hover:bg-white/[0.03]">
-                      <td className="px-4 py-2.5 opacity-60">#{l.lotNumber}</td>
+                    <tr key={l.key} className="border-t border-white/5 hover:bg-white/[0.03]">
+                      <td className="px-4 py-2.5 opacity-60">{l.lotNumber != null ? `#${l.lotNumber}` : "—"}</td>
                       <td className="px-4 py-2.5 font-archivo font-bold uppercase">{l.playerName}</td>
                       <td className="px-4 py-2.5 opacity-70">{l.playerRole}</td>
                       <td className="px-4 py-2.5 opacity-50">—</td>
