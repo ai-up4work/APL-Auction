@@ -66,6 +66,15 @@ export interface Fixture {
    *  requires a decided winner, carried any score information). */
   team1Score?: number
   team2Score?: number
+  /** Real match number from the live-scoring engine's
+   *  `matches.match_setup.matchNumber`, when available (see
+   *  getFixturesForTournament in lib/tournament/tournament.ts). Used to
+   *  sort schedule cards by the actual match number instead of whatever
+   *  arbitrary order the DB returns rows in, and can be used to label a
+   *  card ("MATCH {matchNumber}") instead of its array index. Undefined
+   *  for fixtures that were never played through the live engine (pure
+   *  bracket slots that only have round/position). */
+  matchNumber?: number
   date: string
   time: string
   venue: string
@@ -929,26 +938,4 @@ export function getMatchById(tournamentSlug: string, matchId: string): BracketMa
 // bracket entries that don't have a built-out match page yet).
 export function hasMatchDetail(matchId: string): boolean {
   return matchId in matchDetails
-}
-
-
-export interface TournamentExtras {
-  liveMatch?: LiveMatch
-  pointsTable?: PointsRow[]
-  fixtures?: Fixture[]
-  bracket?: BracketMatch[]
-  bracketFormat?: "single" | "double"
-  bracketRounds?: Round[]
-  doubleElimData?: DoubleElimData
-  squads?: Squad[]
-  runsLeaderboard?: LeaderboardRow[]
-  wicketsLeaderboard?: LeaderboardRow[]
-  awards?: AwardEntry[]
-  /** Series-wide per-player batting/bowling leaderboards, aggregated
-   *  from every `balls` row across the tournament's matches — see
-   *  getTournamentStats in data/match-data.ts. Populated at the page
-   *  level (app/(protected)/tournaments/[id]/page.tsx), not part of
-   *  the static showcase extras above. */
-  battingStats?: PlayerStatRow[]
-  bowlingStats?: BowlingStatRow[]
 }

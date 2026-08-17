@@ -789,6 +789,7 @@ export interface BracketTeamFallback {
   venue?: string;
   date?: string;
   time?: string;
+  matchNumber?: string;
 }
 
 /** Same self-healing pattern as backfillLogosFromPool/backfillImagesFromBank
@@ -2269,6 +2270,7 @@ export async function getTournamentMatchesForOrg(orgId: string): Promise<Friendl
       venue: setup.venue || fallback?.venue || null,
       date: setup.date || fallback?.date || null,
       time: setup.time || fallback?.time || null,
+      matchNumber: setup.matchNumber || fallback?.matchNumber || null
     };
   });
 }
