@@ -16,6 +16,18 @@
 // tournament until either (a) RLS grants anon SELECT on the fields needed
 // for a public tournament page, or (b) this is switched to a cookie-based
 // server client instead.
+//
+// SHARED SQUAD SOURCE (see also data/match-data.ts):
+//   `buildSquad` and `getSquadsByTeamIds` below are exported so that
+//   data/match-data.ts's getMatchDetailById can pull a bracket-linked
+//   match's two squads from the EXACT same teams -> players -> rules
+//   pipeline the tournament detail page uses, instead of maintaining a
+//   second, separately-drifting resolution of the same data. See the
+//   SQUAD RESOLUTION note at the top of data/match-data.ts for the
+//   history of why match_setup.squads[].teamId matching was unreliable
+//   in the first place — getSquadsByTeamIds sidesteps that entirely for
+//   any match whose teams resolved via bracket_matches (i.e. have real
+//   teams.id UUIDs).
 // ─────────────────────────────────────────────────────────────────────────────
 import { supabase } from "@/lib/supabase";
 import type { Tournament, BracketMatch, Squad } from "@/data/tournament-data";
@@ -410,28 +422,6 @@ async function getAwardsForTournament(tournamentId: string) {
   }
 }
 
-/**
- * Points table, read directly from `standings` — it already carries a
- * direct tournament_id FK plus computed nrr/form, no join through auctions
- * needed. This is match-result-derived data, not something the edit page
- * writes to; it's populated by recomputeStandingsForTournament (see
- * lib/tournament/standings.ts) as matches complete.
- *
- * FIXED: `team_id` is now selected and returned explicitly as `id`.
- * Previously this only returned `short` (teams.code) and `team` (teams.name)
- * for identity — but teams.code is NOT guaranteed unique across the whole
- * `teams` table (different auctions can each create their own team with
- * the same short code, e.g. two unrelated "KKR" teams from two different
- * auctions both ending up in this tournament's standings). The client
- * (PointsTablePanel/PointsTableRow in tournament-detail-client.tsx) was
- * using `row.short` as its React list key, so two teams sharing a code
- * produced a duplicate-key warning and undefined render behavior even
- * though the underlying `standings` rows were each perfectly valid and
- * distinct (different team_id, different stats). `team_id` is the only
- * field on this row that's actually guaranteed unique — it's the FK this
- * whole join is built on — so it's now returned as `id` for the client to
- * key on instead.
- */
 /**
  * Points table, read directly from `standings` — it already carries a
  * direct tournament_id FK plus computed nrr/form, no join through auctions
@@ -875,10 +865,11 @@ export async function getTournamentById(id: string): Promise<Tournament | null> 
  * lookup came up empty, which hid squads entirely for those tournaments even
  * though bracket data clearly existed. Now, if no linked auction is found,
  * it falls back to pulling the distinct teams referenced by this
- * tournament's `bracket_matches` directly, and fetches each team's roster
- * from `players` scoped to that team's own `auction_id` (teams always
- * belong to *some* auction — `teams.auction_id` is NOT NULL — it just isn't
- * necessarily one linked back to this tournament).
+ * tournament's `bracket_matches` directly, and delegates to
+ * getSquadsByTeamIds (below) for the actual teams -> players -> rules ->
+ * buildSquad pipeline — the SAME function data/match-data.ts calls for a
+ * single bracket-linked match's two teams, so the two pages can never
+ * silently drift in what they show for a given team.
  *
  * TEAM SUBSET: if the tournament has an explicit team selection saved in
  * `tournament_teams` (see saveTournamentTeamSelection in
@@ -995,54 +986,87 @@ export async function getSquadsForTournament(tournamentId: string): Promise<Squa
   }
   if (teamIds.size === 0) return [];
 
-  const idList = [...teamIds];
+  // Delegate to the shared team-id -> squads pipeline (teams -> players ->
+  // rules -> buildSquad) — the SAME function data/match-data.ts calls
+  // directly for a single match's two teams. Previously this fetched
+  // teams/players/rules inline here as a second, hand-duplicated copy of
+  // that same logic; now there's exactly one implementation.
+  const idList = selectedIds
+    ? [...teamIds].filter((teamId) => selectedIds.has(teamId))
+    : [...teamIds];
+
+  return getSquadsByTeamIds(idList);
+}
+
+/**
+ * Same underlying source as getSquadsForTournament's bracket-derived
+ * fallback (teams -> players.sold_to_team_id -> rules.total_points ->
+ * buildSquad), but scoped directly to a given set of `teams.id` values
+ * instead of resolved from a tournament_id via bracket_matches.
+ *
+ * This is what lets a single match (data/match-data.ts's
+ * getMatchDetailById) pull its two teams' squads from the EXACT same
+ * place the tournament detail page does, without needing to know which
+ * tournament the match belongs to — it only needs the two teams' real
+ * `teams.id` UUIDs, which it already has once a match resolves through
+ * `bracket_matches`.
+ *
+ * Only meaningful for teams with a real teams.id (bracket-linked
+ * matches/teams) — there is no equivalent shared source for standalone
+ * teams that only ever exist as a name/short-code pair embedded in
+ * match_setup.
+ */
+export async function getSquadsByTeamIds(teamIds: string[]): Promise<Squad[]> {
+  if (teamIds.length === 0) return [];
 
   const { data: teams, error: teamsErr } = await supabase
     .from("teams")
     .select("id, code, name, color, tier, owner, logo, remaining_purse, auction_id")
-    .in("id", idList);
+    .in("id", teamIds);
 
   if (teamsErr) {
-    console.error("getSquadsForTournament(fallback teams) failed:", teamsErr.message);
+    console.error("getSquadsByTeamIds(teams) failed:", teamsErr.message);
     return [];
   }
   if (!teams || teams.length === 0) return [];
 
-  const includedTeams = selectedIds ? teams.filter((t) => selectedIds.has(t.id)) : teams;
-
   // Teams here may belong to more than one auction_id (rare, but the
   // schema allows it), so fetch players and rules per distinct auction_id
   // rather than assuming a single shared one.
-  const auctionIds = [...new Set(includedTeams.map((t) => t.auction_id))];
+  const auctionIds = [...new Set(teams.map((t) => t.auction_id))];
 
   const [{ data: players, error: playersErr }, { data: rulesRows, error: rulesErr }] = await Promise.all([
-  supabase
-    .from("players")
-    .select("name, role, img, sold_to_team_id, owner_team_code, auction_id")
-    .in("auction_id", auctionIds)
-    .not("sold_to_team_id", "is", null),
+    supabase
+      .from("players")
+      .select("name, role, img, sold_to_team_id, owner_team_code, auction_id")
+      .in("auction_id", auctionIds)
+      .not("sold_to_team_id", "is", null),
     supabase.from("rules").select("auction_id, total_points").in("auction_id", auctionIds),
   ]);
 
-  if (playersErr) console.error("getSquadsForTournament(fallback players) failed:", playersErr.message);
-  if (rulesErr) console.error("getSquadsForTournament(fallback rules) failed:", rulesErr.message);
+  if (playersErr) console.error("getSquadsByTeamIds(players) failed:", playersErr.message);
+  if (rulesErr) console.error("getSquadsByTeamIds(rules) failed:", rulesErr.message);
 
   const totalPurseByAuction = new Map<string, number>();
   for (const r of rulesRows ?? []) totalPurseByAuction.set(r.auction_id, r.total_points);
 
   const rosterFor = (teamId: string) => (players ?? []).filter((p) => p.sold_to_team_id === teamId);
 
-  return includedTeams.map((t) =>
+  return teams.map((t) =>
     buildSquad(t, rosterFor(t.id), totalPurseByAuction.get(t.auction_id) ?? 50000)
   );
 }
 
 /**
- * Shared shaping logic for one team + its sold players into a Squad,
- * used by both the linked-auction path and the bracket-derived fallback
- * above so the two paths can't silently drift in shape.
+ * Shared shaping logic for one team + its sold players into a Squad, used
+ * by getSquadsForTournament's primary (linked-auction) path and by
+ * getSquadsByTeamIds above — which is itself used both by
+ * getSquadsForTournament's bracket-derived fallback AND directly by
+ * data/match-data.ts for a single match's two teams. Exported so that
+ * call site (and any other future one) can't silently drift from this
+ * shaping logic by re-implementing it.
  */
-function buildSquad(
+export function buildSquad(
   t: { id: string; code: string; name: string; color?: string | null; tier?: string | null; owner?: string | null; logo?: string | null; remaining_purse?: number | null },
   roster: { name: string; role?: string | null; img?: string | null; sold_to_team_id: string | null; owner_team_code?: string | null }[],
   totalPurse: number

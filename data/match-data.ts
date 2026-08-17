@@ -140,9 +140,53 @@
 //   `matches` (id + display label per match) plus
 //   `battingStatsByMatch` / `bowlingStatsByMatch` keyed by match id, so
 //   a caller can offer a match filter without a second round-trip.
+//
+// SQUAD RESOLUTION (fixed, then unified with the tournament page):
+//   buildSquads() previously matched `match_setup.squads[].teamId`
+//   against only three candidates: the literal strings "team1"/"team2",
+//   `match_setup.team{1,2}.short`, and the team's display name. For a
+//   bracket-linked match, the ONLY real team identity is `teams.id` (a
+//   UUID) — resolved via `bracket_matches.team_a_id`/`team_b_id` — and
+//   that UUID is very likely what got written into `match_setup.squads[].teamId`
+//   at save time, since it's the identity the rest of the system treats
+//   as canonical for a bracket match. None of the three old candidates
+//   ever matched a UUID, so the squad silently fell through to
+//   "Unknown Team" every time, with no error surfaced.
+//
+//   That's now moot for bracket-linked matches: rather than trying to
+//   parse match_setup.squads[].teamId at all, buildSquads calls
+//   getSquadsByTeamIds (lib/tournament/tournament.ts) with the two
+//   resolved teams.id UUIDs — the EXACT same teams -> players -> rules ->
+//   buildSquad pipeline the tournament detail page's Squads tab uses.
+//   This is what keeps a team's squad identical whether it's viewed from
+//   the tournament page or from one of that team's individual match
+//   pages, instead of maintaining two resolutions of the same data that
+//   could silently drift apart.
+//
+//   For STANDALONE matches (no bracket_matches row), there is no
+//   tournament-level squad source to point at — teamA.id/teamB.id are
+//   just short codes, not real teams.id values — so those still resolve
+//   squads the original way:
+//     1. buildSquads matches match_setup.squads[].teamId against the
+//        resolved teamA.id/teamB.id first, then falls back to
+//        "team1"/"team2", match_setup.team{1,2}.short, and the team's
+//        display name. If none of those match, it falls back to array
+//        position (match_setup.squads is always written as exactly two
+//        squads, so squads[0] = teamA, squads[1] = teamB) instead of
+//        labeling the team "Unknown Team".
+//     2. If match_setup.squads is missing entirely, OR a resolved squad
+//        has zero players (empty array / upstream field-name mismatch),
+//        buildSquads falls back to the auction roster itself —
+//        `players` rows where `sold_to_team_id` matches the team's real
+//        UUID (only meaningful for bracket-linked matches, since that's
+//        the only case where teamA.id/teamB.id are genuine teams.id
+//        values — for standalone matches this fallback correctly
+//        produces nothing).
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
+import { getSquadsByTeamIds } from "@/lib/tournament/tournament"
+import type { Squad } from "@/data/tournament-data"
 
 // ─────────────────────────────────────────────────────────────
 // PUBLIC TYPES
@@ -585,8 +629,134 @@ function parseMatchSetup(raw: unknown): MatchSetup | null {
   return setup as MatchSetup
 }
 
-async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: string): Promise<MatchSquad[]> {
-  if (!setup.squads || setup.squads.length === 0) return []
+/**
+ * Converts one tournament-shaped Squad (from
+ * lib/tournament/tournament.ts's getSquadsByTeamIds — the same object
+ * shape the tournament detail page's Squads tab renders) into this
+ * file's MatchSquad shape.
+ *
+ * There's no playing-XI concept at the teams/players source level (see
+ * buildSquad in lib/tournament/tournament.ts — every rostered player is
+ * just "on the team", full stop), so every player here is marked
+ * xi: true, same trade-off buildSquadsFromAuctionRoster below already
+ * made for its own auction-roster fallback.
+ */
+function squadToMatchSquad(s: Squad): MatchSquad {
+  return {
+    team: s.team,
+    captain: s.captain,
+    players: (s.players ?? []).map((p) => ({
+      name: p.name,
+      role: p.role ?? "",
+      xi: true,
+      img: p.image,
+    })),
+  }
+}
+
+/**
+ * Fallback squad source, used when `match_setup.squads` is missing
+ * entirely, or a resolved squad ends up with zero players. Pulls the
+ * real auction roster straight from `players.sold_to_team_id`.
+ *
+ * IMPORTANT: this only produces real data for BRACKET-LINKED matches,
+ * where teamAId/teamBId are genuine `teams.id` UUIDs (resolved via
+ * `bracket_matches.team_a_id`/`team_b_id` in getMatchDetailById). For
+ * standalone matches, teamAId/teamBId are just short codes (e.g. "KBG"),
+ * which won't match any `players.sold_to_team_id` row — in that case
+ * this correctly returns empty squads, since there genuinely is no
+ * auction roster to fall back to.
+ *
+ * Because this is the auction roster rather than a per-match selection,
+ * there's no concept of "captain" or "playing XI vs bench" at this
+ * level — every rostered player is marked `xi: true` so the whole squad
+ * still renders under "Playing XI" rather than silently vanishing into
+ * an empty bench section.
+ */
+async function buildSquadsFromAuctionRoster(
+  teamAId: string,
+  teamAName: string,
+  teamBId: string,
+  teamBName: string,
+): Promise<MatchSquad[]> {
+  const { data: rosterRows, error } = await supabase
+    .from("players")
+    .select("id, name, role, img, sold_to_team_id")
+    .in("sold_to_team_id", [teamAId, teamBId])
+
+  if (error) {
+    console.error("[buildSquadsFromAuctionRoster] roster lookup failed:", error.message)
+    return []
+  }
+  if (!rosterRows || rosterRows.length === 0) return []
+
+  const toSquad = (teamId: string, teamName: string): MatchSquad => ({
+    team: teamName,
+    captain: "",
+    players: rosterRows
+      .filter((p) => p.sold_to_team_id === teamId)
+      .map((p) => ({
+        name: p.name,
+        role: p.role,
+        xi: true,
+        img: p.img || undefined,
+      })),
+  })
+
+  return [toSquad(teamAId, teamAName), toSquad(teamBId, teamBName)]
+}
+
+/**
+ * Resolves the two squads for a match.
+ *
+ * BRACKET-LINKED matches (isBracketLinked === true, i.e. teamAId/teamBId
+ * are real `teams.id` UUIDs resolved via `bracket_matches.team_a_id` /
+ * `team_b_id`): squads are pulled from getSquadsByTeamIds — the EXACT
+ * same teams -> players -> rules -> buildSquad pipeline
+ * lib/tournament/tournament.ts uses for the tournament detail page's
+ * Squads tab. This is the change described in the SQUAD RESOLUTION note
+ * at the top of this file: rather than trying to parse
+ * match_setup.squads[].teamId (which for bracket matches is very likely
+ * a UUID nothing here used to check against directly), this goes
+ * straight to the shared source of truth by team id. If that shared
+ * source comes back empty (e.g. a team not yet linked to any auction
+ * roster), this falls through to the original match_setup-based
+ * resolution below rather than showing nothing.
+ *
+ * STANDALONE matches (no bracket_matches row): there is no
+ * tournament-level squad source to point at, since teamAId/teamBId are
+ * just short codes here, not real teams.id values. These always use the
+ * original match_setup.squads resolution.
+ */
+async function buildSquads(
+  setup: MatchSetup,
+  teamAId: string,
+  teamAName: string,
+  teamBId: string,
+  teamBName: string,
+  isBracketLinked: boolean,
+): Promise<MatchSquad[]> {
+  if (isBracketLinked) {
+    const tournamentSquads = await getSquadsByTeamIds([teamAId, teamBId])
+    if (tournamentSquads.length > 0) {
+      const squadByTeamName = new Map(tournamentSquads.map((s) => [s.team, s]))
+      const teamASquad = squadByTeamName.get(teamAName)
+      const teamBSquad = squadByTeamName.get(teamBName)
+      return [
+        teamASquad ? squadToMatchSquad(teamASquad) : { team: teamAName, captain: "", players: [] },
+        teamBSquad ? squadToMatchSquad(teamBSquad) : { team: teamBName, captain: "", players: [] },
+      ]
+    }
+    // Shared source came back empty (e.g. these teams.id values aren't
+    // linked to any auction roster yet) — fall through to the
+    // match_setup-based resolution below rather than showing nothing.
+  }
+
+  // No match_setup.squads at all — go straight to the auction-roster
+  // fallback (see SQUAD RESOLUTION note at the top of this file).
+  if (!setup.squads || setup.squads.length === 0) {
+    return buildSquadsFromAuctionRoster(teamAId, teamAName, teamBId, teamBName)
+  }
 
   // Collect all playerIds from all squads
   const playerIds = new Set<string>()
@@ -647,28 +817,68 @@ async function buildSquads(setup: MatchSetup, teamAName: string, teamBName: stri
     }
   }
 
-  // Build squads with enriched player data
-  return setup.squads.map((s) => {
+  // Build squads with enriched player data.
+  //
+  // Matching now checks against the REAL resolved team id first
+  // (teamAId/teamBId — a genuine teams.id UUID for bracket-linked
+  // matches, or the short code for standalone matches), before falling
+  // back to the older "team1"/"team2" tag / short / name checks. See the
+  // SQUAD RESOLUTION note at the top of this file for why the UUID
+  // check has to come first: for bracket matches it's very likely the
+  // ONLY thing squad.teamId actually contains. (In practice, bracket
+  // matches will usually already have returned above via
+  // getSquadsByTeamIds — this path mainly matters for standalone
+  // matches, or as a fallback if the shared source had nothing yet.)
+  const squadsSource = setup.squads
+  const squads: MatchSquad[] = squadsSource.map((s, index) => {
     const tag = s.teamId?.toLowerCase?.() ?? ""
     const isTeamA =
-      tag === "team1" || tag === setup.team1.short.toLowerCase() || tag === teamAName.toLowerCase()
+      tag === teamAId.toLowerCase() ||
+      tag === "team1" ||
+      tag === setup.team1.short.toLowerCase() ||
+      tag === teamAName.toLowerCase()
     const isTeamB =
-      tag === "team2" || tag === setup.team2.short.toLowerCase() || tag === teamBName.toLowerCase()
-    const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
+      tag === teamBId.toLowerCase() ||
+      tag === "team2" ||
+      tag === setup.team2.short.toLowerCase() ||
+      tag === teamBName.toLowerCase()
+
+    // Last-resort fallback: match_setup.squads is always written as
+    // exactly two squads in array order [teamA, teamB]. If the teamId
+    // tag matches neither known identity, use position instead of
+    // labeling the team "Unknown Team" — this keeps the UI honest
+    // (showing the real team name) even when the tag itself is
+    // unrecognized/malformed.
+    const teamName = isTeamA ? teamAName : isTeamB ? teamBName : index === 0 ? teamAName : teamBName
+
     return {
       team: teamName,
       captain: s.captain,
-      players: s.players?.map((p) => {
-        const playerData = p.playerId ? playerMap.get(p.playerId) : null
-        return {
-          name: playerData?.name || p.name,
-          role: p.role,
-          xi: p.xi,
-          img: playerData?.img || p.img || undefined,
-        }
-      }) || [],
+      players:
+        s.players?.map((p) => {
+          const playerData = p.playerId ? playerMap.get(p.playerId) : null
+          return {
+            name: playerData?.name || p.name,
+            role: p.role,
+            xi: p.xi,
+            img: playerData?.img || p.img || undefined,
+          }
+        }) || [],
     }
   })
+
+  // Per-squad fallback: a squad may have resolved a correct team name
+  // above but still have zero players — either match_setup.squads[].players
+  // was saved as an empty array, or whatever wrote it used different
+  // field names than this reader expects. Rather than showing an empty
+  // "Playing XI" for that team, backfill from the auction roster.
+  const anyEmpty = squads.some((sq) => sq.players.length === 0)
+  if (!anyEmpty) return squads
+
+  const rosterFallback = await buildSquadsFromAuctionRoster(teamAId, teamAName, teamBId, teamBName)
+  if (rosterFallback.length === 0) return squads // nothing to backfill with (e.g. standalone match)
+
+  return squads.map((sq, i) => (sq.players.length > 0 ? sq : rosterFallback[i] ?? sq))
 }
 
 /**
@@ -781,14 +991,20 @@ export async function getMatchDetailById(
     color: setup.team2.color || undefined,
   }
 
-  if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
+  // Whether teamA/teamB below end up resolved from bracket_matches ->
+  // teams (real teams.id UUIDs) rather than the match_setup fallback
+  // (short codes) — also drives which squad source buildSquads uses,
+  // see the SQUAD RESOLUTION note at the top of this file.
+  const isBracketLinked = !!(bracketRow?.team_a_id && bracketRow?.team_b_id)
+
+  if (isBracketLinked) {
     const { data: teamRows } = await supabase
       .from("teams")
       .select("id, name, code, logo, color")
-      .in("id", [bracketRow.team_a_id, bracketRow.team_b_id])
+      .in("id", [bracketRow!.team_a_id, bracketRow!.team_b_id])
 
-    const teamARow = teamRows?.find((t) => t.id === bracketRow.team_a_id) as TeamRow | undefined
-    const teamBRow = teamRows?.find((t) => t.id === bracketRow.team_b_id) as TeamRow | undefined
+    const teamARow = teamRows?.find((t) => t.id === bracketRow!.team_a_id) as TeamRow | undefined
+    const teamBRow = teamRows?.find((t) => t.id === bracketRow!.team_b_id) as TeamRow | undefined
 
     if (teamARow && teamBRow) {
       teamA = { id: teamARow.id, name: teamARow.name, short: teamARow.code, logo: teamARow.logo ?? undefined, color: teamARow.color }
@@ -886,7 +1102,14 @@ export async function getMatchDetailById(
     deliveries: innings2Agg.deliveries,
   }
 
-  const squads = await buildSquads(setup, teamA.name, teamB.name)
+  // See SQUAD RESOLUTION note at the top of this file: for bracket-linked
+  // matches, buildSquads now goes straight to getSquadsByTeamIds — the
+  // same source lib/tournament/tournament.ts uses for the tournament
+  // page's Squads tab — using the resolved teamA.id/teamB.id (real
+  // teams.id UUIDs). Standalone matches fall back to the original
+  // match_setup.squads resolution, since there's no tournament-level
+  // squad source to point at for them.
+  const squads = await buildSquads(setup, teamA.id, teamA.name, teamB.id, teamB.name, isBracketLinked)
 
   // Match's own banner first; otherwise the parent tournament's banner
   // or logo (resolvedTournamentBannerUrl); otherwise undefined so the

@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
 import { aggregateInnings, parseMatchSetup, buildSquads, type BallRow } from "@/lib/matches/cricket-engine"
 import { buildFullMatchLiveScript } from "@/lib/matches/win-probability"
-import type { MatchDetail, MatchStatus, MatchTeamRef, DeliveryEntry } from "@/data/match-data"
+import { getSquadsByTeamIds } from "@/lib/tournament/tournament"
+import type { Squad } from "@/data/tournament-data"
+import type { MatchDetail, MatchStatus, MatchTeamRef, MatchSquad, DeliveryEntry } from "@/data/match-data"
 
 export interface LiveScriptStep {
   ball: string
@@ -59,6 +61,30 @@ function toDeliveries(balls: BallRow[]): DeliveryEntry[] {
     }))
 }
 
+/**
+ * Squad (tournament-detail shape, from getSquadsByTeamIds) -> MatchSquad
+ * (this app's match-detail shape). Mirrors squadToMatchSquad in
+ * data/match-data.ts exactly, so a bracket-linked match's squads look
+ * identical whether they came from the initial server render
+ * (getMatchDetailById) or from this hook's live refresh — see the
+ * SQUAD RESOLUTION note in data/match-data.ts for why the two need to
+ * agree. There's no playing-XI concept at the teams/players source
+ * level, so every rostered player is marked xi: true, same as the
+ * server-side conversion.
+ */
+function squadToMatchSquad(s: Squad): MatchSquad {
+  return {
+    team: s.team,
+    captain: s.captain,
+    players: (s.players ?? []).map((p) => ({
+      name: p.name,
+      role: p.role ?? "",
+      xi: true,
+      img: p.image,
+    })),
+  }
+}
+
 export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
   const [match, setMatch] = useState<LiveMatchDetail>({ ...initialMatch, liveScript: [] })
   const [isSyncing, setIsSyncing] = useState(false)
@@ -67,10 +93,11 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
   const teamBFallback = useRef(initialMatch.teamB)
 
   // Map of player name -> img, built once from the server-fetched squads
-  // (initialMatch.squads). buildSquads() below rebuilds squads from
-  // match_setup JSON on every live refresh, which doesn't carry player
-  // images, so this lookup is used to patch images back in rather than
-  // losing them the moment any live data comes in.
+  // (initialMatch.squads). The old match_setup-based buildSquads() below
+  // doesn't carry player images, so this lookup is used to patch images
+  // back in on that fallback path rather than losing them the moment any
+  // live data comes in. Not needed on the getSquadsByTeamIds path, since
+  // that source already carries real photos directly.
   const playerImgByName = useRef(
     new Map(
       initialMatch.squads.flatMap((s) => s.players.map((p) => [p.name, (p as any).img] as const))
@@ -140,6 +167,42 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
         if (a && b) {
           teamA = { id: a.id, name: a.name, short: a.code, logo: a.logo ?? undefined, color: a.color }
           teamB = { id: b.id, name: b.name, short: b.code, logo: b.logo ?? undefined, color: b.color }
+        }
+      }
+
+      // ── squads: same shared source as getMatchDetailById (server) ──
+      // See the SQUAD RESOLUTION note at the top of data/match-data.ts.
+      // For a bracket-linked match (real teams.id UUIDs available via
+      // bracketRow), pull squads from getSquadsByTeamIds — the EXACT
+      // same teams -> players -> rules -> buildSquad pipeline the
+      // tournament detail page and the server-rendered initial match
+      // both use. This is resolved BEFORE calling setMatch below (it's
+      // async), so the eventual state update is atomic — the page never
+      // renders an intermediate "Unknown Team" state.
+      //
+      // Only falls through to the old match_setup.squads-based
+      // buildSquads (from lib/matches/cricket-engine) — or, if that has
+      // nothing either, to whatever squads were already in state — for
+      // standalone matches (no bracket_matches row) or if the shared
+      // source hasn't got anything for these teams yet.
+      let resolvedSquads: MatchSquad[] | null = null
+      if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
+        try {
+          const tournamentSquads = await getSquadsByTeamIds([bracketRow.team_a_id, bracketRow.team_b_id])
+          if (tournamentSquads.length > 0) {
+            const squadByTeamName = new Map(tournamentSquads.map((s) => [s.team, s]))
+            const teamASquad = squadByTeamName.get(teamA.name)
+            const teamBSquad = squadByTeamName.get(teamB.name)
+            resolvedSquads = [
+              teamASquad ? squadToMatchSquad(teamASquad) : { team: teamA.name, captain: "", players: [] },
+              teamBSquad ? squadToMatchSquad(teamBSquad) : { team: teamB.name, captain: "", players: [] },
+            ]
+          }
+        } catch (err) {
+          console.error(
+            "[useLiveMatch] getSquadsByTeamIds failed:",
+            err instanceof Error ? err.message : err
+          )
         }
       }
 
@@ -245,15 +308,24 @@ export function useLiveMatch(matchId: string, initialMatch: MatchDetail) {
           // and the BALL-BY-BALL DELIVERIES note in data/match-data.ts.
           deliveries: toDeliveries(innings2Balls),
         },
-        squads: setup.squads
-          ? buildSquads(setup, teamA.name, teamB.name).map((s) => ({
-              ...s,
-              players: s.players.map((p) => ({
-                ...p,
-                img: (p as any).img ?? playerImgByName.current.get(p.name),
-              })),
-            }))
-          : prev.squads,
+        // See the SQUAD RESOLUTION note above / in data/match-data.ts:
+        // resolvedSquads (from getSquadsByTeamIds) wins when it's
+        // available for a bracket-linked match. Otherwise fall back to
+        // the old match_setup.squads-based engine, patching in photos
+        // from the server-rendered squads via playerImgByName — and if
+        // there's no match_setup.squads at all, keep whatever squads
+        // were already in state instead of clobbering them.
+        squads:
+          resolvedSquads ??
+          (setup.squads
+            ? buildSquads(setup, teamA.name, teamB.name).map((s) => ({
+                ...s,
+                players: s.players.map((p) => ({
+                  ...p,
+                  img: (p as any).img ?? playerImgByName.current.get(p.name),
+                })),
+              }))
+            : prev.squads),
         matchStatus,
         isLive: matchStatus === "live",
         hasBallData,
