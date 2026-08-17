@@ -136,7 +136,7 @@ function initials(name: string) {
  */
 function StatAvatar({ name, img, size = "md" }: { name: string; img?: string; size?: "sm" | "md" }) {
   const [failed, setFailed] = useState(false)
-  const dims = size === "md" ? "h-12 w-12 text-sm" : "h-9 w-9 text-[10px]"
+  const dims = size === "md" ? "h-16 w-16 text-sm" : "h-12 w-12 text-[16px]"
   const showPhoto = !!img && !failed
   return (
     <div
