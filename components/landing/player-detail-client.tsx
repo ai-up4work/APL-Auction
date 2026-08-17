@@ -28,6 +28,55 @@ import {
 } from "@/lib/players/players"
 
 // ─────────────────────────────────────────────────────────────
+// IDENTITY RESOLUTION
+//
+// Every match a player appears in spins up its own synthetic auction
+// (auctions.is_synthetic = true), which in turn creates a brand-new
+// `players` row for that player (see is_synthetic on auctions and the
+// match simulator). So a single real player can have many distinct
+// ids — one per match they've ever played, plus one more from any
+// genuine (non-synthetic) auction/pool entry.
+//
+// We treat "same name + same role" as one real player's identity —
+// the same rule public_players_list_view / public_player_detail_view
+// use — and resolve every sibling id up front so Matches/Badges/Teams
+// can look across all of them instead of just the single id a card
+// happened to link to.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Given one player row id, returns every id that represents the same
+ * real player — grouped by name + role. Falls back to just [playerId]
+ * if resolution fails or returns nothing, so callers never end up
+ * querying with zero ids.
+ */
+async function resolveSiblingPlayerIds(playerId: string): Promise<string[]> {
+  const { data: self, error: selfErr } = await supabase
+    .from("public_players_view")
+    .select("id, name, role")
+    .eq("id", playerId)
+    .maybeSingle()
+
+  if (selfErr || !self) {
+    console.error("[resolveSiblingPlayerIds] failed resolving self:", selfErr?.message)
+    return [playerId]
+  }
+
+  const { data: siblings, error: sibErr } = await supabase
+    .from("public_players_view")
+    .select("id")
+    .eq("name", self.name)
+    .eq("role", self.role)
+
+  if (sibErr || !siblings || siblings.length === 0) {
+    console.error("[resolveSiblingPlayerIds] failed resolving siblings:", sibErr?.message)
+    return [playerId]
+  }
+
+  return siblings.map((s) => s.id)
+}
+
+// ─────────────────────────────────────────────────────────────
 // MATCH HISTORY
 //
 // Modeled on CrickPro's player profile pattern (see
@@ -41,6 +90,10 @@ import {
 // match_id in JS, then each match's team/venue/date/result comes from
 // `matches.match_setup` and the two team ids seen on this player's own
 // ball rows (so it works whether the player batted, bowled, or both).
+//
+// Queries across every sibling id from resolveSiblingPlayerIds above,
+// since each match this player has ever played was recorded under a
+// different synthetic-auction id.
 //
 // Batting/bowling-credit rules used below are the standard cricket
 // scoring conventions, not this codebase's invention:
@@ -124,12 +177,15 @@ function deriveOutcome(resultText: string | null, playerTeamName: string): Match
 }
 
 async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSummary[]> {
+  const ids = await resolveSiblingPlayerIds(playerId)
+  const idList = ids.join(",")
+
   const { data: ballRows, error: ballsErr } = await supabase
     .from("balls")
     .select(
       "match_id, sequence, runs, extra_type, is_wicket, dismissal_type, striker_player_id, bowler_player_id, batting_team_id, bowling_team_id"
     )
-    .or(`striker_player_id.eq.${playerId},bowler_player_id.eq.${playerId}`)
+    .or(`striker_player_id.in.(${idList}),bowler_player_id.in.(${idList})`)
     .order("match_id", { ascending: true })
     .order("sequence", { ascending: true })
 
@@ -176,8 +232,12 @@ async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSumma
   const summaries: PlayerMatchSummary[] = []
 
   for (const [matchId, rows] of byMatch.entries()) {
-    const battingRows = rows.filter((r) => r.striker_player_id === playerId)
-    const bowlingRows = rows.filter((r) => r.bowler_player_id === playerId)
+    // Membership check is against every sibling id, not just the one
+    // id passed into this function — a match recorded under a
+    // different synthetic-auction id for this same player still
+    // counts as "theirs".
+    const battingRows = rows.filter((r) => !!r.striker_player_id && ids.includes(r.striker_player_id))
+    const bowlingRows = rows.filter((r) => !!r.bowler_player_id && ids.includes(r.bowler_player_id))
 
     let batting: PlayerMatchBatting | null = null
     if (battingRows.length > 0) {
@@ -344,7 +404,9 @@ const TAB_CONFIG: { key: ProfileTab; label: string }[] = [
 // AWARDS — real data, matched against tournament_awards via the
 // player_awards_view (see player-detail-views.sql). player_name on
 // that table is free text with no FK, so matching is by normalized
-// name rather than id.
+// name rather than id — this already merges across every duplicate-id
+// row for a given player automatically, so no sibling-id resolution
+// is needed here.
 // ─────────────────────────────────────────────────────────────
 
 interface PlayerAward {
@@ -388,10 +450,14 @@ async function getPlayerAwards(playerName: string): Promise<PlayerAward[]> {
 
 // ─────────────────────────────────────────────────────────────
 // TEAMS — real data, via player_team_history (see
-// player-detail-views.sql). Two-step lookup: resolve this player's
-// cross-season identity_key first, then pull every stint under it.
-// The view already excludes synthetic-auction rows, so this can't
-// pick up squad-board clones as phantom seasons.
+// player-detail-views.sql). That view only has rows for players whose
+// auction was genuine (auctions.is_synthetic = false) — most of a
+// player's sibling ids come from per-match synthetic auctions and
+// have no row there at all, since is_synthetic auctions are excluded
+// on purpose (they're simulator scaffolding, not real roster
+// membership). So instead of looking up identity_key by the single
+// playerId passed in, we resolve every sibling id for this player and
+// find whichever one (if any) actually has a genuine-auction row.
 // ─────────────────────────────────────────────────────────────
 
 interface PlayerTeamStint {
@@ -405,24 +471,28 @@ interface PlayerTeamStint {
 }
 
 async function getPlayerTeamHistory(playerId: string): Promise<PlayerTeamStint[]> {
-  const { data: selfRow, error: selfErr } = await supabase
+  const ids = await resolveSiblingPlayerIds(playerId)
+
+  const { data: selfRows, error: selfErr } = await supabase
     .from("player_team_history")
     .select("identity_key")
-    .eq("player_row_id", playerId)
-    .maybeSingle()
+    .in("player_row_id", ids)
+    .limit(1)
 
   if (selfErr) {
     console.error("[getPlayerTeamHistory] failed resolving identity:", selfErr.message)
     return []
   }
-  // No row at all means this player's own auction was synthetic and
-  // got filtered out by the view — nothing genuine to show.
-  if (!selfRow) return []
+  // None of this player's sibling ids ever went through a genuine
+  // (non-synthetic) auction — nothing genuine to show, not an error.
+  if (!selfRows || selfRows.length === 0) return []
+
+  const identityKey = selfRows[0].identity_key
 
   const { data, error } = await supabase
     .from("player_team_history")
     .select("player_row_id, season_name, season_started_at, team_id, team_name, team_logo, team_color, player_status, sold_price, base_price")
-    .eq("identity_key", selfRow.identity_key)
+    .eq("identity_key", identityKey)
     .order("season_started_at", { ascending: false })
 
   if (error) {
@@ -445,6 +515,8 @@ async function getPlayerTeamHistory(playerId: string): Promise<PlayerTeamStint[]
 // BADGES — fully derived, no new fetch. Reuses whatever the Matches
 // tab already loaded (match summaries + the hat-trick flag computed
 // alongside them) plus the career totals already on PlayerDetail.
+// Now automatically benefits from the Matches sibling-id fix above,
+// since it derives entirely from that array.
 // "Iron Man" is a documented approximation — match summaries don't
 // currently carry a season/auction grouping, so it's a flat match-
 // count threshold rather than a true "every match in a season" check.

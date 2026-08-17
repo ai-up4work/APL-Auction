@@ -80,8 +80,36 @@ function toPublicPlayer(row: PlayerViewRow): PublicPlayer {
  * The public view can legitimately return more than one row for a player:
  * the same canonical player ID may exist in the organization pool and in one
  * or more auction projections. The ID, not the name, is the identity key.
- * Keep one display record and prefer the auction row because it carries the
- * current auction status/team/price over the pool fallback row.
+ * Keep one display record, preferring:
+ *   1. the auction row over the pool fallback row (current status/team/price)
+ *   2. among rows of the same source, whichever one actually has a photo
+ *
+ * NOTE: this only merges rows that share the exact same `id` (the
+ * pool-vs-auction projection of one canonical player row). It does NOT
+ * catch distinct ids that represent the same real player (e.g. a player
+ * re-imported or re-entered into a new auction with a fresh row). That
+ * broader name+role collapsing happens server-side in
+ * public_players_list_view, which getPlayersForPublic queries below —
+ * this function stays as a second-pass safety net for the id-level case
+ * it was originally written for.
+ */
+/**
+ * The public view can legitimately return more than one row for a player:
+ * the same canonical player ID may exist in the organization pool and in one
+ * or more auction projections. The ID, not the name, is the identity key.
+ * Keep one display record, preferring:
+ *   1. whichever row actually has a photo — always wins, even over a
+ *      more "current" auction row that lacks one
+ *   2. among rows tied on that, the auction row over the pool fallback
+ *
+ * NOTE: this only merges rows that share the exact same `id` (the
+ * pool-vs-auction projection of one canonical player row). It does NOT
+ * catch distinct ids that represent the same real player (e.g. a player
+ * re-imported or re-entered into a new auction with a fresh row). That
+ * broader name+role collapsing happens server-side in
+ * public_players_list_view, which getPlayersForPublic queries below —
+ * this function stays as a second-pass safety net for the id-level case
+ * it was originally written for.
  */
 function dedupePlayerRows(rows: PlayerViewRow[]): PlayerViewRow[] {
   const byId = new Map<string, PlayerViewRow>()
@@ -93,6 +121,21 @@ function dedupePlayerRows(rows: PlayerViewRow[]): PlayerViewRow[] {
       continue
     }
 
+    const existingHasImg = !!existing.img
+    const rowHasImg = !!row.img
+
+    // A row with a photo always beats one without, regardless of
+    // source — this is checked first, before the auction/pool rule.
+    if (!existingHasImg && rowHasImg) {
+      byId.set(row.id, row)
+      continue
+    }
+    if (existingHasImg && !rowHasImg) {
+      continue
+    }
+
+    // Both have an image, or neither does — fall back to preferring
+    // the auction-sourced row over the pool fallback row.
     if (existing.source === "pool" && row.source === "auction") {
       byId.set(row.id, row)
     }
@@ -101,16 +144,24 @@ function dedupePlayerRows(rows: PlayerViewRow[]): PlayerViewRow[] {
   return Array.from(byId.values())
 }
 
-
 /**
  * Every player visible on the public site — both players still sitting
  * in the org's pool (source: "pool") and players already pulled into
  * an auction (source: "auction", status sold/available/unsold).
  *
- * Backed by public.public_players_view, which does the union of
- * `player_bank` + `players` and the status derivation server-side (see
- * public_players_view.sql). This file no longer needs to know about
- * either table's internal columns or FK constraint names.
+ * Backed by public.public_players_list_view, which sits on top of
+ * public_players_view and collapses duplicate rows for the same real
+ * player (same name + role, e.g. from a re-run auction or re-import)
+ * down to one representative row — preferring the auction-sourced row,
+ * then a row that has a photo, then the newest (see
+ * public_players_list_view.sql). This is what keeps the /all-players
+ * grid from showing duplicate cards, and from picking an imageless
+ * duplicate over one that actually has a photo.
+ *
+ * Deliberately NOT backed by public_player_detail_view — that view
+ * keeps every id (including duplicates) so the detail page can resolve
+ * any id a card links to; collapsing happens here instead, once, for
+ * display purposes only.
  *
  * NOTE: as with the previous table-based query, this still has no
  * org/tournament visibility scoping — see the SCOPING NOTE at the top
@@ -118,7 +169,7 @@ function dedupePlayerRows(rows: PlayerViewRow[]): PlayerViewRow[] {
  */
 export async function getPlayersForPublic(): Promise<PublicPlayer[]> {
   const { data, error } = await supabase
-    .from("public_players_view")
+    .from("public_players_list_view")
     .select(
       `
       id,
@@ -154,6 +205,9 @@ export async function getPlayersForPublic(): Promise<PublicPlayer[]> {
 // ── Single-player detail (public_player_detail_view) ────────────────
 // See public_player_detail_view.sql for how these numbers are derived
 // from public.balls, and the assumptions baked into that derivation.
+// This view intentionally keeps one row per id (no collapsing) so that
+// any id surfaced anywhere — including a non-representative duplicate
+// row that lost out in public_players_list_view — still resolves here.
 export type PlayerDetail = PublicPlayer & {
   matchesBatted: number
   runsScored: number
