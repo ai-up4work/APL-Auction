@@ -261,44 +261,18 @@ function toPlayerDetail(row: PlayerDetailRow): PlayerDetail {
  * as getPlayersForPublic) plus career batting/bowling stats derived
  * from public.balls. Returns null if the id doesn't exist — the
  * caller should render a "player not found" state, not throw.
+ *
+ * Backed by the public_player_detail(uuid) function rather than the
+ * old public_player_detail_view — the view aggregated stats for every
+ * player in the org before filtering down to one id, which is why it
+ * started timing out as data grew. The function resolves this
+ * player's siblings first (same name+role+team_code) and only
+ * aggregates `balls` for that small set. See the migration that
+ * introduced public_player_detail() for details.
  */
 export async function getPlayerDetailForPublic(id: string): Promise<PlayerDetail | null> {
   const { data, error } = await supabase
-    .from("public_player_detail_view")
-    .select(
-      `
-      id,
-      source,
-      name,
-      role,
-      origin,
-      country,
-      img,
-      capped,
-      price,
-      sold_price,
-      status,
-      team_id,
-      team_name,
-      team_code,
-      team_color,
-      team_logo,
-      created_at,
-      matches_batted,
-      runs_scored,
-      balls_faced,
-      dismissals,
-      batting_average,
-      strike_rate,
-      matches_bowled,
-      balls_bowled,
-      runs_conceded,
-      wickets,
-      bowling_average,
-      economy
-    `
-    )
-    .eq("id", id)
+    .rpc("public_player_detail", { p_id: id })
     .maybeSingle()
     .returns<PlayerDetailRow>()
 
