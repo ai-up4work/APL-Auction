@@ -920,12 +920,18 @@ export function TeamPoolTab({ org, userId }: { org: OrgSummary; userId: string }
 /*  leaks into the next time it's opened. Assigning a bank player onto   */
 /*  a team's roster still happens elsewhere (the team/auction roster     */
 /*  view), not here.                                                     */
+/*                                                                        */
+/*  SEARCH: `query` filters the loaded `players` array client-side by    */
+/*  name, role, origin, or country — same pattern as the Tournaments     */
+/*  tab's search box above. Nothing is re-fetched; it just narrows what  */
+/*  the grid below renders.                                              */
 /* ────────────────────────────────────────────────────────────────── */
 
 export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string }) {
   const { confirm, ConfirmDialogElement } = useConfirmDialog()
   const [players, setPlayers] = useState<BankPlayer[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [query, setQuery] = useState("")
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -1043,6 +1049,21 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
     }
   }
 
+  // Client-side filter over the already-loaded bank — matches name,
+  // role, origin, or country, same substring-match pattern used by the
+  // Tournaments tab's search box.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return players
+    return players.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.role.toLowerCase().includes(q) ||
+        p.origin.toLowerCase().includes(q) ||
+        (p.country ?? "").toLowerCase().includes(q)
+    )
+  }, [players, query])
+
   return (
     <div className="space-y-6">
       <Modal
@@ -1133,10 +1154,21 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
       <Panel>
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <h2 className="text-lg font-bold text-white font-cinzel">Player Bank</h2>
-          <Button onClick={openAddModal} className="bg-gold hover:bg-gold/90 text-black font-bold">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Player
-          </Button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative w-full sm:w-64">
+              <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, role, country…"
+                className="bg-black/50 border-gold/30 text-white pl-8 text-sm"
+              />
+            </div>
+            <Button onClick={openAddModal} className="bg-gold hover:bg-gold/90 text-black font-bold shrink-0">
+              <Plus className="mr-2 h-4 w-4" />
+              Add Player
+            </Button>
+          </div>
         </div>
         {!loaded ? (
           <p className="text-gray-500 text-sm flex items-center gap-2">
@@ -1151,9 +1183,11 @@ export function PlayerBankTab({ org, userId }: { org: OrgSummary; userId: string
             </p>
             <p className="text-gray-600 text-xs">💡 Pro tip: Add player photos and notes to help identify them at a glance</p>
           </div>
+        ) : filtered.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">No players match "{query}".</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {players.map((p) => (
+            {filtered.map((p) => (
               <div
                 key={p.id}
                 className="flex items-center justify-between gap-3 bg-white/[0.02] border border-gold/10 hover:border-gold/40 rounded-lg px-4 py-3 transition-colors"
