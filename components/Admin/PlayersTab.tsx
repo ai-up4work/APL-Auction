@@ -264,24 +264,10 @@ function PlayerModal({
               style={{ ...inputStyle, fontFamily: "var(--font-label-mono)" }} onFocus={focusOn} onBlur={focusOff} />
           </div>
           <div>
-            <FieldLabel>Country</FieldLabel>
-            <input type="text" value={form.country} onChange={(e) => set("country", e.target.value)}
-              placeholder="e.g. India"
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputStyle} onFocus={focusOn} onBlur={focusOff} />
-          </div>
-          <div>
             <FieldLabel>Role</FieldLabel>
             <select value={form.role} onChange={(e) => set("role", e.target.value as Role)}
               className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ ...inputStyle }}>
               {ROLES.map((r) => <option key={r} value={r} style={{ background: "var(--color-surface-container)" }}>{r}</option>)}
-            </select>
-          </div>
-          <div>
-            <FieldLabel>Origin</FieldLabel>
-            <select value={form.origin} onChange={(e) => set("origin", e.target.value as Player["origin"])}
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ ...inputStyle }}>
-              {(["Local", "Overseas"] as const).map((o) => <option key={o} value={o} style={{ background: "var(--color-surface-container)" }}>{o}</option>)}
             </select>
           </div>
         </div>
@@ -324,16 +310,6 @@ function PlayerModal({
               No franchises created yet — add teams first to assign captains.
             </p>
           )}
-        </div>
-
-        {/* Capped toggle */}
-        <div className="flex items-center justify-between p-3 rounded-lg"
-          style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}>
-          <div>
-            <p className="text-sm font-medium" style={{ color: "var(--color-on-surface)" }}>International capped</p>
-            <p className="text-[11px]" style={{ color: "var(--color-on-surface-variant)" }}>Has represented their national team</p>
-          </div>
-          <Toggle checked={form.capped} onChange={(v) => set("capped", v)} />
         </div>
 
         {/* ── PLAYER PHOTO — now an upload field instead of a raw URL input.
