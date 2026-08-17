@@ -1107,7 +1107,7 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
                             team2Color={getTeamColor(f.team2, colorByTeam.get(f.team2))}
                             statusBadgeClass={statusBadgeClass}
                             slug={slug}
-                            matchNumber={stageFixtures.indexOf(f) + 1}
+                            matchNumber={(f as any).matchNumber ?? stageFixtures.indexOf(f) + 1}
                           />
                         ))}
                       </div>
