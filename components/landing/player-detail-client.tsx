@@ -27,6 +27,8 @@ import {
   type PlayerStatus,
 } from "@/lib/players/players"
 
+import { derivePlayerBadges, type PlayerBadge } from "@/lib/players/player-badges"
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY RESOLUTION
 //
@@ -137,7 +139,7 @@ interface PlayerMatchBowling {
 
 type MatchOutcome = "won" | "lost" | "tied" | null
 
-interface PlayerMatchSummary {
+export interface PlayerMatchSummary {
   matchId: string
   date: string | null
   venue: string | null
@@ -302,15 +304,19 @@ async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSumma
     const matchRow = matchById.get(matchId)
     const setup = (matchRow?.match_setup ?? {}) as Record<string, any>
 
-    // Fall back to match_setup's team1/team2 names if the team ids
-    // couldn't be resolved (e.g. an auction-less friendly match where
-    // balls were written with null team ids).
-    const fallbackOpponentName =
+    // Fall back to match_setup's team1/team2 objects (name, logo, color
+    // if the simulator wrote them) if the team ids on this match's
+    // balls couldn't be resolved against the `teams` table — e.g. an
+    // auction-less friendly match, a stale/deleted team id, or an
+    // RLS-filtered row. Matching player-vs-opponent within match_setup
+    // is done by name, same rule the old fallback used.
+    const setupPlayerTeam =
       normLoose(setup?.team1?.name) === normLoose(playerTeam?.name ?? setup?.team1?.name)
-        ? setup?.team2?.name
-        : setup?.team1?.name
+        ? setup?.team1
+        : setup?.team2
+    const setupOpponentTeam = setupPlayerTeam === setup?.team1 ? setup?.team2 : setup?.team1
 
-    const playerTeamName = playerTeam?.name ?? setup?.team1?.name ?? "Unknown"
+    const playerTeamName = playerTeam?.name ?? setupPlayerTeam?.name ?? "Unknown"
     const resultText = setup?.resultText ?? null
 
     summaries.push({
@@ -319,10 +325,10 @@ async function getPlayerMatchHistory(playerId: string): Promise<PlayerMatchSumma
       venue: setup?.venue ?? null,
       format: setup?.officials?.format ?? null,
       playerTeamName,
-      playerTeamColor: playerTeam?.color ?? null,
-      opponentName: opponentTeam?.name ?? fallbackOpponentName ?? "Unknown",
-      opponentLogo: opponentTeam?.logo ?? null,
-      opponentColor: opponentTeam?.color ?? null,
+      playerTeamColor: playerTeam?.color ?? setupPlayerTeam?.color ?? null,
+      opponentName: opponentTeam?.name ?? setupOpponentTeam?.name ?? "Unknown",
+      opponentLogo: opponentTeam?.logo ?? setupOpponentTeam?.logo ?? null,
+      opponentColor: opponentTeam?.color ?? setupOpponentTeam?.color ?? null,
       resultText,
       outcome: deriveOutcome(resultText, playerTeamName),
       batting,
@@ -511,48 +517,6 @@ async function getPlayerTeamHistory(playerId: string): Promise<PlayerTeamStint[]
   }))
 }
 
-// ─────────────────────────────────────────────────────────────
-// BADGES — fully derived, no new fetch. Reuses whatever the Matches
-// tab already loaded (match summaries + the hat-trick flag computed
-// alongside them) plus the career totals already on PlayerDetail.
-// Now automatically benefits from the Matches sibling-id fix above,
-// since it derives entirely from that array.
-// "Iron Man" is a documented approximation — match summaries don't
-// currently carry a season/auction grouping, so it's a flat match-
-// count threshold rather than a true "every match in a season" check.
-// ─────────────────────────────────────────────────────────────
-
-interface PlayerBadge {
-  id: string
-  label: string
-  description: string
-  earned: boolean
-}
-
-function derivePlayerBadges(player: PlayerDetail, matches: PlayerMatchSummary[]): PlayerBadge[] {
-  console.log(matches)
-  const centuryMaker = matches.some((m) => (m.batting?.runs ?? 0) >= 100)
-  const hatTrickHero = matches.some((m) => m.hatTrick)
-  const fiftyWicketClub = (player.wickets ?? 0) >= 50
-  const sixMachine = matches.some((m) => (m.batting?.sixes ?? 0) >= 10)
-  const ironMan = matches.length >= 10
-  const matchWinner = matches.filter((m) => m.outcome === "won").length >= 5
-
-  return [
-    { id: "b1", label: "Century Maker", description: "Scored 100+ runs in a single innings", earned: centuryMaker },
-    { id: "b2", label: "Hat-trick Hero", description: "Took 3 wickets on 3 consecutive legal balls", earned: hatTrickHero },
-    { id: "b3", label: "50 Wicket Club", description: "50+ career wickets", earned: fiftyWicketClub },
-    {
-      id: "b4",
-      label: "Iron Man",
-      description: "Played 10+ matches (approximate — season-level tracking coming later)",
-      earned: ironMan,
-    },
-    { id: "b5", label: "Six Machine", description: "10+ sixes in a single innings", earned: sixMachine },
-    { id: "b6", label: "Match Winner", description: "On the winning side in 5+ matches", earned: matchWinner },
-  ]
-}
-
 export default function PlayerDetailClient({ id }: { id: string }) {
   useScrollTop()
   const router = useRouter()
@@ -676,18 +640,10 @@ export default function PlayerDetailClient({ id }: { id: string }) {
 
           {player && (
             <div className="space-y-6 fade-in-up">
-              {/* ── Identity header — trading-card treatment ────────
-                  A team-color foil wash behind the portrait (same
-                  diagonal-split language as the match cards elsewhere
-                  in the app), a price sticker for the auction value,
-                  and a corner flourish for capped players. This is the
-                  one deliberate flourish on the page; everything else
-                  stays quiet. */}
               <div
                 className="relative rounded-2xl border overflow-hidden"
                 style={{ borderColor: `${accent}55` }}
               >
-                {/* Foil wash */}
                 <div
                   className="absolute inset-0"
                   style={{
@@ -718,7 +674,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                       </div>
                     )}
 
-                    {/* Price sticker — only meaningful once auctioned */}
                     {player.source === "auction" && (
                       <div
                         className="absolute -bottom-3 left-1/2 -translate-x-1/2 -rotate-2 flex items-center gap-1 bg-black border rounded-md px-2.5 py-1 shadow-lg"
@@ -780,9 +735,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                       <p className="text-xs text-gray-500 mt-1">Not yet entered into an auction.</p>
                     )}
 
-                    {/* Quick stats — the "ledger" strip. Runs/Wickets get
-                        the visual weight, since they're what a scout
-                        actually scans for first. */}
                     <div className="flex items-center justify-center sm:justify-start gap-6 mt-3 pt-3 border-t border-white/10">
                       <QuickStat value={fmt(matchesPlayed)} label="Matches" muted />
                       <QuickStat value={fmt(player.runsScored)} label="Runs" accent={accent} />
@@ -792,11 +744,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               </div>
 
-              {/* ── Tab strip ───────────────────────────────────────
-                  Full CrickPro tab set (Stats · Matches · Awards ·
-                  Teams · Badges), all backed by real data now: Awards
-                  and Teams query Supabase views, Badges derive from
-                  the Matches fetch. */}
               <div className="flex items-center gap-1 rounded-xl border border-gold/10 bg-black/50 p-1 w-fit mx-auto sm:mx-0 overflow-x-auto max-w-full">
                 {TAB_CONFIG.map((tab) => (
                   <button
@@ -811,7 +758,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 ))}
               </div>
 
-              {/* ── Stats tab ───────────────────────────────────── */}
               {activeTab === "stats" && (
                 <div className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-5">
@@ -845,7 +791,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* ── Matches tab ─────────────────────────────────── */}
               {activeTab === "matches" && (
                 <div className="space-y-3">
                   {matches === undefined && <MatchListSkeleton />}
@@ -866,7 +811,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* ── Awards tab ────────────────────────────────────── */}
               {activeTab === "awards" && (
                 <div className="space-y-3">
                   {awards === undefined && <MatchListSkeleton />}
@@ -883,7 +827,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* ── Teams tab ─────────────────────────────────────── */}
               {activeTab === "teams" && (
                 <div className="space-y-3">
                   {teamHistory === undefined && <MatchListSkeleton />}
@@ -900,8 +843,6 @@ export default function PlayerDetailClient({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* ── Badges tab — derived from match history, no
-                  separate fetch (see the useMemo above). ─────────── */}
               {activeTab === "badges" && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {badges === undefined
@@ -943,8 +884,6 @@ function MatchHistoryRow({ match, index }: { match: PlayerMatchSummary; index: n
       className="group relative flex rounded-xl border border-gold/10 bg-black/60 hover:border-gold/30 hover:bg-black/70 transition-all overflow-hidden fade-in-up"
       style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
     >
-      {/* Team-color rail — a scorecard-ledger cue, not decoration: it's
-          the same color as this player's side in the match. */}
       <span className="w-1 shrink-0" style={{ backgroundColor: rail }} />
 
       <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
@@ -1120,8 +1059,6 @@ function StatGroup({
         {title}
       </h2>
 
-      {/* Headline stat gets the visual weight — the number a scout
-          actually looks for first, not buried in a uniform grid. */}
       <div className="flex items-baseline gap-2 mb-4 pb-4 border-b border-white/5">
         <span className="text-4xl font-bold text-white font-mono tabular-nums">{headline.value}</span>
         <span className="text-[10px] font-cinzel uppercase tracking-widest text-gray-500">{headline.label}</span>

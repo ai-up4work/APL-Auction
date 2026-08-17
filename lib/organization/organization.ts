@@ -1023,7 +1023,7 @@ export async function createFriendlyMatch(
     const team1Squads = team1Players.map((p) => ({
       name: p.name,
       role: p.role,
-      team: input.team1Id,
+      team: t1.code,
       captain: p.name === team1Captain || undefined,
       imageUrl: undefined,
     }))
@@ -1031,7 +1031,7 @@ export async function createFriendlyMatch(
     const team2Squads = team2Players.map((p) => ({
       name: p.name,
       role: p.role,
-      team: input.team2Id,
+      team: t2.code,
       captain: p.name === team2Captain || undefined,
       imageUrl: undefined,
     }))

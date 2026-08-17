@@ -236,8 +236,6 @@ function isGroupedShape(rawSquads: any[]): boolean {
 }
 
 function normalizeRawSquads(raw: Record<string, any> | null): Squad[] {
-  const team1Short = (raw?.team1?.short ?? "").toString().toUpperCase()
-  const team2Short = (raw?.team2?.short ?? "").toString().toUpperCase()
   const rawSquads: any[] = raw && Array.isArray(raw.squads) ? raw.squads : []
 
   if (rawSquads.length === 0) {
@@ -264,8 +262,43 @@ function normalizeRawSquads(raw: Record<string, any> | null): Squad[] {
     return [squadFor("team1"), squadFor("team2")]
   }
 
-  // Flat shape from createFriendlyMatch — bucket by short code, falling
-  // back to team1 for anything that doesn't clearly match team2's code.
+  // Flat shape from createFriendlyMatch — bucket by short code.
+  //
+  // Prefer match_setup's stored team1.short/team2.short — but ONLY if
+  // both are actually set and distinct from each other. If either is
+  // blank (short code never got saved onto match_setup at creation
+  // time) or they're identical, every player's code comparison below
+  // would fail identically and every player would silently collapse
+  // into team1. Instead, derive the two real codes directly from what
+  // actually appears on the squad rows (first-seen order), which is
+  // reliable regardless of what match_setup.team1/team2 ended up
+  // holding, since createFriendlyMatch tags every player with their
+  // real team code.
+  const setupTeam1Short = (raw?.team1?.short ?? "").toString().toUpperCase()
+  const setupTeam2Short = (raw?.team2?.short ?? "").toString().toUpperCase()
+  const setupCodesUsable = !!setupTeam1Short && !!setupTeam2Short && setupTeam1Short !== setupTeam2Short
+
+  let team1Short = setupTeam1Short
+  let team2Short = setupTeam2Short
+
+  if (!setupCodesUsable) {
+    const seenCodes: string[] = []
+    for (const p of rawSquads) {
+      const code = (p?.team ?? "").toString().toUpperCase()
+      if (code && !seenCodes.includes(code)) seenCodes.push(code)
+      if (seenCodes.length === 2) break
+    }
+    if (seenCodes.length < 2) {
+      console.warn(
+        "[normalizeRawSquads] couldn't find two distinct team codes on squad rows — every player will fall back to team1. " +
+          "match_setup.team1/team2.short is missing/duplicated AND squad rows carry <2 distinct `team` codes.",
+        { setupTeam1Short, setupTeam2Short, seenCodes }
+      )
+    }
+    team1Short = seenCodes[0] ?? team1Short
+    team2Short = seenCodes[1] ?? team2Short
+  }
+
   const team1Players: SquadPlayer[] = []
   const team2Players: SquadPlayer[] = []
   let team1Captain = ""
