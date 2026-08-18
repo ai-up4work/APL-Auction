@@ -1011,18 +1011,27 @@ function PointsCalculationOverlay({
 // SCHEDULE PANEL
 // ─────────────────────────────────────────────────────────────
 
-// A "bye" happens when a bracket size isn't a power of 2 — one team
-// auto-advances a round with no actual opponent to play. A bye is
-// decided instantly when the bracket is generated (there's no game to
-// play), so it reads "completed" from the very start, with exactly one
-// side still unresolved ("TBD"). A pending future-round slot also shows
-// a "TBD" side but stays "upcoming" until its feeder match resolves —
-// that's what distinguishes the two.
+// A real bye: exactly one side is a real team, the other is permanently
+// empty — that team auto-advances with no opponent.
 function isBye(f: Fixture) {
   const t1 = (f.team1 || "").trim().toUpperCase()
   const t2 = (f.team2 || "").trim().toUpperCase()
   const oneSideMissing = (t1 === "TBD" || !t1) !== (t2 === "TBD" || !t2)
   return oneSideMissing && f.status === "completed"
+}
+
+// A phantom double-bye: BOTH sides were byes upstream (see
+// bracket_matches reconciliation), so this slot has no real team at
+// all yet — it's "completed" only so it can flow forward and later be
+// swapped for whichever real team eventually drops in. There is no
+// advancing team to show, so this must never render as a played match
+// or as a single-team ByeRow (which would incorrectly show "TBD
+// advances").
+function isPhantomBye(f: Fixture) {
+  const t1 = (f.team1 || "").trim().toUpperCase()
+  const t2 = (f.team2 || "").trim().toUpperCase()
+  const bothMissing = (t1 === "TBD" || !t1) && (t2 === "TBD" || !t2)
+  return bothMissing && f.status === "completed"
 }
 
 // Two Fixture rows can end up describing the exact same bye slot
@@ -1033,14 +1042,18 @@ function dedupeByes(fixtures: Fixture[]): Fixture[] {
   const seen = new Set<string>()
   const result: Fixture[] = []
   for (const f of fixtures) {
+    if (isPhantomBye(f)) {
+      const roundLabel = (f as any).stage || (f as any).round || ""
+      const key = `phantom|${roundLabel}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(f)
+      continue
+    }
     if (!isBye(f)) {
       result.push(f)
       continue
     }
-    // Key deliberately omits matchNumber/date — those are exactly the
-    // fields that differ between the two duplicate rows for the same
-    // bye slot. Round + advancing team is what actually identifies
-    // "this bye", so that's all the key uses.
     const advancingTeam = (f.team1 || "").trim().toUpperCase() === "TBD" || !f.team1 ? f.team2 : f.team1
     const roundLabel = (f as any).stage || (f as any).round || ""
     const key = `${roundLabel}|${(advancingTeam || "").trim().toUpperCase()}`
@@ -1113,6 +1126,28 @@ function ByeRow({
   )
 }
 
+function PendingSlotRow({ fixture: f, matchNumber }: { fixture: Fixture; matchNumber?: number }) {
+  const roundLabel = (f as any).stage || (f as any).round || (matchNumber ? `Match ${matchNumber}` : null)
+  return (
+    <div className="relative rounded-xl border border-gold/10 overflow-hidden h-full flex flex-col opacity-70">
+      <div className="relative h-36 bg-black/60 flex items-center justify-center">
+        {roundLabel && (
+          <span className="absolute top-2 left-2 z-20 text-white/90 text-[10px] font-cinzel uppercase tracking-widest bg-black/50 border border-white/10 rounded-full px-2.5 py-0.5">
+            {roundLabel}
+          </span>
+        )}
+        <div className="h-16 w-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+          <span className="text-gray-500 text-[10px] font-cinzel uppercase tracking-wide">TBD</span>
+        </div>
+      </div>
+      <div className="bg-black/50 p-4 flex-1 flex flex-col items-center justify-center gap-1">
+        <p className="text-gray-400 text-xs font-medium text-center">Awaiting bracket progression</p>
+        <p className="text-gray-500 text-[10px] text-center">No teams assigned to this slot yet</p>
+      </div>
+    </div>
+  )
+}
+
 function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads?: Squad[]; slug: string }) {
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "completed">("all")
   const logoByTeam = new Map(squads?.map((s) => [s.team, s.logo]) ?? [])
@@ -1120,7 +1155,7 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
 
   // Counts exclude byes — a bye isn't a played match, so it shouldn't
   // inflate the status-filter chip counts. It still shows in the list.
-  const nonByeFixtures = fixtures.filter((f) => !isBye(f))
+  const nonByeFixtures = fixtures.filter((f) => !isBye(f) && !isPhantomBye(f))
   const counts = {
     all: nonByeFixtures.length,
     live: nonByeFixtures.filter((f) => f.status === "live").length,
@@ -1131,7 +1166,7 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
   // Byes are excluded from status-specific filters (their "completed"
   // status isn't a real result), but always shown under "All".
   const filtered = dedupeByes(
-    filter === "all" ? fixtures : fixtures.filter((f) => !isBye(f) && f.status === filter)
+    filter === "all" ? fixtures : fixtures.filter((f) => !isBye(f) && !isPhantomBye(f) && f.status === filter)
   )
 
   const stageOf = (f: Fixture) => (f as any).stage ?? "Matches"
@@ -1238,7 +1273,9 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {stageFixtures.map((f) =>
-                    isBye(f) ? (
+                    isPhantomBye(f) ? (
+                        <PendingSlotRow key={f.id} fixture={f} matchNumber={f.matchNumber ?? stageFixtures.indexOf(f) + 1} />
+                      ) : isBye(f) ? (                      
                       <ByeRow
                         key={f.id}
                         fixture={f}
