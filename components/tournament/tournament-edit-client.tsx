@@ -63,8 +63,8 @@ type SectionId = "details" | "bracket" | "teams" | "schedule" | "awards"
 
 const JUMP_SECTIONS: { id: SectionId; label: string }[] = [
   { id: "details", label: "Details" },
-  { id: "bracket", label: "Bracket" },
   { id: "teams", label: "Teams" },
+  { id: "bracket", label: "Bracket" },
   { id: "schedule", label: "Schedule" },
   { id: "awards", label: "Prizes & Awards" },
 ]
@@ -641,6 +641,40 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                     </div>
                   )}
 
+                  
+                  {/* TEAMS */}
+                  {activeSection === "teams" && (
+                    <div className="space-y-5">
+                      <TeamsManager
+                        tournamentId={tournament.id}
+                        orgId={tournament.orgId!}
+                        tournamentName={tournament.name}
+                        sourceType={tournament.sourceType}
+                        sourceId={tournament.sourceId}
+                      />
+                      <div className="bg-black/30 border border-gold/10 rounded-lg p-4">
+                        <p className="text-gray-400 text-xs flex items-start gap-2">
+                          <Users className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
+                          <span>
+                            <span className="text-gold font-semibold">Squads</span> aren't edited here
+                            — they come from your linked auction's results. Update the auction to
+                            change those.
+                          </span>
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={() => goToNextSection(0)}
+                          className="text-gold text-xs underline underline-offset-4 hover:text-gold/80"
+                        >
+                          Edit Schedule →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+
                   {/* BRACKET */}
                   {activeSection === "bracket" && (
                     <div className="bg-black/50 border border-gold/20 rounded-lg p-5 sm:p-6">
@@ -739,37 +773,6 @@ export default function TournamentEditClient({ tournament }: TournamentEditClien
                     </div>
                   )}
 
-                  {/* TEAMS */}
-                  {activeSection === "teams" && (
-                    <div className="space-y-5">
-                      <TeamsManager
-                        tournamentId={tournament.id}
-                        orgId={tournament.orgId!}
-                        tournamentName={tournament.name}
-                        sourceType={tournament.sourceType}
-                        sourceId={tournament.sourceId}
-                      />
-                      <div className="bg-black/30 border border-gold/10 rounded-lg p-4">
-                        <p className="text-gray-400 text-xs flex items-start gap-2">
-                          <Users className="h-3.5 w-3.5 text-gold shrink-0 mt-0.5" />
-                          <span>
-                            <span className="text-gold font-semibold">Squads</span> aren't edited here
-                            — they come from your linked auction's results. Update the auction to
-                            change those.
-                          </span>
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <button
-                          type="button"
-                          onClick={() => goToNextSection(0)}
-                          className="text-gold text-xs underline underline-offset-4 hover:text-gold/80"
-                        >
-                          Edit Schedule →
-                        </button>
-                      </div>
-                    </div>
-                  )}
 
                   {/* MATCHES / SCHEDULE */}
                   {activeSection === "schedule" && (

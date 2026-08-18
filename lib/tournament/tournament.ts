@@ -495,10 +495,11 @@ async function getFixturesForTournament(tournamentId: string) {
     .from("bracket_matches")
     .select(
       `
-      id, scheduled_at, venue, status, score_a, score_b, overlay_match_id,
+      id, round, scheduled_at, venue, status, score_a, score_b, overlay_match_id, match_number,
       team_a:team_a_id ( name, logo ),
       team_b:team_b_id ( name, logo ),
-      winner:winner_team_id ( name )
+      winner:winner_team_id ( name ),
+      matches:overlay_match_id ( match_setup )
       `
     )
     .eq("tournament_id", tournamentId)
@@ -513,21 +514,42 @@ async function getFixturesForTournament(tournamentId: string) {
     const teamA = Array.isArray(m.team_a) ? m.team_a[0] : m.team_a;
     const teamB = Array.isArray(m.team_b) ? m.team_b[0] : m.team_b;
     const winner = Array.isArray(m.winner) ? m.winner[0] : m.winner;
+    const linkedMatch = Array.isArray(m.matches) ? m.matches[0] : m.matches;
+    const setup = linkedMatch?.match_setup;
+
     const scheduled = m.scheduled_at ? new Date(m.scheduled_at) : null;
+
+    // match_setup.date is "YYYY-MM-DD", match_setup.time is "HH:mm" — parse
+    // them into a real Date so formatting matches the scheduled_at path
+    // instead of showing raw strings.
+    const setupDateTime =
+      !scheduled && setup?.date
+        ? new Date(`${setup.date}T${setup.time || "00:00"}`)
+        : null;
+
+    const dateLabel = scheduled
+      ? scheduled.toLocaleDateString()
+      : setupDateTime && !isNaN(setupDateTime.getTime())
+      ? setupDateTime.toLocaleDateString()
+      : setup?.date || "TBD";
+
+    const timeLabel = scheduled
+      ? scheduled.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : setupDateTime && !isNaN(setupDateTime.getTime()) && setup?.time
+      ? setupDateTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : setup?.time || "";
 
     return {
       id: m.id,
-      // Links the Schedule tab's fixture card through to /match/[id],
-      // same as the Bracket tab. Undefined (not null) when there's no
-      // linked match yet, matching Fixture.matchId?: string.
       matchId: m.overlay_match_id ?? undefined,
+      matchNumber: m.match_number ?? undefined,
       team1: teamA?.name ?? "TBD",
       team2: teamB?.name ?? "TBD",
       team1Logo: teamA?.logo ?? undefined,
       team2Logo: teamB?.logo ?? undefined,
-      date: scheduled ? scheduled.toLocaleDateString() : "TBD",
-      time: scheduled ? scheduled.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
-      venue: m.venue ?? "",
+      date: dateLabel,
+      time: timeLabel,
+      venue: m.venue || setup?.venue || "",
       status: m.status as "upcoming" | "live" | "completed",
       result:
         winner && m.score_a != null && m.score_b != null
@@ -574,6 +596,7 @@ function toMatchNode(m: any): MatchNode {
   return {
     id: m.id,
     label: `Round ${m.round}`,
+    matchNumber: m.match_number ?? undefined,   // <-- add this
     status: m.status === "completed" ? "completed" : m.status === "live" ? "live" : "scheduled",
     teamA: toTeamNode(teamA, m.score_a, winner?.code),
     teamB: toTeamNode(teamB, m.score_b, winner?.code),
@@ -636,7 +659,7 @@ async function getBracketChartDataForTournament(
     .select(
       `
       id, round, position, bracket_type, score_a, score_b, status,
-      venue, scheduled_at, feeder_match_a_id, feeder_match_b_id,
+      venue, scheduled_at, feeder_match_a_id, feeder_match_b_id, match_number,
       team_a:team_a_id ( name, code, color ),
       team_b:team_b_id ( name, code, color ),
       winner:winner_team_id ( code )

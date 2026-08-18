@@ -355,27 +355,57 @@ function MiniMatchCard({
   slug?: string
 }) {
   const linkable = !!slug && hasMatchDetail(match.id)
+  // Same heuristic as isBye() in tournament-detail-client.tsx: a bye is
+  // decided the instant the bracket is generated, so it's "completed"
+  // with exactly one side still unresolved.
+  const isBye = match.status === "completed" && !!match.teamA !== !!match.teamB
+  const advancingTeam = match.teamA ?? match.teamB
 
   const card = (
     <div
       ref={cardRef}
       className={`border border-gold/10 rounded-md p-3 bg-white/[0.02] transition-all ${
-        linkable ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
+        linkable && !isBye ? "hover:border-gold/60 hover:bg-white/[0.04] cursor-pointer" : ""
       }`}
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-gold text-[10px] font-bold font-cinzel uppercase tracking-wide">{match.label}</span>
-        {match.status === "live" ? (
-          <span className="flex items-center gap-1 text-red-500 text-[10px] font-bold">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="text-gold text-[10px] font-bold font-cinzel uppercase tracking-wide truncate">
+            {match.label}
+          </span>
+          {match.matchNumber != null && (
+            <span className="text-gold/70 text-[9px] font-bold font-cinzel uppercase tracking-wide shrink-0">
+              · M{match.matchNumber}
+            </span>
+          )}
+        </span>
+        {isBye ? (
+          <span className="text-[9px] font-cinzel uppercase tracking-widest text-gray-500 border border-white/10 rounded-full px-1.5 py-0.5 shrink-0">
+            Bye
+          </span>
+        ) : match.status === "live" ? (
+          <span className="flex items-center gap-1 text-red-500 text-[10px] font-bold shrink-0">
             <Radio className="h-2.5 w-2.5 animate-pulse" /> LIVE
           </span>
         ) : match.date ? (
-          <span className="text-gray-500 text-[10px]">{match.date}</span>
+          <span className="text-gray-500 text-[10px] shrink-0">{match.date}</span>
         ) : null}
       </div>
-      <MiniTeamRow team={match.teamA} isWinner={!!match.teamA?.isWinner} />
-      <MiniTeamRow team={match.teamB} isWinner={!!match.teamB?.isWinner} />
-      {linkable && (
+
+      {isBye ? (
+        <div className="py-1.5 px-2">
+          <span className="text-xs" style={{ color: advancingTeam?.color }}>
+            {advancingTeam?.name ?? "TBD"} <span className="text-gray-500">advances on a bye</span>
+          </span>
+        </div>
+      ) : (
+        <>
+          <MiniTeamRow team={match.teamA} isWinner={!!match.teamA?.isWinner} />
+          <MiniTeamRow team={match.teamB} isWinner={!!match.teamB?.isWinner} />
+        </>
+      )}
+
+      {linkable && !isBye && (
         <p className="text-gold text-[9px] uppercase tracking-widest font-cinzel mt-2 text-right">
           View match →
         </p>
@@ -383,7 +413,7 @@ function MiniMatchCard({
     </div>
   )
 
-  return linkable ? (
+  return linkable && !isBye ? (
     <Link href={`/tournaments/${slug}/match/${match.id}`} className="block">
       {card}
     </Link>

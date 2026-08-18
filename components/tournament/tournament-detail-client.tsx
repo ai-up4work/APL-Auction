@@ -108,6 +108,46 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  same "what do winners get" information.                             */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  NOTE ON BYES (Schedule tab):                                        */
+/*  A "bye" happens when a bracket size isn't a power of 2 — one team    */
+/*  auto-advances a round with no actual opponent to play. Historically  */
+/*  a bye written into `fixtures` (e.g. team2 = "BYE" or "") rendered as */
+/*  a normal two-team FixtureCard, which looked exactly like a genuine   */
+/*  completed head-to-head result even though only one team was ever     */
+/*  really "there."                                                      */
+/*                                                                        */
+/*  FIXED: `isBye()` detects these fixtures, and they're now routed to   */
+/*  a compact `ByeRow` ("Team X advances on a bye") instead of the full  */
+/*  FixtureCard, so visitors can still see the round happened without it */
+/*  being mistaken for an actual match. Bye fixtures are also excluded   */
+/*  from the status-filter chip counts (All/Live/Upcoming/Completed) at  */
+/*  the top of the Schedule panel, since counting them there would       */
+/*  inflate those numbers with rounds where no game was actually played. */
+/*                                                                        */
+/*  FIXED (round 2): a bye's underlying `status` field is set the        */
+/*  instant the bracket is generated — there's no game to play, so it    */
+/*  reads "completed" from the very start, often before the tournament   */
+/*  itself has even begun. That made a bye appear under the "Completed"  */
+/*  filter looking exactly like a genuine result, even pre-tournament.   */
+/*  Status-specific tabs (Live/Upcoming/Completed) now exclude byes      */
+/*  entirely — a bye isn't a "completed match" in any meaningful sense,  */
+/*  it's a walkover, and it only ever appears in the unfiltered "All"    */
+/*  view via ByeRow. ByeRow also now carries an explicit "Bye" tag so    */
+/*  it can't be mistaken for a played game even there.                   */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON MATCH ORDER (Schedule tab):                                 */
+/*  Fixtures within a stage previously sorted by status (completed →    */
+/*  live → upcoming) with real match order never considered. Now sorts  */
+/*  by `Fixture.matchNumber` first — the real tournament-wide play      */
+/*  order sourced from matches.match_setup.matchNumber (see             */
+/*  bracket_matches.match_number / generateBracket.ts) — falling back   */
+/*  to the old status/TBD ordering only for fixtures that don't have a  */
+/*  matchNumber yet (not scheduled through the live engine).            */
+/* ------------------------------------------------------------------ */
+
 interface TournamentDetailClientProps {
   tournament: Tournament
   slug: string
@@ -970,19 +1010,129 @@ function PointsCalculationOverlay({
 // ─────────────────────────────────────────────────────────────
 // SCHEDULE PANEL
 // ─────────────────────────────────────────────────────────────
+
+// A "bye" happens when a bracket size isn't a power of 2 — one team
+// auto-advances a round with no actual opponent to play. A bye is
+// decided instantly when the bracket is generated (there's no game to
+// play), so it reads "completed" from the very start, with exactly one
+// side still unresolved ("TBD"). A pending future-round slot also shows
+// a "TBD" side but stays "upcoming" until its feeder match resolves —
+// that's what distinguishes the two.
+function isBye(f: Fixture) {
+  const t1 = (f.team1 || "").trim().toUpperCase()
+  const t2 = (f.team2 || "").trim().toUpperCase()
+  const oneSideMissing = (t1 === "TBD" || !t1) !== (t2 === "TBD" || !t2)
+  return oneSideMissing && f.status === "completed"
+}
+
+// Two Fixture rows can end up describing the exact same bye slot
+// (one written for the "match", one for the auto-advance record).
+// Collapse them to a single row keyed on the round + the team that
+// is actually advancing, so the same bye never renders twice.
+function dedupeByes(fixtures: Fixture[]): Fixture[] {
+  const seen = new Set<string>()
+  const result: Fixture[] = []
+  for (const f of fixtures) {
+    if (!isBye(f)) {
+      result.push(f)
+      continue
+    }
+    // Key deliberately omits matchNumber/date — those are exactly the
+    // fields that differ between the two duplicate rows for the same
+    // bye slot. Round + advancing team is what actually identifies
+    // "this bye", so that's all the key uses.
+    const advancingTeam = (f.team1 || "").trim().toUpperCase() === "TBD" || !f.team1 ? f.team2 : f.team1
+    const roundLabel = (f as any).stage || (f as any).round || ""
+    const key = `${roundLabel}|${(advancingTeam || "").trim().toUpperCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(f)
+  }
+  return result
+}
+
+function ByeRow({
+  fixture: f,
+  logo,
+  color,
+  matchNumber,
+}: {
+  fixture: Fixture
+  logo?: string
+  color: string
+  matchNumber?: number
+}) {
+  const t1 = (f.team1 || "").trim().toUpperCase()
+  const advancingTeam = t1 === "TBD" || !f.team1 ? f.team2 : f.team1
+  const roundLabel = (f as any).stage || (f as any).round || (matchNumber ? `Match ${matchNumber}` : null)
+
+  return (
+    <div className="relative rounded-xl border border-gold/10 overflow-hidden h-full flex flex-col opacity-90">
+      <div className="relative h-36 bg-black/60">
+        <div
+          className="absolute inset-0"
+          style={{ background: `linear-gradient(135deg, ${color}40, rgba(0,0,0,0.94))` }}
+        />
+
+        {roundLabel && (
+          <span className="absolute top-2 left-2 z-20 text-white/90 text-[10px] font-cinzel uppercase tracking-widest bg-black/50 border border-white/10 rounded-full px-2.5 py-0.5">
+            {roundLabel}
+          </span>
+        )}
+        <span className="absolute top-2 right-2 z-20 text-gray-300 text-[10px] font-bold font-cinzel px-2.5 py-1 rounded-full bg-white/10 border border-white/10">
+          Bye
+        </span>
+
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1.5">
+          {logo ? (
+            <div
+              className="relative h-20 w-20 rounded-full overflow-hidden border-2 ring-1 ring-black/40 bg-black/40"
+              style={{ borderColor: color }}
+            >
+              <Image src={logo} alt={`${advancingTeam} logo`} fill className="object-cover" />
+            </div>
+          ) : (
+            <div
+              className="h-20 w-20 rounded-full bg-black/40 border-2 flex items-center justify-center"
+              style={{ borderColor: color }}
+            >
+              <span className="text-white text-[13px] font-bold font-cinzel">{initials(advancingTeam || "?")}</span>
+            </div>
+          )}
+          <span className="text-white text-[12px] font-semibold font-cinzel text-center leading-tight max-w-[160px] truncate">
+            {advancingTeam || "TBD"}
+          </span>
+        </div>
+      </div>
+
+      <div className="bg-black/50 p-4 flex-1 flex flex-col items-center justify-center gap-1">
+        <p className="text-gray-300 text-xs font-medium text-center">Advances automatically</p>
+        <p className="text-gray-500 text-[10px] text-center">No opponent for this round</p>
+      </div>
+    </div>
+  )
+}
+
 function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads?: Squad[]; slug: string }) {
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "completed">("all")
   const logoByTeam = new Map(squads?.map((s) => [s.team, s.logo]) ?? [])
   const colorByTeam = new Map(squads?.map((s) => [s.team, (s as any).color as string | undefined]) ?? [])
 
+  // Counts exclude byes — a bye isn't a played match, so it shouldn't
+  // inflate the status-filter chip counts. It still shows in the list.
+  const nonByeFixtures = fixtures.filter((f) => !isBye(f))
   const counts = {
-    all: fixtures.length,
-    live: fixtures.filter((f) => f.status === "live").length,
-    upcoming: fixtures.filter((f) => f.status === "upcoming").length,
-    completed: fixtures.filter((f) => f.status === "completed").length,
+    all: nonByeFixtures.length,
+    live: nonByeFixtures.filter((f) => f.status === "live").length,
+    upcoming: nonByeFixtures.filter((f) => f.status === "upcoming").length,
+    completed: nonByeFixtures.filter((f) => f.status === "completed").length,
   }
 
-  const filtered = filter === "all" ? fixtures : fixtures.filter((f) => f.status === filter)
+  // Byes are excluded from status-specific filters (their "completed"
+  // status isn't a real result), but always shown under "All".
+  const filtered = dedupeByes(
+    filter === "all" ? fixtures : fixtures.filter((f) => !isBye(f) && f.status === filter)
+  )
 
   const stageOf = (f: Fixture) => (f as any).stage ?? "Matches"
   const stageOrder = ["Group Stage", "Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final", "Matches"]
@@ -1063,6 +1213,12 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
         <div className="space-y-10">
           {stages.map((stage) => {
             const stageFixtures = [...stageGroups.get(stage)!].sort((a, b) => {
+              if (a.matchNumber != null && b.matchNumber != null) {
+                return a.matchNumber - b.matchNumber
+              }
+              if (a.matchNumber != null) return -1
+              if (b.matchNumber != null) return 1
+
               const statusRank = (f: Fixture) =>
                 f.status === "completed" ? 0 : f.status === "live" ? 1 : 2
               const statusDiff = statusRank(a) - statusRank(b)
@@ -1072,12 +1228,6 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
               return tbdRank(a) - tbdRank(b)
             })
 
-            const dateGroups: { date: string; items: Fixture[] }[] = []
-            for (const f of stageFixtures) {
-              const current = dateGroups[dateGroups.length - 1]
-              if (current && current.date === f.date) current.items.push(f)
-              else dateGroups.push({ date: f.date, items: [f] })
-            }
             return (
               <div key={stage}>
                 {stage !== "Matches" && (
@@ -1086,33 +1236,33 @@ function SchedulePanel({ fixtures, squads, slug }: { fixtures: Fixture[]; squads
                     {stage}
                   </h3>
                 )}
-                <div className="space-y-6">
-                  {dateGroups.map((group) => (
-                    <div key={group.date}>
-                      {group.date && group.date !== "TBD" && (
-                        <p className="text-gold/70 text-[11px] font-cinzel uppercase tracking-widest mb-2.5 flex items-center gap-3">
-                          <span className="h-px flex-1 bg-gold/10" />
-                          {group.date}
-                          <span className="h-px flex-1 bg-gold/10" />
-                        </p>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {group.items.map((f, i) => (
-                          <FixtureCard
-                            key={f.id}
-                            fixture={f}
-                            team1Logo={logoByTeam.get(f.team1)}
-                            team2Logo={logoByTeam.get(f.team2)}
-                            team1Color={getTeamColor(f.team1, colorByTeam.get(f.team1))}
-                            team2Color={getTeamColor(f.team2, colorByTeam.get(f.team2))}
-                            statusBadgeClass={statusBadgeClass}
-                            slug={slug}
-                            matchNumber={(f as any).matchNumber ?? stageFixtures.indexOf(f) + 1}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {stageFixtures.map((f) =>
+                    isBye(f) ? (
+                      <ByeRow
+                        key={f.id}
+                        fixture={f}
+                        logo={logoByTeam.get(f.team1 !== "TBD" ? f.team1 : f.team2)}
+                        color={getTeamColor(
+                          f.team1 !== "TBD" ? f.team1 : f.team2,
+                          colorByTeam.get(f.team1 !== "TBD" ? f.team1 : f.team2)
+                        )}
+                        matchNumber={f.matchNumber ?? stageFixtures.indexOf(f) + 1}
+                      />
+                    ) : (
+                      <FixtureCard
+                        key={f.id}
+                        fixture={f}
+                        team1Logo={logoByTeam.get(f.team1)}
+                        team2Logo={logoByTeam.get(f.team2)}
+                        team1Color={getTeamColor(f.team1, colorByTeam.get(f.team1))}
+                        team2Color={getTeamColor(f.team2, colorByTeam.get(f.team2))}
+                        statusBadgeClass={statusBadgeClass}
+                        slug={slug}
+                        matchNumber={f.matchNumber ?? stageFixtures.indexOf(f) + 1}
+                      />
+                    )
+                  )}
                 </div>
               </div>
             )

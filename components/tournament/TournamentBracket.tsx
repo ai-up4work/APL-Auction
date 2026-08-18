@@ -23,6 +23,7 @@ export interface MatchNode {
   teamA: TeamNode | null;
   teamB: TeamNode | null;
   aFrom: string | null;
+  matchNumber?: number;
   bFrom: string | null;
   venue?: string;
   date?: string;

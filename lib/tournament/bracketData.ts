@@ -15,6 +15,7 @@ interface BracketMatchRow {
   bracket_type: "winners" | "losers" | "grand_final" | "round_robin";
   round: number;
   position: number;
+  match_number: number | null;   // <-- add
   score_a: number | null;
   score_b: number | null;
   winner_team_id: string | null;
@@ -38,29 +39,30 @@ function normalizeOne<T>(v: T | T[] | null): T | null {
  * has no bracket to render here — callers should show standings instead).
  */
 export async function getBracketMatchesForTournament(tournamentId: string): Promise<BracketMatchRow[]> {
-  const { data, error } = await supabase
-    .from("bracket_matches")
-    .select(
-      `
-      id,
-      bracket_type,
-      round,
-      position,
-      score_a,
-      score_b,
-      winner_team_id,
-      status,
-      venue,
-      scheduled_at,
-      feeder_match_a_id,
-      feeder_match_b_id,
-      team_a:team_a_id ( id, code, name, color, logo ),
-      team_b:team_b_id ( id, code, name, color, logo )
-      `
-    )
-    .eq("tournament_id", tournamentId)
-    .order("round", { ascending: true })
-    .order("position", { ascending: true });
+const { data, error } = await supabase
+  .from("bracket_matches")
+  .select(
+    `
+    id,
+    bracket_type,
+    round,
+    position,
+    match_number,
+    score_a,
+    score_b,
+    winner_team_id,
+    status,
+    venue,
+    scheduled_at,
+    feeder_match_a_id,
+    feeder_match_b_id,
+    team_a:team_a_id ( id, code, name, color, logo ),
+    team_b:team_b_id ( id, code, name, color, logo )
+    `
+  )
+  .eq("tournament_id", tournamentId)
+  .order("round", { ascending: true })
+  .order("position", { ascending: true });
 
   if (error) {
     console.error("getBracketMatchesForTournament failed:", error.message);
@@ -133,6 +135,7 @@ function rowToMatchNode(
   return {
     id: row.id,
     label: row.id,
+    matchNumber: row.match_number ?? undefined,   // <-- add
     status: mapStatus(row.status),
     teamA: teamNodeFromRow(row.team_a, row.status, row.score_a, row.winner_team_id),
     teamB: teamNodeFromRow(row.team_b, row.status, row.score_b, row.winner_team_id),

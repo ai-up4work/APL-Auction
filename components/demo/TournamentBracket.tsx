@@ -22,6 +22,7 @@ export interface MatchNode {
   status: "scheduled" | "live" | "completed";
   teamA: TeamNode | null;
   teamB: TeamNode | null;
+  matchNumber?: number;
   aFrom: string | null;
   bFrom: string | null;
   venue?: string;

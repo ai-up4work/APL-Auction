@@ -25,6 +25,12 @@ function stripPrefix(label: string | null | undefined): string | null {
  * render in their dashed "To Be Determined" placeholder state (matching
  * TournamentBracket's single-elim look) rather than collapsing into a
  * one-line text-only box.
+ *
+ * MATCH NUMBER: `match.matchNumber` (from bracket_matches.match_number —
+ * see generateBracket.ts, assigned round-by-round at generation time)
+ * is shown next to the bracket label in the header, e.g.
+ * "R32-1 · Match 7". Falls back to just the label when it isn't set
+ * (older bracket rows generated before the column existed).
  */
 export default function MatchResultCardStatic({
   match,
@@ -76,10 +82,15 @@ export default function MatchResultCardStatic({
       )}
 
       <div className="relative flex flex-col gap-1.5 p-2">
-        <div className="flex items-center justify-between">
-          <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline truncate">
+            {/* {match.label} */}
+            {match.matchNumber != null && (
+              <span className="text-theme-orange/80"> · Match {match.matchNumber}</span>
+            )}
+          </p>
           {match.status === "live" && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-status-live/10 text-status-live border border-status-live/30 text-[9px] font-black tracking-widest font-label-mono">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-status-live/10 text-status-live border border-status-live/30 text-[9px] font-black tracking-widest font-label-mono shrink-0">
               <Radio className="w-2.5 h-2.5 animate-pulse" />
               Live
             </span>

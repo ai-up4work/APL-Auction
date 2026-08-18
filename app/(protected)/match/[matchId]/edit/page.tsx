@@ -838,6 +838,7 @@ export default function EditMatchPage() {
   const [form, setForm] = useState<EditableSetup>(emptySetup())
   const [showImportedHint, setShowImportedHint] = useState(false)
   const [bannerBroken, setBannerBroken] = useState(false)
+  const [tournamentBannerUrl, setTournamentBannerUrl] = useState<string>("")
   const rawSetupRef = useRef<Record<string, any> | null>(null)
 
   // ── load existing match_setup ──
@@ -848,7 +849,11 @@ export default function EditMatchPage() {
     async function load() {
       setState("loading")
       setErrorMsg(null)
-      const { data, error } = await supabase.from("matches").select("id, match_setup").eq("id", matchId).maybeSingle()
+      const { data, error } = await supabase
+        .from("matches")
+        .select("id, match_setup, tournament_id")
+        .eq("id", matchId)
+        .maybeSingle()
       if (cancelled) return
       if (error) {
         setErrorMsg(error.message)
@@ -864,24 +869,29 @@ export default function EditMatchPage() {
       rawSetupRef.current = raw
       let parsed = fromRawSetup(raw)
 
-      // ── TEAM IDENTITY FALLBACK ──
-      // match_setup.team1/team2 is a JSON snapshot, not a foreign key —
-      // for a tournament-linked match whose bracket slot was created
-      // before real teams were assigned to it, that snapshot can be
-      // blank even though the real teams already exist in
-      // bracket_matches.team_a_id/team_b_id. This is the same gap
-      // getFixturesForTournament/backfillTeamsFromBracket in
-      // organization.ts already work around for the public Schedule
-      // tab and the admin dashboard's tournament collapsible — without
-      // this, the editor loads showing empty team fields for a match
-      // that clearly has real teams elsewhere. Only fires when a team
-      // name is actually missing, and only fills fields that are still
-      // empty — anything already present in match_setup wins.
-      if (!parsed.team1Name.trim() || !parsed.team2Name.trim()) {
+      // Declared at the top level of load() so both the bracket-fetch
+      // block and the tournament-fallback block below can read/assign it.
+      let bracketTournamentId: string | null = null
+
+      // ── TEAM IDENTITY + MATCH NUMBER FALLBACK ──
+      // match_setup.team1/team2 is a JSON snapshot, not a foreign key,
+      // and match_setup.matchNumber is free text the organizer may never
+      // have filled in — the real tournament-wide match number lives on
+      // bracket_matches.match_number. Both gaps (plus tournament_id, used
+      // further below) are covered by the same bracket_matches row, keyed
+      // by overlay_match_id = this match, so fetch it whenever ANY of
+      // team names / match number / tournament fields are still blank.
+      const needsTeamFallback = !parsed.team1Name.trim() || !parsed.team2Name.trim()
+      const needsMatchNumberFallback = !parsed.matchNumber.trim()
+      const needsTournamentFallback = !parsed.tournament.trim() || !parsed.tournamentName.trim()
+
+      if (needsTeamFallback || needsMatchNumberFallback || needsTournamentFallback) {
         const { data: bracketRow, error: bracketErr } = await supabase
           .from("bracket_matches")
           .select(
             `
+            match_number,
+            tournament_id,
             team_a:team_a_id ( name, code, logo, color ),
             team_b:team_b_id ( name, code, logo, color )
             `
@@ -890,8 +900,10 @@ export default function EditMatchPage() {
           .maybeSingle()
 
         if (bracketErr) {
-          console.error("[edit] bracket team fallback lookup failed:", bracketErr.message)
+          console.error("[edit] bracket fallback lookup failed:", bracketErr.message)
         } else if (bracketRow) {
+          bracketTournamentId = bracketRow.tournament_id ?? null
+
           const teamA: any = Array.isArray(bracketRow.team_a) ? bracketRow.team_a[0] : bracketRow.team_a
           const teamB: any = Array.isArray(bracketRow.team_b) ? bracketRow.team_b[0] : bracketRow.team_b
 
@@ -907,8 +919,71 @@ export default function EditMatchPage() {
             team2Logo: parsed.team2Logo.trim() || teamB?.logo || "",
             team2Color:
               parsed.team2Color !== DEFAULT_TEAM_COLOR ? parsed.team2Color : teamB?.color || DEFAULT_TEAM_COLOR,
+            // Prefer the real bracket match_number column; only fall back
+            // to whatever's already in match_setup.matchNumber if
+            // bracket_matches has no row/no number for this match.
+            matchNumber:
+              parsed.matchNumber.trim() ||
+              (bracketRow.match_number != null ? String(bracketRow.match_number) : parsed.matchNumber),
           }
         }
+      }
+
+      // ── MATCH TITLE FALLBACK ──
+      // Runs after the team-identity fallback above so it always sees the
+      // final resolved team names, whichever source they came from. Only
+      // fills in when matchTitle is still blank — anything already typed
+      // in match_setup.matchTitle wins.
+      if (!parsed.matchTitle.trim() && (parsed.team1Name.trim() || parsed.team2Name.trim())) {
+        parsed = {
+          ...parsed,
+          matchTitle: `${parsed.team1Name || "Team 1"} vs ${parsed.team2Name || "Team 2"}`,
+        }
+      }
+
+      // ── TOURNAMENT FALLBACK (name, ref/slug, AND banner) ──
+      // `tournament` (Info panel, "ref/slug"), `tournamentName` (Details
+      // panel, "Tournament / Series"), and the Live Preview banner
+      // fallback all describe/derive from the same real-world fact: which
+      // tournament this match belongs to. Resolve the tournament row once
+      // — preferring bracket_matches.tournament_id (from the fetch above)
+      // over matches.tournament_id, since the latter isn't reliably
+      // populated for bracket-created matches (same gap documented for
+      // auction_id elsewhere in this file) — then fill in whichever of
+      // tournament/tournamentName is still blank, and separately stash the
+      // tournament's logo for display-only use in the Live Preview.
+      {
+        const resolvedTournamentId = bracketTournamentId || data.tournament_id
+        let resolvedName: string | null = null
+        let resolvedLogo: string | null = null
+
+        if (resolvedTournamentId) {
+          const { data: tournamentRow, error: tournamentErr } = await supabase
+            .from("tournaments")
+            .select("name, image_url")
+            .eq("id", resolvedTournamentId)
+            .maybeSingle()
+
+          if (tournamentErr) {
+            console.error("[edit] tournament fallback lookup failed:", tournamentErr.message)
+          }
+          resolvedName = tournamentRow?.name ?? null
+          resolvedLogo = tournamentRow?.image_url ?? null
+        }
+
+        if (!parsed.tournament.trim() || !parsed.tournamentName.trim()) {
+          parsed = {
+            ...parsed,
+            tournament: parsed.tournament.trim() || resolvedName || "Friendly",
+            tournamentName: parsed.tournamentName.trim() || resolvedName || "Friendly",
+          }
+        }
+
+        // Display-only — never merged into `parsed`/form.tournamentLogoUrl,
+        // so it's never written back to match_setup on save. The Live
+        // Preview banner prefers form.tournamentLogoUrl first and only
+        // falls back to this when the match has no banner of its own.
+        setTournamentBannerUrl(resolvedLogo || "")
       }
 
       if (cancelled) return
@@ -925,7 +1000,7 @@ export default function EditMatchPage() {
 
   useEffect(() => {
     setBannerBroken(false)
-  }, [form.tournamentLogoUrl])
+  }, [form.tournamentLogoUrl, tournamentBannerUrl])
 
   function update<K extends keyof EditableSetup>(key: K, value: EditableSetup[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -1355,7 +1430,7 @@ export default function EditMatchPage() {
                           subType="banner" → matches/{matchId}/banner/. ── */}
                       <div>
                         <ImageUploadField
-                          label="Match Banner"
+                          label="Match Banner (if different from tournament banner)"
                           value={form.tournamentLogoUrl}
                           onChange={(url) => update("tournamentLogoUrl", url)}
                           matchId={matchId}
@@ -1573,21 +1648,27 @@ export default function EditMatchPage() {
                             near the top of this file), same treatment as
                             the tournament editor's imageUrl strip. */}
                         <div className="relative h-24 bg-black/60 border-b border-gold/10">
-                          {form.tournamentLogoUrl && !bannerBroken ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <Image
-                              src={form.tournamentLogoUrl}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={() => setBannerBroken(true)}
-                              width={600}
-                              height={400}
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <ImageOff className="h-5 w-5 text-gray-700" />
-                            </div>
-                          )}
+                          {(() => {
+                            // Prefer this match's own banner; fall back to
+                            // the parent tournament's banner purely for
+                            // display when the match hasn't set one yet.
+                            const previewBanner = form.tournamentLogoUrl || tournamentBannerUrl
+                            return previewBanner && !bannerBroken ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <Image
+                                src={previewBanner}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                onError={() => setBannerBroken(true)}
+                                width={600}
+                                height={400}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <ImageOff className="h-5 w-5 text-gray-700" />
+                              </div>
+                            )
+                          })()}
                         </div>
 
                         <div className="p-4">

@@ -98,6 +98,14 @@ export async function deleteBracketForTournament(tournamentId: string): Promise<
  * to reference it as a feeder_match_a_id/feeder_match_b_id — batching
  * with .select() would rely on Postgres preserving row order, which this
  * avoids entirely.
+ *
+ * MATCH NUMBERING: each bracket_matches row also gets a contiguous
+ * match_number (1..N), assigned in the exact order rows are inserted —
+ * round by round, and for double elimination winners rounds fully,
+ * then losers rounds fully, then grand final last. This gives a single
+ * tournament-wide play order ("level by level") independent of round/
+ * bracket_type, which createMatchesFromBracket below then copies into
+ * match_setup.matchNumber for the overlay/broadcast JSON.
  */
 export async function generateBracketForTournament(
   tournamentId: string,
@@ -231,6 +239,7 @@ function stripPrefix(label: string | null): string | null {
 
 async function insertSingleElim(tournamentId: string, rounds: Round[]) {
   const idMap = new Map<string, string>(); // generated match id -> real uuid
+  let nextMatchNumber = 1; // ── contiguous, in insertion order (round by round) ──
 
   for (let r = 0; r < rounds.length; r++) {
     const round = rounds[r];
@@ -241,6 +250,7 @@ async function insertSingleElim(tournamentId: string, rounds: Round[]) {
         bracket_type: "winners" as const,
         round: r + 1,
         position: i + 1,
+        match_number: nextMatchNumber++,
         team_a_id: realTeamId(m.teamA),
         team_b_id: realTeamId(m.teamB),
         feeder_match_a_id: m.aFrom ? idMap.get(m.aFrom) ?? null : null,
@@ -261,6 +271,7 @@ async function insertSingleElim(tournamentId: string, rounds: Round[]) {
 
 async function insertDoubleElim(tournamentId: string, data: DoubleElimData) {
   const idMap = new Map<string, string>();
+  let nextMatchNumber = 1; // ── shared across winners, losers, and grand final ──
 
   async function insertRound(round: Round, bracketType: "winners" | "losers", roundNumber: number) {
     for (let i = 0; i < round.matches.length; i++) {
@@ -272,6 +283,7 @@ async function insertDoubleElim(tournamentId: string, data: DoubleElimData) {
         bracket_type: bracketType,
         round: roundNumber,
         position: i + 1,
+        match_number: nextMatchNumber++,
         team_a_id: realTeamId(m.teamA),
         team_b_id: realTeamId(m.teamB),
         feeder_match_a_id: feederA ? idMap.get(feederA) ?? null : null,
@@ -299,6 +311,7 @@ async function insertDoubleElim(tournamentId: string, data: DoubleElimData) {
     bracket_type: "grand_final" as const,
     round: 1,
     position: 1,
+    match_number: nextMatchNumber++, // grand final always numbered last
     team_a_id: realTeamId(data.grandFinal.teamA),
     team_b_id: realTeamId(data.grandFinal.teamB),
     feeder_match_a_id: gfFeederA ? idMap.get(gfFeederA) ?? null : null,
@@ -321,12 +334,19 @@ async function insertDoubleElim(tournamentId: string, data: DoubleElimData) {
  * After bracket is generated, automatically create a friendly match
  * for each bracket slot that has two teams. This ensures matches are
  * created immediately upon bracket generation, not as a separate step.
+ *
+ * NOTE: only slots where both team_a_id and team_b_id are already known
+ * get a matches row here — later-round slots still waiting on a feeder
+ * match to resolve are skipped and presumably picked up by whatever
+ * code runs when a feeder result comes in. That code should read
+ * match_number off the bracket row the same way this does, or those
+ * matches will end up with matchNumber: "" in match_setup.
  */
 async function createMatchesFromBracket(tournamentId: string, orgId: string): Promise<void> {
   // Fetch all bracket matches for this tournament
   const { data: bracketMatches, error: bracketErr } = await supabase
     .from("bracket_matches")
-    .select("id, team_a_id, team_b_id, round, position")
+    .select("id, team_a_id, team_b_id, round, position, match_number")
     .eq("tournament_id", tournamentId)
     .order("round", { ascending: true })
     .order("position", { ascending: true });
@@ -380,6 +400,7 @@ async function createMatchesFromBracket(tournamentId: string, orgId: string): Pr
     const matchSetup = {
       tournamentName: "",
       round: `Round ${bracket.round}, Match ${bracket.position}`,
+      matchNumber: bracket.match_number != null ? String(bracket.match_number) : "",
       team1: { name: team1.name, short: team1.code, logo: team1.logo || "" },
       team2: { name: team2.name, short: team2.code, logo: team2.logo || "" },
       venue: "",

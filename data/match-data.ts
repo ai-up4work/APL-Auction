@@ -448,6 +448,7 @@ interface BracketMatchRow {
   round: number
   score_a: number | null
   score_b: number | null
+  matchNumber: number | null
 }
 
 interface TeamRow {
