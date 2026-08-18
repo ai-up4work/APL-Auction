@@ -181,62 +181,6 @@ function MutedNote({ tone = "neutral", children }: { tone?: "neutral" | "warning
   );
 }
 
-// ── DB team picker ────────────────────────────────────────────────────
-function TeamDbSelect({
-  teamsState,
-  roster,
-  excludeTeamId,
-  onApply,
-}: {
-  teamsState: TeamsDbState;
-  roster: RosterState;
-  excludeTeamId?: string;
-  onApply: (patch: Partial<TeamInfo>) => void;
-}) {
-  if (teamsState.status === "loading") {
-    return <MutedNote>Loading teams…</MutedNote>;
-  }
-  if (teamsState.status === "error") {
-    return <MutedNote tone="warning">Couldn&apos;t reach the teams table — fill in details manually.</MutedNote>;
-  }
-  if (teamsState.status === "empty") {
-    return <MutedNote>No teams found for this auction — fill in details manually.</MutedNote>;
-  }
-
-  const options = teamsState.teams.filter((t) => t.id !== excludeTeamId);
-
-  return (
-    <select
-      className="select-input select-input-compact"
-      defaultValue=""
-      onChange={(e) => {
-        const team = teamsState.teams.find((t) => t.id === e.target.value);
-        if (!team) return;
-
-        const squadPlayers = rosterPlayersForTeamId(roster, team.id);
-        onApply({
-          teamId: team.id,
-          name: team.name,
-          shortCode: team.code,
-          color: team.color,
-          logoUrl: team.logo ?? "",
-          ...(squadPlayers.length ? { squadPlayers, squad: squadPlayers.map((p) => p.name) } : {}),
-        });
-        e.target.value = "";
-      }}
-    >
-      <option value="" disabled>
-        Load team from database…
-      </option>
-      {options.map((t) => (
-        <option key={t.id} value={t.id}>
-          {t.code} — {t.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 // ── One team's roster picker ─────────────────────────────────────────
 function TeamRosterPicker({
   team,
@@ -559,50 +503,6 @@ function TeamRosterPicker({
           ))}
         </div>
       )}
-
-      {/* ── Styled callout linking to where players are actually added
-           (Match Editor / Auctions), replacing the old plain <p>. ── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "8px",
-          padding: "10px 12px",
-          borderRadius: "10px",
-          background: "rgba(201,151,31,0.06)",
-          border: "1px dashed rgba(201,151,31,0.35)",
-        }}
-      >
-        <span style={{ fontSize: 12, lineHeight: "14px", color: "var(--color-theme-orange)" }}>ⓘ</span>
-        <p
-          className="text-[10px] leading-relaxed"
-          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-        >
-          Need to add a new player? Do that from the{" "}
-          {matchEditorHref ? (
-            <a
-              href={matchEditorHref}
-              style={{ color: "var(--color-theme-orange)", fontWeight: 700, textDecoration: "underline" }}
-            >
-              Match Editor
-            </a>
-          ) : (
-            <span style={{ color: "var(--color-theme-orange)" }}>Match Editor</span>
-          )}{" "}
-          or the{" "}
-          {auctionAdminHref ? (
-            <a
-              href={auctionAdminHref}
-              style={{ color: "var(--color-theme-orange)", fontWeight: 700, textDecoration: "underline" }}
-            >
-              Auctions
-            </a>
-          ) : (
-            <span style={{ color: "var(--color-theme-orange)" }}>Auctions</span>
-          )}{" "}
-          tab — this panel only picks today&apos;s XI from players already on record.
-        </p>
-      </div>
     </div>
   );
 }
@@ -887,13 +787,6 @@ export default function MatchSetupPanel({
                 }}
               >
                 <Eyebrow color="var(--color-theme-orange)">{teamKey === "teamA" ? "Team A" : "Team B"}</Eyebrow>
-
-                <TeamDbSelect
-                  teamsState={teamsState}
-                  roster={roster}
-                  excludeTeamId={matchSetup[otherKey].teamId}
-                  onApply={(patch) => updateTeam(teamKey, patch)}
-                />
 
                 <div className="grid grid-cols-2 gap-3">
                   <TextField

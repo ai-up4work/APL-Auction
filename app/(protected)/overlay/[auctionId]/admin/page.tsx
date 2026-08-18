@@ -10,6 +10,7 @@ import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/a
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
 import { ChevronDown } from "lucide-react";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
+import { supabase } from "@/lib/supabase";
 import {
   getOrCreateMatch,
   saveMatchSetup,
@@ -233,6 +234,86 @@ function BatterPickerButton({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW — hydration UI: a lightweight skeleton shown while the Supabase load
+// is in flight, and an error banner shown if it failed. Both live here so
+// the main render tree below stays uncluttered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function HydrationSkeleton() {
+  return (
+    <div
+      className="rounded-xl p-8 flex flex-col items-center justify-center gap-3 text-center"
+      style={{
+        background: "var(--color-surface-glass)",
+        backdropFilter: "blur(24px)",
+        border: "1px dashed var(--color-border-overlay)",
+        minHeight: 220,
+      }}
+    >
+      <span
+        className="tally"
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: "999px",
+          background: "radial-gradient(circle at 35% 30%, #ffe08a, var(--color-theme-orange) 65%)",
+          boxShadow: "0 0 8px 1px rgba(201,151,31,0.5)",
+          animation: "connPulse 1.2s ease-in-out infinite",
+        }}
+      />
+      <p
+        className="text-[11px] uppercase tracking-widest"
+        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+      >
+        Loading match data…
+      </p>
+    </div>
+  );
+}
+
+function HydrationErrorBanner({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      className="rounded-xl p-5 flex flex-col gap-3"
+      style={{
+        background: "var(--color-error-container)",
+        border: "1px solid rgba(255,180,171,0.35)",
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="material-symbols-outlined"
+          style={{ fontSize: 20, color: "var(--color-error)" }}
+        >
+          error
+        </span>
+        <span
+          className="text-[11px] font-black uppercase tracking-widest"
+          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}
+        >
+          Couldn't load match data
+        </span>
+      </div>
+      <p className="text-[12px] leading-snug" style={{ color: "var(--color-on-surface-variant)" }}>
+        The saved setup, live state, or weather for this match failed to load from the database.
+        Editing now risks overwriting existing data with blank defaults — retry before making changes.
+        Check the browser console for details.
+      </p>
+      <button
+        onClick={onRetry}
+        className="self-start px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          background: "var(--color-error)",
+          color: "var(--color-on-primary)",
+        }}
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PAGE — auth gate wraps the real content component below
@@ -255,6 +336,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const matchIdRef = useRef<string | null>(null);
+  
 
   const onAirRef = useRef<OnAirChannelsHandle>(null);
   const [connected, setConnected] = useState(false);
@@ -263,17 +345,29 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   const weatherPanelRef = useRef<WeatherPanelHandle>(null);
   const [matchId, setMatchId] = useState<string | null>(null);
 
-
-
   // ── Match Setup state (session) ─────────────────────────────────────
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
   const [setupPushed, setSetupPushed] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
+
   // Single source-of-truth hydration flag. True only once the Supabase
   // load (success OR failure) has resolved. Nothing writes to Supabase
   // before this flips, so we can never clobber a real DB row with the
   // empty initial state during the fetch window.
   const [hydrated, setHydrated] = useState(false);
+
+  // NEW — distinguishes "load succeeded, this really is a fresh match"
+  // from "load failed, we're showing defaults we shouldn't trust yet."
+  // Previously these were indistinguishable once `hydrated` flipped
+  // true, which meant a transient network blip during the initial
+  // fetch looked exactly like a brand-new match and an operator could
+  // start reconfiguring real data on top of it, or push blank state
+  // over Supabase once the save effects unlock.
+  const [hydrationError, setHydrationError] = useState(false);
+
+  // NEW — bumping this re-runs the hydration effect, used by the retry
+  // button on the error banner.
+  const [hydrationAttempt, setHydrationAttempt] = useState(0);
 
   // FIX — guards the very first save-effect run that fires as a side
   // effect of hydration itself. `setMatchSetup(match.match_setup)` and
@@ -304,9 +398,6 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
 
   const [setupPushCount, setSetupPushCount] = useState(0);
   const [sourceAuctionId, setSourceAuctionId] = useState<string | null>(null);
-
-// inside the hydration effect, alongside the other setState calls:
-
 
   const [showMatchWonForm, setShowMatchWonForm] = useState(false);
   const [matchWonDraft, setMatchWonDraft] = useState<{
@@ -342,12 +433,25 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   // ── SOLE hydration path — Supabase only. ──────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    
+
+    // NEW — reset error state on every (re)hydration attempt, including
+    // retries, so a failed retry can flip the banner back on rather than
+    // getting stuck on stale "it worked" state.
+    setHydrationError(false);
 
     (async () => {
       const match = await getOrCreateMatch(auctionId);
       if (!match || cancelled) {
-        setHydrated(true);
+        if (!cancelled) {
+          // NEW — getOrCreateMatch already logs the underlying Postgrest
+          // error via logDbError; here we just surface that a failure
+          // happened, without stomping on whatever state is currently
+          // in memory (e.g. from a previous successful load, or a
+          // half-finished edit — see justHydratedRef comment above for
+          // why we never want to overwrite blindly on this path).
+          setHydrationError(true);
+          setHydrated(true);
+        }
         return;
       }
       matchIdRef.current = match.id;
@@ -389,12 +493,21 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [auctionId]);
+  }, [auctionId, hydrationAttempt]); // NEW — hydrationAttempt lets the retry button re-run this
 
   // ── Save-to-Supabase effects — all gated on `hydrated` + a real matchId,
-  // so nothing writes back before the initial load has actually resolved. ──
+  // so nothing writes back before the initial load has actually resolved.
+  // ALSO now gated on !hydrationError — see below. ──────────────────────
   useEffect(() => {
-    if (!hydrated || !matchIdRef.current) return;
+    // CHANGED — previously only checked `hydrated`. If the initial load
+    // failed, `hydrated` still flips true (see above) but matchIdRef
+    // will be null in the getOrCreateMatch-failure case, which already
+    // blocked writes. The remaining gap: if getOrCreateMatch SUCCEEDED
+    // but one of the three parallel loads failed, matchIdRef.current is
+    // still set, and this effect would happily save right over the
+    // fields that failed to load. Blocking on hydrationError closes
+    // that gap explicitly rather than relying on matchIdRef as a proxy.
+    if (!hydrated || !matchIdRef.current || hydrationError) return;
 
     // FIX — skip the one save that would otherwise fire as a direct
     // side effect of hydration setting matchSetup + hydrated together.
@@ -410,17 +523,17 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
     }
 
     saveMatchSetup(auctionId, matchSetup, matchSetupCompleted);
-  }, [matchSetup, matchSetupCompleted, auctionId, hydrated]);
+  }, [matchSetup, matchSetupCompleted, auctionId, hydrated, hydrationError]);
 
   useEffect(() => {
-    if (!hydrated || !matchIdRef.current) return;
+    if (!hydrated || !matchIdRef.current || hydrationError) return;
     saveLiveState(matchIdRef.current, liveState);
-  }, [liveState, hydrated]);
+  }, [liveState, hydrated, hydrationError]);
 
   useEffect(() => {
-    if (!hydrated || !matchIdRef.current) return;
+    if (!hydrated || !matchIdRef.current || hydrationError) return;
     saveWeather(matchIdRef.current, weatherData);
-  }, [weatherData, hydrated]);
+  }, [weatherData, hydrated, hydrationError]);
 
   const pendingSyncRequestRef = useRef(false);
 
@@ -518,7 +631,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
     setSetupPushCount((n) => n + 1);
     setTimeout(() => setSetupPushed(false), 1500);
   }
-  
+
   function pushLiveState() {
     fireLoose({ type: "liveState", data: liveStateRef.current }, "Live State pushed to overlay");
     setLiveDirty(false);
@@ -813,68 +926,85 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
 
         <div className="flex flex-col lg:flex-row gap-8 items-start">
           <div className="flex-1 min-w-0 flex flex-col gap-6">
-            <MatchSetupPanel
-              auctionId={sourceAuctionId}
-              matchId={matchId}                 // NEW — enables the Match Editor link
-              auctionAdminHref={undefined}      // set this to your real Auctions tab route
-              matchSetup={matchSetup}
-              setMatchSetup={setMatchSetup}
-              onPush={pushMatchSetup}
-              pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
-              completed={matchSetupCompleted}
-              onVenueSelect={async (match, displayName) => {
-                try {
-                  // your geocode/weather logic here, using `match` (GeocodeMatch)
-                } catch (err) {
-                  console.error("[v0] Geocoding failed:", err);
-                }
-              }}
-            />
-
-            {matchSetupCompleted ? (
-              <LiveStatePanel
-                auctionId={auctionId}
-                matchId={matchId}
-                liveState={liveState}
-                setLiveState={setLiveState}
-                setLiveDirty={setLiveDirty}
-                liveDirty={liveDirty}
-                onPush={pushLiveState}
-                pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
-                matchSetup={matchSetup}
-                onBoundary={fireBoundaryMoment}
-                onMilestone={fireMilestoneMoment}
-                onWicketConfirm={fireWicketMomentFrom}
-                onMaiden={fireMaidenMoment}
-                onInningsEnd={logInningsEnd}
-                onMatchComplete={handleAutoMatchComplete}
-                onFireMatchWonMoment={fireMatchWonMomentAuto}
-                onRestartMatch={restartMatch}
-                initialEngineState={engineSyncState}
-                onEngineStateChange={handleEngineStateChange}
-              />
+            {/* NEW — gate the entire editable column on hydration state.
+                Previously MatchSetupPanel rendered fully interactive
+                immediately on mount, using the empty in-memory defaults,
+                while the Supabase fetch was still in flight. If an
+                operator started typing during that window, the fetch
+                would resolve moments later and setMatchSetup(match.match_setup)
+                would silently stomp their edits. LiveStatePanel was
+                already implicitly protected by the matchSetupCompleted
+                gate, but MatchSetupPanel had no equivalent guard. */}
+            {!hydrated ? (
+              <HydrationSkeleton />
+            ) : hydrationError ? (
+              <HydrationErrorBanner onRetry={() => setHydrationAttempt((n) => n + 1)} />
             ) : (
-              <div
-                className="rounded-xl p-6 text-center"
-                style={{
-                  background: "var(--color-surface-glass)",
-                  backdropFilter: "blur(24px)",
-                  border: "1px dashed var(--color-border-overlay)",
-                }}
-              >
-                <span
-                  className="material-symbols-outlined block mx-auto mb-2"
-                  style={{ fontSize: 22, color: "var(--color-outline)" }}
-                >
-                  scoreboard
-                </span>
-                <p
-                  className="text-[11px] uppercase tracking-widest"
-                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-                >
-                  Push Match Setup above to unlock live scoring
-                </p>
-              </div>
+              <>
+                <MatchSetupPanel
+                  auctionId={sourceAuctionId}
+                  matchId={matchId}                 // NEW — enables the Match Editor link
+                  auctionAdminHref={undefined}      // set this to your real Auctions tab route
+                  matchSetup={matchSetup}
+                  setMatchSetup={setMatchSetup}
+                  onPush={pushMatchSetup}
+                  pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
+                  completed={matchSetupCompleted}
+                  onVenueSelect={async (match, displayName) => {
+                    try {
+                      // your geocode/weather logic here, using `match` (GeocodeMatch)
+                    } catch (err) {
+                      console.error("[v0] Geocoding failed:", err);
+                    }
+                  }}
+                />
+
+                {matchSetupCompleted ? (
+                  <LiveStatePanel
+                    auctionId={auctionId}
+                    matchId={matchId}
+                    liveState={liveState}
+                    setLiveState={setLiveState}
+                    setLiveDirty={setLiveDirty}
+                    liveDirty={liveDirty}
+                    onPush={pushLiveState}
+                    pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
+                    matchSetup={matchSetup}
+                    onBoundary={fireBoundaryMoment}
+                    onMilestone={fireMilestoneMoment}
+                    onWicketConfirm={fireWicketMomentFrom}
+                    onMaiden={fireMaidenMoment}
+                    onInningsEnd={logInningsEnd}
+                    onMatchComplete={handleAutoMatchComplete}
+                    onFireMatchWonMoment={fireMatchWonMomentAuto}
+                    onRestartMatch={restartMatch}
+                    initialEngineState={engineSyncState}
+                    onEngineStateChange={handleEngineStateChange}
+                  />
+                ) : (
+                  <div
+                    className="rounded-xl p-6 text-center"
+                    style={{
+                      background: "var(--color-surface-glass)",
+                      backdropFilter: "blur(24px)",
+                      border: "1px dashed var(--color-border-overlay)",
+                    }}
+                  >
+                    <span
+                      className="material-symbols-outlined block mx-auto mb-2"
+                      style={{ fontSize: 22, color: "var(--color-outline)" }}
+                    >
+                      scoreboard
+                    </span>
+                    <p
+                      className="text-[11px] uppercase tracking-widest"
+                      style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+                    >
+                      Push Match Setup above to unlock live scoring
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
