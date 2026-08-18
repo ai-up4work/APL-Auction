@@ -190,14 +190,14 @@ export function generateDoubleElimination(teamsBySeed: AdminTeam[]): DoubleElimD
   return data;
 }
 
-function teamFromResult(match: MatchNode, wantLoser: boolean): TeamNode | null {
-  const winner = match.teamA?.isWinner ? match.teamA : match.teamB?.isWinner ? match.teamB : null;
-  if (!winner) return null;
-  if (!wantLoser) return winner;
-  const loser = match.teamA?.isWinner ? match.teamB : match.teamB?.isWinner ? match.teamA : null;
-  if (!loser || loser.code === "BYE") return null; // nobody drops from a bye
-  return loser;
-}
+export function teamFromResult(match: MatchNode, wantLoser: boolean): TeamNode | null {
+   const winner = match.teamA?.isWinner ? match.teamA : match.teamB?.isWinner ? match.teamB : null;
+   if (!winner) return null;
+   if (!wantLoser) return winner;
+   const loser = match.teamA?.isWinner ? match.teamB : match.teamB?.isWinner ? match.teamA : null;
+   if (!loser || loser.code === "BYE") return null;
+   return loser;
+ }
 
 function allMatches(data: DoubleElimData): MatchNode[] {
   return [
@@ -212,22 +212,22 @@ function allMatches(data: DoubleElimData): MatchNode[] {
  *  team now sitting in the other side, it's effectively already decided —
  *  complete it as a bye win, same as a WB1 bye. Returns true if it just
  *  resolved a match (so the caller knows to cascade the result onward). */
-function resolveByeIfNeeded(match: MatchNode): boolean {
-  if (match.status === "completed") return false;
-  const aIsBye = match.teamA?.code === "BYE";
-  const bIsBye = match.teamB?.code === "BYE";
-  if (aIsBye && match.teamB && match.teamB.code !== "BYE") {
-    match.status = "completed";
-    match.teamB = { ...match.teamB, isWinner: true };
-    return true;
-  }
-  if (bIsBye && match.teamA && match.teamA.code !== "BYE") {
-    match.status = "completed";
-    match.teamA = { ...match.teamA, isWinner: true };
-    return true;
-  }
-  return false;
-}
+export function resolveByeIfNeeded(match: MatchNode): boolean {
+   if (match.status === "completed") return false;
+   const aIsBye = match.teamA?.code === "BYE";
+   const bIsBye = match.teamB?.code === "BYE";
+   if (aIsBye && match.teamB && match.teamB.code !== "BYE") {
+     match.status = "completed";
+     match.teamB = { ...match.teamB, isWinner: true };
+     return true;
+   }
+   if (bIsBye && match.teamA && match.teamA.code !== "BYE") {
+     match.status = "completed";
+     match.teamA = { ...match.teamA, isWinner: true };
+     return true;
+   }
+   return false;
+ }
 
 /** Scans every match for an aFrom/bFrom that references `sourceMatch` (as
  *  a winner-feed "W:id" or loser-feed "L:id") and fills that slot in.

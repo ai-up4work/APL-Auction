@@ -3,6 +3,11 @@ import { supabase } from "@/lib/supabase";
 import type { Round, MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import type { DoubleElimData } from "@/lib/tournament/doubleElim";
 import { roundMetaFor } from "@/lib/tournament/seeding";
+import {
+  teamFromResult,
+  resolveByeIfNeeded,
+} from "@/lib/tournament/doubleElim";
+import { BYE_TEAM } from "@/lib/tournament/seeding";
 
 /* ------------------------------------------------------------------ */
 /*  Raw row shape, straight off bracket_matches + team joins           */
@@ -188,6 +193,139 @@ export function buildSingleEliminationRounds(rows: BracketMatchRow[]): Round[] {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Bye reconciliation for DB-reconstructed double-elim data           */
+/*                                                                      */
+/*  generateDoubleElimination() handles byes in-memory at generation   */
+/*  time. Data rebuilt from bracket_matches rows goes through a        */
+/*  completely different path (rowToMatchNode/feederLabel) that knows  */
+/*  nothing about byes — a WB1 bye match may not even be marked        */
+/*  completed in the DB, and any LB slot fed by one carries a live     */
+/*  "L:<id>" reference that can never resolve, since a bye produces no */
+/*  loser. This pass detects and fixes both problems after the fact,   */
+/*  purely from the reconstructed shape — it doesn't require the DB    */
+/*  row itself to have been seeded/marked correctly.                   */
+/* ------------------------------------------------------------------ */
+
+/** WB round 1 is the only round that can structurally contain a bye
+ *  (top seeds get one when the field isn't a power of 2). If a match
+ *  there has exactly one real team and hasn't been marked completed,
+ *  treat it as a bye now, matching generateDoubleElimination's WB1
+ *  construction. */
+function markWinnersByes(winners: Round[]) {
+  const wb1 = winners[0];
+  if (!wb1) return;
+  for (const m of wb1.matches) {
+    if (m.status === "completed") continue;
+    const aOnly = m.teamA && !m.teamB;
+    const bOnly = m.teamB && !m.teamA;
+    if (aOnly) {
+      m.status = "completed";
+      m.teamA = { ...m.teamA!, isWinner: true };
+      m.teamB = { ...BYE_TEAM };
+    } else if (bOnly) {
+      m.status = "completed";
+      m.teamB = { ...m.teamB!, isWinner: true };
+      m.teamA = { ...BYE_TEAM };
+    }
+  }
+}
+
+/** Any LB slot whose feeder is a bye WB match can never receive a real
+ *  "L:" loser — swap that live reference for a permanent BYE_TEAM
+ *  placeholder, same convention generateDoubleElimination uses. */
+function convertByeFeedersToPlaceholders(losers: Round[], winnersById: Map<string, MatchNode>) {
+  for (const round of losers) {
+    for (const m of round.matches) {
+      if (m.aFrom?.startsWith("L:") && !m.teamA) {
+        const feeder = winnersById.get(m.aFrom.slice(2));
+        if (feeder && (feeder.teamA?.code === "BYE" || feeder.teamB?.code === "BYE")) {
+          m.aFrom = null;
+          m.teamA = { ...BYE_TEAM };
+        }
+      }
+      if (m.bFrom?.startsWith("L:") && !m.teamB) {
+        const feeder = winnersById.get(m.bFrom.slice(2));
+        if (feeder && (feeder.teamA?.code === "BYE" || feeder.teamB?.code === "BYE")) {
+          m.bFrom = null;
+          m.teamB = { ...BYE_TEAM };
+        }
+      }
+    }
+  }
+}
+
+/** A slot fed by two bye matches (both feeders empty) has no real
+ *  contender at all yet — resolve it to a placeholder BYE "winner" so
+ *  it can still flow forward and later get swapped for a real team. */
+function resolveDoubleByeSlots(losers: Round[]) {
+  for (const round of losers) {
+    for (const m of round.matches) {
+      const aIsBye = m.teamA?.code === "BYE";
+      const bIsBye = m.teamB?.code === "BYE";
+      if (aIsBye && bIsBye && m.status !== "completed") {
+        m.status = "completed";
+        m.teamA = { ...BYE_TEAM, isWinner: true };
+      }
+    }
+  }
+}
+
+function allDoubleElimNodes(data: DoubleElimData): MatchNode[] {
+  return [
+    ...data.winners.flatMap((r) => r.matches),
+    ...data.losers.flatMap((r) => r.matches),
+    data.grandFinal,
+    ...(data.bracketReset ? [data.bracketReset] : []),
+  ];
+}
+
+/**
+ * Runs after buildDoubleEliminationData reconstructs the bracket from DB
+ * rows. Fixes up byes purely from structure (missing teams / feeders
+ * pointing at bye matches), then fills any downstream slot that a
+ * now-resolved bye should have advanced into, repeating to a fixed
+ * point so bye chains of any depth cascade correctly — mirroring
+ * generateDoubleElimination's in-memory behavior, just replayed over
+ * data rebuilt from Supabase rows instead.
+ */
+function resolveByesInDoubleElimData(data: DoubleElimData): DoubleElimData {
+  markWinnersByes(data.winners);
+
+  const winnersById = new Map(data.winners.flatMap((r) => r.matches).map((m) => [m.id, m]));
+  convertByeFeedersToPlaceholders(data.losers, winnersById);
+  resolveDoubleByeSlots(data.losers);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const nodes = allDoubleElimNodes(data);
+    const byId = new Map(nodes.map((m) => [m.id, m]));
+
+    for (const target of nodes) {
+      if (target.aFrom && !target.teamA) {
+        const source = byId.get(target.aFrom.slice(2));
+        const team = source ? teamFromResult(source, target.aFrom.startsWith("L:")) : null;
+        if (team) {
+          target.teamA = { ...team, score: undefined, isWinner: undefined };
+          changed = true;
+        }
+      }
+      if (target.bFrom && !target.teamB) {
+        const source = byId.get(target.bFrom.slice(2));
+        const team = source ? teamFromResult(source, target.bFrom.startsWith("L:")) : null;
+        if (team) {
+          target.teamB = { ...team, score: undefined, isWinner: undefined };
+          changed = true;
+        }
+      }
+      if (resolveByeIfNeeded(target)) changed = true;
+    }
+  }
+
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Double elimination                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -224,7 +362,7 @@ export function buildDoubleEliminationData(rows: BracketMatchRow[]): DoubleElimD
     ? { ...rowToMatchNode(gfRows[1], typeById, { prefixed: true }), aFrom: null, bFrom: null }
     : null;
 
-  return { winners, losers, grandFinal, bracketReset };
+  return resolveByesInDoubleElimData({ winners, losers, grandFinal, bracketReset });
 }
 
 /* ------------------------------------------------------------------ */
