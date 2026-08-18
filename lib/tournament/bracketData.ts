@@ -20,7 +20,7 @@ interface BracketMatchRow {
   bracket_type: "winners" | "losers" | "grand_final" | "round_robin";
   round: number;
   position: number;
-  match_number: number | null;   // <-- add
+  match_number: number | null;
   score_a: number | null;
   score_b: number | null;
   winner_team_id: string | null;
@@ -44,30 +44,30 @@ function normalizeOne<T>(v: T | T[] | null): T | null {
  * has no bracket to render here — callers should show standings instead).
  */
 export async function getBracketMatchesForTournament(tournamentId: string): Promise<BracketMatchRow[]> {
-const { data, error } = await supabase
-  .from("bracket_matches")
-  .select(
-    `
-    id,
-    bracket_type,
-    round,
-    position,
-    match_number,
-    score_a,
-    score_b,
-    winner_team_id,
-    status,
-    venue,
-    scheduled_at,
-    feeder_match_a_id,
-    feeder_match_b_id,
-    team_a:team_a_id ( id, code, name, color, logo ),
-    team_b:team_b_id ( id, code, name, color, logo )
-    `
-  )
-  .eq("tournament_id", tournamentId)
-  .order("round", { ascending: true })
-  .order("position", { ascending: true });
+  const { data, error } = await supabase
+    .from("bracket_matches")
+    .select(
+      `
+      id,
+      bracket_type,
+      round,
+      position,
+      match_number,
+      score_a,
+      score_b,
+      winner_team_id,
+      status,
+      venue,
+      scheduled_at,
+      feeder_match_a_id,
+      feeder_match_b_id,
+      team_a:team_a_id ( id, code, name, color, logo ),
+      team_b:team_b_id ( id, code, name, color, logo )
+      `
+    )
+    .eq("tournament_id", tournamentId)
+    .order("round", { ascending: true })
+    .order("position", { ascending: true });
 
   if (error) {
     console.error("getBracketMatchesForTournament failed:", error.message);
@@ -140,7 +140,7 @@ function rowToMatchNode(
   return {
     id: row.id,
     label: row.id,
-    matchNumber: row.match_number ?? undefined,   // <-- add
+    matchNumber: row.match_number ?? undefined,
     status: mapStatus(row.status),
     teamA: teamNodeFromRow(row.team_a, row.status, row.score_a, row.winner_team_id),
     teamB: teamNodeFromRow(row.team_b, row.status, row.score_b, row.winner_team_id),
@@ -167,13 +167,6 @@ function groupByRound(rows: BracketMatchRow[]): Map<number, BracketMatchRow[]> {
 /*  Single elimination                                                  */
 /* ------------------------------------------------------------------ */
 
-/**
- * Groups real bracket_matches rows by round and maps each to a Round/
- * MatchNode pair that TournamentBracket already knows how to render.
- * No "W:"/"L:" prefixing needed here — that's only relevant for double
- * elimination's winners/losers routing — so aFrom/bFrom are just the raw
- * feeder match ids, matching TournamentBracket's direct id comparison.
- */
 export function buildSingleEliminationRounds(rows: BracketMatchRow[]): Round[] {
   const relevant = rows.filter((r) => r.bracket_type !== "losers" && r.bracket_type !== "grand_final");
   const typeById = new Map(relevant.map((r) => [r.id, r.bracket_type]));
@@ -193,24 +186,24 @@ export function buildSingleEliminationRounds(rows: BracketMatchRow[]): Round[] {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Bye reconciliation for DB-reconstructed double-elim data           */
+/*  Bye reconciliation — CLIENT-SIDE (in-memory, read path)            */
 /*                                                                      */
-/*  generateDoubleElimination() handles byes in-memory at generation   */
-/*  time. Data rebuilt from bracket_matches rows goes through a        */
-/*  completely different path (rowToMatchNode/feederLabel) that knows  */
-/*  nothing about byes — a WB1 bye match may not even be marked        */
-/*  completed in the DB, and any LB slot fed by one carries a live     */
-/*  "L:<id>" reference that can never resolve, since a bye produces no */
-/*  loser. This pass detects and fixes both problems after the fact,   */
-/*  purely from the reconstructed shape — it doesn't require the DB    */
-/*  row itself to have been seeded/marked correctly.                   */
+/*  CONFIRMED DB CONVENTION (from production data, not assumption):    */
+/*  a bye is never represented as a live "L:<id>" reference to a bye   */
+/*  match. Instead, the dead side of a losers-bracket slot is simply   */
+/*  left with NO team and NO feeder (feeder_match_*_id is null). A     */
+/*  "phantom" double-bye slot (both WB1 feeders were byes) is stored   */
+/*  as status:'completed' with winner_team_id: null and no feeders at  */
+/*  all — a decided-but-empty placeholder that flows forward.          */
+/*                                                                      */
+/*  This pass detects dead slots by that shape — not by chasing "L:"   */
+/*  strings — and repeats to a fixed point so multi-round bye chains   */
+/*  resolve correctly no matter how deep.                              */
 /* ------------------------------------------------------------------ */
 
-/** WB round 1 is the only round that can structurally contain a bye
- *  (top seeds get one when the field isn't a power of 2). If a match
- *  there has exactly one real team and hasn't been marked completed,
- *  treat it as a bye now, matching generateDoubleElimination's WB1
- *  construction. */
+/** WB round 1 is the only round where teams are seeded directly rather
+ *  than fed from an earlier match, so a null feeder there is normal —
+ *  byes are instead detected by "only one real team present". */
 function markWinnersByes(winners: Round[]) {
   const wb1 = winners[0];
   if (!wb1) return;
@@ -230,44 +223,16 @@ function markWinnersByes(winners: Round[]) {
   }
 }
 
-/** Any LB slot whose feeder is a bye WB match can never receive a real
- *  "L:" loser — swap that live reference for a permanent BYE_TEAM
- *  placeholder, same convention generateDoubleElimination uses. */
-function convertByeFeedersToPlaceholders(losers: Round[], winnersById: Map<string, MatchNode>) {
-  for (const round of losers) {
-    for (const m of round.matches) {
-      if (m.aFrom?.startsWith("L:") && !m.teamA) {
-        const feeder = winnersById.get(m.aFrom.slice(2));
-        if (feeder && (feeder.teamA?.code === "BYE" || feeder.teamB?.code === "BYE")) {
-          m.aFrom = null;
-          m.teamA = { ...BYE_TEAM };
-        }
-      }
-      if (m.bFrom?.startsWith("L:") && !m.teamB) {
-        const feeder = winnersById.get(m.bFrom.slice(2));
-        if (feeder && (feeder.teamA?.code === "BYE" || feeder.teamB?.code === "BYE")) {
-          m.bFrom = null;
-          m.teamB = { ...BYE_TEAM };
-        }
-      }
-    }
-  }
-}
-
-/** A slot fed by two bye matches (both feeders empty) has no real
- *  contender at all yet — resolve it to a placeholder BYE "winner" so
- *  it can still flow forward and later get swapped for a real team. */
-function resolveDoubleByeSlots(losers: Round[]) {
-  for (const round of losers) {
-    for (const m of round.matches) {
-      const aIsBye = m.teamA?.code === "BYE";
-      const bIsBye = m.teamB?.code === "BYE";
-      if (aIsBye && bIsBye && m.status !== "completed") {
-        m.status = "completed";
-        m.teamA = { ...BYE_TEAM, isWinner: true };
-      }
-    }
-  }
+/** A losers-bracket slot's feeder is "dead" if there's no feeder at all,
+ *  or the feeder match is completed but produced no winner (a phantom
+ *  bye slot itself) — meaning nothing will ever arrive in that side. */
+function isDeadFeeder(fromLabel: string | null, byId: Map<string, MatchNode>): boolean {
+  if (!fromLabel) return true;
+  const source = byId.get(fromLabel.slice(2));
+  if (!source) return false;
+  if (source.status !== "completed") return false;
+  const hasWinner = !!(source.teamA?.isWinner || source.teamB?.isWinner);
+  return !hasWinner;
 }
 
 function allDoubleElimNodes(data: DoubleElimData): MatchNode[] {
@@ -281,19 +246,13 @@ function allDoubleElimNodes(data: DoubleElimData): MatchNode[] {
 
 /**
  * Runs after buildDoubleEliminationData reconstructs the bracket from DB
- * rows. Fixes up byes purely from structure (missing teams / feeders
- * pointing at bye matches), then fills any downstream slot that a
- * now-resolved bye should have advanced into, repeating to a fixed
- * point so bye chains of any depth cascade correctly — mirroring
- * generateDoubleElimination's in-memory behavior, just replayed over
- * data rebuilt from Supabase rows instead.
+ * rows. Fixes byes purely from structure — no team + no live feeder in
+ * a losers-bracket slot means it's a permanent bye-through, matching the
+ * confirmed DB convention. Repeats to a fixed point so bye chains and
+ * downstream advancement cascade correctly.
  */
 function resolveByesInDoubleElimData(data: DoubleElimData): DoubleElimData {
   markWinnersByes(data.winners);
-
-  const winnersById = new Map(data.winners.flatMap((r) => r.matches).map((m) => [m.id, m]));
-  convertByeFeedersToPlaceholders(data.losers, winnersById);
-  resolveDoubleByeSlots(data.losers);
 
   let changed = true;
   while (changed) {
@@ -301,6 +260,22 @@ function resolveByesInDoubleElimData(data: DoubleElimData): DoubleElimData {
     const nodes = allDoubleElimNodes(data);
     const byId = new Map(nodes.map((m) => [m.id, m]));
 
+    // Losers-bracket dead-slot detection.
+    for (const round of data.losers) {
+      for (const m of round.matches) {
+        if (m.status === "completed") continue;
+        if (!m.teamA && isDeadFeeder(m.aFrom, byId)) {
+          m.teamA = { ...BYE_TEAM };
+          changed = true;
+        }
+        if (!m.teamB && isDeadFeeder(m.bFrom, byId)) {
+          m.teamB = { ...BYE_TEAM };
+          changed = true;
+        }
+      }
+    }
+
+    // Advance real results along W:/L: references.
     for (const target of nodes) {
       if (target.aFrom && !target.teamA) {
         const source = byId.get(target.aFrom.slice(2));
@@ -318,7 +293,26 @@ function resolveByesInDoubleElimData(data: DoubleElimData): DoubleElimData {
           changed = true;
         }
       }
-      if (resolveByeIfNeeded(target)) changed = true;
+    }
+
+    // Complete any slot that now has a real team opposite a BYE placeholder.
+    for (const m of nodes) {
+      if (resolveByeIfNeeded(m)) changed = true;
+    }
+
+    // Double-bye slot: both sides are BYE placeholders — resolve as a
+    // decided-but-empty phantom so it can still flow forward and later
+    // be swapped for a real team, without falsely marking either side
+    // "isWinner" (there is no real winner here).
+    for (const round of data.losers) {
+      for (const m of round.matches) {
+        const aIsBye = m.teamA?.code === "BYE";
+        const bIsBye = m.teamB?.code === "BYE";
+        if (aIsBye && bIsBye && m.status !== "completed") {
+          m.status = "completed";
+          changed = true;
+        }
+      }
     }
   }
 
@@ -366,6 +360,107 @@ export function buildDoubleEliminationData(rows: BracketMatchRow[]): DoubleElimD
 }
 
 /* ------------------------------------------------------------------ */
+/*  Bye reconciliation — SERVER-SIDE (writes to bracket_matches)       */
+/*                                                                      */
+/*  Same dead-slot convention as the client-side pass above, but       */
+/*  operating directly on DB rows and persisting the result — this is  */
+/*  what actually unblocks the admin from recording the NEXT match,    */
+/*  since the client-side pass alone only fixes what's *displayed*,    */
+/*  not what's stored. Idempotent: safe to call after every write.     */
+/* ------------------------------------------------------------------ */
+
+interface RawRow {
+  id: string;
+  status: "upcoming" | "live" | "completed";
+  team_a_id: string | null;
+  team_b_id: string | null;
+  winner_team_id: string | null;
+  feeder_match_a_id: string | null;
+  feeder_match_b_id: string | null;
+}
+
+async function fetchRawRows(tournamentId: string): Promise<RawRow[]> {
+  const { data, error } = await supabase
+    .from("bracket_matches")
+    .select("id, status, team_a_id, team_b_id, winner_team_id, feeder_match_a_id, feeder_match_b_id")
+    .eq("tournament_id", tournamentId);
+  if (error) {
+    console.error("reconcileByeMatches: fetch failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/**
+ * Walks every bracket_matches row for a tournament and completes any
+ * "dead" losers-bracket slot — no team and no live feeder (or a feeder
+ * that itself resolved to a phantom bye) — as an automatic bye-through
+ * for whichever real team sits in the other slot. Also cascades the
+ * result forward via advanceResultToNextMatches, and re-propagates any
+ * already-completed match as a safety net for anything previously missed.
+ *
+ * Call this after bracket generation and after every result write —
+ * it's cheap, idempotent, and the single source of truth for the bye
+ * convention so we don't end up with two slightly different
+ * implementations drifting apart again.
+ */
+export async function reconcileByeMatches(tournamentId: string): Promise<{ touched: string[] }> {
+  const touched: string[] = [];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const rows = await fetchRawRows(tournamentId);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    // Safety net: re-propagate anything already completed, in case an
+    // earlier advance was missed for any reason.
+    for (const r of rows) {
+      if (r.status === "completed" && r.winner_team_id) {
+        await advanceResultToNextMatches(r.id, r.winner_team_id);
+      }
+    }
+
+    function isDead(feederId: string | null): boolean {
+      if (!feederId) return true;
+      const feeder = byId.get(feederId);
+      if (!feeder) return false;
+      return feeder.status === "completed" && !feeder.winner_team_id;
+    }
+
+    for (const r of rows) {
+      if (r.status === "completed") continue;
+      const aDead = !r.team_a_id && isDead(r.feeder_match_a_id);
+      const bDead = !r.team_b_id && isDead(r.feeder_match_b_id);
+
+      if (r.team_a_id && bDead) {
+        await supabase
+          .from("bracket_matches")
+          .update({ status: "completed", winner_team_id: r.team_a_id })
+          .eq("id", r.id);
+        await advanceResultToNextMatches(r.id, r.team_a_id);
+        touched.push(r.id);
+        changed = true;
+      } else if (r.team_b_id && aDead) {
+        await supabase
+          .from("bracket_matches")
+          .update({ status: "completed", winner_team_id: r.team_b_id })
+          .eq("id", r.id);
+        await advanceResultToNextMatches(r.id, r.team_b_id);
+        touched.push(r.id);
+        changed = true;
+      } else if (!r.team_a_id && !r.team_b_id && aDead && bDead) {
+        await supabase.from("bracket_matches").update({ status: "completed" }).eq("id", r.id);
+        touched.push(r.id);
+        changed = true;
+      }
+    }
+  }
+
+  return { touched };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Writing results back into bracket_matches                          */
 /* ------------------------------------------------------------------ */
 
@@ -378,20 +473,15 @@ interface BracketMatchResultInput {
   scheduledAt?: string | null;
 }
 
-/**
- * Looks up just enough about a match (its bracket_type and current
- * team_a_id/team_b_id) to figure out who the *loser* was, and whether
- * this match's bracket_type means a "drop" (winners -> losers) applies
- * to whoever feeds off of it.
- */
 async function getMatchTeamsAndType(matchId: string): Promise<{
   bracketType: BracketMatchRow["bracket_type"];
   teamAId: string | null;
   teamBId: string | null;
+  tournamentId: string | null;
 } | null> {
   const { data, error } = await supabase
     .from("bracket_matches")
-    .select("bracket_type, team_a_id, team_b_id")
+    .select("bracket_type, team_a_id, team_b_id, tournament_id")
     .eq("id", matchId)
     .maybeSingle();
 
@@ -401,25 +491,21 @@ async function getMatchTeamsAndType(matchId: string): Promise<{
   }
   if (!data) return null;
 
-  return { bracketType: data.bracket_type, teamAId: data.team_a_id, teamBId: data.team_b_id };
+  return {
+    bracketType: data.bracket_type,
+    teamAId: data.team_a_id,
+    teamBId: data.team_b_id,
+    tournamentId: (data as any).tournament_id ?? null,
+  };
 }
 
 /**
  * After a match is completed, pushes the advancing team(s) straight into
- * whichever downstream match(es) reference this match as a feeder
- * (feeder_match_a_id / feeder_match_b_id) — so the bracket updates
- * immediately instead of waiting for the sibling feeder match to also
- * finish before a team shows up in the next round.
- *
- * A winners-bracket match feeding into a losers-bracket match is a drop:
- * the LOSER advances into that slot, not the winner. Every other
- * combination (winners->winners, losers->losers, either->grand_final)
- * advances the winner — this mirrors the W:/L: convention already used
- * by feederLabel() on the read side, just applied here as a write.
- *
- * Safe to call for single elimination too: if there are no downstream
- * matches referencing this one as a feeder (e.g. it's the final), this
- * is a no-op.
+ * whichever downstream match(es) reference this match as a feeder, then
+ * runs reconcileByeMatches for the tournament as a safety net so any
+ * bye-through slot that's now decided also gets completed and cascaded —
+ * this is what makes future double-elim brackets self-heal automatically
+ * instead of getting stuck the way this tournament did.
  */
 export async function advanceResultToNextMatches(
   matchId: string,
@@ -446,35 +532,37 @@ export async function advanceResultToNextMatches(
     console.error("advanceResultToNextMatches lookup failed:", error.message);
     return { ok: false, error: error.message };
   }
-  if (!targets || targets.length === 0) {
-    // No downstream match references this one (e.g. it's the final) —
-    // nothing to advance.
-    return { ok: true };
+
+  if (targets && targets.length > 0) {
+    for (const target of targets) {
+      const isDrop = source.bracketType === "winners" && target.bracket_type === "losers";
+      const advancingTeamId = isDrop ? loserTeamId : winnerTeamId;
+      if (!advancingTeamId) continue;
+
+      const field = target.feeder_match_a_id === matchId ? "team_a_id" : "team_b_id";
+      const { error: updateError } = await supabase
+        .from("bracket_matches")
+        .update({ [field]: advancingTeamId })
+        .eq("id", target.id);
+
+      if (updateError) {
+        console.error(
+          `advanceResultToNextMatches: failed to advance team into match ${target.id}:`,
+          updateError.message
+        );
+      }
+    }
   }
 
-  for (const target of targets) {
-    const isDrop = source.bracketType === "winners" && target.bracket_type === "losers";
-    const advancingTeamId = isDrop ? loserTeamId : winnerTeamId;
-
-    // If it's a drop but there's no resolvable loser yet (shouldn't
-    // normally happen once a match is completed, but guards against a
-    // partially-filled match), skip this target rather than writing null
-    // over a slot that may already be correctly populated.
-    if (!advancingTeamId) continue;
-
-    const field = target.feeder_match_a_id === matchId ? "team_a_id" : "team_b_id";
-    const { error: updateError } = await supabase
-      .from("bracket_matches")
-      .update({ [field]: advancingTeamId })
-      .eq("id", target.id);
-
-    if (updateError) {
-      console.error(
-        `advanceResultToNextMatches: failed to advance team into match ${target.id}:`,
-        updateError.message
-      );
-      // Keep going for other targets (e.g. grand final can be fed by two
-      // different matches) rather than bailing out entirely.
+  // Safety net: sweep for any bye-through slot that's now decided as a
+  // result of this write, and cascade it forward too.
+  if (source.tournamentId) {
+    try {
+      await reconcileByeMatches(source.tournamentId);
+    } catch (e) {
+      console.error("advanceResultToNextMatches: reconcileByeMatches failed:", e);
+      // Don't fail the whole call — the primary advancement above already
+      // succeeded; reconciliation is a best-effort extra pass.
     }
   }
 
@@ -485,11 +573,6 @@ export async function advanceResultToNextMatches(
  * Admin manually edits a match on the bracket page. Always wins over
  * overlay sync from this point forward — sets result_source='manual'
  * so a later overlay completion won't overwrite it silently.
- *
- * On completion, also immediately advances the winner (or, for a
- * winners->losers drop, the loser) into whichever next match(es)
- * reference this one as a feeder — so the next round's card shows the
- * correct team right away instead of waiting on its sibling match.
  */
 export async function updateBracketMatchResult(
   matchId: string,
@@ -517,9 +600,6 @@ export async function updateBracketMatchResult(
     const advance = await advanceResultToNextMatches(matchId, result.winnerTeamId);
     if (!advance.ok) {
       console.error("updateBracketMatchResult: failed to advance winner:", advance.error);
-      // The result itself already saved successfully — don't fail the
-      // whole operation just because propagation to the next match hit
-      // an issue; the admin can re-save or the overlay path can retry.
     }
   }
 
@@ -527,13 +607,9 @@ export async function updateBracketMatchResult(
 }
 
 /**
- * Called from the overlay-completion path (wherever a live `matches` row
- * gets finalized) for the bracket_matches row linked via overlay_match_id.
- * Skips the write entirely if a human has already manually set this match,
- * so the live engine never stomps a deliberate override.
- *
- * Also advances the winner into the next match immediately on success,
- * same as the manual path above.
+ * Called from the overlay-completion path for the bracket_matches row
+ * linked via overlay_match_id. Skips the write entirely if a human has
+ * already manually set this match.
  */
 export async function syncOverlayResultToBracket(
   overlayMatchId: string,
@@ -568,8 +644,6 @@ export async function syncOverlayResultToBracket(
   const advance = await advanceResultToNextMatches(existing.id, result.winnerTeamId);
   if (!advance.ok) {
     console.error("syncOverlayResultToBracket: failed to advance winner:", advance.error);
-    // Result already saved; propagation failure shouldn't surface as an
-    // overall failure to the caller.
   }
 
   return { ok: true };
