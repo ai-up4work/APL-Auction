@@ -980,7 +980,7 @@ function DriverContent({ auctionId }: { auctionId: string }) {
           <div className="px-6 pt-6 pb-4 border-b border-outline-variant">
             <div className="flex justify-between items-center">
               <h3 className="font-mono-geist text-xs text-black/50 uppercase font-bold tracking-[0.2em]">Remaining Pool</h3>
-              <span className="bg-surface-variant px-2 py-0.5 rounded font-mono-geist text-[10px] font-bold tracking-widest">
+              <span className="bg-surface-variant px-2 py-0.5 rounded font-mono-geist text-[10px] font-bold tracking-widest text-black/80">
                 {playerQueue.length} PENDING
               </span>
             </div>
