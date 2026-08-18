@@ -280,12 +280,12 @@ export function OverlaysTab({ org }: { org: OrgSummary; userId: string }) {
           Every overlay is tied to one match. Pick a match below to open its full Overlay Control Room — match
           setup, live scoring, weather, and on-air channels are all configured there.
         </p>
-        <p className="text-gray-600 text-xs italic flex items-start gap-1.5">
+        {/* <p className="text-gray-600 text-xs italic flex items-start gap-1.5">
           <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           Don't see the match you want? Create a standalone one from the{" "}
           <span className="text-gold not-italic">Matches</span> tab, or connect a bracket slot from the{" "}
           <span className="text-gold not-italic">Tournaments</span> tab, then come back here to open its overlay.
-        </p>
+        </p> */}
       </Panel>
 
       <div className="space-y-8">
