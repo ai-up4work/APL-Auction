@@ -101,7 +101,7 @@ export default function TournamentClient() {
 
     getTournamentsForPublic().then((publicTournaments) => {
       if (cancelled) return
-      setTournaments(publicTournaments)
+      setTournaments(publicTournaments.filter((t) => t.id !== "dae7460d-fca7-479c-b89d-94c6857167bb"))
       setDataLoading(false)
     })
 
