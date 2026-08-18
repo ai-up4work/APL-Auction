@@ -1,5 +1,5 @@
 "use client";
-import { CheckCircle2, Radio, ChevronLeft } from "lucide-react";
+import { CheckCircle2, Radio, ChevronLeft, Clock } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import Image from "next/image";
 
@@ -9,6 +9,18 @@ import Image from "next/image";
  *  TeamRow does for single-elim brackets. */
 function stripPrefix(label: string | null | undefined): string | null {
   return label ? label.replace(/^[WL]:/, "") : null;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** aFrom/bFrom is sometimes a raw bracket_matches.id (a UUID) rather than
+ *  a short human label like "qf1" — happens for older rows generated
+ *  before short slot codes existed. A raw UUID in "Winner of
+ *  6fb3dbca-243b-4353-9f08-f8f47391ed0f" reads as a data leak, not a
+ *  hint, so fall back to generic phrasing instead of printing it. */
+function humanizeFromLabel(label: string | null): string {
+  if (!label || UUID_RE.test(label)) return "an earlier match";
+  return label;
 }
 
 /**
@@ -31,6 +43,21 @@ function stripPrefix(label: string | null | undefined): string | null {
  * is shown next to the bracket label in the header, e.g.
  * "R32-1 · Match 7". Falls back to just the label when it isn't set
  * (older bracket rows generated before the column existed).
+ *
+ * PHANTOM BYES: a match can auto-complete with BOTH slots still empty
+ * when both of its inputs were themselves byes (see isPhantomBye in
+ * tournament-detail-client.tsx's Schedule tab — same underlying
+ * bracket_matches reconciliation quirk). Previously this rendered
+ * identically to a normal, genuinely-not-reached-yet match — both rows
+ * said "To Be Determined" with no indication anything was different,
+ * which reads as a data bug ("why hasn't this match happened") rather
+ * than what it actually is (a walkover slot waiting on bracket
+ * progression to backfill a real team). It's now visually distinguished:
+ * "Pending" instead of "To Be Determined", no "Winner of X" hint (there
+ * isn't one single meaningful upstream match to point to), and a footer
+ * that says "Awaiting bracket progression" instead of "Waiting for
+ * teams" — matching the language PendingSlotRow already uses on the
+ * Schedule tab so the two surfaces read consistently.
  */
 export default function MatchResultCardStatic({
   match,
@@ -47,9 +74,33 @@ export default function MatchResultCardStatic({
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
 }) {
-  const aIsBye = match.teamA?.code === "BYE";
-  const bIsBye = match.teamB?.code === "BYE";
+  const aExplicitBye = match.teamA?.code === "BYE";
+  const bExplicitBye = match.teamB?.code === "BYE";
+
+  // A genuine bye can show up two ways depending on how the bracket was
+  // generated: an explicit team object with code "BYE" (older rows), or
+  // — same convention as isBye() in tournament-detail-client.tsx's
+  // Schedule tab — simply a permanently-missing slot on a match whose
+  // status already reads "completed" even though only one side was ever
+  // assigned. You can't complete a match without an opponent unless it
+  // auto-advanced, so "one side present, one missing, status completed"
+  // reliably means bye, not "still waiting for opponent." Without this,
+  // a single-sided bye rendered exactly like a normal half-filled match
+  // still in progress ("To Be Determined" / "Waiting for opponent").
+  const oneSidedBye =
+    !aExplicitBye && !bExplicitBye && !!match.teamA !== !!match.teamB && match.status === "completed";
+  const aIsBye = aExplicitBye || (oneSidedBye && !match.teamA);
+  const bIsBye = bExplicitBye || (oneSidedBye && !match.teamB);
   const isBye = aIsBye || bIsBye;
+
+  // A "phantom" double-bye: this slot auto-completed upstream because
+  // BOTH of its inputs were byes, so there's no real team on either side
+  // yet — nothing is actually "waiting for teams" in the normal sense,
+  // it just hasn't been backfilled by bracket progression yet. Same
+  // concept as isPhantomBye in tournament-detail-client.tsx's Schedule
+  // tab; distinguished here too so it isn't mistaken for an ordinary
+  // future "To Be Determined" match.
+  const isPhantomBye = !isBye && !match.teamA && !match.teamB && match.status === "completed";
 
   // A "BYE" slot renders exactly like an empty slot (dashed placeholder
   // row) rather than as a real team — just labeled "Bye" instead of "To
@@ -61,6 +112,8 @@ export default function MatchResultCardStatic({
   let footer: string | null = null;
   if (isBye) {
     footer = "Bye — advances automatically";
+  } else if (isPhantomBye) {
+    footer = "Awaiting bracket progression";
   } else if (!match.teamA && !match.teamB) {
     footer = "Waiting for teams";
   } else if (!bothRealAssigned) {
@@ -95,6 +148,12 @@ export default function MatchResultCardStatic({
               Live
             </span>
           )}
+          {isPhantomBye && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-high text-outline border border-border-overlay text-[9px] font-black tracking-widest font-label-mono shrink-0">
+              <Clock className="w-2.5 h-2.5" />
+              Pending
+            </span>
+          )}
         </div>
 
         <StaticTeamRow
@@ -104,8 +163,8 @@ export default function MatchResultCardStatic({
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
-          placeholderLabel={aIsBye ? "Bye" : "To Be Determined"}
-          fromLabel={!teamA ? stripPrefix(match.aFrom) : null}
+          placeholderLabel={aIsBye ? "Bye" : isPhantomBye ? "Pending" : "To Be Determined"}
+          fromLabel={!teamA && !isPhantomBye ? stripPrefix(match.aFrom) : null}
         />
         <StaticTeamRow
           team={teamB}
@@ -114,8 +173,8 @@ export default function MatchResultCardStatic({
           onTeamHover={onTeamHover}
           onTeamClick={onTeamClick}
           pinnedTeamCode={pinnedTeamCode}
-          placeholderLabel={bIsBye ? "Bye" : "To Be Determined"}
-          fromLabel={!teamB ? stripPrefix(match.bFrom) : null}
+          placeholderLabel={bIsBye ? "Bye" : isPhantomBye ? "Pending" : "To Be Determined"}
+          fromLabel={!teamB && !isPhantomBye ? stripPrefix(match.bFrom) : null}
         />
 
         {footer && (
@@ -145,11 +204,14 @@ function StaticTeamRow({
   onTeamClick?: (code: string) => void;
   pinnedTeamCode?: string | null;
   /** Text shown in place of the team name when this slot is empty.
-   *  "To Be Determined" for a normal open slot, "Bye" for a bye slot. */
+   *  "To Be Determined" for a normal open slot, "Bye" for a bye slot,
+   *  "Pending" for a phantom double-bye slot. */
   placeholderLabel?: string;
   /** When the slot is empty and we know which match feeds it, shows a
    *  small "Winner of X" hint under the placeholder — same as
-   *  TournamentBracket's single-elim TeamRow. Ignored for bye slots. */
+   *  TournamentBracket's single-elim TeamRow. Ignored for bye slots
+   *  and phantom-bye slots (there's no single meaningful feeder to
+   *  point to for the latter). */
   fromLabel?: string | null;
 }) {
   const isTBD = !team;

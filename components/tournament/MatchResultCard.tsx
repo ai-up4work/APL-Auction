@@ -1,7 +1,7 @@
 // File: components/tournament/MatchResultCard.tsx
 "use client";
 import { useState } from "react";
-import { CheckCircle2, Radio, Loader2, Pencil } from "lucide-react";
+import { CheckCircle2, Radio, Loader2, Pencil, Clock } from "lucide-react";
 import type { MatchNode, TeamNode } from "@/components/tournament/TournamentBracket";
 import Image from "next/image";
 
@@ -54,6 +54,16 @@ export default function MatchResultCard({
     // yet since the match can't be scored until both teams are set.
     const byeOpponent = match.teamB?.code === "BYE";
 
+    // A "phantom" double-bye: both slots are still empty but the match
+    // already flipped to "completed" upstream because both of ITS
+    // inputs were themselves byes (same reconciliation quirk as
+    // isPhantomBye in tournament-detail-client.tsx's Schedule tab).
+    // There's no opponent to enter a score against and nothing for an
+    // admin to do here yet — this just needs to read as "waiting on
+    // bracket progression to backfill a real team" rather than a
+    // generic unreached future match.
+    const isPhantomBye = !match.teamA && !match.teamB && match.status === "completed" && !byeOpponent;
+
     return (
       <div
         ref={cardRef}
@@ -64,6 +74,12 @@ export default function MatchResultCard({
             <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
             {byeOpponent && (
               <span className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">Bye</span>
+            )}
+            {isPhantomBye && (
+              <span className="flex items-center gap-1 text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">
+                <Clock className="w-2.5 h-2.5" />
+                Pending
+              </span>
             )}
           </div>
 
@@ -80,7 +96,7 @@ export default function MatchResultCard({
               pinnedTeamCode={pinnedTeamCode}
             />
           ) : (
-            <TBDResultRow />
+            <TBDResultRow pending={isPhantomBye} />
           )}
 
           {byeOpponent ? null : match.teamB ? (
@@ -96,7 +112,13 @@ export default function MatchResultCard({
               pinnedTeamCode={pinnedTeamCode}
             />
           ) : (
-            <TBDResultRow />
+            <TBDResultRow pending={isPhantomBye} />
+          )}
+
+          {isPhantomBye && (
+            <p className="text-center text-[9px] font-label-mono font-bold uppercase tracking-widest text-outline mt-0.5">
+              Awaiting bracket progression
+            </p>
           )}
         </div>
       </div>
@@ -335,15 +357,21 @@ function TeamResultRow({
 
 /** Placeholder row for a match slot whose team hasn't been decided yet —
  *  same height/shape as a real TeamResultRow so the card doesn't jump
- *  or look lopsided once the real team fills in. */
-function TBDResultRow() {
+ *  or look lopsided once the real team fills in.
+ *
+ *  `pending` distinguishes a phantom double-bye slot (says "Pending",
+ *  i.e. waiting on bracket progression to backfill a real team) from an
+ *  ordinary not-yet-reached match (says "TBD"). */
+function TBDResultRow({ pending = false }: { pending?: boolean }) {
   return (
     <div className="flex items-center gap-2 p-1 lg:p-1.5 rounded-lg relative bg-surface-container/40 border border-dashed border-border-overlay">
       <div className="flex items-center gap-2 pl-1.5 min-w-0">
         <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-background/60 font-label-mono font-black text-[10px] text-outline">
-          ?
+          {pending ? <Clock className="w-3 h-3" /> : "?"}
         </span>
-        <span className="font-label-mono font-bold text-xs uppercase tracking-wide text-outline">TBD</span>
+        <span className="font-label-mono font-bold text-xs uppercase tracking-wide text-outline">
+          {pending ? "Pending" : "TBD"}
+        </span>
       </div>
     </div>
   );
