@@ -276,8 +276,9 @@ export default function AdminHeader({
   const [isConfirming,  setIsConfirming]  = useState(false);
 
   const status = STATUS_META[auctionStatus] ?? STATUS_META.setup;
-  const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
-
+  const auctionLocked =
+    auctionStatus === "live" || auctionStatus === "paused" || auctionStatus === "completed";
+    
   async function handleConfirm() {
     setIsConfirming(true);
     try {

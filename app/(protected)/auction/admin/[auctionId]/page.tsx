@@ -70,8 +70,9 @@ function AdminAuctionPageContent({ routeAuctionId }: { routeAuctionId: string })
   }, [isHydrated, routeAuctionId, switchAuction]);
 
   const { auctionId, status: auctionStatus, teams, players, rules, session } = auction;
-  const auctionLocked = auctionStatus === "live" || auctionStatus === "paused";
-
+  const auctionLocked =
+    auctionStatus === "live" || auctionStatus === "paused" || auctionStatus === "completed";
+    
   function handleStepChange(step: string) {
     if (auctionLocked && CONFIG_STEPS.includes(step as any)) return;
     setActiveStep(step);
