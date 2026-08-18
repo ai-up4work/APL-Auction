@@ -54,8 +54,8 @@ function statusPillStyle(status: string): StatusPillStyle {
   if (["completed", "finished", "ended"].includes(key)) {
     return {
       label: "Completed",
-      badgeClass: "bg-white/5 text-gray-300 border-white/15",
-      dotClass: "bg-gray-400",
+      badgeClass: "bg-white/5 text-green-300 border-white/15",
+      dotClass: "bg-green-400",
     }
   }
   if (["upcoming", "scheduled"].includes(key)) {
