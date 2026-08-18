@@ -234,6 +234,13 @@ function poolFromSetup(setup: MatchSetup, side: "team1" | "team2", identity: Auc
 // `officials` object is present but has e.g. an empty `format: ""`
 // would previously pass the `setup.officials ? setup.officials : {...}`
 // check (the object itself is truthy) and keep the blank field forever.
+//
+// NOTE: the object this returns is used to build the in-memory `setup`
+// this page simulates against (venue/toss/officials shown in the log,
+// used when resolving bracket team sides, etc.) — it is NOT written
+// back to the DB wholesale anymore. See the "filledPatch" block in
+// handleStart for how any actually-blank fields get persisted, one
+// field at a time, via patch_match_setup.
 function withDefaultMatchInfo(setup: MatchSetup): MatchSetup {
   const now = new Date()
   const isoDate = now.toISOString().split("T")[0]
@@ -471,32 +478,50 @@ export default function SimulateMatchPage() {
     if (error) throw new Error(`Failed writing ball: ${error.message}`)
   }
 
-  // Small helper so every `match_setup` write in this file goes through
-  // one place — makes it hard to accidentally forget the `status` field
-  // on any individual update, which is exactly the bug this page had
-  // before (bracket_matches.status flipped to "live"/"completed" while
-  // match_setup carried no equivalent marker at all, so anything
-  // reading match_setup directly — e.g. matches.derived_status, or a
-  // standalone match with no bracket_matches row — had no way to know
-  // a match was in progress).
+  // ── ATOMIC PARTIAL WRITES INTO match_setup ─────────────────────
+  // CHANGED — every write into match_setup in this file used to be a
+  // full-object replace: `update({ match_setup: {...someInMemorySetup} })`,
+  // built from a snapshot of match_setup captured once at handleStart()
+  // time (or run-start time). That snapshot goes stale the moment
+  // anything else — most importantly, someone editing this match on
+  // /edit while a simulation is running — writes to match_setup in the
+  // meantime. The next time this page wrote (every over boundary, every
+  // wicket, the innings transition, the final completion write), it
+  // would overwrite the ENTIRE column with its stale copy, silently
+  // erasing whatever had been edited in between.
+  //
+  // patch_match_setup(p_match_id, p_patch) is a SECURITY DEFINER
+  // Postgres function that does `match_setup = match_setup || p_patch`
+  // — a SHALLOW merge that only touches the top-level keys present in
+  // p_patch, atomically, server-side. Every write below now goes
+  // through it and passes ONLY the runtime keys this page owns
+  // (scoreA/wktsA/oversA, scoreB/wktsB/oversB, currentInnings, target,
+  // matchComplete, resultText, status) — never a spread of a full
+  // setup/baseSetup object. That means this page can no longer clobber
+  // team1/team2/venue/officials/toss/squads/etc. no matter what order
+  // the writes land in relative to an edit made on /edit.
+  //
+  // writeMatchSetup() is kept as the single choke point for every
+  // "runtime patch + status" write, same as before — just backed by the
+  // RPC instead of a raw `.update()`.
   async function writeMatchSetup(
     matchId: string,
-    setupPatch: MatchSetup & Record<string, unknown>,
+    runtimePatch: Record<string, unknown>,
     status: "live" | "completed"
   ) {
-    return supabase
-      .from("matches")
-      .update({ match_setup: { ...setupPatch, status } })
-      .eq("id", matchId)
+    return supabase.rpc("patch_match_setup", {
+      p_match_id: matchId,
+      p_patch: { ...runtimePatch, status },
+    })
   }
 
-  // Context runInnings needs to patch a running score into match_setup
-  // as it goes — separate from `state` (the engine's own innings state)
-  // because it carries the *other* innings' already-finalized score
-  // too (baseSetup), so writing team2's progress never clobbers team1's
-  // final total that was written earlier in the same match.
+  // Context runInnings needs to know which side/innings it's patching
+  // scores for. `baseSetup` (a full match_setup snapshot) used to live
+  // here too, purely so the live-score write below could spread it —
+  // now that write is a shallow patch of just the score fields, so
+  // baseSetup is gone; LiveScoreContext only carries what's actually
+  // needed to build that patch.
   type LiveScoreContext = {
-    baseSetup: MatchSetup & Record<string, unknown>
     side: "team1" | "team2"
     currentInnings: 1 | 2
     target?: number
@@ -537,25 +562,28 @@ export default function SimulateMatchPage() {
         // than every single ball, since this is a second write on top
         // of the ball insert above and per-ball granularity isn't
         // needed for a card that just shows "runs/wkts (overs)".
+        //
+        // CHANGED — routed through patch_match_setup: only the score
+        // fields for this side, currentInnings, target (if set), and
+        // status are sent. Nothing else in match_setup is touched, so
+        // this write can no longer race an edit made on /edit — see the
+        // block comment above writeMatchSetup().
         if (current.legalBalls % 6 === 0 || row.is_wicket) {
           if (token !== runTokenRef.current) return current
           const scoreField = liveCtx.side === "team1" ? "scoreA" : "scoreB"
           const wktsField = liveCtx.side === "team1" ? "wktsA" : "wktsB"
           const oversField = liveCtx.side === "team1" ? "oversA" : "oversB"
-          const { error: liveErr } = await supabase
-            .from("matches")
-            .update({
-              match_setup: {
-                ...liveCtx.baseSetup,
-                currentInnings: liveCtx.currentInnings,
-                ...(liveCtx.target != null ? { target: liveCtx.target } : {}),
-                status: "live",
-                [scoreField]: current.runs,
-                [wktsField]: current.wkts,
-                [oversField]: oversLabel(current.legalBalls),
-              },
-            })
-            .eq("id", matchId)
+          const { error: liveErr } = await supabase.rpc("patch_match_setup", {
+            p_match_id: matchId,
+            p_patch: {
+              currentInnings: liveCtx.currentInnings,
+              ...(liveCtx.target != null ? { target: liveCtx.target } : {}),
+              status: "live",
+              [scoreField]: current.runs,
+              [wktsField]: current.wkts,
+              [oversField]: oversLabel(current.legalBalls),
+            },
+          })
           if (liveErr) console.error("[runInnings] live score patch failed:", liveErr.message)
         }
       }
@@ -638,6 +666,13 @@ export default function SimulateMatchPage() {
       // was tied to whichever teams occupied this slot before) so
       // poolFromSetup cleanly falls back to placeholder players instead
       // of silently mixing an old roster in under a new team name.
+      //
+      // NOTE: this resync writes team1/team2/squads — keys the EDITOR
+      // owns — but only via patch_match_setup and only when the bracket
+      // teams have genuinely drifted (a real, intentional overwrite of
+      // stale data, not a race). It's still a partial patch of just
+      // {team1, team2, squads}, so it can't touch venue/officials/toss/
+      // any other editor field.
       let bracketTeamsResynced = false
       if (bracketRow?.team_a_id && bracketRow?.team_b_id) {
         const { data: currentBracketTeams, error: currentTeamsErr } = await supabase
@@ -669,6 +704,19 @@ export default function SimulateMatchPage() {
               // it with the wrong team.
               ;(parsedSetup as any).squads = []
               bracketTeamsResynced = true
+
+              const { error: resyncErr } = await supabase.rpc("patch_match_setup", {
+                p_match_id: matchId,
+                p_patch: {
+                  team1: parsedSetup.team1,
+                  team2: parsedSetup.team2,
+                  squads: [],
+                },
+              })
+              if (resyncErr) {
+                console.error("[handleStart] failed persisting bracket team resync:", resyncErr.message)
+              }
+
               pushLog(
                 `Bracket teams for this match changed since it was last simulated (was "${prevTeam1Name}" vs "${prevTeam2Name}", now "${liveTeamA.name}" vs "${liveTeamB.name}") — match info and squads have been resynced.`,
                 true
@@ -681,6 +729,12 @@ export default function SimulateMatchPage() {
       // Build the authoritative setup only after bracket synchronization. The
       // previous code captured `setup` before the resync, so the database was
       // updated with the new teams but pools/results still used the old teams.
+      //
+      // `setup` is used throughout the rest of this function to run the
+      // simulation (build player pools, resolve bracket sides, label log
+      // lines) — it is NOT written back to the DB wholesale anymore. Every
+      // DB write below sends only the specific runtime keys via
+      // patch_match_setup.
       const setup = withDefaultMatchInfo(parsedSetup)
       const infoWasFilled =
         setup.venue !== parsedSetup.venue ||
@@ -731,14 +785,47 @@ export default function SimulateMatchPage() {
       // — runInnings will overwrite them as deliveries come in, but a
       // resimulated match should not start out still showing the
       // previous run's final score.
-      const setupAtInnings1Start = { ...setup, scoreA: 0, wktsA: 0, oversA: "0.0", scoreB: 0, wktsB: 0, oversB: "0.0" }
+      //
+      // CHANGED — only the runtime keys are sent (via writeMatchSetup,
+      // which now patches instead of replacing). team1/team2/venue/
+      // officials/toss/squads/etc. are left exactly as they are in the
+      // DB right now, whatever that is.
       const { error: infoUpdateErr } = await writeMatchSetup(
         matchId,
-        { ...setupAtInnings1Start, currentInnings: 1 },
+        { scoreA: 0, wktsA: 0, oversA: "0.0", scoreB: 0, wktsB: 0, oversB: "0.0", currentInnings: 1 },
         "live"
       )
       if (infoUpdateErr) throw new Error(`Failed setting match info: ${infoUpdateErr.message}`)
+
+      // If any match-info fields were genuinely blank in the DB, persist
+      // the sensible defaults computed by withDefaultMatchInfo — but
+      // still as a narrow patch containing only the fields that were
+      // actually blank, never the whole `setup` object. This is what
+      // makes a freshly-created match (no venue/toss/officials set yet)
+      // get real-looking defaults on first simulate, without a
+      // subsequent run ever stomping something the operator typed in on
+      // /edit in between two simulations.
       if (infoWasFilled) {
+        const filledPatch: Record<string, unknown> = {}
+        if (!parsedSetup.venue?.trim()) filledPatch.venue = setup.venue
+        if (!parsedSetup.date?.trim()) filledPatch.date = setup.date
+        if (!parsedSetup.time?.trim()) filledPatch.time = setup.time
+        if (!parsedSetup.toss?.trim()) filledPatch.toss = setup.toss
+        const officialsBlank =
+          !parsedSetup.officials?.format?.trim() ||
+          !parsedSetup.officials?.referee?.trim() ||
+          !parsedSetup.officials?.umpires?.trim() ||
+          !parsedSetup.officials?.thirdUmpire?.trim()
+        if (officialsBlank) filledPatch.officials = setup.officials
+
+        if (Object.keys(filledPatch).length > 0) {
+          const { error: filledErr } = await supabase.rpc("patch_match_setup", {
+            p_match_id: matchId,
+            p_patch: filledPatch,
+          })
+          if (filledErr) console.error("[handleStart] failed persisting default match info:", filledErr.message)
+        }
+
         pushLog(
           `Filled in missing match info — venue: "${setup.venue}", date: "${setup.date}", toss: "${setup.toss}", format: "${setup.officials?.format}".`
         )
@@ -784,7 +871,6 @@ export default function SimulateMatchPage() {
         startSequence: 0,
       })
       innings1 = await runInnings(matchId, innings1, teamAPool.teamShort, myToken, {
-        baseSetup: setupAtInnings1Start,
         side: "team1",
         currentInnings: 1,
       })
@@ -793,26 +879,30 @@ export default function SimulateMatchPage() {
       const target = innings1.runs + 1
       pushLog(`Innings 1 complete: ${teamAPool.teamName} ${innings1.runs}/${innings1.wkts}. Target: ${target}.`, true)
 
-      // Innings 1's final score is folded into the setup object carried
-      // forward from here on, so every later write — the innings-2-start
-      // write below, each live patch inside runInnings during innings 2,
-      // and the final completion write — keeps reporting team1's
-      // finished score instead of losing it once team2 starts batting.
-      const setupAfterInnings1 = {
-        ...setup,
-        scoreA: innings1.runs,
-        wktsA: innings1.wkts,
-        oversA: oversLabel(innings1.legalBalls),
-      }
-
       // Flip currentInnings to 2 in the SAME write that sets the target,
       // so the two facts ("2nd innings has started" and "this is the
       // target") always land together — no window where one has updated
       // and the other hasn't. status stays "live" here — the match is
       // still very much in progress, just in its second innings.
+      //
+      // CHANGED — only runtime keys sent. team1's final score
+      // (scoreA/wktsA/oversA) is folded in here explicitly so it
+      // persists into innings 2 rather than being lost — previously this
+      // relied on spreading a `setupAfterInnings1` object that carried
+      // it implicitly; now it's just three explicit keys in the patch.
       const { error: setupUpdateErr } = await writeMatchSetup(
         matchId,
-        { ...setupAfterInnings1, overs: oversLimit, target, currentInnings: 2, scoreB: 0, wktsB: 0, oversB: "0.0" },
+        {
+          overs: oversLimit,
+          scoreA: innings1.runs,
+          wktsA: innings1.wkts,
+          oversA: oversLabel(innings1.legalBalls),
+          target,
+          currentInnings: 2,
+          scoreB: 0,
+          wktsB: 0,
+          oversB: "0.0",
+        },
         "live"
       )
       if (setupUpdateErr) throw new Error(`Failed updating target: ${setupUpdateErr.message}`)
@@ -830,7 +920,6 @@ export default function SimulateMatchPage() {
         startSequence: innings1.sequence,
       })
       innings2 = await runInnings(matchId, innings2, teamBPool.teamShort, myToken, {
-        baseSetup: setupAfterInnings1,
         side: "team2",
         currentInnings: 2,
         target,
@@ -857,11 +946,18 @@ export default function SimulateMatchPage() {
       // a real score on the public matches page once it's done, since
       // match_team_stats is only ever written for bracket-linked
       // matches (see the bracketRow branch below).
+      //
+      // CHANGED — only runtime keys sent, same as every other write in
+      // this file now. This is the write that used to most visibly wipe
+      // out mid-match edits, since it landed once per match right at
+      // the very end.
       const { error: completeUpdateErr } = await writeMatchSetup(
         matchId,
         {
-          ...setupAfterInnings1,
           overs: oversLimit,
+          scoreA: innings1.runs,
+          wktsA: innings1.wkts,
+          oversA: oversLabel(innings1.legalBalls),
           target,
           currentInnings: 2,
           matchComplete: true,
@@ -1029,17 +1125,20 @@ export default function SimulateMatchPage() {
       // this page's own runState already shows "error". Best-effort —
       // if this write itself fails, the original error above still
       // surfaced via setErrorMsg, so just log and move on.
+      //
+      // CHANGED — routed through patch_match_setup instead of a
+      // read-then-full-replace. The prior version re-fetched
+      // match_setup and spread it back wholesale purely to change one
+      // key; the RPC does the same one-key change atomically without
+      // needing the read at all, and without any risk of clobbering
+      // something written in between the read and the write.
       try {
-        const { data: currentRow } = await supabase
-          .from("matches")
-          .select("match_setup")
-          .eq("id", matchId)
-          .maybeSingle()
-        if (currentRow?.match_setup) {
-          await supabase
-            .from("matches")
-            .update({ match_setup: { ...(currentRow.match_setup as object), status: "error" } })
-            .eq("id", matchId)
+        const { error: statusErr } = await supabase.rpc("patch_match_setup", {
+          p_match_id: matchId,
+          p_patch: { status: "error" },
+        })
+        if (statusErr) {
+          console.error("[handleStart] failed writing status: 'error' to match_setup:", statusErr.message)
         }
       } catch (innerErr) {
         console.error("[handleStart] failed writing status: 'error' to match_setup:", innerErr)
@@ -1077,6 +1176,19 @@ export default function SimulateMatchPage() {
   // leaving team1/team2/venue/etc alone. This is what makes the live
   // match page fall back to "not_started" and empty scorecards the
   // instant it's clicked, via Realtime.
+  //
+  // NOTE: this one still needs a read-then-write, because it's DELETING
+  // specific keys, not merging in new values for keys it knows the
+  // names of ahead of time — jsonb `||` can't express "remove these
+  // keys" (that's the `-` operator, which patch_match_setup doesn't
+  // currently expose). There is a real, if narrow, race window here:
+  // if an editor save lands between the SELECT and the UPDATE below, the
+  // rest-spread of `matchRow.match_setup` will still capture it (since
+  // it reads AFTER the delete completes above), so in practice this is
+  // safe as written — but if you want this to be fully atomic too,
+  // add a `patch_match_setup_remove_keys(p_match_id uuid, p_keys text[])`
+  // RPC using `match_setup - p_keys[1] - p_keys[2] - ...` (or
+  // `jsonb_object_agg` filtering) and swap this block to call it.
   async function handleClear() {
     const matchId = matchIdInput.trim()
     if (!matchId) {

@@ -34,7 +34,7 @@ import Image from "next/image"
 //
 // Mirrors the shape simulate/page.tsx already reads via
 // parseMatchSetup / poolFromSetup — this editor writes into the same
-// match_setup JSON column on `matches`, so anything saved here is
+// match_setup jsonb column on `matches`, so anything saved here is
 // immediately picked up by both the simulator and the live match page.
 // Runtime-only fields the simulator owns (target, currentInnings) are
 // preserved as-is on save rather than edited here, since editing them
@@ -139,6 +139,24 @@ import Image from "next/image"
 // moment after being made. hasLoadedForRef tracks which matchId has
 // already completed a load and no-ops any repeat call for that same id;
 // a real navigation to a different matchId still re-fetches normally.
+//
+// ── PARTIAL WRITES INTO match_setup (NEW) ──
+// handleSave() (and the id-link write inside the players-sync step)
+// used to build the FULL match_setup object — spreading whatever was
+// captured in rawSetupRef.current at load time as a base — and replace
+// the entire column with it. That base could be stale by the time Save
+// is clicked (e.g. the simulator has been running in another tab and
+// has since updated scoreA/wktsA/currentInnings/matchComplete/status),
+// so a save here would silently wipe out live match progress along
+// with the intended edit.
+//
+// toEditorPatch(form) below builds ONLY the keys this editor actually
+// owns (team1/team2/venue/date/time/toss/officials/squads/etc — never
+// score/currentInnings/matchComplete/status/target/resultText), and
+// handleSave sends that through patch_match_setup, a Postgres RPC that
+// does an atomic, shallow `match_setup || patch` merge server-side. The
+// simulator's runtime fields are therefore left completely untouched by
+// any save made here, regardless of what's running concurrently.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -424,18 +442,36 @@ function composeTossText(tossWinner: string, tossDecision: string): string {
   return `${tossWinner} won the toss and elected to ${decisionText}`
 }
 
-// Merges the edited fields back into whatever the raw match_setup blob
-// already contained, so runtime-only keys the simulator owns (target,
-// currentInnings) survive a save untouched instead of being wiped.
-// `playerId` is included on every player entry (as undefined if absent)
-// so it round-trips through JSON without extra bookkeeping. Once saved
-// once, squads are always written back in the GROUPED shape — the flat
-// shape only ever exists on the very first load right after creation.
-// `rosterLocked` is passed straight through from what was loaded — this
-// page never changes it, only createFriendlyMatch sets it.
-function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Record<string, any> {
+// ── CHANGED ───────────────────────────────────────────────────────
+// Squads are always written back in the GROUPED shape — the flat shape
+// only ever exists on the very first load right after creation.
+function squadsForSetup(squads: Squad[]) {
+  return squads.map((s) => ({
+    teamId: s.teamId,
+    captain: s.captain,
+    players: s.players.map((p) => ({
+      name: p.name,
+      role: p.role,
+      xi: p.xi,
+      playerId: p.playerId,
+    })),
+  }))
+}
+
+// Builds ONLY the keys this editor owns, for use with patch_match_setup
+// (a shallow `match_setup || patch` merge done atomically in Postgres).
+// CHANGED — replaces the old toRawSetup(raw, form), which spread a
+// possibly-stale `raw` base and replaced the ENTIRE match_setup column.
+// This version never reads or spreads the existing row at all: it just
+// describes what the editor itself is responsible for. Runtime-only
+// keys the simulator owns (target, currentInnings, matchComplete,
+// resultText, status, scoreA/wktsA/oversA, scoreB/wktsB/oversB) are
+// never mentioned here, so a save from this page can never touch them —
+// regardless of whether a simulation is running concurrently, and
+// regardless of how stale this page's own in-memory `form` might be
+// relative to those specific keys.
+function toEditorPatch(form: EditableSetup): Record<string, any> {
   return {
-    ...(raw ?? {}),
     tournamentName: form.tournamentName,
     season: form.season,
     round: form.round,
@@ -451,16 +487,7 @@ function toRawSetup(raw: Record<string, any> | null, form: EditableSetup): Recor
     format: form.format,
     overs: form.overs,
     officials: { ...form.officials },
-    squads: form.squads.map((s) => ({
-      teamId: s.teamId,
-      captain: s.captain,
-      players: s.players.map((p) => ({
-        name: p.name,
-        role: p.role,
-        xi: p.xi,
-        playerId: p.playerId,
-      })),
-    })),
+    squads: squadsForSetup(form.squads),
     rosterLocked: form.rosterLocked,
     matchTitle: form.matchTitle,
     matchNumber: form.matchNumber,
@@ -1053,7 +1080,7 @@ export default function EditMatchPage() {
 
   // ── Toss de-duplication ──
   // `form.toss` is derived, not directly editable (see composeTossText
-  // in toRawSetup). Keep it in sync locally too so the preview line
+  // in toEditorPatch). Keep it in sync locally too so the preview line
   // below the Toss Winner/Decision selects always reflects the latest
   // choice without waiting for a save round-trip.
   useEffect(() => {
@@ -1116,10 +1143,30 @@ export default function EditMatchPage() {
     const savedForm = form
 
     try {
-      const updated = toRawSetup(rawSetupRef.current, form)
-      const { error } = await supabase.from("matches").update({ match_setup: updated }).eq("id", matchId)
+      // CHANGED — was: toRawSetup(rawSetupRef.current, form) then a full
+      // `.update({ match_setup: updated })`, replacing the ENTIRE column
+      // using rawSetupRef.current (captured at load time) as the base.
+      // If a simulation had progressed match_setup's runtime fields
+      // (scoreA/wktsA/currentInnings/matchComplete/status/etc.) since
+      // this page loaded, that full replace would silently wipe them
+      // back to whatever they were when this page was opened.
+      //
+      // toEditorPatch(form) instead builds ONLY the editor-owned keys,
+      // and patch_match_setup does an atomic shallow merge server-side
+      // — every other top-level key (including anything the simulator
+      // has written since this page loaded) is left untouched.
+      const patch = toEditorPatch(form)
+      const { error } = await supabase.rpc("patch_match_setup", {
+        p_match_id: matchId,
+        p_patch: patch,
+      })
       if (error) throw new Error(error.message)
-      rawSetupRef.current = updated
+
+      // Keep the local "what we last saved" snapshot in sync for the
+      // squads-sync step below, without re-reading from the DB. This is
+      // only ever used as a base for merging in playerId's after sync —
+      // it does not get sent back to the DB as a whole object anymore.
+      rawSetupRef.current = { ...(rawSetupRef.current ?? {}), ...patch }
 
       // Keep bracket_matches.match_number in sync — the Schedule tab's
       // real match order (Fixture.matchNumber, per the NOTE ON MATCH
@@ -1162,22 +1209,20 @@ export default function EditMatchPage() {
 
       setForm((prev) => ({ ...prev, squads: updatedSquads }))
 
-      const withIds = {
-        ...(rawSetupRef.current ?? {}),
-        squads: updatedSquads.map((s) => ({
-          teamId: s.teamId,
-          captain: s.captain,
-          players: s.players.map((p) => ({
-            name: p.name,
-            role: p.role,
-            xi: p.xi,
-            playerId: p.playerId,
-          })),
-        })),
-      }
-      const { error: idLinkErr } = await supabase.from("matches").update({ match_setup: withIds }).eq("id", matchId)
+      // CHANGED — was a full-object spread of rawSetupRef.current plus a
+      // full `.update({ match_setup: withIds })`. Now patches only the
+      // `squads` key (the only thing this step changes — it's just
+      // writing back the playerId's that upsertPlayer resolved), via the
+      // same atomic merge RPC, so it can't clobber runtime fields either.
+      const squadsPatch = { squads: squadsForSetup(updatedSquads) }
+      const { error: idLinkErr } = await supabase.rpc("patch_match_setup", {
+        p_match_id: matchId,
+        p_patch: squadsPatch,
+      })
       if (!idLinkErr) {
-        rawSetupRef.current = withIds
+        rawSetupRef.current = { ...(rawSetupRef.current ?? {}), ...squadsPatch }
+      } else {
+        console.error("[save] failed linking playerIds back into match_setup.squads:", idLinkErr.message)
       }
 
       const baseMsg = `Synced to players table (auction ${result.auctionId.slice(0, 8)}…): ${result.teamsUpserted} team${
