@@ -344,7 +344,7 @@ export default function RulesTab({ locked, rules, onRulesChange }: RulesTabProps
                 <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>Starting bid including unsold re-entries.</p>
               </div>
               <div>
-                <FieldLabel>Max Overseas Players</FieldLabel>
+                <FieldLabel>Maximum Players allowed</FieldLabel>
                 <NumberInput value={rules.maxOverseasPlayers} min={0} onChange={(v) => update("maxOverseasPlayers", v)} suffix="per team" disabled={locked} />
                 <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>Set to 0 for no overseas limit.</p>
               </div>

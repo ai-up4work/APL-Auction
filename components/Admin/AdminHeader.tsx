@@ -3,7 +3,11 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
+import { Building2 } from "lucide-react";
 import AuctionSwitcher from "@/components/Admin/AuctionSwitcher";
+import { useAuth } from "@/context/AuthContext";
+import { getOrgForUser, type OrgSummary } from "@/lib/organization/organization";
 
 
 // ── Status → visual meta ───────────────────────────────────────────────────────
@@ -310,7 +314,7 @@ export default function AdminHeader({
         <div className="flex items-center gap-2 md:gap-4 min-w-0 shrink-0">
           
           <span
-            className="font-black tracking-tighter uppercase text-sm md:text-base whitespace-nowrap"
+            className="hidden md:inline font-black tracking-tighter uppercase text-sm md:text-base whitespace-nowrap"
             style={{ fontFamily: "var(--font-headline-lg)", color: "var(--color-theme-orange)" }}
           >
             War Room Admin
@@ -362,10 +366,9 @@ export default function AdminHeader({
               <div className="w-px h-5" style={{ background: "var(--color-outline-variant)" }} />
             </>
           )}
-
-          <NotificationButton />
-          <div className="w-px h-5" style={{ background: "var(--color-outline-variant)" }} />
           <ProfileChip />
+
+          <div className="w-px h-5" style={{ background: "var(--color-outline-variant)" }} />
         </div>
       </div>
 
@@ -499,8 +502,55 @@ function NotificationButton() {
   );
 }
 
+// ── Profile chip ──────────────────────────────────────────────────────────────
+// Shows the signed-in admin's organization — logo + name — instead of a
+// static "Admin / Console" label, mirroring the pattern in AppHeader.tsx:
+// fetch org via getOrgForUser(user.id), fall back to a generic Building2
+// icon while the logo is loading/missing/broken, and never block the chip
+// from rendering just because the org lookup is slow or fails.
 function ProfileChip() {
   const [hovered, setHovered] = useState(false);
+  const { user } = useAuth();
+  const [organization, setOrganization] = useState<OrgSummary | null>(null);
+  const [orgLoading, setOrgLoading] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setOrganization(null);
+      return;
+    }
+
+    let cancelled = false;
+    setOrgLoading(true);
+
+    getOrgForUser(user.id)
+      .then((org) => {
+        if (!cancelled) {
+          setOrganization(org);
+          setLogoFailed(false);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch organization:", err);
+        if (!cancelled) setOrganization(null);
+      })
+      .finally(() => {
+        if (!cancelled) setOrgLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  // Primary line: org name, falling back to "Admin" if no org is resolved
+  // yet (matches the old default so the chip never shows blank/undefined).
+  // Secondary line: the admin's own email, so there's still a way to tell
+  // which account is signed in even once the chip is org-branded.
+  const primaryLabel   = organization?.name ?? "Admin";
+  const secondaryLabel = user?.email ?? "Console";
+
   return (
     <button
       className="flex items-center gap-2 h-[34px] pl-1.5 pr-2.5 rounded-lg border transition-colors"
@@ -510,25 +560,41 @@ function ProfileChip() {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label="Admin account"
+      aria-label="Organization account"
     >
       <div
-        className="w-6 h-6 rounded-[6px] flex items-center justify-center text-[9px] font-bold shrink-0"
-        style={{ background: "var(--color-theme-orange)", color: "var(--color-on-primary)" }}
+        className="relative w-6 h-6 rounded-[6px] overflow-hidden flex items-center justify-center shrink-0"
+        style={{ background: "var(--color-theme-orange)" }}
       >
-        AC
+        {orgLoading ? (
+          <div className="w-full h-full animate-pulse" style={{ background: "rgba(255,255,255,0.25)" }} />
+        ) : organization?.logoUrl && !logoFailed ? (
+          <Image
+            src={organization.logoUrl}
+            alt={organization.name ? `${organization.name} logo` : "Organization logo"}
+            fill
+            sizes="24px"
+            className="object-contain"
+            onError={() => setLogoFailed(true)}
+          />
+        ) : (
+          <Building2 style={{ width: 13, height: 13, color: "var(--color-on-primary)" }} />
+        )}
       </div>
-      <div className="hidden sm:flex flex-col items-start leading-none">
-        <span className="text-[12px] font-medium" style={{ color: "var(--color-on-surface-variant)", fontFamily: "var(--font-body-md)" }}>
-          Admin
+      <div className="hidden sm:flex flex-col items-start leading-none min-w-0">
+        <span
+          className="text-[12px] font-medium truncate max-w-[140px]"
+          style={{ color: "var(--color-on-surface-variant)", fontFamily: "var(--font-body-md)" }}
+        >
+          {primaryLabel}
         </span>
-        <span className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-          Console
+        <span
+          className="text-[10px] truncate max-w-[140px]"
+          style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}
+        >
+          {secondaryLabel}
         </span>
       </div>
-      <span className="material-symbols-outlined hidden sm:block" style={{ fontSize: "14px", color: "var(--color-outline)" }}>
-        expand_more
-      </span>
     </button>
   );
 }

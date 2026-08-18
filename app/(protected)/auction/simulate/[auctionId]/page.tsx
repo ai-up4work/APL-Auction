@@ -32,6 +32,24 @@
 //     teamSize, and a fixed total purse, the simulation reliably makes it
 //     through the *entire* player pool instead of a few teams blowing their
 //     whole purse on the first handful of lots.
+//   • Roster size has TWO thresholds now, not one:
+//       - rules.teamSize            → the REQUIRED squad size. Pacing (fair
+//                                      share per slot, hesitation, eagerness)
+//                                      targets this first, so teams under 11
+//                                      keep bidding priority.
+//       - rules.maxOverseasPlayers  → repurposed as the TRUE hard cap a
+//                                      team's roster may never exceed. Once
+//                                      a team has filled its required 11 it
+//                                      can keep buying "bonus" players (with
+//                                      a much lighter purse reserve) until
+//                                      this true max is hit or its purse
+//                                      runs out. See getRosterCaps() below.
+//                                      NOTE: this field is literally named
+//                                      for an overseas-player quota in the
+//                                      DB schema — it is being reinterpreted
+//                                      here as the overall roster cap per
+//                                      explicit product decision, not
+//                                      because the name matches its use.
 //
 // This page acts as an autonomous "virtual auctioneer + virtual bidding
 // teams" driver: it walks the real player queue, opens each lot for real via
@@ -164,6 +182,29 @@ function isHeavyHitter(playerId: string | number): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Roster caps — REQUIRED squad size vs. the TRUE hard cap a team may never
+// exceed.
+//
+//   requiredSlots → rules.teamSize. Pacing (fair-share-per-slot, eagerness,
+//                   hesitation) targets this first, so teams that haven't
+//                   filled their required squad keep bidding priority over
+//                   teams that already have.
+//   maxSlots      → rules.maxOverseasPlayers, reinterpreted as the overall
+//                   roster ceiling per explicit product decision (NOT an
+//                   overseas-origin quota, despite the field's name in the
+//                   DB). Floored at requiredSlots so a 0/unset/misconfigured
+//                   value can never make the cap LOWER than what's actually
+//                   required — that would stop the auction mid-fill instead
+//                   of extending it.
+// ─────────────────────────────────────────────────────────────────────────
+function getRosterCaps(rules: { teamSize: number; maxOverseasPlayers: number }) {
+  const requiredSlots = rules.teamSize;
+  const maxSlots =
+    rules.maxOverseasPlayers > requiredSlots ? rules.maxOverseasPlayers : requiredSlots;
+  return { requiredSlots, maxSlots };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // "Bid must exceed current high bid" (or equivalent) is an EXPECTED race,
 // not a real failure: it means the DB's current_bid moved between when the
 // driver decided to raise and when placeBid actually landed — almost
@@ -188,13 +229,25 @@ function isStaleBidError(err: unknown): boolean {
 // freshest possible lot state at that moment — this also naturally
 // absorbs races against real concurrent owner bids instead of stacking
 // stale writes on top of each other.
+//
+// Pacing target: while a team still hasn't filled its REQUIRED squad, fair
+// share is computed against requiredSlots remaining (slots) — this is what
+// keeps under-filled teams hesitating like they need every remaining pick.
+// Once a team's required squad is already full, any further lot is a
+// discretionary "bonus" buy, so fair share is computed against the
+// remaining HARD-CAP slots instead (maxSlots) — a much larger denominator,
+// which naturally makes bonus-buy hesitation shorter/cheaper-feeling since
+// there's no mandatory roster at risk anymore.
 function decideHesitationMs(
   team: VirtualTeamState,
   askAmount: number,
   heavyHitter: boolean,
   speedMult: number
 ): number {
-  const slotsRemaining = Math.max(team.slots - team.roster, 1);
+  const stillBuildingRequired = team.roster < team.slots;
+  const slotsRemaining = stillBuildingRequired
+    ? Math.max(team.slots - team.roster, 1)
+    : Math.max(team.maxSlots - team.roster, 1);
   const fairSharePerSlot = team.purse / slotsRemaining;
   const overspendRatio = askAmount / Math.max(fairSharePerSlot, 1);
   const base = 350 + Math.min(overspendRatio, 3) * 700;
@@ -215,7 +268,8 @@ interface VirtualTeamState {
   color: string;
   purse: number;
   roster: number;
-  slots: number;
+  slots: number;    // REQUIRED squad size (rules.teamSize) — pacing target
+  maxSlots: number; // TRUE hard cap (rules.maxOverseasPlayers) — never exceed
 }
 
 // Eagerness now scales against each team's remaining "fair share per empty
@@ -226,8 +280,19 @@ interface VirtualTeamState {
 // flat bonus that lets bidding wars push meaningfully past fair share, up
 // to whatever the price cap allows — everything else settles near a sane
 // multiple of fair share so the purse actually lasts the whole auction.
+//
+// fillRatio is deliberately still computed against the REQUIRED size
+// (team.slots), not maxSlots. Once a team's roster passes team.slots this
+// ratio exceeds 1, which naturally suppresses (1 - fillRatio) into negative
+// territory — cooling that team's eagerness for further "bonus" lots so
+// teams still short of their required squad keep outbidding it, without
+// making the team fully ineligible (that's handled by canTeamAfford /
+// the eligible-teams filter using maxSlots instead).
 function decideEagerness(team: VirtualTeamState, askAmount: number, heavyHitter: boolean): number {
-  const slotsRemaining = Math.max(team.slots - team.roster, 1);
+  const stillBuildingRequired = team.roster < team.slots;
+  const slotsRemaining = stillBuildingRequired
+    ? Math.max(team.slots - team.roster, 1)
+    : Math.max(team.maxSlots - team.roster, 1);
   const fillRatio = team.roster / Math.max(team.slots, 1);
   const fairSharePerSlot = team.purse / slotsRemaining;
   const overspendRatio = askAmount / Math.max(fairSharePerSlot, 1);
@@ -241,22 +306,39 @@ function decideEagerness(team: VirtualTeamState, askAmount: number, heavyHitter:
 }
 
 // A team may only raise if, after paying askAmount, what's left is still
-// enough to cover its remaining slots at a sane reserve-per-slot — where
-// "sane" is half of the team's current fair share per remaining slot,
-// floored at the tier's bid increment. This is what actually stops a
-// purse-rich team early in the auction from blowing 3-4x its sustainable
-// per-player budget on a single lot and then being unable to fill its
-// roster later.
+// enough to cover its remaining slots at a sane reserve-per-slot.
+//
+// Hard eligibility ceiling is now maxSlots (the true cap), not slots (the
+// required size) — see the `eligible` filter in driverStep, which checks
+// `t.roster < t.maxSlots`. This function's job is just the purse-reserve
+// math once a team IS eligible:
+//
+//   • While still short of its REQUIRED squad, reserve conservatively
+//     (half of fair-share-per-required-slot) — this is what stops a
+//     purse-rich team early in the auction from blowing 3-4x its
+//     sustainable per-player budget on one lot and then being unable to
+//     fill its mandatory roster later.
+//   • Once the required squad is already full, any further lot is a
+//     discretionary "bonus" buy against the remaining hard-cap slots —
+//     reserve much more lightly (15% of fair-share-per-remaining-cap-slot)
+//     so purse a team has already earned the right to spend freely isn't
+//     needlessly stranded unusable.
 function canTeamAfford(team: VirtualTeamState, askAmount: number, minStep: number): boolean {
   if (askAmount > team.purse) return false;
 
-  const slotsRemainingBeforeThis = Math.max(team.slots - team.roster, 1); // includes this lot
-  const slotsLeftAfter = slotsRemainingBeforeThis - 1;
+  const hardSlotsRemainingBeforeThis = Math.max(team.maxSlots - team.roster, 1); // includes this lot
+  const slotsLeftAfter = hardSlotsRemainingBeforeThis - 1;
   if (slotsLeftAfter <= 0) return true;
 
   const purseAfter = team.purse - askAmount;
-  const fairSharePerSlot = team.purse / slotsRemainingBeforeThis;
-  const reservePerSlot = Math.max(minStep, fairSharePerSlot * 0.5);
+
+  const stillBuildingRequired = team.roster < team.slots;
+  const referenceSlotsRemaining = stillBuildingRequired
+    ? Math.max(team.slots - team.roster, 1)
+    : hardSlotsRemainingBeforeThis;
+  const fairSharePerSlot = team.purse / referenceSlotsRemaining;
+  const reserveMultiplier = stillBuildingRequired ? 0.5 : 0.15;
+  const reservePerSlot = Math.max(minStep, fairSharePerSlot * reserveMultiplier);
   return purseAfter >= slotsLeftAfter * reservePerSlot;
 }
 
@@ -464,8 +546,11 @@ function DriverContent({ auctionId }: { auctionId: string }) {
   }, [auctionId, auction?.auctionId, getCurrentLotId, resetClock, freezeClock, pauseClock, refreshReentryStatus]);
 
   // ── Build the current list of virtual team states from live purses ─────
+  // slots = REQUIRED squad size (pacing target). maxSlots = TRUE hard cap a
+  // team may never exceed. See getRosterCaps() for how these are derived.
   function getVirtualTeams(): VirtualTeamState[] {
     if (!auction) return [];
+    const { requiredSlots, maxSlots } = getRosterCaps(auction.rules);
     return auction.teams
       .filter((t) => !!t.supabaseId)
       .map((t) => {
@@ -477,7 +562,8 @@ function DriverContent({ auctionId }: { auctionId: string }) {
           color: t.color || "#c9971f",
           purse: purse?.remaining ?? auction.rules.totalPoints,
           roster: purse?.roster ?? t.roster ?? 0,
-          slots: auction.rules.teamSize,
+          slots: requiredSlots,
+          maxSlots,
         };
       });
   }
@@ -620,11 +706,15 @@ function DriverContent({ auctionId }: { auctionId: string }) {
         const cap = maxBidCapRef.current;
         const capReached = cap != null && askAmount > cap;
 
+        // Eligibility ceiling is the TRUE roster cap (maxSlots), not the
+        // required squad size — a team that has already filled its
+        // required 11 stays eligible to keep buying "bonus" players until
+        // it hits the real max.
         const eligible = capReached
           ? []
           : teams.filter(
               (t) =>
-                t.roster < t.slots &&
+                t.roster < t.maxSlots &&
                 t.id !== lot.winningTeamId &&
                 canTeamAfford(t, askAmount, minStep)
             );
@@ -856,6 +946,7 @@ function DriverContent({ auctionId }: { auctionId: string }) {
   const isSold = currentLot?.status === "sold";
   const isUnsold = currentLot?.status === "unsold";
   const currentLotIsHeavyHitter = currentLot ? isHeavyHitter(currentLot.playerId) : false;
+  const { requiredSlots, maxSlots } = getRosterCaps(auction.rules);
 
   return (
     <div className="bg-background text-on-background h-screen flex flex-col overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -930,6 +1021,19 @@ function DriverContent({ auctionId }: { auctionId: string }) {
               className="w-20 bg-transparent font-mono-geist text-[11px] text-red-300 font-bold outline-none"
             />
             <span className="font-mono-geist text-[9px] text-red-400/70">pts</span>
+          </div>
+
+          {/* Roster caps readout — required squad size vs. the true max a
+              team may keep bidding up to. Read-only here: both numbers
+              come from rules.teamSize / rules.maxOverseasPlayers, which are
+              configured in the auction setup flow, not this simulator. */}
+          <div className="flex items-center gap-1.5 mr-2 px-3 py-1.5 rounded bg-indigo-500/[0.06] border border-indigo-500/20"
+            title="Required squad size vs. the true roster cap a team may keep buying up to">
+            <span className="material-symbols-outlined text-indigo-300" style={{ fontSize: 14 }}>groups</span>
+            <span className="font-mono-geist text-[9px] text-indigo-300 uppercase tracking-[0.1em]">
+              Squad {requiredSlots}
+              {maxSlots > requiredSlots ? ` · Max ${maxSlots}` : ""}
+            </span>
           </div>
 
           <div className="flex items-center gap-1 mr-2">
@@ -1144,8 +1248,13 @@ function DriverContent({ auctionId }: { auctionId: string }) {
               const remaining = purse?.remaining ?? auction.rules.totalPoints;
               const pctFilled = Math.round((remaining / Math.max(auction.rules.totalPoints, 1)) * 100);
               const isLeadingThisLot = currentLot?.winningTeamId === team.supabaseId && isPending;
-              const slotsLeft = Math.max(auction.rules.teamSize - roster, 0);
+              // Fair-share display now paces against the TRUE roster cap
+              // (maxSlots), not just the required squad size, so it stays
+              // meaningful for a team that's already filled its required 11
+              // and is still shopping for bonus players.
+              const slotsLeft = Math.max(maxSlots - roster, 0);
               const fairSharePerSlot = slotsLeft > 0 ? Math.round(remaining / slotsLeft) : 0;
+              const overRequired = roster > requiredSlots;
 
               return (
                 <div key={team.supabaseId ?? team.id}
@@ -1161,7 +1270,8 @@ function DriverContent({ auctionId }: { auctionId: string }) {
                       <div>
                         <span className="block font-archivo text-sm font-bold text-on-surface uppercase leading-tight">{team.name}</span>
                         <span className="font-mono-geist text-[9px] text-on-surface-variant font-bold uppercase tracking-[0.1em]">
-                          Squad {roster}/{auction.rules.teamSize}
+                          Squad {roster}/{requiredSlots}
+                          {overRequired ? ` (+${roster - requiredSlots})` : ""}
                         </span>
                       </div>
                     </div>
@@ -1176,7 +1286,7 @@ function DriverContent({ auctionId }: { auctionId: string }) {
                   </div>
                   {slotsLeft > 0 && (
                     <div className="flex justify-between font-mono-geist text-[8px] uppercase tracking-[0.1em] mt-1.5 text-on-surface-variant/70">
-                      <span>Fair share / slot</span>
+                      <span>Fair share / slot{overRequired ? " (bonus)" : ""}</span>
                       <span>{fmtPts(fairSharePerSlot)} pts</span>
                     </div>
                   )}

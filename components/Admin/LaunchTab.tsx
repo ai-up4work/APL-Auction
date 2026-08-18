@@ -17,17 +17,38 @@ interface LaunchTabProps {
   shuffleReady?:      boolean;
   targetPlayerCount?: number;
   links?:             AuctionLinks | null;
+  auctionDate?:       string;
+  auctionStartTime?:  string;
+  auctionVenue?:      string;
 }
 
 function buildSessionSummary(props: LaunchTabProps) {
   return [
     { icon: "badge",          label: "Auction Name", value: props.auctionName ?? "APL Season 1" },
-    { icon: "calendar_today", label: "Date",         value: "12 Jul 2025"                        },
-    { icon: "schedule",       label: "Start Time",   value: "10:00 AM"                           },
-    { icon: "timer",          label: "Bid Timer",    value: "15s per bid"                        },
+    { icon: "calendar_today", label: "Date",         value: props.auctionDate ?? "12 Jul 2025"   },
+    { icon: "schedule",       label: "Start Time",   value: props.auctionStartTime ?? "10:00 AM" },
     { icon: "group",          label: "Teams",        value: `${props.teamCount ?? 4} franchises` },
     { icon: "person",         label: "Players",      value: `${props.playerCount ?? 0} in pool`  },
   ];
+}
+
+// ── helper: pull a value out of the session summary by label ────────────────
+// Session summary is already the single source of truth for what's shown on
+// screen (Date, Start Time, Venue, etc). Rather than threading separate
+// auctionDate/auctionStartTime/auctionVenue props down to the WhatsApp
+// message builder — which could drift out of sync with what's displayed —
+// we just look the value up from the same array that renders the summary
+// row. If a label isn't present, or its value is the "TBA" placeholder, this
+// returns undefined and the message builder omits that line cleanly.
+function getSummaryValue(
+  summary: ReturnType<typeof buildSessionSummary>,
+  label: string,
+): string | undefined {
+  const row = summary.find((r) => r.label === label);
+  if (!row) return undefined;
+  const value = String(row.value).trim();
+  if (!value || value.toUpperCase() === "TBA") return undefined;
+  return value;
 }
 
 function buildChecklist(props: LaunchTabProps, shuffled: boolean) {
@@ -104,22 +125,52 @@ function shareOnWhatsApp(message: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+// ── WhatsApp message builder ─────────────────────────────────────────────────
+// Venue/date/startTime are optional. If any (or all) are missing — e.g. the
+// admin hasn't filled them in yet, so they came back as undefined from
+// getSummaryValue() — we simply omit those lines rather than printing
+// "undefined" or a broken placeholder. The closing line adapts too: if we
+// have at least one logistics detail we send an upbeat "see you there" line,
+// otherwise a "details coming soon" line, so the message never implies
+// details were given when they weren't.
 function buildOwnerWhatsAppMessage(params: {
   auctionName: string;
-  teamName: string;
-  teamCode: string;
-  url: string;
-  pin: string;
+  teamName:    string;
+  teamCode:    string;
+  url:         string;
+  pin:         string;
+  venue?:      string;
+  date?:       string;
+  startTime?:  string;
 }) {
-  const { auctionName, teamName, teamCode, url, pin } = params;
-  return (
-    `Hi ${teamName}! 👋\n\n` +
-    `You're all set for *${auctionName}*.\n\n` +
-    `🏏 Franchise: ${teamName} (${teamCode})\n` +
-    `🔗 Your Bid Room: ${url}\n` +
-    `🔑 Owner PIN: ${pin}\n\n` +
-    `Keep your PIN private — you'll need it to log in and bid. See you at the auction!`
-  );
+  const { auctionName, teamName, teamCode, url, pin, venue, date, startTime } = params;
+
+  const logisticsLines = [
+    date      ? `📅 Date: ${date}`           : null,
+    startTime ? `⏰ Start Time: ${startTime}` : null,
+    venue     ? `📍 Venue: ${venue}`          : null,
+  ].filter(Boolean) as string[];
+
+  const hasLogistics = logisticsLines.length > 0;
+
+  const closingLine = hasLogistics
+    ? "See you at the auction — let's make some noise! 🎉🏆"
+    : "Date, time and venue to be confirmed soon — stay tuned! 🎉🏆";
+
+  return [
+    `Hi ${teamName} squad! 👋🏏`,
+    ``,
+    `You're all set for *${auctionName}*! Get ready to build your dream team 🔥`,
+    ``,
+    `🏷️ Franchise: ${teamName} (${teamCode})`,
+    ...logisticsLines,
+    `🔗 Your Bid Room: ${url}`,
+    `🔑 Owner PIN: ${pin}`,
+    ``,
+    `Keep your PIN private — you'll need it to log in and bid.`,
+    ``,
+    closingLine,
+  ].join("\n");
 }
 
 // ── Link row ──────────────────────────────────────────────────────────────────
@@ -170,8 +221,22 @@ function LinkRow({
 }
 
 // ── Post-launch links panel ───────────────────────────────────────────────────
-function PostLaunchLinks({ links, auctionName }: { links: AuctionLinks; auctionName: string }) {
+// Takes the already-built sessionSummary array rather than raw
+// date/time/venue props, so the WhatsApp message always matches exactly
+// what's rendered in the Session Summary card — one source of truth, no
+// chance of the two drifting apart.
+function PostLaunchLinks({
+  links, auctionName, sessionSummary,
+}: {
+  links: AuctionLinks;
+  auctionName: string;
+  sessionSummary: ReturnType<typeof buildSessionSummary>;
+}) {
   const [copied, setCopied] = useState<string | null>(null);
+
+  const auctionDate      = getSummaryValue(sessionSummary, "Date");
+  const auctionStartTime = getSummaryValue(sessionSummary, "Start Time");
+  const auctionVenue     = getSummaryValue(sessionSummary, "Venue");
 
   function copy(text: string, key: string) {
     navigator.clipboard.writeText(text);
@@ -291,7 +356,16 @@ function PostLaunchLinks({ links, auctionName }: { links: AuctionLinks; auctionN
                     <button
                       onClick={() =>
                         shareOnWhatsApp(
-                          buildOwnerWhatsAppMessage({ auctionName, teamName, teamCode, url, pin })
+                          buildOwnerWhatsAppMessage({
+                            auctionName,
+                            teamName,
+                            teamCode,
+                            url,
+                            pin,
+                            venue: auctionVenue,
+                            date: auctionDate,
+                            startTime: auctionStartTime,
+                          })
                         )
                       }
                       title={`Share ${teamName}'s link on WhatsApp`}
@@ -688,7 +762,13 @@ export default function LaunchTab(props: LaunchTabProps) {
       </div>
 
       {/* Post-launch links panel */}
-      {isLive && links && <PostLaunchLinks links={links} auctionName={auctionName} />}
+      {isLive && links && (
+        <PostLaunchLinks
+          links={links}
+          auctionName={auctionName}
+          sessionSummary={sessionSummary}
+        />
+      )}
 
       {/* Session Summary */}
       <div className="w-full mt-6 rounded-2xl p-5 flex items-center gap-6"
