@@ -36,7 +36,7 @@ export interface DoubleElimBoardProps {
 /* ------------------------------------------------------------------ */
 const COL_W = 250;
 const COL_GAP = 70;
-const CARD_GAP = 28;
+const CARD_GAP = 48;
 const HEADER_H = 34;
 // Reserved vertical space for each bracket's section header (the
 // "Winners bracket" / "Losers bracket" banner). Bumped up from the old
@@ -117,14 +117,20 @@ function computeRowCenters(
 ): Record<string, number> {
   const rowRect = rowEl.getBoundingClientRect();
   const centers: Record<string, number> = {};
+  const heights: Record<string, number> = {};
   if (!rounds.length) return centers;
+
+  let fallbackHeight = 90; // used only if a card genuinely can't be measured yet
   for (const m of rounds[0].matches) {
     const el = cardEls[m.id];
     if (!el) return centers;
     const r = el.getBoundingClientRect();
     if (r.height === 0) return centers;
     centers[m.id] = r.top - rowRect.top + r.height / 2;
+    heights[m.id] = r.height;
+    fallbackHeight = r.height;
   }
+
   for (let ri = 1; ri < rounds.length; ri++) {
     for (const m of rounds[ri].matches) {
       const feederYs = [m.aFrom, m.bFrom]
@@ -134,6 +140,26 @@ function computeRowCenters(
       centers[m.id] = feederYs.length
         ? feederYs.reduce((a, b) => a + b, 0) / feederYs.length
         : centers[rounds[ri - 1].matches[0]?.id] ?? 0;
+
+      const el = cardEls[m.id];
+      const h = el?.getBoundingClientRect().height;
+      heights[m.id] = h && h > 0 ? h : fallbackHeight;
+    }
+
+    // Averaging feeder centers can pull two matches in the SAME round
+    // closer together than their card heights allow — common in the
+    // losers bracket, where round shapes are irregular and several
+    // matches can end up sharing almost the same feeder position.
+    // Walk the round top-to-bottom and push any overlapping card down
+    // just enough to clear the one above it.
+    const ordered = rounds[ri].matches;
+    for (let i = 1; i < ordered.length; i++) {
+      const prev = ordered[i - 1];
+      const cur = ordered[i];
+      const minGap = heights[prev.id] / 2 + heights[cur.id] / 2 + CARD_GAP;
+      if (centers[cur.id] - centers[prev.id] < minGap) {
+        centers[cur.id] = centers[prev.id] + minGap;
+      }
     }
   }
   return centers;

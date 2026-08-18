@@ -69,18 +69,25 @@ function stripPrefix(label: string | null): string | null {
 function computeRowCenters(
   rounds: Round[],
   rowEl: HTMLDivElement,
-  cardEls: Record<string, HTMLDivElement | null>
+  cardEls: Record<string, HTMLDivElement | null>,
+  gap: number
 ): Record<string, number> {
   const rowRect = rowEl.getBoundingClientRect();
   const centers: Record<string, number> = {};
+  const heights: Record<string, number> = {};
   if (!rounds.length) return centers;
+
+  let fallbackHeight = 90;
   for (const m of rounds[0].matches) {
     const el = cardEls[m.id];
     if (!el) return centers;
     const r = el.getBoundingClientRect();
     if (r.height === 0) return centers;
     centers[m.id] = r.top - rowRect.top + r.height / 2;
+    heights[m.id] = r.height;
+    fallbackHeight = r.height;
   }
+
   for (let ri = 1; ri < rounds.length; ri++) {
     for (const m of rounds[ri].matches) {
       const feederYs = [m.aFrom, m.bFrom]
@@ -90,6 +97,24 @@ function computeRowCenters(
       centers[m.id] = feederYs.length
         ? feederYs.reduce((a, b) => a + b, 0) / feederYs.length
         : centers[rounds[ri - 1].matches[0]?.id] ?? 0;
+
+      const el = cardEls[m.id];
+      const h = el?.getBoundingClientRect().height;
+      heights[m.id] = h && h > 0 ? h : fallbackHeight;
+    }
+
+    // Averaging feeder centers can pull two matches in the SAME round
+    // closer together than their card heights allow — walk the round
+    // top-to-bottom and push any overlapping card down just enough to
+    // clear the one above it.
+    const ordered = rounds[ri].matches;
+    for (let i = 1; i < ordered.length; i++) {
+      const prev = ordered[i - 1];
+      const cur = ordered[i];
+      const minGap = heights[prev.id] / 2 + heights[cur.id] / 2 + gap;
+      if (centers[cur.id] - centers[prev.id] < minGap) {
+        centers[cur.id] = centers[prev.id] + minGap;
+      }
     }
   }
   return centers;
@@ -191,7 +216,7 @@ export default function DoubleElimBoard({
 
   const COL_W = isMobile ? (spacious ? 210 : 175) : spacious ? 340 : 250;
   const COL_GAP = isMobile ? (spacious ? 60 : 36) : spacious ? 160 : 70;
-  const CARD_GAP = isMobile ? (spacious ? 20 : 14) : spacious ? 40 : 28;
+  const CARD_GAP = isMobile ? (spacious ? 20 : 14) : spacious ? 40 : 50; // was 28
   const LEFT_MARGIN = isMobile ? 20 : 40;
   const ROW_GAP = isMobile ? 80 : 160;
 
@@ -233,8 +258,8 @@ export default function DoubleElimBoard({
   useLayoutEffect(() => {
     function recompute() {
       if (!wbRowRef.current || !lbRowRef.current) return;
-      const wbCenters = computeRowCenters(data.winners, wbRowRef.current, cardEls.current);
-      const lbCenters = computeRowCenters(data.losers, lbRowRef.current, cardEls.current);
+      const wbCenters = computeRowCenters(data.winners, wbRowRef.current, cardEls.current, CARD_GAP);
+      const lbCenters = computeRowCenters(data.losers, lbRowRef.current, cardEls.current, CARD_GAP);
       setMatchCenterY({ ...wbCenters, ...lbCenters });
 
       const wbH = wbLeafColRef.current?.scrollHeight;

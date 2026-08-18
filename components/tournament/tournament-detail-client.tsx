@@ -1042,9 +1042,17 @@ function dedupeByes(fixtures: Fixture[]): Fixture[] {
   const seen = new Set<string>()
   const result: Fixture[] = []
   for (const f of fixtures) {
+    const roundLabel = (f as any).stage || (f as any).round || ""
+    // Disambiguate distinct slots within the same round: two Fixture
+    // rows only describe the SAME bye slot when they share a real
+    // bracket identifier (matchNumber, falling back to id). Without
+    // this, two different byes/phantom-byes landing in the same round
+    // (e.g. Match 3 and Match 5 both being byes) collided on `round`
+    // alone and the second one got silently dropped as a "duplicate".
+    const slot = f.matchNumber ?? f.id ?? ""
+
     if (isPhantomBye(f)) {
-      const roundLabel = (f as any).stage || (f as any).round || ""
-      const key = `phantom|${roundLabel}`
+      const key = `phantom|${roundLabel}|${slot}`
       if (seen.has(key)) continue
       seen.add(key)
       result.push(f)
@@ -1055,8 +1063,7 @@ function dedupeByes(fixtures: Fixture[]): Fixture[] {
       continue
     }
     const advancingTeam = (f.team1 || "").trim().toUpperCase() === "TBD" || !f.team1 ? f.team2 : f.team1
-    const roundLabel = (f as any).stage || (f as any).round || ""
-    const key = `${roundLabel}|${(advancingTeam || "").trim().toUpperCase()}`
+    const key = `${roundLabel}|${(advancingTeam || "").trim().toUpperCase()}|${slot}`
     if (seen.has(key)) continue
     seen.add(key)
     result.push(f)
@@ -1136,7 +1143,7 @@ function PendingSlotRow({ fixture: f, matchNumber }: { fixture: Fixture; matchNu
             {roundLabel}
           </span>
         )}
-        <div className="h-16 w-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+        <div className="h-20 w-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
           <span className="text-gray-500 text-[10px] font-cinzel uppercase tracking-wide">TBD</span>
         </div>
       </div>
