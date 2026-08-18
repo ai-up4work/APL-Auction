@@ -25,7 +25,7 @@ function buildSessionSummary(props: LaunchTabProps) {
     { icon: "calendar_today", label: "Date",         value: "12 Jul 2025"                        },
     { icon: "schedule",       label: "Start Time",   value: "10:00 AM"                           },
     { icon: "timer",          label: "Bid Timer",    value: "15s per bid"                        },
-    { icon: "group",          label: "Teams",        value: `${props.teamCount ?? 8} franchises` },
+    { icon: "group",          label: "Teams",        value: `${props.teamCount ?? 4} franchises` },
     { icon: "person",         label: "Players",      value: `${props.playerCount ?? 0} in pool`  },
   ];
 }
@@ -43,8 +43,8 @@ function buildChecklist(props: LaunchTabProps, shuffled: boolean) {
     {
       id:     "teams",
       label:  "Teams Created",
-      status: teamCount >= 8 ? "complete" : "action",
-      meta:   teamCount >= 8 ? "ALL SEATED" : `${teamCount}/8 CREATED`,
+      status: teamCount >= 4 ? "complete" : "action",
+      meta:   teamCount >= 4 ? "ALL SEATED" : `${teamCount}/4 CREATED`,
     },
     {
       id:     "pins",
@@ -79,6 +79,47 @@ function buildChecklist(props: LaunchTabProps, shuffled: boolean) {
       meta:   shuffled ? "SEQUENCE LOCKED" : "REQUIRES ACTION",
     },
   ] as const;
+}
+
+// ── WhatsApp icon ─────────────────────────────────────────────────────────────
+// Inline SVG rather than a material-symbols glyph — Material Symbols doesn't
+// ship a recognizable WhatsApp mark, and using a generic "chat" bubble would
+// make the button unidentifiable at a glance.
+function WhatsAppIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91C21.96 6.45 17.5 2 12.04 2Zm5.8 14.16c-.24.68-1.4 1.32-1.93 1.4-.5.08-1.12.11-1.8-.11a16.6 16.6 0 0 1-1.63-.6c-2.87-1.24-4.74-4.14-4.88-4.33-.14-.19-1.17-1.55-1.17-2.96s.73-2.1.99-2.39c.26-.28.56-.35.75-.35.19 0 .38 0 .54.01.17.01.4-.07.63.48.24.57.81 1.98.88 2.12.07.14.12.31.02.5-.09.19-.14.31-.28.47-.14.17-.3.37-.42.5-.14.14-.29.29-.13.57.17.28.75 1.24 1.61 2 1.11.99 2.04 1.3 2.32 1.44.28.14.44.12.61-.07.17-.19.71-.83.9-1.11.19-.28.38-.24.63-.14.26.09 1.65.78 1.93.92.28.14.47.21.54.33.07.13.07.71-.17 1.39Z" />
+    </svg>
+  );
+}
+
+// ── WhatsApp share helper ────────────────────────────────────────────────────
+// Opens wa.me's compose intent with a pre-filled message. No specific phone
+// number is targeted — this is a general "share via WhatsApp" affordance
+// (the admin picks the recipient/chat inside WhatsApp itself), which is the
+// right pattern here since owner phone numbers aren't part of this data
+// model.
+function shareOnWhatsApp(message: string) {
+  const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function buildOwnerWhatsAppMessage(params: {
+  auctionName: string;
+  teamName: string;
+  teamCode: string;
+  url: string;
+  pin: string;
+}) {
+  const { auctionName, teamName, teamCode, url, pin } = params;
+  return (
+    `Hi ${teamName}! 👋\n\n` +
+    `You're all set for *${auctionName}*.\n\n` +
+    `🏏 Franchise: ${teamName} (${teamCode})\n` +
+    `🔗 Your Bid Room: ${url}\n` +
+    `🔑 Owner PIN: ${pin}\n\n` +
+    `Keep your PIN private — you'll need it to log in and bid. See you at the auction!`
+  );
 }
 
 // ── Link row ──────────────────────────────────────────────────────────────────
@@ -129,7 +170,7 @@ function LinkRow({
 }
 
 // ── Post-launch links panel ───────────────────────────────────────────────────
-function PostLaunchLinks({ links }: { links: AuctionLinks }) {
+function PostLaunchLinks({ links, auctionName }: { links: AuctionLinks; auctionName: string }) {
   const [copied, setCopied] = useState<string | null>(null);
 
   function copy(text: string, key: string) {
@@ -192,6 +233,10 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
               icon="gavel" label="Live Bid Screen" note="Real-time bidding screen"
               url={links.live} copied={copied === "live"} onCopy={() => copy(links.live, "live")}
             />
+            <LinkRow
+              icon="leaderboard" label="Results Page" note="Public results after auction"
+              url={links.results} copied={copied === "results"} onCopy={() => copy(links.results, "results")}
+            />
           </div>
         </div>
 
@@ -217,40 +262,68 @@ function PostLaunchLinks({ links }: { links: AuctionLinks }) {
             </button>
           </div>
 
-          <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-            {links.ownerLinks.map(({ teamCode, teamName, url, pin }) => (
-              <div
-                key={teamCode}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
-                style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-border-overlay)" }}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", background: "rgba(201,151,31,0.1)" }}>
-                      {teamCode}
-                    </span>
-                    <span className="text-xs font-semibold truncate" style={{ color: "var(--color-on-surface)" }}>{teamName}</span>
-                  </div>
-                  <p className="text-[10px] truncate mb-0.5" style={{ color: "var(--color-surface-variant)", fontFamily: "var(--font-label-mono)" }}>{url}</p>
-                  <p className="text-[11px]" style={{ color: "var(--color-outline)" }}>
-                    PIN: <span style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", fontWeight: 700 }}>{pin}</span>
-                  </p>
-                </div>
-                <button
-                  onClick={() => copy(`${url}\nPIN: ${pin}`, `owner-${teamCode}`)}
-                  style={{
-                    flexShrink: 0, padding: "5px 10px", borderRadius: 6,
-                    border: "1px solid var(--color-border-overlay)",
-                    background: "transparent",
-                    color: copied === `owner-${teamCode}` ? "var(--color-success)" : "var(--color-on-surface-variant)",
-                    fontSize: 11, fontWeight: 700, cursor: "pointer",
-                    fontFamily: "var(--font-label-mono)",
-                  }}
+          <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+            {links.ownerLinks.map(({ teamCode, teamName, url, pin }) => {
+              const copyKey = `owner-${teamCode}`;
+              return (
+                <div
+                  key={teamCode}
+                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
+                  style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-border-overlay)" }}
                 >
-                  {copied === `owner-${teamCode}` ? "✓" : "Copy"}
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", background: "rgba(201,151,31,0.1)" }}>
+                        {teamCode}
+                      </span>
+                      <span className="text-xs font-semibold truncate" style={{ color: "var(--color-on-surface)" }}>{teamName}</span>
+                    </div>
+                    <p className="text-[10px] truncate mb-0.5" style={{ color: "var(--color-surface-variant)", fontFamily: "var(--font-label-mono)" }}>{url}</p>
+                    <p className="text-[11px]" style={{ color: "var(--color-outline)" }}>
+                      PIN: <span style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)", fontWeight: 700 }}>{pin}</span>
+                    </p>
+                  </div>
+
+                  {/* Copy + WhatsApp sit as a tight action pair. WhatsApp
+                      gets its own brand-green styling so it reads as a
+                      distinct action, not a second "Copy" button. */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() =>
+                        shareOnWhatsApp(
+                          buildOwnerWhatsAppMessage({ auctionName, teamName, teamCode, url, pin })
+                        )
+                      }
+                      title={`Share ${teamName}'s link on WhatsApp`}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "5px 10px", borderRadius: 6,
+                        border: "1px solid rgba(37,211,102,0.35)",
+                        background: "rgba(37,211,102,0.08)",
+                        color: "#25D366",
+                        fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        fontFamily: "var(--font-label-mono)",
+                      }}
+                    >
+                      <WhatsAppIcon />
+                    </button>
+                    <button
+                      onClick={() => copy(`${url}\nPIN: ${pin}`, copyKey)}
+                      style={{
+                        padding: "5px 10px", borderRadius: 6,
+                        border: "1px solid var(--color-border-overlay)",
+                        background: "transparent",
+                        color: copied === copyKey ? "var(--color-success)" : "var(--color-on-surface-variant)",
+                        fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        fontFamily: "var(--font-label-mono)",
+                      }}
+                    >
+                      {copied === copyKey ? "✓" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -615,7 +688,7 @@ export default function LaunchTab(props: LaunchTabProps) {
       </div>
 
       {/* Post-launch links panel */}
-      {isLive && links && <PostLaunchLinks links={links} />}
+      {isLive && links && <PostLaunchLinks links={links} auctionName={auctionName} />}
 
       {/* Session Summary */}
       <div className="w-full mt-6 rounded-2xl p-5 flex items-center gap-6"

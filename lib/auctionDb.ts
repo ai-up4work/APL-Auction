@@ -766,6 +766,7 @@ export interface AuctionLinks {
   admin:      string;
   spectator:  string;
   live:       string;
+  results:    string;
   ownerLinks: { teamCode: string; teamName: string; url: string; pin: string }[];
 }
 
@@ -775,13 +776,14 @@ export function generateLinks(
   baseUrl: string = typeof window !== "undefined" ? window.location.origin : ""
 ): AuctionLinks {
   return {
-    admin:      `${baseUrl}/admin?auction=${auctionId}`,
-    spectator:  `${baseUrl}/watch/${auctionId}`,
-    live:       `${baseUrl}/live/${auctionId}`,
+    admin:      `${baseUrl}/auction/admin/${auctionId}`,
+    spectator:  `${baseUrl}/auction/watch/${auctionId}`,
+    live:       `${baseUrl}/auction/live/${auctionId}`,
+    results:    `${baseUrl}/auction/results/${auctionId}`,
     ownerLinks: teams.map((t) => ({
       teamCode: t.code,
       teamName: t.name,
-      url:      `${baseUrl}/owner/${auctionId}/join`,
+      url:      `${baseUrl}/auction/owner/${auctionId}/join`,
       pin:      t.pin ?? "—",
     })),
   };

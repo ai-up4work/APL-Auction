@@ -444,9 +444,26 @@ function StepButton({
           {isDisabled ? "lock" : step.icon}
         </span>
       </div>
+      {/*
+        Label visibility:
+          - Below `sm` (mobile): only the ACTIVE step's label renders — every
+            other step is icon-only. Previously this was `hidden sm:block`,
+            which hid every label on mobile regardless of active state, so
+            there was no way to tell which step icon was "Teams" vs "Rules"
+            without tapping around.
+          - `sm` and up: unchanged, all labels always show.
+      */}
       <span
-        className="hidden sm:block text-[9px] font-bold uppercase tracking-widest whitespace-nowrap"
-        style={{ fontFamily: "var(--font-label-mono)", color: isActive ? "var(--color-theme-orange)" : "var(--color-outline)" }}
+        className={isActive ? "block" : "hidden sm:block"}
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          fontSize: "9px",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.1em",
+          whiteSpace: "nowrap",
+          color: isActive ? "var(--color-theme-orange)" : "var(--color-outline)",
+        }}
       >
         {step.label}
       </span>

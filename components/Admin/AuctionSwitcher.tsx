@@ -297,6 +297,7 @@ export default function AuctionSwitcher() {
                         { label: "Admin",     key: "admin",     url: links.admin,     icon: "admin_panel_settings", note: "Share only with admins" },
                         { label: "Spectator", key: "spectator", url: links.spectator, icon: "visibility",           note: "Public read-only view"  },
                         { label: "Live Bid",  key: "live",      url: links.live,      icon: "gavel",                note: "Real-time bid screen"   },
+                        { label: "Results",   key: "results",   url: links.results,   icon: "leaderboard",          note: "Public results after auction" },
                       ].map(({ label, key, url, icon, note }) => (
                         <LinkRow key={key} label={label} url={url} icon={icon} note={note}
                           copied={copied === key} onCopy={() => copy(url, key)} />

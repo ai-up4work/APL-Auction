@@ -17,7 +17,7 @@ const TOOLS = [
 ];
 
 const TIERS: Team["tier"][] = ["Pro", "Elite", "Legend"];
-const MAX_TEAMS = 8;
+const MAX_TEAMS = 64;
 
 // NOTE: color defaults to a resolved hex (matching the --color-theme-orange
 // token), not the raw CSS var string. ColorPicker displays whatever string
