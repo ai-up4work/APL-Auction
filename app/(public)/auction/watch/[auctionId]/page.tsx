@@ -684,7 +684,7 @@ function ScreenContent({ auctionId }: { auctionId: string }) {
         {/* HEADER */}
         <header className="header-px fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-[30px] bg-[rgba(13,17,23,0.85)] header-blur border-b border-white/5">
             <div className="flex items-center gap-[13px]">
-              <div className="w-13 h-13 overflow-hidden shrink-0 flex items-center justify-center">
+              <div className="w-12 h-12 overflow-hidden shrink-0 flex items-center justify-center">
                 <Image
                   src={auction.session.auctionLogo || "/moon-knight-logo.png"}
                   alt="Auction logo"

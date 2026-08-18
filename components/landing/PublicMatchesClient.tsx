@@ -36,7 +36,7 @@ const filters = ["all", "upcoming", "live", "completed"] as const
 type Filter = (typeof filters)[number]
 
 const FRIENDLY_VALUE = "__friendly__"
-const PAGE_SIZE = 12
+const PAGE_SIZE = 50
 const SEARCH_DEBOUNCE_MS = 350
 // Kept only as a fallback safety net for if the realtime channel below
 // ever drops (network hiccup, tab backgrounded long enough to be

@@ -11,12 +11,7 @@ type RecordFn = (matchId: string, winner: "A" | "B", scoreA: number, scoreB: num
 
 export interface DoubleElimBoardProps {
   data: DoubleElimData;
-  /** Required when `editable` is true; ignored (and safe to omit) when
-   *  the board is read-only. */
   onRecordResult?: RecordFn;
-  /** Turns on score entry on every match card. Defaults to false — the
-   *  public tournament page should never pass this, so every card
-   *  renders via MatchResultCardStatic with no inputs or buttons. */
   editable?: boolean;
   title?: string;
   eyebrowLabel?: string;
@@ -27,42 +22,19 @@ export interface DoubleElimBoardProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Layout constants — same idea as TournamentBracket's geometry, just */
-/*  fixed-width columns instead of flex-grow (double-elim's losers    */
-/*  bracket has an irregular round count, so fixed columns + a        */
-/*  horizontal scroll container is the simplest thing that stays      */
-/*  correct for any bracket shape).                                   */
-/*                                                                     */
-/*  COL_W / COL_GAP / CARD_GAP are NOT fixed anymore — a board with    */
-/*  only 2-3 columns (small single-elim-ish double-elim brackets) used */
-/*  to render into the same narrow 250px columns as a big bracket,    */
-/*  which left a lot of empty canvas to the right of the 1600px stage */
-/*  and looked lost/unbalanced. They're computed per-board inside the */
-/*  component instead, scaled up when there aren't many rounds.       */
+/*  Layout constants. COL_W / COL_GAP / CARD_GAP / LEFT_MARGIN / ROW_GAP */
+/*  are all computed per-render inside the component now (not fixed    */
+/*  module constants) because they need to scale down for mobile      */
+/*  viewports — previously mobile got a totally separate, geometry-    */
+/*  free rendering path (MobileSection) which is why no connector      */
+/*  lines ever appeared there. Now mobile reuses the exact same        */
+/*  measured canvas as desktop, just at smaller scale, inside the      */
+/*  same horizontally-scrollable container.                            */
 /* ------------------------------------------------------------------ */
 const HEADER_H = 34;
-// Reserved vertical space for each bracket's section header (the
-// "Winners bracket" / "Losers bracket" banner). Bumped up from the old
-// thin-label height to fit the banner's padding comfortably.
 const LABEL_H = 44;
-const ROW_GAP = 160;
-// How far the section-header banner stops short of the canvas's own
-// right edge, so it never looks like it's touching/running into the
-// border of the scroll area.
 const HEADER_RIGHT_PAD = 32;
 
-// Reserved strip on the left of the whole canvas so "drop into losers
-// bracket" connectors — which travel a long way straight down, often
-// through the same column x-range their own cards occupy — have an
-// always-empty lane to travel through instead of cutting across cards.
-// NOTE: kept at its original value on purpose — changing this shifts
-// every column in the board, which is not what we want here.
-const LEFT_MARGIN = 40;
-
-/** Connects two cards in different columns via a rounded elbow whose
- *  vertical run sits at the midpoint between the source's right edge and
- *  the target's left edge — i.e. always inside the gap between the two
- *  columns, never inside either card's own column span. */
 function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 10): string {
   const midX = (x1 + x2) / 2;
   if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -73,11 +45,6 @@ function elbowPath(x1: number, y1: number, x2: number, y2: number, radius = 10):
   } Q ${midX} ${y2} ${midX + r} ${y2} L ${x2} ${y2}`;
 }
 
-/** Routes a connector out to a fixed vertical lane (always an empty gap)
- *  before dropping/rising to the target's row, then back in — used only
- *  for the "loser of this winners-bracket match drops here" links, which
- *  can span a huge vertical distance that would otherwise cut straight
- *  through every card stacked in between. */
 function lanePath(x1: number, y1: number, x2: number, y2: number, laneX: number, radius = 10): string {
   const dir1 = laneX >= x1 ? 1 : -1;
   const vdir = y2 >= y1 ? 1 : -1;
@@ -99,10 +66,6 @@ function stripPrefix(label: string | null): string | null {
   return label ? label.replace(/^[WL]:/, "") : null;
 }
 
-/** Measures a row's leaf-round cards from the DOM, then computes every
- *  later round's vertical center as the average of its feeders' centers —
- *  looked up by match id rather than assumed index math, so it works
- *  regardless of how irregular the losers-bracket round shapes are. */
 function computeRowCenters(
   rounds: Round[],
   rowEl: HTMLDivElement,
@@ -138,12 +101,6 @@ interface Connector {
   teamCode?: string;
 }
 
-/** A section header for a bracket row: a tinted banner block with a
- *  colored left accent border, icon, and label — giving each section a
- *  clear, self-contained visual boundary instead of a thin floating
- *  label. Width is expected to already be padded in from the canvas's
- *  right edge by the caller (see HEADER_RIGHT_PAD) so the banner never
- *  looks like it's touching the edge of the scroll area. */
 function SectionHeader({
   icon,
   label,
@@ -153,6 +110,7 @@ function SectionHeader({
   accentBarClass,
   top,
   width,
+  leftInset,
 }: {
   icon: ReactNode;
   label: string;
@@ -162,15 +120,16 @@ function SectionHeader({
   accentBarClass: string;
   top: number;
   width: number;
+  leftInset: number;
 }) {
   return (
     <div
-      className={`absolute left-8 flex items-stretch rounded-lg border ${bgClass} ${borderClass} shadow-sm overflow-hidden`}
-      style={{ top, width, height: 32 }}
+      className={`absolute flex items-stretch rounded-lg border ${bgClass} ${borderClass} shadow-sm overflow-hidden`}
+      style={{ top, left: leftInset, width, height: 32 }}
     >
       <div className={`w-1 shrink-0 ${accentBarClass}`} />
       <span
-        className={`flex items-center gap-2 px-4 text-[10px] font-black uppercase tracking-widest font-label-mono ${textClass}`}
+        className={`flex items-center gap-2 px-4 text-[10px] font-black uppercase tracking-widest font-label-mono whitespace-nowrap ${textClass}`}
       >
         {icon}
         {label}
@@ -179,11 +138,6 @@ function SectionHeader({
   );
 }
 
-/** Renders whichever match card is appropriate for this board's mode:
- *  the real editable card (score inputs, Save, tie-break buttons) when
- *  `editable` is true, or the fully static read-only card otherwise.
- *  Centralizing the switch here means every call site below just calls
- *  <MatchCardFor .../> once instead of branching five separate times. */
 function MatchCardFor({
   editable,
   onRecordResult,
@@ -199,11 +153,6 @@ function MatchCardFor({
   pinnedTeamCode?: string | null;
 }) {
   if (editable) {
-    // onRecordResult is guaranteed by the caller when editable is true
-    // (DoubleElimBoard only ever sets editable on the admin route, which
-    // always passes a real handler) — cast away the optionality here
-    // rather than threading a redundant non-null check through every
-    // render site below.
     return <MatchResultCard {...rest} onRecordResult={onRecordResult as (matchId: string, winner: "A" | "B", scoreA: number, scoreB: number) => void} />;
   }
   return <MatchResultCardStatic {...rest} />;
@@ -224,25 +173,32 @@ export default function DoubleElimBoard({
   const [selectedTeamCode, setSelectedTeamCode] = useState<string | null>(null);
   const activeTeamCode = hoveredTeamCode || selectedTeamCode;
 
-  // Small double-elim boards (few rounds) used to render into the same
-  // fixed 250px columns as a big bracket, which left a lot of empty
-  // canvas to the right of the 1600px stage and looked thin/lost. Scale
-  // the column width, column gap, and leaf-card gap up when there
-  // aren't many rounds so a 2-3 column board fills the stage the same
-  // way a bigger bracket naturally does. `+1` accounts for the grand
-  // final column, which always renders regardless of round count.
+  // Track viewport size so the SAME measured canvas can scale down for
+  // mobile instead of falling back to a geometry-free stacked list.
+  // This is what makes connector lines actually show up on phones.
+  const [isMobile, setIsMobile] = useState(false);
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const totalCols = Math.max(data.winners.length, data.losers.length) + 1;
   const spacious = totalCols <= 3;
-  const COL_W = spacious ? 340 : 250;
-  const COL_GAP = spacious ? 160 : 70;
-  const CARD_GAP = spacious ? 40 : 28;
+
+  const COL_W = isMobile ? (spacious ? 210 : 175) : spacious ? 340 : 250;
+  const COL_GAP = isMobile ? (spacious ? 60 : 36) : spacious ? 160 : 70;
+  const CARD_GAP = isMobile ? (spacious ? 20 : 14) : spacious ? 40 : 28;
+  const LEFT_MARGIN = isMobile ? 20 : 40;
+  const ROW_GAP = isMobile ? 80 : 160;
 
   function colX(i: number) {
     return LEFT_MARGIN + i * (COL_W + COL_GAP);
   }
 
-  /** The x-coordinate of the empty gap immediately before column i. Always
-   *  clear of cards, since cards only ever occupy [colX(i), colX(i)+COL_W]. */
   function laneXBefore(i: number) {
     return colX(i) - COL_GAP / 2;
   }
@@ -274,7 +230,6 @@ export default function DoubleElimBoard({
     return refCache.current[id];
   }
 
-  // Pass 1: measure leaf cards, compute every match's row-relative center.
   useLayoutEffect(() => {
     function recompute() {
       if (!wbRowRef.current || !lbRowRef.current) return;
@@ -299,10 +254,8 @@ export default function DoubleElimBoard({
       window.removeEventListener("resize", recompute);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, isMobile]);
 
-  // Pass 2: once cards are actually positioned, measure real rects to place
-  // the grand final (centered between both finals) and draw every connector.
   useLayoutEffect(() => {
     function recomputeFinal() {
       const masterEl = masterRef.current;
@@ -336,13 +289,6 @@ export default function DoubleElimBoard({
         const team = slot === "A" ? target.teamA : target.teamB;
 
         if (laneX != null) {
-          // Cross-row "drop into the losers bracket" link: exit from a
-          // point ON the source card's left border — below its vertical
-          // middle, so the line visibly touches/attaches to the card
-          // instead of floating below it with a gap — travel the
-          // dedicated empty lane, then enter the target the same way,
-          // touching its left border below the middle. Never touches a
-          // card in between.
           const sX = sR.left - masterRect.left;
           const sY = sR.top - masterRect.top + sR.height * 0.7;
           const tX = tR.left - masterRect.left;
@@ -351,9 +297,6 @@ export default function DoubleElimBoard({
           return;
         }
 
-        // Normal same-row (or into-the-final) link: source's right edge to
-        // target's left edge, with the vertical run at the midpoint between
-        // them — i.e. always inside the empty gap between the two columns.
         const sX = sR.right - masterRect.left;
         const sY = sR.top + sR.height / 2 - masterRect.top;
         const tX = tR.left - masterRect.left;
@@ -379,10 +322,6 @@ export default function DoubleElimBoard({
       addConnector(lbFinalId ?? null, data.grandFinal, "B", null);
 
       if (data.bracketReset) {
-        // FIX: was `cardEls.current["GF"]` — a hardcoded key that only
-        // ever matched if data.grandFinal.id happened to literally be
-        // "GF". The card itself is registered via getRef(data.grandFinal.id)
-        // below, so this lookup now uses the same key consistently.
         const gfEl = cardEls.current[data.grandFinal.id];
         const rEl = cardEls.current[data.bracketReset.id];
         if (gfEl && rEl) {
@@ -405,7 +344,7 @@ export default function DoubleElimBoard({
     const raf = requestAnimationFrame(recomputeFinal);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchCenterY, wbLeafHeight, lbLeafHeight, data]);
+  }, [matchCenterY, wbLeafHeight, lbLeafHeight, data, isMobile]);
 
   useLayoutEffect(() => {
     onActiveTeamChange?.(activeTeamCode);
@@ -487,13 +426,13 @@ export default function DoubleElimBoard({
 
   return (
     <div className={`min-h-screen w-full bg-background text-on-surface p-2 md:p-2 ${className}`}>
-      <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
+      <div className="max-w-[1600px] mx-auto mt-2 md:my-4 flex flex-col px-4 md:px-8 md:flex-row items-start md:items-center justify-between gap-4 border-b border-border-overlay pb-6">
         <div>
           <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] font-label-mono text-theme-orange">
             <Trophy className="w-3.5 h-3.5" />
             {eyebrowLabel}
           </span>
-          <h1 className="font-headline-lg font-bold text-3xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
+          <h1 className="font-headline-lg font-bold text-2xl md:text-4xl text-on-surface mt-1.5">{title}</h1>
         </div>
         <div className="flex items-center gap-4 bg-surface-container-low/70 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-border-overlay">
           {selectedTeamCode ? (
@@ -510,17 +449,15 @@ export default function DoubleElimBoard({
         </div>
       </div>
 
-      {/* Desktop: measured canvas with real connector lines */}
-      <div className="hidden md:block max-w-[1600px] mx-auto relative">
+      {/* Single measured canvas for both desktop and mobile. Mobile just
+          gets smaller COL_W/COL_GAP/CARD_GAP/LEFT_MARGIN/ROW_GAP values
+          (computed above via isMobile) and relies on the same
+          overflow-x-auto horizontal scroll to move between rounds. This
+          is what makes connector lines show up on phones — there's now
+          only one code path that draws them. */}
+      <div className="max-w-[1600px] mx-auto relative px-2 md:px-0">
         <div className="db-scroll overflow-x-auto pb-6">
           <div ref={masterRef} className="relative" style={{ width: totalWidth, height: totalHeight, minWidth: "100%" }}>
-            {/* Connectors are drawn FIRST (underneath everything else) on
-                purpose. Cards below have solid/opaque backgrounds, so
-                whichever part of a connector's path happens to fall
-                under a card gets visually covered by that card instead
-                of painting over its face — a line only ever shows in the
-                actual empty gaps between cards, never appearing to cut
-                across one. */}
             <svg className="absolute inset-0 pointer-events-none" width={totalWidth} height={totalHeight}>
               {connectors.map((c) => {
                 const active = c.teamCode && c.teamCode === activeTeamCode;
@@ -546,32 +483,34 @@ export default function DoubleElimBoard({
               <img
                 src={logoSrc}
                 alt=""
-                className="absolute pointer-events-none opacity-30 w-[300px] h-auto object-contain"
+                className="absolute pointer-events-none opacity-30 w-[180px] md:w-[300px] h-auto object-contain"
                 style={{ left: gfX + COL_W / 2, top: gfCenterY, transform: "translate(-50%, -50%)" }}
               />
             )}
 
             <SectionHeader
               icon={<Trophy className="w-3.5 h-3.5" />}
-              label="Winners bracket · still unbeaten"
+              label={isMobile ? "Winners bracket" : "Winners bracket · still unbeaten"}
               textClass="text-emerald-400"
               bgClass="bg-emerald-500/10"
               borderClass="border-emerald-500/25"
               accentBarClass="bg-emerald-400"
               top={0}
-              width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
+              leftInset={LEFT_MARGIN - (isMobile ? 12 : 32)}
+              width={Math.max(0, totalWidth - HEADER_RIGHT_PAD - (LEFT_MARGIN - (isMobile ? 12 : 32)))}
             />
             {renderRow(data.winners, wbRowRef, wbLeafColRef, wbRowTop, wbRowHeight)}
 
             <SectionHeader
               icon={<RotateCcw className="w-3.5 h-3.5" />}
-              label="Losers bracket · one more loss and you're out"
+              label={isMobile ? "Losers bracket" : "Losers bracket · one more loss and you're out"}
               textClass="text-orange-400"
               bgClass="bg-orange-500/10"
               borderClass="border-orange-500/25"
               accentBarClass="bg-orange-400"
               top={lbLabelTop}
-              width={Math.max(0, totalWidth - HEADER_RIGHT_PAD)}
+              leftInset={LEFT_MARGIN - (isMobile ? 12 : 32)}
+              width={Math.max(0, totalWidth - HEADER_RIGHT_PAD - (LEFT_MARGIN - (isMobile ? 12 : 32)))}
             />
             {renderRow(data.losers, lbRowRef, lbLeafColRef, lbRowTop, lbRowHeight)}
 
@@ -617,35 +556,13 @@ export default function DoubleElimBoard({
             )}
           </div>
         </div>
-      </div>
-
-      {/* Mobile: simple stacked sections, no absolute geometry */}
-      <div className="md:hidden max-w-xl mx-auto flex flex-col gap-8 px-2">
-        <MobileSection title="Winners bracket" rounds={data.winners} editable={editable} onRecordResult={onRecordResult} />
-        <MobileSection title="Losers bracket" rounds={data.losers} editable={editable} onRecordResult={onRecordResult} />
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-widest font-label-mono text-theme-orange mb-3">
-            Grand final
+        {isMobile && (
+          <p className="text-center text-[10px] font-label-mono uppercase tracking-widest text-outline mt-1">
+            ← scroll to see all rounds →
           </p>
-          <div className="flex flex-col gap-4">
-            <MatchCardFor match={data.grandFinal} editable={editable} onRecordResult={onRecordResult} />
-            {data.bracketReset && (
-              <>
-                <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline text-center -mt-1">
-                  Bracket reset
-                </p>
-                <MatchCardFor match={data.bracketReset} editable={editable} onRecordResult={onRecordResult} />
-              </>
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Themed scrollbar for .db-scroll containers (horizontal canvas
-          + mobile round rows) AND the page's own vertical scrollbar
-          (html) — both styled the same way so they're visually
-          consistent with each other instead of one being custom and
-          the other left as the browser/OS default. */}
       <style jsx global>{`
         html {
           scrollbar-width: thin;
@@ -684,39 +601,6 @@ export default function DoubleElimBoard({
           background-color: var(--color-outline);
         }
       `}</style>
-    </div>
-  );
-}
-
-function MobileSection({
-  title,
-  rounds,
-  editable,
-  onRecordResult,
-}: {
-  title: string;
-  rounds: Round[];
-  editable?: boolean;
-  onRecordResult?: RecordFn;
-}) {
-  if (!rounds.length) return null;
-  return (
-    <div>
-      <p className="text-[10px] font-black uppercase tracking-widest font-label-mono text-on-surface-variant mb-3">{title}</p>
-      <div className="flex gap-4 overflow-x-auto db-scroll pb-3">
-        {rounds.map((round) => (
-          <div key={round.id} className="min-w-[240px] flex flex-col items-center gap-3">
-            <span className="inline-block px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest font-label-mono bg-surface-container-low border border-border-overlay text-on-surface-variant">
-              {round.name}
-            </span>
-            <div className="w-full flex flex-col gap-4">
-              {round.matches.map((m) => (
-                <MatchCardFor key={m.id} match={m} editable={editable} onRecordResult={onRecordResult} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
