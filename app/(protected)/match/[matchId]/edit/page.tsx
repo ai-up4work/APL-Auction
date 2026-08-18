@@ -111,6 +111,34 @@ import Image from "next/image"
 // backfill squads/players (those live in the `players` table keyed by
 // sold_to_team_id, a separate lookup), so an empty Squads tab for such a
 // match still needs to be synced/populated separately.
+//
+// ── MATCH NUMBER + MATCH TITLE + TOURNAMENT FALLBACKS (NEW) ──
+// Three more fields backfilled from real DB sources rather than left
+// blank when match_setup doesn't have them yet:
+//   - matchNumber: prefers bracket_matches.match_number (the real
+//     tournament-wide play-order column) over whatever's already in
+//     match_setup.matchNumber.
+//   - matchTitle: auto-composed as "{team1Name} vs {team2Name}" once
+//     team identity is resolved, if not already set.
+//   - tournament / tournamentName: resolved from tournaments.name via
+//     bracket_matches.tournament_id (preferred) or matches.tournament_id
+//     (fallback) — defaults to "Friendly" if neither resolves, since
+//     this is presumably a standalone/manual match in that case.
+//   - tournamentBannerUrl (component state, NOT part of match_setup):
+//     resolved from tournaments.image_url in the same lookup, used ONLY
+//     as a display-time fallback for the Live Preview banner when this
+//     match hasn't set its own banner (form.tournamentLogoUrl) — never
+//     written back to match_setup on save.
+//
+// ── DOUBLE-LOAD GUARD (NEW) ──
+// React Strict Mode double-invokes effects in dev (mount → cleanup →
+// mount again). Without a guard, load() would run twice for the same
+// matchId, and the second call's setForm(parsed) — built fresh from
+// whatever's still in the DB — would silently overwrite any edit made
+// in between the two loads, making a change look like it "reverted" a
+// moment after being made. hasLoadedForRef tracks which matchId has
+// already completed a load and no-ops any repeat call for that same id;
+// a real navigation to a different matchId still re-fetches normally.
 // ─────────────────────────────────────────────────────────────
 
 interface SquadPlayer {
@@ -838,12 +866,22 @@ export default function EditMatchPage() {
   const [form, setForm] = useState<EditableSetup>(emptySetup())
   const [showImportedHint, setShowImportedHint] = useState(false)
   const [bannerBroken, setBannerBroken] = useState(false)
+  // Display-only fallback for the Live Preview banner — resolved from
+  // the parent tournament's own image_url when this match hasn't set
+  // its own banner yet. Never merged into `form`/match_setup.
   const [tournamentBannerUrl, setTournamentBannerUrl] = useState<string>("")
   const rawSetupRef = useRef<Record<string, any> | null>(null)
+
+  // Tracks which matchId has already completed a load() — guards
+  // against React Strict Mode's dev-only double-invoke of this effect
+  // silently reverting an in-progress edit. See the DOUBLE-LOAD GUARD
+  // note near the top of this file.
+  const hasLoadedForRef = useRef<string | null>(null)
 
   // ── load existing match_setup ──
   useEffect(() => {
     if (!matchId) return
+    if (hasLoadedForRef.current === matchId) return
     let cancelled = false
 
     async function load() {
@@ -875,12 +913,13 @@ export default function EditMatchPage() {
 
       // ── TEAM IDENTITY + MATCH NUMBER FALLBACK ──
       // match_setup.team1/team2 is a JSON snapshot, not a foreign key,
-      // and match_setup.matchNumber is free text the organizer may never
-      // have filled in — the real tournament-wide match number lives on
-      // bracket_matches.match_number. Both gaps (plus tournament_id, used
-      // further below) are covered by the same bracket_matches row, keyed
-      // by overlay_match_id = this match, so fetch it whenever ANY of
-      // team names / match number / tournament fields are still blank.
+      // and match_setup.matchNumber is free text the organizer may
+      // never have filled in — the real tournament-wide match number
+      // lives on bracket_matches.match_number. Both gaps (plus
+      // tournament_id, used further below) are covered by the same
+      // bracket_matches row, keyed by overlay_match_id = this match, so
+      // fetch it whenever ANY of team names / match number / tournament
+      // fields are still blank.
       const needsTeamFallback = !parsed.team1Name.trim() || !parsed.team2Name.trim()
       const needsMatchNumberFallback = !parsed.matchNumber.trim()
       const needsTournamentFallback = !parsed.tournament.trim() || !parsed.tournamentName.trim()
@@ -919,8 +958,8 @@ export default function EditMatchPage() {
             team2Logo: parsed.team2Logo.trim() || teamB?.logo || "",
             team2Color:
               parsed.team2Color !== DEFAULT_TEAM_COLOR ? parsed.team2Color : teamB?.color || DEFAULT_TEAM_COLOR,
-            // Prefer the real bracket match_number column; only fall back
-            // to whatever's already in match_setup.matchNumber if
+            // Prefer the real bracket match_number column; only fall
+            // back to whatever's already in match_setup.matchNumber if
             // bracket_matches has no row/no number for this match.
             matchNumber:
               parsed.matchNumber.trim() ||
@@ -930,10 +969,10 @@ export default function EditMatchPage() {
       }
 
       // ── MATCH TITLE FALLBACK ──
-      // Runs after the team-identity fallback above so it always sees the
-      // final resolved team names, whichever source they came from. Only
-      // fills in when matchTitle is still blank — anything already typed
-      // in match_setup.matchTitle wins.
+      // Runs after the team-identity fallback above so it always sees
+      // the final resolved team names, whichever source they came
+      // from. Only fills in when matchTitle is still blank — anything
+      // already typed in match_setup.matchTitle wins.
       if (!parsed.matchTitle.trim() && (parsed.team1Name.trim() || parsed.team2Name.trim())) {
         parsed = {
           ...parsed,
@@ -944,18 +983,19 @@ export default function EditMatchPage() {
       // ── TOURNAMENT FALLBACK (name, ref/slug, AND banner) ──
       // `tournament` (Info panel, "ref/slug"), `tournamentName` (Details
       // panel, "Tournament / Series"), and the Live Preview banner
-      // fallback all describe/derive from the same real-world fact: which
-      // tournament this match belongs to. Resolve the tournament row once
-      // — preferring bracket_matches.tournament_id (from the fetch above)
-      // over matches.tournament_id, since the latter isn't reliably
-      // populated for bracket-created matches (same gap documented for
-      // auction_id elsewhere in this file) — then fill in whichever of
-      // tournament/tournamentName is still blank, and separately stash the
-      // tournament's logo for display-only use in the Live Preview.
+      // fallback all describe/derive from the same real-world fact:
+      // which tournament this match belongs to. Resolve the tournament
+      // row once — preferring bracket_matches.tournament_id (from the
+      // fetch above) over matches.tournament_id, since the latter isn't
+      // reliably populated for bracket-created matches (same gap
+      // documented for auction_id elsewhere in this file) — then fill
+      // in whichever of tournament/tournamentName is still blank, and
+      // separately stash the tournament's banner image for
+      // display-only use in the Live Preview.
       {
         const resolvedTournamentId = bracketTournamentId || data.tournament_id
         let resolvedName: string | null = null
-        let resolvedLogo: string | null = null
+        let resolvedBanner: string | null = null
 
         if (resolvedTournamentId) {
           const { data: tournamentRow, error: tournamentErr } = await supabase
@@ -968,7 +1008,7 @@ export default function EditMatchPage() {
             console.error("[edit] tournament fallback lookup failed:", tournamentErr.message)
           }
           resolvedName = tournamentRow?.name ?? null
-          resolvedLogo = tournamentRow?.image_url ?? null
+          resolvedBanner = tournamentRow?.image_url ?? null
         }
 
         if (!parsed.tournament.trim() || !parsed.tournamentName.trim()) {
@@ -983,10 +1023,11 @@ export default function EditMatchPage() {
         // so it's never written back to match_setup on save. The Live
         // Preview banner prefers form.tournamentLogoUrl first and only
         // falls back to this when the match has no banner of its own.
-        setTournamentBannerUrl(resolvedLogo || "")
+        setTournamentBannerUrl(resolvedBanner || "")
       }
 
       if (cancelled) return
+      hasLoadedForRef.current = matchId // mark this matchId as loaded — future re-invocations for the same id become no-ops
       setForm(parsed)
       setShowImportedHint(hadFlatSquads(raw))
       setState("idle")
@@ -1371,20 +1412,20 @@ export default function EditMatchPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
+                          <FieldLabel>Match Title</FieldLabel>
+                          <TextInput
+                            value={form.matchTitle}
+                            onChange={(e) => update("matchTitle", e.target.value)}
+                            placeholder="The Grand Rematch"
+                          />
+                        </div>
+                        <div>
                           <FieldLabel>Match Number</FieldLabel>
                           <TextInput
                             inputMode="numeric"
                             value={form.matchNumber}
                             onChange={(e) => update("matchNumber", e.target.value.replace(/[^0-9]/g, ""))}
                             placeholder="14"
-                          />
-                        </div>
-                        <div>
-                          <FieldLabel>Match Number</FieldLabel>
-                          <TextInput
-                            value={form.matchNumber}
-                            onChange={(e) => update("matchNumber", e.target.value)}
-                            placeholder="Match 14"
                           />
                         </div>
                       </div>
@@ -1454,7 +1495,7 @@ export default function EditMatchPage() {
                           subType="banner" → matches/{matchId}/banner/. ── */}
                       <div>
                         <ImageUploadField
-                          label="Match Banner (if different from tournament banner)"
+                          label="Match Banner"
                           value={form.tournamentLogoUrl}
                           onChange={(url) => update("tournamentLogoUrl", url)}
                           matchId={matchId}
@@ -1669,13 +1710,14 @@ export default function EditMatchPage() {
                       <div className="bg-black/50 border border-gold/20 rounded-lg overflow-hidden">
                         {/* Match banner — form.tournamentLogoUrl is the
                             match banner field (see the BANNER IMAGE note
-                            near the top of this file), same treatment as
-                            the tournament editor's imageUrl strip. */}
+                            near the top of this file). Falls back to the
+                            parent tournament's own banner (resolved on
+                            load into tournamentBannerUrl) purely for
+                            display when this match hasn't set its own
+                            banner yet — that fallback is never written
+                            back to match_setup on save. */}
                         <div className="relative h-24 bg-black/60 border-b border-gold/10">
                           {(() => {
-                            // Prefer this match's own banner; fall back to
-                            // the parent tournament's banner purely for
-                            // display when the match hasn't set one yet.
                             const previewBanner = form.tournamentLogoUrl || tournamentBannerUrl
                             return previewBanner && !bannerBroken ? (
                               // eslint-disable-next-line @next/next/no-img-element
