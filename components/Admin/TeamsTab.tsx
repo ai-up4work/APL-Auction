@@ -19,8 +19,14 @@ const TOOLS = [
 const TIERS: Team["tier"][] = ["Pro", "Elite", "Legend"];
 const MAX_TEAMS = 8;
 
+// NOTE: color defaults to a resolved hex (matching the --color-theme-orange
+// token), not the raw CSS var string. ColorPicker displays whatever string
+// lives in form.color verbatim, so "var(--color-theme-orange)" was showing
+// up literally in the swatch label instead of resolving to a color.
+const DEFAULT_TEAM_COLOR = "#C9971F";
+
 const EMPTY_FORM: Omit<Team, "id" | "roster" | "supabaseId"> = {
-  name: "", code: "", tier: "Pro", owner: "", color: "var(--color-theme-orange)", logo: "", pin: "",
+  name: "", code: "", tier: "Pro", owner: "", color: DEFAULT_TEAM_COLOR, logo: "", pin: "",
 };
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -57,6 +63,60 @@ function focusOn(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
 }
 function focusOff(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
   e.currentTarget.style.borderColor = "var(--color-border-overlay)";
+}
+
+// ── Eyedropper (pick color from logo) ──────────────────────────────────────
+/** Uses the browser's native EyeDropper API to let the user sample an
+ *  exact pixel color from anywhere on screen — including the uploaded
+ *  logo preview further down the form — straight into the color field.
+ *  No canvas/pixel-bucket extraction or swatch list, just a direct
+ *  native color-picking affordance sitting next to the Identity Color
+ *  field. Renders nothing if the browser doesn't support EyeDropper
+ *  (e.g. Firefox, Safari as of this writing) since there's no good
+ *  polyfill for it — ColorPicker's manual hex/wheel entry still works
+ *  regardless. */
+function EyedropperButton({ onPick }: { onPick: (hex: string) => void }) {
+  const supported = typeof window !== "undefined" && "EyeDropper" in window;
+
+  if (!supported) return null;
+
+  async function handleClick() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const eyeDropper = new (window as any).EyeDropper();
+      const result = await eyeDropper.open();
+      onPick(result.sRGBHex);
+    } catch {
+      // User pressed Escape / cancelled the picker — not an error, ignore.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title="Pick color from logo"
+      className="flex items-center gap-1.5 px-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wide shrink-0 transition-colors"
+      style={{
+        height: "38px",
+        background: "var(--color-surface-container-low)",
+        border: "1px solid var(--color-border-overlay)",
+        color: "var(--color-on-surface-variant)",
+        fontFamily: "var(--font-label-mono)",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.color = "var(--color-theme-orange)";
+        (e.currentTarget as HTMLElement).style.borderColor = "rgba(201,151,31,0.4)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.color = "var(--color-on-surface-variant)";
+        (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border-overlay)";
+      }}
+    >
+      <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>colorize</span>
+      Pick from logo
+    </button>
+  );
 }
 
 // ── Lock Banner ───────────────────────────────────────────────────────────────
@@ -119,8 +179,12 @@ function PinInput({
         onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
         className="flex-1 bg-transparent px-3 py-2 text-sm outline-none"
         style={{
+          // Bumped from --color-outline-ish grey to --color-on-surface so the
+          // masked PIN dots carry the same visual weight as neighbouring
+          // fields instead of reading as faint/disabled.
           color: disabled ? "var(--color-surface-variant)" : "var(--color-on-surface)",
           fontFamily: "var(--font-label-mono)",
+          fontWeight: 700,
           letterSpacing: show ? "0.2em" : "0.3em",
           cursor: disabled ? "not-allowed" : "auto",
         }}
@@ -184,7 +248,13 @@ function FranchiseModal({ initial, existingCodes, auctionId, onClose, onSave }: 
     <div className="fixed inset-0 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999 }}
       onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl p-6 flex flex-col gap-5"
+      {/* Modal shell widened from max-w-lg (512px) to max-w-4xl (~896px) on
+          desktop — the narrow card was leaving huge unused margins on both
+          sides of the screen. Body switches to a two-column layout at md+
+          (fields left, logo/preview right) so that width gets used for
+          layout, not just empty padding; it collapses back to one column
+          below md for mobile. */}
+      <div className="w-full max-w-4xl rounded-2xl p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
         style={{ background: "var(--color-surface-container)", border: "1px solid var(--color-border-overlay)", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
         onClick={(e) => e.stopPropagation()}>
 
@@ -213,95 +283,108 @@ function FranchiseModal({ initial, existingCodes, auctionId, onClose, onSave }: 
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <FieldLabel>Franchise Name *</FieldLabel>
-            <input type="text" value={form.name} onChange={(e) => set("name", e.target.value)}
-              placeholder="e.g. Colombo Kings"
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
-          </div>
-          <div>
-            <FieldLabel>Team Code * (max 3)</FieldLabel>
-            <input type="text" value={form.code}
-              onChange={(e) => set("code", e.target.value.toUpperCase().slice(0, 3))}
-              placeholder="e.g. CK"
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none uppercase"
-              style={{ ...inputBase(), fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em" }}
-              onFocus={focusOn} onBlur={focusOff} />
-          </div>
-          <div>
-            <FieldLabel>Tier</FieldLabel>
-            <select value={form.tier} onChange={(e) => set("tier", e.target.value as Team["tier"])}
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputBase()}>
-              {TIERS.map((t) => <option key={t} value={t} style={{ background: "var(--color-surface-container)" }}>{t}</option>)}
-            </select>
-          </div>
-          <div className="col-span-2">
-            <FieldLabel>Owner / Organisation *</FieldLabel>
-            <input type="text" value={form.owner} onChange={(e) => set("owner", e.target.value)}
-              placeholder="e.g. MJ Holdings"
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
+        {/* Two-column body: left = identity fields, right = logo + live
+            preview. On mobile (below md) this stacks to a single column
+            in source order (fields, then logo/preview), same as before. */}
+        <div className="grid grid-cols-1 md:grid-cols-[1.1fr_0.9fr] gap-6">
+
+          {/* ── LEFT: form fields ── */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 content-start">
+            <div className="col-span-2">
+              <FieldLabel>Franchise Name *</FieldLabel>
+              <input type="text" value={form.name} onChange={(e) => set("name", e.target.value)}
+                placeholder="e.g. Colombo Kings"
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
+            </div>
+
+            <div>
+              <FieldLabel>Team Code * (max 3)</FieldLabel>
+              <input type="text" value={form.code}
+                onChange={(e) => set("code", e.target.value.toUpperCase().slice(0, 3))}
+                placeholder="e.g. CK"
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none uppercase"
+                style={{ ...inputBase(), fontFamily: "var(--font-label-mono)", letterSpacing: "0.1em" }}
+                onFocus={focusOn} onBlur={focusOff} />
+            </div>
+
+            <div>
+              <FieldLabel>Tier</FieldLabel>
+              <select value={form.tier} onChange={(e) => set("tier", e.target.value as Team["tier"])}
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                style={inputBase()}>
+                {TIERS.map((t) => <option key={t} value={t} style={{ background: "var(--color-surface-container)" }}>{t}</option>)}
+              </select>
+            </div>
+
+            <div className="col-span-2">
+              <FieldLabel>Owner / Organisation *</FieldLabel>
+              <input type="text" value={form.owner} onChange={(e) => set("owner", e.target.value)}
+                placeholder="e.g. MJ Holdings"
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                style={inputBase()} onFocus={focusOn} onBlur={focusOff} />
+            </div>
+
+            {/* ── IDENTITY COLOR ── */}
+            <div className="col-span-2">
+              <FieldLabel>Identity Color</FieldLabel>
+              <div className="flex items-stretch gap-2">
+                <div className="flex-1 min-w-0">
+                  <ColorPicker value={form.color} onChange={(v) => set("color", v)} label="" />
+                </div>
+                <EyedropperButton onPick={(hex) => set("color", hex)} />
+              </div>
+            </div>
+
+            {/* ── PIN FIELD — moved into the left column with the rest of
+                 the form fields now that logo lives in its own column. ── */}
+            <div className="col-span-2">
+              <FieldLabel>Owner Access PIN (4–6 digits)</FieldLabel>
+              <PinInput value={form.pin ?? ""} onChange={(v) => set("pin", v)} />
+              <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>
+                Team owners use this PIN to access the bidding room. Leave blank to set later.
+              </p>
+            </div>
           </div>
 
-          {/* ── IDENTITY COLOR — now the aesthetic ColorPicker component
-               (preset swatches + hex input + native color wheel) instead
-               of a raw <input type="color">. Same form.color value/setter,
-               so nothing downstream changes. ── */}
-          <div>
-            <ColorPicker value={form.color} onChange={(v) => set("color", v)} label="Identity Color" />
-          </div>
+          {/* ── RIGHT: logo upload + live preview, stacked in the freed-up
+               side column instead of stretching the whole modal taller. ── */}
+          <div className="flex flex-col gap-4">
+            <div>
+              <ImageUploadField
+                auctionId={auctionId ?? ""}
+                kind="team"
+                value={form.logo}
+                onChange={(url) => set("logo", url)}
+                label="Team Logo"
+                accentColor={form.color}
+              />
+            </div>
 
-          {/* ── TEAM LOGO — now an upload field instead of a raw URL input.
-               Uploads go to {auctionId}/Auction-Images/team-images/ via
-               /api/uploads, and the resulting public URL is stored on
-               form.logo exactly as before, so the rest of the save flow
-               (onSave → teams.logo) is unchanged. ── */}
-          <div>
-            <ImageUploadField
-              auctionId={auctionId ?? ""}
-              kind="team"
-              value={form.logo}
-              onChange={(url) => set("logo", url)}
-              label="Team Logo"
-              accentColor={form.color}
-            />
-          </div>
-
-          {/* ── PIN FIELD ── */}
-          <div className="col-span-2">
-            <FieldLabel>Owner Access PIN (4–6 digits)</FieldLabel>
-            <PinInput value={form.pin ?? ""} onChange={(v) => set("pin", v)} />
-            <p className="mt-1.5 text-[10px]" style={{ color: "var(--color-outline)" }}>
-              Team owners use this PIN to access the bidding room. Leave blank to set later.
-            </p>
+            {(form.name || form.code) && (
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl mt-auto"
+                style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}>
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden shrink-0"
+                  style={{ background: "var(--color-surface-bright)", border: `2px solid ${form.color}55` }}>
+                  {form.logo
+                    ? <img src={form.logo} alt="" className="w-10 h-10 object-cover" />
+                    : <span className="text-[10px] font-black" style={{ color: form.color, fontFamily: "var(--font-label-mono)" }}>{form.code || "—"}</span>
+                  }
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold truncate" style={{ color: "var(--color-on-surface)", fontFamily: "var(--font-headline-md)" }}>
+                    {form.name || "Franchise Name"}
+                  </p>
+                  <p className="text-[10px] truncate" style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}>
+                    {form.code || "CODE"} • {form.tier} {form.owner ? `• ${form.owner}` : ""}
+                    {form.pin ? ` • PIN: ${"•".repeat(form.pin.length)}` : " • No PIN set"}
+                  </p>
+                </div>
+                <div className="ml-auto w-3 h-3 rounded-full shrink-0" style={{ background: form.color }} />
+              </div>
+            )}
           </div>
         </div>
-
-        {(form.name || form.code) && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)" }}>
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden shrink-0"
-              style={{ background: "var(--color-surface-bright)", border: `2px solid ${form.color}55` }}>
-              {form.logo
-                ? <img src={form.logo} alt="" className="w-10 h-10 object-cover" />
-                : <span className="text-[10px] font-black" style={{ color: form.color, fontFamily: "var(--font-label-mono)" }}>{form.code || "—"}</span>
-              }
-            </div>
-            <div>
-              <p className="text-sm font-bold" style={{ color: "var(--color-on-surface)", fontFamily: "var(--font-headline-md)" }}>
-                {form.name || "Franchise Name"}
-              </p>
-              <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}>
-                {form.code || "CODE"} • {form.tier} {form.owner ? `• ${form.owner}` : ""}
-                {form.pin ? ` • PIN: ${"•".repeat(form.pin.length)}` : " • No PIN set"}
-              </p>
-            </div>
-            <div className="ml-auto w-3 h-3 rounded-full shrink-0" style={{ background: form.color }} />
-          </div>
-        )}
 
         <div className="flex gap-3 pt-1">
           <button onClick={onClose}

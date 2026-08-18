@@ -882,13 +882,6 @@ function DriverContent({ auctionId }: { auctionId: string }) {
         input[type=number] { -moz-appearance: textfield; }
       `}</style>
 
-      {/* Live-write warning banner */}
-      <div className="shrink-0 flex items-center gap-2 px-4 py-1.5 bg-red-500/10 border-b border-red-500/25">
-        <span className="material-symbols-outlined text-red-400" style={{ fontSize: 14 }}>warning</span>
-        <span className="font-mono-geist text-[10px] text-red-400 uppercase tracking-[0.14em] font-bold">
-          Live-write mode — this writes real bids, sales, and purse changes to this auction
-        </span>
-      </div>
 
       {driverError && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold"
@@ -904,9 +897,7 @@ function DriverContent({ auctionId }: { auctionId: string }) {
           <h1 className="font-archivo text-2xl font-bold italic uppercase tracking-tight text-theme-orange">
             {auction.session.auctionName}
           </h1>
-          <span className="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/25 font-mono-geist text-[9px] uppercase tracking-[0.16em] text-red-400">
-            Live-write simulation
-          </span>
+         
           {roundInfo.current > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-400/10 border border-indigo-400/20 rounded-full">
               <span className="material-symbols-outlined text-indigo-300 text-sm">autorenew</span>

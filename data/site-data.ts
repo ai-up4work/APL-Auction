@@ -331,7 +331,7 @@ export const showcaseSlides: ShowcaseSlide[] = [
     tag: "Website",
     slug: "moratuwa-thundersharks-draft-night",
     title: "Moratuwa Thundersharks Draft Night",
-    by: "Run by Moratuwa Thundersharks — 58 players moved in one night",
+    by: "Run by Moratuwa Thundersharks — 58 players, 4 teams moved in one night",
     image: "/images/showcase/moratuwa-thundersharks-draft-night.png",
     screenshot: "/images/showcase/moratuwa-thundersharks-draft-night-website-screenshot.png",
     featured: true,

@@ -12,6 +12,7 @@ import Image from "next/image";
 
 interface AuctionData {
   id: string;
+  status: string | null;
 }
 
 interface TeamData {
@@ -51,6 +52,57 @@ interface FlowTeam {
   purse: string;
 }
 
+// ── Status badge config ──────────────────────────────────────────────────
+// The badge used to be a hardcoded "COMPLETED" label that rendered
+// regardless of the auction's actual status column — so resetting an
+// auction (which correctly flips status back to "live" in the DB) never
+// changed what this page displayed, since this page never read the status
+// column in the first place. This maps the real status to a label/color so
+// the badge reflects the auction the visitor is actually looking at.
+type BadgeConfig = { label: string; dotColor: string; textColor: string; bg: string; border: string; pulse: boolean };
+
+const STATUS_BADGES: Record<string, BadgeConfig> = {
+  completed: {
+    label: "COMPLETED",
+    dotColor: "#22c55e",
+    textColor: "text-green-400",
+    bg: "rgba(0,80,30,0.30)",
+    border: "rgba(34,197,94,0.30)",
+    pulse: false,
+  },
+  live: {
+    label: "LIVE",
+    dotColor: "#ef4444",
+    textColor: "text-red-400",
+    bg: "rgba(120,0,0,0.30)",
+    border: "rgba(239,68,68,0.35)",
+    pulse: true,
+  },
+  paused: {
+    label: "PAUSED",
+    dotColor: "#f59e0b",
+    textColor: "text-amber-400",
+    bg: "rgba(120,80,0,0.30)",
+    border: "rgba(245,158,11,0.35)",
+    pulse: false,
+  },
+  setup: {
+    label: "NOT STARTED",
+    dotColor: "#9ca3af",
+    textColor: "text-gray-400",
+    bg: "rgba(60,60,60,0.30)",
+    border: "rgba(156,163,175,0.30)",
+    pulse: false,
+  },
+};
+
+const FALLBACK_BADGE: BadgeConfig = STATUS_BADGES.setup;
+
+function getStatusBadge(status: string | null): BadgeConfig {
+  if (!status) return FALLBACK_BADGE;
+  return STATUS_BADGES[status] ?? FALLBACK_BADGE;
+}
+
 export default function AuctionResultsPage({ params }: { params: Promise<{ auctionId: string }> }) {
   const { auctionId } = use(params);
   const playerListRef = useRef<HTMLDivElement>(null);
@@ -68,9 +120,12 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
   useEffect(() => {
     async function loadData() {
       try {
+        // NOTE: now selecting `status` alongside `id` — this is the field
+        // the header badge is driven from below. Previously only `id` was
+        // fetched, which is why the badge couldn't reflect real state.
         const { data: auctionData, error: auctionErr } = await supabase
           .from("auctions")
-          .select("id")
+          .select("id, status")
           .eq("id", auctionId)
           .maybeSingle();
 
@@ -133,6 +188,31 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
     loadData();
   }, [auctionId]);
 
+  // ── Live status subscription ─────────────────────────────────────────
+  // Without this, a visitor who already has this tab open when someone
+  // resets/relaunches the auction elsewhere would keep seeing whatever
+  // status was true at page load, same problem as the old hardcoded badge
+  // just one layer down. Subscribes to UPDATEs on this auction's row and
+  // keeps `auction.status` in sync in realtime.
+  useEffect(() => {
+    if (!auctionId) return;
+    const sub = supabase
+      .channel(`auction-status-${auctionId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "auctions", filter: `id=eq.${auctionId}` },
+        (payload) => {
+          const newStatus = (payload.new as any)?.status ?? null;
+          setAuction((prev) => (prev ? { ...prev, status: newStatus } : prev));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      sub.unsubscribe();
+    };
+  }, [auctionId]);
+
   const { flowPlayers, flowTeams } = useMemo(() => {
     const fp: FlowPlayer[] = players.map((p) => ({
       id: p.id,
@@ -182,6 +262,7 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
 
   const hasSelection = activePlayer !== null || activeTeam !== null;
   const soldCount = flowPlayers.filter((p) => p.status === "sold").length;
+  const badge = getStatusBadge(auction?.status ?? null);
 
   if (loading) {
     return (
@@ -206,6 +287,12 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
         .font-mono-geist { font-family:'Geist Mono',monospace; }
         .font-inter { font-family:'Inter',sans-serif; }
         .header-blur { backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+
+        @keyframes livePulseDot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.35; }
+        }
+        .live-dot-pulse { animation: livePulseDot 1.4s ease-in-out infinite; }
 
         /* Mobile: keep the 12-col grid (flow-view-grid stays untouched, it's
            Tailwind's grid grid-cols-12 from the JSX) — just narrow the
@@ -253,10 +340,21 @@ export default function AuctionResultsPage({ params }: { params: Promise<{ aucti
           </div>
 
           <div className="flex items-center gap-[16px] sm:gap-[30px]">
-            <div className="live-badge flex items-center gap-[9px] bg-[rgba(0,80,30,0.30)] px-[17px] py-[6px] rounded-full border border-[rgba(34,197,94,0.30)]">
-              <div className="w-[6px] h-[6px] rounded-full bg-green-500" style={{ boxShadow: "0 0 7px #22c55e" }} />
-              <span className="live-badge-text font-mono-geist text-green-400 font-bold tracking-[0.18em] text-[9px]">
-                COMPLETED
+            {/* Status badge — driven by auction.status (with a realtime
+                subscription above keeping it fresh) instead of a hardcoded
+                "COMPLETED" label. */}
+            <div
+              className="live-badge flex items-center gap-[9px] px-[17px] py-[6px] rounded-full border"
+              style={{ background: badge.bg, borderColor: badge.border }}
+            >
+              <div
+                className={`w-[6px] h-[6px] rounded-full ${badge.pulse ? "live-dot-pulse" : ""}`}
+                style={{ background: badge.dotColor, boxShadow: `0 0 7px ${badge.dotColor}` }}
+              />
+              <span
+                className={`live-badge-text font-mono-geist font-bold tracking-[0.18em] text-[9px] ${badge.textColor}`}
+              >
+                {badge.label}
               </span>
             </div>
           </div>
