@@ -170,7 +170,7 @@ export default function MatchResultCard({
 
       <div className="relative flex flex-col gap-1.5 p-2">
         <div className="flex items-center justify-between">
-          <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p>
+          {/* <p className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">{match.label}</p> */}
           {match.matchNumber != null && (
             <span className="text-[9px] font-label-mono font-black uppercase tracking-widest text-outline">
               Match {match.matchNumber}
