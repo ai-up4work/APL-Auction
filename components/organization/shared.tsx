@@ -13,10 +13,11 @@ import { ChevronDown, ChevronRight, Plus } from "lucide-react"
 export type Tone =
   | "linked" // this thing is connected to something (tournament, overlay configured…)
   | "none" // explicitly not connected — a real, visible state, not an absence
-  | "warn" // needs attention (overlay not set, pending registration, setup status)
+  | "warn" // needs attention (overlay not set, pending registration, paused status)
   | "neutral" // informational, low-emphasis tag
-  | "success" // completed / approved / live
+  | "success" // active / approved / live right now
   | "danger" // rejected / failed
+  | "complete" // finished / terminal-success — distinct from "success", which reads as currently-active
 
 export const statusColors: Record<Tone, { border: string; text: string; bg: string; glyph: string }> = {
   linked: { border: "border-gold/40", text: "text-gold", bg: "bg-gold/[0.06]", glyph: "✓" },
@@ -25,6 +26,7 @@ export const statusColors: Record<Tone, { border: string; text: string; bg: stri
   neutral: { border: "border-white/15", text: "text-gray-300", bg: "bg-white/[0.02]", glyph: "" },
   success: { border: "border-green-500/40", text: "text-green-400", bg: "bg-green-500/[0.08]", glyph: "" },
   danger: { border: "border-red-500/40", text: "text-red-400", bg: "bg-red-500/[0.08]", glyph: "" },
+  complete: { border: "border-blue-500/40", text: "text-blue-400", bg: "bg-blue-500/[0.08]", glyph: "✓" },
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -75,12 +77,21 @@ export function StatusBadge({ tone, children, pulse = false }: { tone: Tone; chi
 
 /** Auction lifecycle badge (setup/live/paused/completed) — a distinct
  *  vocabulary from the linked/warn/neutral tones above, but drawn from
- *  the same statusColors map so the palette never drifts apart. */
+ *  the same statusColors map so the palette never drifts apart.
+ *
+ *    setup     → neutral   plain gray, no glyph — normal pre-launch phase,
+ *                          not a warning
+ *    live      → success   green, pulsing dot — unmistakably active right now
+ *    paused    → warn      amber ⚠ — genuinely needs a decision (resume/stop)
+ *    completed → complete  blue ✓ — finished/terminal-success, visually
+ *                          distinct from live's green so a completed auction
+ *                          can never be mistaken for a currently-running one
+ */
 const AUCTION_STATUS_TONE: Record<string, Tone> = {
-  setup: "warn",
+  setup: "neutral",
   live: "success",
   paused: "warn",
-  completed: "none",
+  completed: "complete",
 }
 
 export function AuctionStatusBadge({ status }: { status: string }) {
