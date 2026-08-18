@@ -1079,6 +1079,29 @@ export default function EditMatchPage() {
       const { error } = await supabase.from("matches").update({ match_setup: updated }).eq("id", matchId)
       if (error) throw new Error(error.message)
       rawSetupRef.current = updated
+
+      // Keep bracket_matches.match_number in sync — the Schedule tab's
+      // real match order (Fixture.matchNumber, per the NOTE ON MATCH
+      // ORDER comment at the top of tournament-detail-client.tsx) is
+      // sourced from this column, not match_setup. Without this, an
+      // edit here would only ever update the JSON copy shown in this
+      // editor and silently diverge from what the public page displays.
+      // Non-fatal if it fails or doesn't apply (e.g. no bracket row for
+      // this match, or the field was left blank) — match_setup has
+      // already saved successfully either way.
+      if (form.matchNumber.trim()) {
+        const numericMatchNumber = Number(form.matchNumber)
+        if (Number.isFinite(numericMatchNumber)) {
+          const { error: bracketUpdateErr } = await supabase
+            .from("bracket_matches")
+            .update({ match_number: numericMatchNumber })
+            .eq("overlay_match_id", matchId)
+          if (bracketUpdateErr) {
+            console.error("[save] bracket match_number sync failed:", bracketUpdateErr.message)
+          }
+        }
+      }
+
       setShowImportedHint(false) // once saved, squads are in the grouped shape from here on
       setState("saved")
       setTimeout(() => setState((s) => (s === "saved" ? "idle" : s)), 2500)
@@ -1348,11 +1371,12 @@ export default function EditMatchPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
-                          <FieldLabel>Match Title</FieldLabel>
+                          <FieldLabel>Match Number</FieldLabel>
                           <TextInput
-                            value={form.matchTitle}
-                            onChange={(e) => update("matchTitle", e.target.value)}
-                            placeholder="The Grand Rematch"
+                            inputMode="numeric"
+                            value={form.matchNumber}
+                            onChange={(e) => update("matchNumber", e.target.value.replace(/[^0-9]/g, ""))}
+                            placeholder="14"
                           />
                         </div>
                         <div>
