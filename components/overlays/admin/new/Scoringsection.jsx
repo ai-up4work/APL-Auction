@@ -1,5 +1,7 @@
 "use client";
 
+import CricketBall from "@/components/overlays/shared/CricketBall"
+
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
 
 function initials(name) {
@@ -277,27 +279,25 @@ export default function ScoringSection({
           )}
         </div>
 
-        {/* <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-2.5 relative z-10">Extra</p>
-        <div className="flex items-center gap-2 mb-2 flex-wrap relative z-10">
-          {extraOptions.map((label) => {
-            const isFreeHit = label === "Free Hit";
-            const key = extraKeyFor(label);
-            const active = isFreeHit ? freeHit : extraMode === key;
-            return (
-              <button
-                key={label}
-                onClick={() => (isFreeHit ? setFreeHit((v) => !v) : setExtraMode(active ? null : key))}
-                className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3.5 py-1.5 rounded transition-all"
-                style={{ border: `1px solid ${active ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.1)"}`, background: active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)", color: active ? "#c9971f" : "rgba(255,255,255,0.5)" }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div> */}
-        <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] mb-4 pt-4 relative z-10">
-          Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb} · Free Hit {extras.FreeHit}
+        <div className="flex items-center justify-between gap-3 mb-4 relative z-10">
+        {/* Extras */}
+        <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em]">
+            Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb} · Free Hit {extras.FreeHit}
         </p>
+
+        {/* Current Over */}
+        <div className="flex items-center gap-1.5 shrink-0">
+            <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] font-bold">
+            Current Over:
+            </span>
+
+            <div className="flex items-center gap-1.5">
+            {Array.from({ length: 6 }, (_, i) => (
+                <CricketBall key={i}>{i + 1}</CricketBall>
+            ))}
+            </div>
+        </div>
+        </div>
 
         <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 relative z-10">
         {/* Runs */}
