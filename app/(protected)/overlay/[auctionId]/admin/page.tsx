@@ -872,22 +872,17 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
       <div
         className="fixed inset-0 pointer-events-none"
         style={{
-          background: `
-            radial-gradient(circle at 50% -20%, rgba(200,205,216,0.12) 0%, transparent 70%),
-            radial-gradient(circle at 0% 100%, rgba(201,151,31,0.05) 0%, transparent 50%)
-          `,
           zIndex: 0,
         }}
       />
 
-      <div className="relative z-10 max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-5 sm:py-8">
+      <div className="relative z-10 mb-0 lg:mb-6 flex flex-col gap-6 sm:gap-8">
         {/* ── Header — now IS the On Air panel. On desktop it's the full
             styled row inline; on mobile OnAirChannels renders a compact
             trigger pill instead that opens a bottom-sheet overlay, so it
             never has to be manually collapsed/expanded here. ── */}
         <div
-          className="mb-6 sm:mb-8 pb-4 sm:pb-6"
-          style={{ borderBottom: "1px solid var(--color-border-overlay)" }}
+          className=""
         >
           <OnAirChannels ref={onAirRef} fire={fire} matchId={matchId} />
         </div>

@@ -21,10 +21,7 @@ export function Section({
     <div
       className="rounded-xl p-6"
       style={{
-        background: "var(--color-surface-glass)",
-        backdropFilter: "blur(24px)",
         border: accent ? "1px solid rgba(201,151,31,0.2)" : "1px solid var(--color-border-overlay)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
       }}
     >
       <div className="mb-5 pb-4 border-b flex items-center justify-between gap-3" style={{ borderColor: "var(--color-outline-variant)" }}>

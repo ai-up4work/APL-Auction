@@ -420,7 +420,7 @@ const OnAirChannels = forwardRef<
           borderBottom: "1px solid var(--color-border-overlay)",
         }}
       >
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-2 sm:py-3">
+        <div className="max-w-[1600px] mx-auto">
           {/* Desktop / tablet — Clear sits on the same row/level as the
               "On Air" title itself (top-right corner of the Section
               card), not stacked above it. Positioned absolutely over
