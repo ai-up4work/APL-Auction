@@ -889,56 +889,138 @@ export default function OverlayAdminConsole() {
 
       <main className="flex-1 flex flex-col pb-8 lg:pb-0 lg:grid lg:grid-cols-[20%_55%_25%] lg:h-[calc(100vh-8rem)] lg:overflow-hidden">
         {/* ══════════ LEFT: Roster (2nd on mobile) ══════════ */}
-        <aside className="order-2 lg:order-1 hidden lg:flex lg:flex-col lg:h-full bg-surface-container-lowest border-t lg:border-t-0 lg:border-r border-outline-variant shrink-0 lg:overflow-y-auto custom-scrollbar py-4 px-4 gap-4">          {/* Roster — the ONLY pick/drop list on desktop. It follows whichever
-             crew slot is active: batting squad for Striker/Non-Striker,
-             bowling squad for Bowler. Drag a name onto the active slot up
-             in the scorer card, or just tap it here to assign directly. */}
+        <aside className="order-2 lg:order-1 hidden lg:flex lg:flex-col lg:h-full bg-surface-container-lowest border-t lg:border-t-0 lg:border-r border-outline-variant shrink-0 lg:overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-4 px-4 gap-4">
+          {/* Roster — the ONLY pick/drop list on desktop. It follows whichever
+            crew slot is active: batting squad for Striker/Non-Striker,
+            bowling squad for Bowler. Drag a name onto the active slot up
+            in the scorer card, or just tap it here to assign directly. */}
           <div className="hidden lg:flex glass-panel rounded-2xl p-4 lg:flex-1 lg:min-h-0 flex-col lg:overflow-hidden">
             <div className="flex items-center justify-between mb-1 shrink-0 gap-2 flex-wrap">
-              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">Pick From {matchSetup[asideTeamKey]}</p>
+              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">
+                Pick From {matchSetup[asideTeamKey]}
+              </p>
+
               <div className="flex items-center gap-1.5 shrink-0">
-                <TogglePill label={matchSetup.teamA} on={battingTeam === "teamA"} dotColor="#c9971f" onClick={() => setBattingTeam("teamA")} />
-                <TogglePill label={matchSetup.teamB} on={battingTeam === "teamB"} dotColor="#c9971f" onClick={() => setBattingTeam("teamB")} />
+                <TogglePill
+                  label={matchSetup.teamA}
+                  on={battingTeam === "teamA"}
+                  dotColor="#c9971f"
+                  onClick={() => setBattingTeam("teamA")}
+                />
+                <TogglePill
+                  label={matchSetup.teamB}
+                  on={battingTeam === "teamB"}
+                  dotColor="#c9971f"
+                  onClick={() => setBattingTeam("teamB")}
+                />
               </div>
             </div>
+
             <div className="flex items-center justify-between mb-3 shrink-0 gap-2">
-              <span className="font-mono-geist text-[9px] text-on-surface-variant shrink-0">{asideRoster.length} players</span>
+              <span className="font-mono-geist text-[9px] text-on-surface-variant shrink-0">
+                {asideRoster.length} players
+              </span>
             </div>
-            <div className="max-h-72 lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto custom-scrollbar space-y-2">
+
+            <div className="max-h-72 lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2">
               {asideRoster.map((name) => {
                 const isOut = !!asideDismissed?.has(name);
                 const roleInfo = asideRoleMap.get(name);
                 const isLocked = isOut || !!roleInfo;
-                const roleLabel = roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
+
+                const roleLabel =
+                  roleInfo?.role === "striker"
+                    ? "On Strike"
+                    : roleInfo?.role === "nonStriker"
+                    ? "Non-Striker"
+                    : roleInfo?.role === "bowler"
+                    ? "Bowling"
+                    : undefined;
+
                 return (
                   <button
                     key={name}
                     draggable={!isLocked}
                     disabled={isLocked}
                     onDragStart={(e) => {
-                      if (isLocked) { e.preventDefault(); return; }
+                      if (isLocked) {
+                        e.preventDefault();
+                        return;
+                      }
                       e.dataTransfer.setData("text/player-name", name);
                     }}
                     onClick={() => !isLocked && assignFromAsideList(name)}
                     className="w-full flex items-center gap-3 rounded-lg pl-2.5 pr-3 py-3 text-left transition-all"
                     style={
                       isOut
-                        ? { opacity: 0.55, cursor: "not-allowed", border: "1px solid rgba(248,113,113,0.4)", background: "rgba(239,68,68,0.08)" }
+                        ? {
+                            opacity: 0.55,
+                            cursor: "not-allowed",
+                            border: "1px solid rgba(248,113,113,0.4)",
+                            background: "rgba(239,68,68,0.08)",
+                          }
                         : roleInfo
-                        ? { opacity: 0.85, cursor: "not-allowed", border: "1px solid rgba(74,222,128,0.4)", background: "rgba(34,197,94,0.08)" }
-                        : { border: "1px solid rgba(255,255,255,0.08)", background: "transparent" }
+                        ? {
+                            opacity: 0.85,
+                            cursor: "not-allowed",
+                            border: "1px solid rgba(74,222,128,0.4)",
+                            background: "rgba(34,197,94,0.08)",
+                          }
+                        : {
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            background: "transparent",
+                          }
                     }
                   >
-                    <span className="h-9 w-9 rounded-full flex items-center justify-center font-mono-geist text-[11px] font-bold shrink-0" style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "#e5e7eb" }}>
+                    <span
+                      className="h-9 w-9 rounded-full flex items-center justify-center font-mono-geist text-[11px] font-bold shrink-0"
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        color: isOut
+                          ? "#f87171"
+                          : roleInfo
+                          ? "#4ade80"
+                          : "#e5e7eb",
+                      }}
+                    >
                       {initials(name)}
                     </span>
+
                     <span className="flex flex-col min-w-0">
-                      <span className="font-archivo text-sm font-bold truncate" style={{ color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "var(--color-on-surface)" }}>{name}</span>
+                      <span
+                        className="font-archivo text-sm font-bold truncate"
+                        style={{
+                          color: isOut
+                            ? "#f87171"
+                            : roleInfo
+                            ? "#4ade80"
+                            : "var(--color-on-surface)",
+                        }}
+                      >
+                        {name}
+                      </span>
+
                       <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.08em]">
-                        {matchSetup[asideTeamKey]}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
+                        {matchSetup[asideTeamKey]}
+                        {isOut
+                          ? " · OUT"
+                          : roleLabel
+                          ? ` · ${roleLabel}`
+                          : ""}
                       </span>
                     </span>
-                    {roleInfo && <Icon name={roleInfo.role === "bowler" ? "sports_cricket" : "sports_baseball"} className="ml-auto" style={{ fontSize: 16, color: "#4ade80" }} />}
+
+                    {roleInfo && (
+                      <Icon
+                        name={
+                          roleInfo.role === "bowler"
+                            ? "sports_cricket"
+                            : "sports_baseball"
+                        }
+                        className="ml-auto"
+                        style={{ fontSize: 16, color: "#4ade80" }}
+                      />
+                    )}
                   </button>
                 );
               })}
@@ -1253,10 +1335,6 @@ export default function OverlayAdminConsole() {
               <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
               <Icon name={showMoments ? "expand_less" : "expand_more"} className="text-on-surface-variant" style={{ fontSize: 18 }} />
             </button>
-            <p className="font-mono-geist text-[10px] text-on-surface-variant uppercase tracking-[0.08em] mb-3 leading-relaxed shrink-0">
-              Fours, sixes, fifties and wickets fire automatically from the ball pad — these are manual/backup triggers.
-            </p>
-
             {showMoments && (
              <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
                 <div className="grid grid-cols-3 gap-2.5">
