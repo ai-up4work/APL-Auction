@@ -2047,9 +2047,7 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
               {readOnly
                 ? "Auto-demo is currently driving this match — switch to \"Try It Yourself\" to take over scoring."
                 : <>Pick an extra type first if this ball is a wide / no ball / bye / leg bye. Fours, sixes, and fifty/hundred milestones
-                fire automatically. Tap OUT to record a wicket — you&apos;ll be asked who was out, the dismissal, and (for a run out)
-                how many runs were completed. Innings/match completion (all out, overs up, or target reached) is now detected
-                automatically, and the Match Won graphic fires the instant the match completes.</>}
+                fire automatically.</>}
             </p>
           </div>
 
