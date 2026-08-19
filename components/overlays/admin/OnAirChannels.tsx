@@ -122,24 +122,27 @@ const OnAirChannels = forwardRef<
   // never reads this — the full row is always inline there.
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
 
-  // NEW — the mobile trigger bar is `position: fixed` (see render below),
-  // not `sticky`. `sticky` only stays pinned while its own parent
-  // container is scrolled through; the div this component renders into
-  // (page.tsx's thin header wrapper) is barely taller than the bar
-  // itself, so a sticky bar would unstick and scroll away again after a
-  // few pixels of scroll. Fixed positioning pins it to the viewport
-  // instead, but that also takes it out of normal document flow, so we
-  // measure its real height here and render an equal-height spacer in
-  // its place to stop the rest of the page jumping up underneath it.
-  const mobileBarRef = useRef<HTMLDivElement>(null);
-  const [mobileBarHeight, setMobileBarHeight] = useState(0);
+  // NEW — the whole On Air header (desktop chip row AND mobile trigger
+  // pill) is now `position: fixed` to the top of the viewport, not
+  // `sticky`. `sticky` only stays pinned while its own parent container
+  // is still scrolling through the viewport; the div this component
+  // renders into (page.tsx's thin header wrapper) is barely taller than
+  // the bar itself, so on either breakpoint a sticky bar unsticks and
+  // scrolls away again after a few pixels. Fixed positioning pins it to
+  // the viewport instead, but that also takes it out of normal document
+  // flow, so we measure its real rendered height here (whichever
+  // variant — desktop row or mobile pill — is actually visible) and
+  // render an equal-height spacer in its place so the rest of the page
+  // doesn't jump up underneath it.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
 
   useEffect(() => {
-    const el = mobileBarRef.current;
+    const el = barRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setMobileBarHeight(entry.contentRect.height);
+        setBarHeight(entry.contentRect.height);
       }
     });
     ro.observe(el);
@@ -311,6 +314,29 @@ const OnAirChannels = forwardRef<
     );
   }
 
+  // Standalone Clear button — pulled out of the chip-groups row so it
+  // can sit above the "On Air" header, right-aligned, instead of at the
+  // end of the wrapped chip row.
+  function ClearButton() {
+    return (
+      <button
+        onClick={clearAll}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide flex-shrink-0"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          background: "var(--color-error-container)",
+          border: "1px solid rgba(255,180,171,0.25)",
+          color: "var(--color-error)",
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: "13px" }}>
+          restart_alt
+        </span>
+        Clear
+      </button>
+    );
+  }
+
   const liveCount =
     Number(on.weather && !suppressed.weather) +
     Number(on.liveScoreBar && !suppressed.liveScoreBar) +
@@ -369,126 +395,121 @@ const OnAirChannels = forwardRef<
         <div className="h-4 w-px hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
 
         <StatusChip label="Test BG" on={on.testBg} onToggle={toggleTestBg} tone="blue" />
-
-        <button
-          onClick={clearAll}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide sm:ml-auto"
-          style={{
-            fontFamily: "var(--font-label-mono)",
-            background: "var(--color-error-container)",
-            border: "1px solid rgba(255,180,171,0.25)",
-            color: "var(--color-error)",
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: "13px" }}>
-            restart_alt
-          </span>
-          Clear
-        </button>
       </div>
     );
   }
 
   return (
     <>
-      {/* Desktop / tablet — inline, full row, no bottom sheet */}
-      <div className="hidden sm:block">
-        <Section title="On Air" description="Toggle overlay channels live on the broadcast.">
-          {renderChipGroups()}
-        </Section>
-      </div>
+      {/* Spacer — reserves the fixed bar's real measured height in
+          normal document flow so the rest of the page doesn't jump up
+          underneath it once the bar is pulled out of flow below. */}
+      <div aria-hidden="true" style={{ height: barHeight || undefined }} />
 
-      {/* Mobile — small trigger pill, pinned to the top of the viewport
-          with `position: fixed` (not `sticky` — see the mobileBarRef
-          comment above for why sticky doesn't actually stay put here)
-          so "Manage" stays reachable while scrolling the rest of the
-          admin page. The spacer div below reserves the bar's real
-          measured height in normal flow so page content doesn't jump
-          up underneath it. Tapping the bar opens a bottom sheet overlay
-          instead of pushing page content down. */}
-      <div className="sm:hidden">
-        <div aria-hidden="true" style={{ height: mobileBarHeight || undefined }} />
-        <div
-          ref={mobileBarRef}
-          className="fixed top-0 left-0 right-0 z-30 px-4 py-2"
-          style={{
-            background: "var(--color-background)",
-            borderBottom: "1px solid var(--color-border-overlay)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setMobileSheetOpen(true)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg"
-            style={{
-              background: "var(--color-surface-container-low)",
-              border: "1px solid var(--color-border-overlay)",
-            }}
-          >
-            <span className="flex items-center gap-2">
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "999px",
-                  background: liveCount > 0 ? "var(--color-success-green, #4caf50)" : "var(--color-outline)",
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                className="text-[11px] font-black uppercase tracking-widest"
-                style={{ fontFamily: "var(--font-label-mono)" }}
-              >
-                On Air
-              </span>
-              <span className="text-[10px]" style={{ color: "var(--color-outline)" }}>
-                {liveCount} live
-              </span>
-            </span>
-            <span
-              className="text-[10px] font-bold uppercase tracking-wide"
-              style={{ color: "var(--color-theme-orange)" }}
-            >
-              Manage
-            </span>
-          </button>
-        </div>
+      {/* The On Air header itself, pinned to the top of the viewport on
+          every breakpoint. Inner wrapper mirrors page.tsx's own
+          max-w-[1600px] + responsive px- container so the bar's content
+          lines up with the rest of the page even though, being fixed,
+          it's no longer nested inside that container for layout
+          purposes. */}
+      <div
+        ref={barRef}
+        className="fixed top-0 left-0 right-0 z-30"
+        style={{
+          background: "var(--color-background)",
+          borderBottom: "1px solid var(--color-border-overlay)",
+        }}
+      >
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-2 sm:py-3">
+          {/* Desktop / tablet — Clear sits on the same row/level as the
+              "On Air" title itself (top-right corner of the Section
+              card), not stacked above it. Positioned absolutely over
+              the Section so it doesn't depend on Section's internal
+              title layout — adjust the top/right offsets below if it
+              doesn't land exactly on the title's baseline once you
+              see it against Section's real padding. */}
+          <div className="hidden sm:block relative">
+            <div className="absolute top-5 right-5 sm:top-6 sm:right-6 z-10">
+              <ClearButton />
+            </div>
+            <Section title="On Air">
+              {renderChipGroups()}
+            </Section>
+          </div>
 
-        {mobileSheetOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              style={{ background: "rgba(0,0,0,0.5)" }}
-              onClick={() => setMobileSheetOpen(false)}
-            />
-            <div
-              className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] max-h-[75vh] overflow-y-auto"
+          {/* Mobile — Clear sits inline, same row as the trigger pill,
+              rather than stacked above it. */}
+          <div className="sm:hidden flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMobileSheetOpen(true)}
+              className="flex-1 flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg"
               style={{
                 background: "var(--color-surface-container-low)",
-                borderTop: "1px solid var(--color-border-overlay)",
+                border: "1px solid var(--color-border-overlay)",
               }}
             >
-              <div className="flex items-center justify-between mb-4">
+              <span className="flex items-center gap-2">
                 <span
-                  className="text-[12px] font-black uppercase tracking-widest"
-                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: "999px",
+                    background: liveCount > 0 ? "var(--color-success-green, #4caf50)" : "var(--color-outline)",
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  className="text-[11px] font-black uppercase tracking-widest"
+                  style={{ fontFamily: "var(--font-label-mono)" }}
                 >
                   On Air
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setMobileSheetOpen(false)}
-                  className="text-[11px] font-bold uppercase tracking-wide"
-                  style={{ color: "var(--color-outline)" }}
-                >
-                  Done
-                </button>
-              </div>
-              <div className="flex flex-col gap-4">{renderChipGroups()}</div>
-            </div>
-          </>
-        )}
+                <span className="text-[10px]" style={{ color: "var(--color-outline)" }}>
+                  {liveCount} live
+                </span>
+              </span>
+              <span
+                className="text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: "var(--color-theme-orange)" }}
+              >
+                Manage
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
+
+      {mobileSheetOpen && (
+        <>
+        <ClearButton />
+          <div
+            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] max-h-[75vh] overflow-y-auto"
+            style={{
+              background: "var(--color-surface-container-low)",
+              borderTop: "1px solid var(--color-border-overlay)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <span
+                className="text-[12px] font-black uppercase tracking-widest"
+                style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+              >
+                On Air
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileSheetOpen(false)}
+                className="text-[11px] font-bold uppercase tracking-wide"
+                style={{ color: "var(--color-outline)" }}
+              >
+                Done
+              </button>
+            </div>
+            <div className="flex flex-col gap-4">{renderChipGroups()}</div>
+          </div>
+        </>
+      )}
     </>
   );
 });
