@@ -550,7 +550,7 @@ export default function OverlayAdminConsole() {
       </div>
 
       {/* ══════════ HEADER ══════════ */}
-      <header className="sticky top-0 shrink-0 z-50 flex justify-between items-center px-3 sm:px-4 h-16 glass-panel border-b border-white/10 gap-2">
+      <header className="hidden sm:flex sticky top-0 shrink-0 z-50 justify-between items-center px-3 sm:px-4 h-16 glass-panel border-b border-white/10 gap-2">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <div className="w-16 h-16 flex items-center justify-center shrink-0 overflow-hidden">
             {!logoFailed ? (
@@ -637,7 +637,7 @@ export default function OverlayAdminConsole() {
       <main className="flex-1 flex flex-col pb-8 lg:pb-0 lg:grid lg:grid-cols-[20%_55%_25%] lg:h-[calc(100vh-8rem)] lg:overflow-hidden">
         {/* ══════════ LEFT: Roster (2nd on mobile) ══════════ */}
         <aside className="order-2 lg:order-1 hidden lg:flex lg:flex-col lg:h-full bg-surface-container-lowest border-t lg:border-t-0 lg:border-r border-outline-variant shrink-0 lg:overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-4 px-4 gap-4">
-          <div className="hidden lg:flex glass-panel rounded-2xl p-4 lg:flex-1 lg:min-h-0 flex-col lg:overflow-hidden">
+          <div className="hidden lg:flex lg:flex-1 lg:min-h-0 flex-col lg:overflow-hidden">
             <div className="flex items-center justify-between mb-1 shrink-0 gap-2 flex-wrap">
               <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">
                 Pick From {matchSetup[asideTeamKey]}
@@ -738,7 +738,7 @@ export default function OverlayAdminConsole() {
           />
 
           {/* Broadcast Channels — mobile-only replacement for the desktop sticky pill bar. */}
-          <div className={`glass-panel rounded-2xl p-3 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
+          <div className={`p-2 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
             <div>
               <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
               <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">Toggle what's live on the overlay.</p>
@@ -772,10 +772,9 @@ export default function OverlayAdminConsole() {
           </div>
 
           {/* Moments */}
-          <div className={`glass-panel rounded-2xl p-4 shrink-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden ${mobileTab === "overlay" ? "flex" : "hidden"} lg:flex`}>
+          <div className={`p-2 shrink-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden ${mobileTab === "overlay" ? "flex" : "hidden"} lg:flex`}>
             <button onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
               <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
-              <Icon name={showMoments ? "expand_less" : "expand_more"} className="text-on-surface-variant" style={{ fontSize: 18 }} />
             </button>
             {showMoments && (
               <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">

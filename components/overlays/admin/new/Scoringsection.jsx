@@ -181,7 +181,7 @@ export default function ScoringSection({
         />
       )}
 
-      <div className="glass-panel rounded-2xl relative overflow-hidden p-4 sm:p-6 shrink-0">
+      <div className="relative overflow-hidden px-2 shrink-0">
         <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full pointer-events-none" />
         {stamp && (
           <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none px-4">
@@ -275,16 +275,9 @@ export default function ScoringSection({
               <Icon name="sports_score" style={{ fontSize: 13 }} /> End Innings
             </button>
           )}
-          <button
-            onClick={handleUndo}
-            disabled={history.length === 0}
-            className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20 disabled:opacity-30"
-          >
-            <Icon name="undo" style={{ fontSize: 13 }} /> Undo
-          </button>
         </div>
 
-        <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-2.5 relative z-10">Extra</p>
+        {/* <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-2.5 relative z-10">Extra</p>
         <div className="flex items-center gap-2 mb-2 flex-wrap relative z-10">
           {extraOptions.map((label) => {
             const isFreeHit = label === "Free Hit";
@@ -301,30 +294,133 @@ export default function ScoringSection({
               </button>
             );
           })}
-        </div>
+        </div> */}
         <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] mb-4 pt-4 relative z-10">
-          Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb}
+          Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb} · Free Hit {extras.FreeHit}
         </p>
 
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 relative z-10">
-          {[0, 1, 2, 3, 4, 6].map((n) => (
+        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 relative z-10">
+        {/* Runs */}
+        {[0, 1, 2, 3, 4, 6].map((n) => (
             <button
-              key={n}
-              onClick={() => handleRun(n)}
-              className="rounded-lg py-3.5 sm:py-4 font-archivo text-lg sm:text-xl font-bold transition-all hover:brightness-110 active:scale-95 border border-white/10"
-              style={n === 4 || n === 6 ? { background: GOLD_GRADIENT, color: "#1a1304", border: "1px solid rgba(255,255,255,0.1)" } : { background: "rgba(255,255,255,0.03)" }}
+            key={n}
+            onClick={() => handleRun(n)}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-archivo text-lg sm:text-xl font-bold transition-all hover:brightness-110 active:scale-95 border border-white/10"
+            style={
+                n === 4 || n === 6
+                ? {
+                    background: GOLD_GRADIENT,
+                    color: "#1a1304",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    }
+                : {
+                    background: "rgba(255,255,255,0.03)",
+                    }
+            }
             >
-              {n}
+            {n}
             </button>
-          ))}
-          <button
+        ))}
+
+        {/* Out */}
+        <button
             onClick={handleOut}
             disabled={freeHit}
-            className="rounded-lg py-3.5 sm:py-4 font-mono-geist text-xs sm:text-sm font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10 disabled:opacity-30"
-          >
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10 disabled:opacity-30"
+        >
             Out
-          </button>
+        </button>
+
+        {/* Undo */}
+        <button
+            onClick={() => handleRun("Undo")}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 border"
+            style={{
+            background: "rgba(156,163,175,0.12)",
+            color: "#d1d5db",
+            border: "1px solid rgba(156,163,175,0.25)",
+            }}
+        >
+            Undo
+        </button>
+
+        {/* Extras */}
+        {["Wide", "No Ball", "LB", "Bye"].map((n) => (
+            <button
+            key={n}
+            onClick={() => handleRun(n)}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-archivo text-sm sm:text-base font-bold transition-all hover:brightness-110 active:scale-95 border"
+            style={
+                n === "Wide" || n === "No Ball"
+                ? {
+                    background: "rgba(245,158,11,0.18)",
+                    color: "#fbbf24",
+                    border: "1px solid rgba(245,158,11,0.35)",
+                    }
+                : {
+                    background: "rgba(59,130,246,0.15)",
+                    color: "#93c5fd",
+                    border: "1px solid rgba(59,130,246,0.35)",
+                    }
+            }
+            >
+            {n}
+            </button>
+        ))}
+
+        {/* Free Hit */}
+        <button
+            onClick={() => handleRun("Free Hit")}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 border"
+            style={{
+            background: "rgba(139,92,246,0.18)",
+            color: "#c4b5fd",
+            border: "1px solid rgba(139,92,246,0.35)",
+            }}
+        >
+            Free Hit
+        </button>
+
+        {/* Bonus */}
+        <button
+            onClick={() => handleRun("Bonus")}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 border"
+            style={{
+            background: "rgba(34,197,94,0.18)",
+            color: "#86efac",
+            border: "1px solid rgba(34,197,94,0.35)",
+            }}
+        >
+            Bonus
+        </button>
+
+        {/* Injured */}
+        <button
+            onClick={() => handleRun("Injured")}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 border"
+            style={{
+            background: "rgba(249,115,22,0.18)",
+            color: "#fdba74",
+            border: "1px solid rgba(249,115,22,0.35)",
+            }}
+        >
+            Injured
+        </button>
+
+        {/* Abandon */}
+        <button
+            onClick={() => handleRun("Abandon")}
+            className="min-h-14 rounded-lg py-3.5 sm:py-4 font-mono-geist text-sm sm:text-base font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 border"
+            style={{
+            background: "rgba(127,29,29,0.45)",
+            color: "#fecaca",
+            border: "1px solid rgba(239,68,68,0.35)",
+            }}
+        >
+            Abandon
+        </button>
         </div>
+        
       </div>
 
       {/* Partnership / boundary stat strip */}
