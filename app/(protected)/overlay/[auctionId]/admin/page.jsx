@@ -2,23 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
+import MatchSetupPanel from "@/components/overlays/admin/new/Matchsetuppanel";
+import ScoringSection from "@/components/overlays/admin/new/Scoringsection";
 
 /* ─────────────────────────────────────────────────────────────
-   Same auction-console visual language as before, now with the
-   Striker / Non-Striker / Bowler slots picked the way the old
-   admin panel did it:
-
-     • Desktop  — a slot is a drop target. A draggable roster
-                   strip appears under whichever slot is active
-                   (batting roster for Striker/Non-Striker, the
-                   left-rail roster for Bowler) — drag a player
-                   in, or just tap them.
-     • Mobile   — tapping a slot opens a bottom-sheet picker
-                   instead, since there's no drag surface worth
-                   using on a phone.
-
-   Everything else (moments, weather, on-air toggles, event log)
-   is unchanged from the previous pass.
+   Auction-console visual language. Striker / Non-Striker / Bowler
+   are picked via the ScoringSection's crew slots (drag on desktop,
+   bottom-sheet tap on mobile). Weather and Match Setup are their
+   own cards. Everything else — moments, on-air toggles, roster
+   rail, event feed — lives here in the shell.
    ───────────────────────────────────────────────────────────── */
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
@@ -26,31 +19,15 @@ const PARTICLE_COLORS_BOUNDARY = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
 const PARTICLE_COLORS_WICKET   = ["#718096", "#A0AEC0", "#CBD5E0", "#E2E8F0"];
 const DEFAULT_LOGO_SRC = "/valiant-league-logo.png";
 
-const AMBIENT_CHANNELS = [
-  { key: "weather", label: "Weather" },
-  { key: "liveScoreBar", label: "Live Score Bar" },
-  { key: "tournamentLogo", label: "Tournament Logo" },
-];
-
 const BOUNDARY_CHANNELS = [
   { key: "matchBoundaries", label: "Match Boundaries" },
   { key: "tournamentBoundaries", label: "Tournament Boundaries" },
 ];
 
-const FULLSCREEN_CHANNELS = [
-  { key: "pointsTable", label: "Points Table" },
-  { key: "matchScorecard", label: "Match Scorecard" },
-  { key: "matchIntro", label: "Match Intro" },
-];
-
-
 let idCtr = 0;
 
 function initials(name) {
   return (name || "").split(" ").filter(Boolean).map((p) => p[0]).join("").slice(0, 2).toUpperCase() || "—";
-}
-function timeNow() {
-  return new Date().toLocaleTimeString("en-GB", { hour12: false });
 }
 function Icon({ name, className = "", style }) {
   return <span className={`material-symbols-outlined ${className}`} style={style}>{name}</span>;
@@ -88,9 +65,6 @@ function TogglePill({ label, on, onClick, dotColor }) {
     </button>
   );
 }
-/* `center` renders the label centered with no trailing margin, for use
-   as a heading sitting above a row of toggle pills rather than inline
-   before them. */
 function GroupLabel({ children, center }) {
   return (
     <span
@@ -102,8 +76,6 @@ function GroupLabel({ children, center }) {
     </span>
   );
 }
-/* Mobile-only channel row: bigger tap target than the desktop pill,
-   with an icon chip + full-width label + a proper switch on the right. */
 function MobileChannelRow({ icon, label, on, onClick, dotColor }) {
   return (
     <button
@@ -125,9 +97,6 @@ function MobileChannelRow({ icon, label, on, onClick, dotColor }) {
       </span>
       <span className="flex-1 text-left font-archivo text-sm font-bold" style={{ color: on ? "#e5e7eb" : "rgba(255,255,255,0.55)" }}>
         {label}
-      </span>
-      <span className="relative h-6 w-10 rounded-full shrink-0 transition-colors" style={{ background: on ? dotColor : "rgba(255,255,255,0.15)" }}>
-        <span className="absolute top-0.5 h-5 w-5 rounded-full bg-black transition-all" style={{ left: on ? "18px" : "2px" }} />
       </span>
     </button>
   );
@@ -170,192 +139,6 @@ function BatterPickerButton({ batter, label, selected, onClick }) {
   );
 }
 
-/* ── roster strip: draggable + clickable, used under the active slot ── */
-function PlayerCarousel({ players, onSelect, teamLabel, dismissedNames, roleByName, disabled }) {
-  if (!players || players.length === 0) {
-    return <p className="font-mono-geist text-[10px] text-on-surface-variant py-1">No squad loaded for {teamLabel}.</p>;
-  }
-  const allUnavailable = players.every((name) => dismissedNames?.has(name) || !!roleByName?.get(name));
-  if (allUnavailable) {
-    return (
-      <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/10">
-        <Icon name="person_off" className="text-on-surface-variant shrink-0" style={{ fontSize: 18 }} />
-        <div className="flex flex-col">
-          <span className="font-archivo text-xs font-bold uppercase">All out of batters</span>
-          <span className="font-mono-geist text-[9px] text-on-surface-variant">Every player is out or already at the crease.</span>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-wrap gap-2">
-      {players.map((name) => {
-        const isOut = !!dismissedNames?.has(name);
-        const roleInfo = roleByName?.get(name);
-        const isLocked = isOut || !!roleInfo || !!disabled;
-        const roleLabel = roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
-        return (
-          <button
-            key={name}
-            type="button"
-            draggable={!isLocked}
-            disabled={isLocked}
-            onDragStart={(e) => {
-              if (isLocked) { e.preventDefault(); return; }
-              e.dataTransfer.setData("text/player-name", name);
-            }}
-            onClick={() => !isLocked && onSelect(name)}
-            className="flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all"
-            style={
-              isOut
-                ? { opacity: 0.55, cursor: "not-allowed", background: "rgba(239,68,68,0.08)", borderColor: "rgba(248,113,113,0.4)" }
-                : roleInfo
-                ? { opacity: 0.85, cursor: "not-allowed", background: "rgba(34,197,94,0.08)", borderColor: "rgba(74,222,128,0.4)" }
-                : disabled
-                ? { opacity: 0.45, cursor: "not-allowed", background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.08)" }
-                : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.08)" }
-            }
-            title={isOut ? `${name} — already out this innings` : roleInfo ? `${name} — currently ${roleLabel}` : name}
-          >
-            <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-mono-geist text-[9px] font-bold" style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "#e5e7eb" }}>
-              {initials(name)}
-            </span>
-            <span className="text-[11px] font-archivo font-bold max-w-[110px] truncate" style={{ color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "#e5e7eb" }}>
-              {name}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ── mobile bottom sheet: same roster, tap to pick ── */
-function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismissedNames, roleByName }) {
-  return (
-    <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="w-full sm:w-[520px] sm:max-w-[calc(100vw-64px)] max-h-[78vh] overflow-y-auto custom-scrollbar bg-surface-container-lowest border border-white/10 rounded-t-2xl sm:rounded-2xl rounded-b-none sm:rounded-b-2xl p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex flex-col min-w-0">
-            <span className="font-archivo text-sm font-bold uppercase italic">{title}</span>
-            <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.1em] mt-0.5">{teamLabel}</span>
-          </div>
-          <button onClick={onClose} className="h-7 w-7 rounded-full flex items-center justify-center border border-white/10 text-on-surface-variant shrink-0">
-            <Icon name="close" style={{ fontSize: 15 }} />
-          </button>
-        </div>
-
-        {(!players || players.length === 0) ? (
-          <p className="font-mono-geist text-[10px] text-on-surface-variant text-center py-6">No squad loaded — set this team's squad in Match Setup.</p>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
-            {players.map((name) => {
-              const isOut = !!dismissedNames?.has(name);
-              const roleInfo = roleByName?.get(name);
-              const isLocked = isOut || !!roleInfo;
-              const roleLabel = roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
-              return (
-                <button
-                  key={name}
-                  disabled={isLocked}
-                  onClick={() => { if (isLocked) return; onSelect(name); onClose(); }}
-                  className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-xl border transition-colors"
-                  style={
-                    isOut
-                      ? { opacity: 0.55, background: "rgba(239,68,68,0.07)", borderColor: "rgba(248,113,113,0.4)" }
-                      : isLocked
-                      ? { opacity: 0.7, background: "rgba(34,197,94,0.07)", borderColor: "rgba(74,222,128,0.4)" }
-                      : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.1)" }
-                  }
-                >
-                  <span className="w-11 h-11 rounded-full flex items-center justify-center font-mono-geist text-[12px] font-bold" style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : isLocked ? "#4ade80" : "#e5e7eb" }}>
-                    {initials(name)}
-                  </span>
-                  <span className="text-[9.5px] font-archivo font-bold text-center leading-tight break-words" style={{ color: isOut ? "#f87171" : isLocked ? "#4ade80" : "#e5e7eb" }}>
-                    {name}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ── the slot itself: shows the current player, doubles as a drop target,
-     opens the picker (sheet on mobile, inline strip below on desktop) ── */
-function CrewSlot({
-  title, accentColor, active, onActivate, displayName, statLine,
-  allNames, onAssign, onClear, placeholder, dismissedNames, blockedName,
-  noReplacement, avatarSize,
-}) {
-  const size = avatarSize ?? 44;
-  const isEmpty = !displayName;
-
-  if (noReplacement && isEmpty) {
-    return (
-      <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-3">
-        <p className="font-mono-geist text-[9px] uppercase tracking-[0.14em] font-bold text-on-surface-variant mb-2">{title}</p>
-        <div className="flex items-center gap-2.5">
-          <span className="rounded-full flex items-center justify-center opacity-50" style={{ width: size, height: size, border: "1px solid rgba(255,255,255,0.15)" }}>—</span>
-          <span className="text-[10px] font-mono-geist font-bold text-on-surface-variant">No replacement left in the squad</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      onClick={onActivate}
-      className="rounded-xl p-3 cursor-pointer transition-all"
-      style={{
-        border: `1px ${isEmpty ? "dashed" : "solid"} ${isEmpty ? "rgba(239,68,68,0.4)" : active ? "rgba(201,151,31,0.45)" : "rgba(255,255,255,0.1)"}`,
-        background: isEmpty ? "rgba(239,68,68,0.08)" : active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)",
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        const name = e.dataTransfer.getData("text/player-name");
-        if (!name) return;
-        if (dismissedNames?.has(name)) return;
-        if (blockedName && name === blockedName) return;
-        onAssign(name);
-      }}
-    >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="font-mono-geist text-[9px] uppercase tracking-[0.14em] font-bold" style={{ color: isEmpty ? "#f87171" : accentColor || "rgba(255,255,255,0.4)" }}>
-          {isEmpty ? "⚠ " : ""}{title}
-        </span>
-        <div className="flex items-center gap-2">
-          {active && <span className="font-mono-geist text-[8.5px] text-theme-orange/70 hidden sm:inline">drag or tap a player ▾</span>}
-          {!isEmpty && onClear && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onClear(); }}
-              className="w-5 h-5 rounded-full border border-white/10 flex items-center justify-center text-on-surface-variant hover:text-red-400 shrink-0"
-            >
-              <Icon name="close" style={{ fontSize: 12 }} />
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2.5">
-        <span className="rounded-full flex items-center justify-center shrink-0 font-mono-geist font-bold" style={{ width: size, height: size, border: "1px solid rgba(255,255,255,0.15)", fontSize: Math.max(9, size * 0.26), color: isEmpty ? "#f87171" : "#e5e7eb" }}>
-          {displayName ? initials(displayName) : "+"}
-        </span>
-        <div className="flex flex-col min-w-0">
-          <span className="text-[12px] font-archivo font-bold truncate text-on-surface">{displayName || placeholder}</span>
-          {statLine && <span className="text-[10px] font-mono-geist text-on-surface-variant">{statLine}</span>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const emptyBatter = () => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 });
 const emptyBowler = () => ({ name: "", overs: 0, balls: 0, runs: 0, wickets: 0 });
 
@@ -363,15 +146,12 @@ export default function OverlayAdminConsole() {
   /* ── On Air channel toggles ── */
   const [alwaysOn, setAlwaysOn] = useState({ weather: true, liveScoreBar: true, tournamentLogo: true });
   const [fullScreen, setFullScreen] = useState({ pointsTable: false, matchScorecard: false, matchIntro: false });
-  /* ── Moments/boundary broadcast toggles (Match Boundaries, Tournament
-     Boundaries) — shown in both the desktop sticky bar and the mobile
-     Broadcast Channels card. ── */
   const [boundaryChannels, setBoundaryChannels] = useState({ matchBoundaries: false, tournamentBoundaries: false });
 
   /* ── Match Setup ── */
   const [matchSetup] = useState({
-    teamA: "JSH", teamAColor: "#bd932d", teamAlogo: "/logos/jsh.png",  
-    teamB: "MWR", teamBColor: "#3d9dd8", teamBlogo: "/logos/mwr.png",   
+    teamA: "JSH", teamAColor: "#bd932d", teamAlogo: "/logos/jsh.png",
+    teamB: "MWR", teamBColor: "#3d9dd8", teamBlogo: "/logos/mwr.png",
     venue: "Galle Fort", format: "T20", matchTitle: "Semi Final 1",
     tossWinner: "teamA", tossElected: "bat",
   });
@@ -402,18 +182,15 @@ export default function OverlayAdminConsole() {
   const [dismissedPlayers, setDismissedPlayers] = useState(() => new Set());
   const [activeSlot, setActiveSlot] = useState("striker");
   const [playerPicker, setPlayerPicker] = useState(null); // mobile sheet: null | 'striker' | 'nonStriker' | 'bowler'
-  const isMobile = useIsMobile();
+  useIsMobile();
   const [logoFailed, setLogoFailed] = useState(false);
 
-  /* ── Mobile-only bottom-nav tabs: Scoring / Overlay / Setup.
-     Desktop (lg+) always shows everything and ignores this — every
-     gated block below uses `hidden ... lg:flex|block` so the `hidden`
-     only ever applies under the lg breakpoint. ── */
-  const [mobileTab, setMobileTab] = useState("scoring"); // 'scoring' | 'overlay' | 'setup'
+  /* ── Mobile-only bottom-nav tabs: Scoring / Overlay / Setup. ── */
+  const [mobileTab, setMobileTab] = useState("scoring");
 
   /* ── Innings / target tracking ── */
   const [inningsNumber, setInningsNumber] = useState(1);
-  const [firstInnings, setFirstInnings] = useState(null); // { runs, wkts, overs, team }
+  const [firstInnings, setFirstInnings] = useState(null);
 
   const rosterTeamA = ["Ravindu Bandara", "Chamika Silva", "Isuru Weerasekara", "Nadun Karunaratne", "Lakindu Peris", "Tharindu Costa", "Ashen Gunaratne", "Binura Jayasuriya"];
   const rosterTeamB = ["Hasitha Perera", "Niroshan Jay", "Kavindu Silva", "Danushka Mendis", "Sahan Fernando", "Kaveen Mendis", "Yohan Raj", "Kusal Fernando"];
@@ -447,8 +224,7 @@ export default function OverlayAdminConsole() {
 
   // The left rail is the *only* pick/drop list on desktop — it swaps
   // between the batting squad and the bowling squad depending on which
-  // crew slot is currently active, instead of duplicating a second list
-  // under the scorer card.
+  // crew slot is currently active.
   const isBattingSlotActive = activeSlot === "striker" || activeSlot === "nonStriker";
   const asideTeamKey = isBattingSlotActive ? battingTeam : bowlingTeam;
   const asideRoster = isBattingSlotActive ? battingRoster : bowlingRoster;
@@ -471,8 +247,7 @@ export default function OverlayAdminConsole() {
   const [weather, setWeather] = useState({ venue: "GALLE FORT", temp: 28, condition: "partly-cloudy" });
   const [weatherEditing, setWeatherEditing] = useState(false);
 
-  /* ── Event feed — bottom-right stacked cards, one per ball/action.
-     Replaces the old top-center single toast + separate Event Log list. */
+  /* ── Event feed — bottom-right stacked cards ── */
   const [toasts, setToasts] = useState([]);
   const toastTimers = useRef(new Map());
   useEffect(() => {
@@ -493,7 +268,6 @@ export default function OverlayAdminConsole() {
   const oversLimit = matchSetup.format === "T20" ? 20 : matchSetup.format === "ODI" ? 50 : null;
   const rr = legalBalls > 0 ? (teamRuns / (legalBalls / 6)).toFixed(2) : "0.00";
 
-  /* ── second-innings chase numbers ── */
   const target = firstInnings ? firstInnings.runs + 1 : null;
   const runsNeeded = target !== null ? Math.max(target - teamRuns, 0) : null;
   const ballsLeft = oversLimit !== null ? Math.max(oversLimit * 6 - legalBalls, 0) : null;
@@ -558,8 +332,6 @@ export default function OverlayAdminConsole() {
     if (wicket) setWkts((w) => w + 1);
     if (isLegal) setLegalBalls((b) => b + 1);
     setTeamRuns((r) => r + runsAdded);
-    // Partnership tracks the CURRENT pair only — it resets when a wicket falls,
-    // separate from the team's running total which never resets.
     setPartnership((p) => (wicket ? { runs: 0, balls: 0 } : { runs: p.runs + runsAdded, balls: p.balls + (isLegal ? 1 : 0) }));
     if (extra) setExtras((ex) => ({ ...ex, [extra]: ex[extra] + 1 }));
     if (runsAdded === 4 && !extra) setMatchBoundaries((m) => ({ ...m, fours: m.fours + 1 }));
@@ -655,9 +427,6 @@ export default function OverlayAdminConsole() {
   function fireWicketMoment() {
     const batter = wicketDraft.batsmanOut === "striker" ? striker : nonStriker;
     pushLog(`Moment: WICKET — ${batter.name || "Batter"} ${wicketDraft.dismissalType}${bowler.name ? ` b ${bowler.name}` : ""}${wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""}`);
-    // Mark the dismissed batter as out and clear their slot so the next
-    // pick has to come from the remaining squad — same rule the roster
-    // strip/sheet enforce visually.
     if (batter.name) {
       setDismissedPlayers((prev) => new Set(prev).add(batter.name));
       if (wicketDraft.batsmanOut === "striker") setStriker(emptyBatter());
@@ -675,9 +444,6 @@ export default function OverlayAdminConsole() {
     pushLog(`Moment: MATCH WON — ${name} ${margin}`);
     setShowMatchWonForm(false);
   }
-
-  const extraOptions = [ "Wide", "No Ball", "Bye", "Leg Bye", "Free Hit" ];   
-  const extraKeyFor = (label) => ({ Wide: "Wd", "No Ball": "Nb", Bye: "By", "Leg Bye": "Lb" }[label]);
 
   const statCards = [
     { label: "Partnership", value: `${partnership.runs} (${partnership.balls})` },
@@ -777,28 +543,11 @@ export default function OverlayAdminConsole() {
               boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
             }}
           >
-            <Icon
-              name={t.tone === "wicket" ? "sports_cricket" : t.tone === "boundary" ? "bolt" : "info"}
-              style={{ fontSize: 14, marginTop: 1 }}
-            />
+            <Icon name={t.tone === "wicket" ? "sports_cricket" : t.tone === "boundary" ? "bolt" : "info"} style={{ fontSize: 14, marginTop: 1 }} />
             <span className="min-w-0">{t.text}</span>
           </div>
         ))}
       </div>
-
-
-      {/* mobile bottom-sheet picker — shared by all three slots */}
-      {playerPicker && (
-        <PlayerPickerSheet
-          title={playerPicker === "striker" ? "Select Striker" : playerPicker === "nonStriker" ? "Select Non-Striker" : "Select Bowler"}
-          teamLabel={playerPicker === "bowler" ? matchSetup[bowlingTeam] : matchSetup[battingTeam]}
-          players={playerPicker === "bowler" ? bowlingRoster : battingRoster}
-          onSelect={(name) => (playerPicker === "bowler" ? assignBowler(name) : assignBatter(playerPicker, name))}
-          onClose={() => setPlayerPicker(null)}
-          dismissedNames={playerPicker === "bowler" ? undefined : dismissedPlayers}
-          roleByName={playerPicker === "bowler" ? bowlingRoleMap : battingRoleMap}
-        />
-      )}
 
       {/* ══════════ HEADER ══════════ */}
       <header className="sticky top-0 shrink-0 z-50 flex justify-between items-center px-3 sm:px-4 h-16 glass-panel border-b border-white/10 gap-2">
@@ -818,12 +567,12 @@ export default function OverlayAdminConsole() {
               <Icon name="tv" className="text-theme-orange" style={{ fontSize: 20 }} />
             )}
           </div>
-            <h1 className="font-archivo text-lg sm:text-2xl font-bold italic tracking-tighter uppercase shrink-0">
-              <span style={{ color: matchSetup.teamAColor }}>{matchSetup.teamA}</span>
-              {" "}vs{" "}
-              <span style={{ color: matchSetup.teamBColor }}>{matchSetup.teamB}</span>
-            </h1>    
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full shrink-0" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)" }}>
+          <h1 className="font-archivo text-lg sm:text-2xl font-bold italic tracking-tighter uppercase shrink-0">
+            <span style={{ color: matchSetup.teamAColor }}>{matchSetup.teamA}</span>
+            {" "}vs{" "}
+            <span style={{ color: matchSetup.teamBColor }}>{matchSetup.teamB}</span>
+          </h1>
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full shrink-0" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)" }}>
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full" style={{ background: "#22c55e", opacity: 0.5 }} />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: "#22c55e" }} />
@@ -848,10 +597,8 @@ export default function OverlayAdminConsole() {
         </div>
       </header>
 
-      {/* ── On Air channels — desktop only now; mobile gets a purpose-built
-           card version inside the Overlay tab (see below). Each group's
-           label sits centered above its row of toggle pills instead of
-           inline before them. ── */}
+      {/* ── On Air channels — desktop only; mobile gets a purpose-built card
+           inside the Overlay tab. ── */}
       <div className="hidden lg:flex sticky top-16 w-full z-40 px-3 sm:px-6 py-1.5 sm:py-3 items-start gap-4 flex-wrap border-b border-white/5 bg-surface-container-lowest">
         <div className="flex flex-col items-center gap-1.5">
           <GroupLabel center>On Air</GroupLabel>
@@ -890,36 +637,19 @@ export default function OverlayAdminConsole() {
       <main className="flex-1 flex flex-col pb-8 lg:pb-0 lg:grid lg:grid-cols-[20%_55%_25%] lg:h-[calc(100vh-8rem)] lg:overflow-hidden">
         {/* ══════════ LEFT: Roster (2nd on mobile) ══════════ */}
         <aside className="order-2 lg:order-1 hidden lg:flex lg:flex-col lg:h-full bg-surface-container-lowest border-t lg:border-t-0 lg:border-r border-outline-variant shrink-0 lg:overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-4 px-4 gap-4">
-          {/* Roster — the ONLY pick/drop list on desktop. It follows whichever
-            crew slot is active: batting squad for Striker/Non-Striker,
-            bowling squad for Bowler. Drag a name onto the active slot up
-            in the scorer card, or just tap it here to assign directly. */}
           <div className="hidden lg:flex glass-panel rounded-2xl p-4 lg:flex-1 lg:min-h-0 flex-col lg:overflow-hidden">
             <div className="flex items-center justify-between mb-1 shrink-0 gap-2 flex-wrap">
               <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">
                 Pick From {matchSetup[asideTeamKey]}
               </p>
-
               <div className="flex items-center gap-1.5 shrink-0">
-                <TogglePill
-                  label={matchSetup.teamA}
-                  on={battingTeam === "teamA"}
-                  dotColor="#c9971f"
-                  onClick={() => setBattingTeam("teamA")}
-                />
-                <TogglePill
-                  label={matchSetup.teamB}
-                  on={battingTeam === "teamB"}
-                  dotColor="#c9971f"
-                  onClick={() => setBattingTeam("teamB")}
-                />
+                <TogglePill label={matchSetup.teamA} on={battingTeam === "teamA"} dotColor="#c9971f" onClick={() => setBattingTeam("teamA")} />
+                <TogglePill label={matchSetup.teamB} on={battingTeam === "teamB"} dotColor="#c9971f" onClick={() => setBattingTeam("teamB")} />
               </div>
             </div>
 
             <div className="flex items-center justify-between mb-3 shrink-0 gap-2">
-              <span className="font-mono-geist text-[9px] text-on-surface-variant shrink-0">
-                {asideRoster.length} players
-              </span>
+              <span className="font-mono-geist text-[9px] text-on-surface-variant shrink-0">{asideRoster.length} players</span>
             </div>
 
             <div className="max-h-72 lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2">
@@ -927,15 +657,8 @@ export default function OverlayAdminConsole() {
                 const isOut = !!asideDismissed?.has(name);
                 const roleInfo = asideRoleMap.get(name);
                 const isLocked = isOut || !!roleInfo;
-
                 const roleLabel =
-                  roleInfo?.role === "striker"
-                    ? "On Strike"
-                    : roleInfo?.role === "nonStriker"
-                    ? "Non-Striker"
-                    : roleInfo?.role === "bowler"
-                    ? "Bowling"
-                    : undefined;
+                  roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
 
                 return (
                   <button
@@ -943,83 +666,35 @@ export default function OverlayAdminConsole() {
                     draggable={!isLocked}
                     disabled={isLocked}
                     onDragStart={(e) => {
-                      if (isLocked) {
-                        e.preventDefault();
-                        return;
-                      }
+                      if (isLocked) { e.preventDefault(); return; }
                       e.dataTransfer.setData("text/player-name", name);
                     }}
                     onClick={() => !isLocked && assignFromAsideList(name)}
                     className="w-full flex items-center gap-3 rounded-lg pl-2.5 pr-3 py-3 text-left transition-all"
                     style={
                       isOut
-                        ? {
-                            opacity: 0.55,
-                            cursor: "not-allowed",
-                            border: "1px solid rgba(248,113,113,0.4)",
-                            background: "rgba(239,68,68,0.08)",
-                          }
+                        ? { opacity: 0.55, cursor: "not-allowed", border: "1px solid rgba(248,113,113,0.4)", background: "rgba(239,68,68,0.08)" }
                         : roleInfo
-                        ? {
-                            opacity: 0.85,
-                            cursor: "not-allowed",
-                            border: "1px solid rgba(74,222,128,0.4)",
-                            background: "rgba(34,197,94,0.08)",
-                          }
-                        : {
-                            border: "1px solid rgba(255,255,255,0.08)",
-                            background: "transparent",
-                          }
+                        ? { opacity: 0.85, cursor: "not-allowed", border: "1px solid rgba(74,222,128,0.4)", background: "rgba(34,197,94,0.08)" }
+                        : { border: "1px solid rgba(255,255,255,0.08)", background: "transparent" }
                     }
                   >
                     <span
                       className="h-9 w-9 rounded-full flex items-center justify-center font-mono-geist text-[11px] font-bold shrink-0"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: isOut
-                          ? "#f87171"
-                          : roleInfo
-                          ? "#4ade80"
-                          : "#e5e7eb",
-                      }}
+                      style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "#e5e7eb" }}
                     >
                       {initials(name)}
                     </span>
-
                     <span className="flex flex-col min-w-0">
-                      <span
-                        className="font-archivo text-sm font-bold truncate"
-                        style={{
-                          color: isOut
-                            ? "#f87171"
-                            : roleInfo
-                            ? "#4ade80"
-                            : "var(--color-on-surface)",
-                        }}
-                      >
+                      <span className="font-archivo text-sm font-bold truncate" style={{ color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "var(--color-on-surface)" }}>
                         {name}
                       </span>
-
                       <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.08em]">
-                        {matchSetup[asideTeamKey]}
-                        {isOut
-                          ? " · OUT"
-                          : roleLabel
-                          ? ` · ${roleLabel}`
-                          : ""}
+                        {matchSetup[asideTeamKey]}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
                       </span>
                     </span>
-
                     {roleInfo && (
-                      <Icon
-                        name={
-                          roleInfo.role === "bowler"
-                            ? "sports_cricket"
-                            : "sports_baseball"
-                        }
-                        className="ml-auto"
-                        style={{ fontSize: 16, color: "#4ade80" }}
-                      />
+                      <Icon name={roleInfo.role === "bowler" ? "sports_cricket" : "sports_baseball"} className="ml-auto" style={{ fontSize: 16, color: "#4ade80" }} />
                     )}
                   </button>
                 );
@@ -1029,314 +704,81 @@ export default function OverlayAdminConsole() {
         </aside>
 
         {/* ══════════ CENTER: Live State scorer (1st on mobile) ══════════ */}
-        <section className={`order-1 lg:order-2 flex-col lg:h-full p-3 lg:p-4 gap-4 lg:overflow-y-auto custom-scrollbar ${mobileTab === "scoring" ? "flex" : "hidden"} lg:flex`}>          <div className="glass-panel rounded-2xl relative overflow-hidden p-4 sm:p-6 shrink-0">
-            <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full pointer-events-none" />
-            {stamp && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none px-4">
-                {stamp.kind === "boundary" ? (
-                  <div className="cr-boundary-stamp"><div className="cr-stamp-face-gold"><span className="cr-stamp-word-gold">{stamp.label}</span><span className="cr-stamp-sub" style={{ color: "rgba(232,196,104,0.6)" }}>Moment Fired</span></div></div>
-                ) : (
-                  <div className="cr-wicket-stamp"><div className="cr-stamp-face-grey"><span className="cr-stamp-word-grey">{stamp.label}</span><span className="cr-stamp-sub" style={{ color: "rgba(160,174,192,0.55)" }}>Wicket Falls</span></div></div>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center justify-between gap-2 mb-2 relative z-10">
-              <div className="flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1">
-                <span className="font-archivo text-3xl sm:text-5xl font-bold tabular-nums shrink-0">{teamRuns}/{wkts}</span>
-                <span className="font-mono-geist text-[9px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">{overs} ov · RR {rr} · {matchSetup[battingTeam]} batting{inningsNumber === 2 ? " · Inns 2" : ""}</span>
-              </div>
-              <button
-                onClick={pushLiveState}
-                className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.16em] px-3 sm:px-4 py-2 rounded transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 shrink-0"
-                style={{ background: liveDirty ? GOLD_GRADIENT : "rgba(255,255,255,0.05)", color: liveDirty ? "#1a1304" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.1)" }}
-              >
-                <Icon name="cloud_upload" style={{ fontSize: 13 }} />
-                <span className="hidden sm:inline">{livePushed ? "Pushed ✓" : "Push Live State"}</span>
-                <span className="sm:hidden">{livePushed ? "✓" : "Push"}</span>
-              </button>
-            </div>
-
-            {inningsNumber === 2 && target !== null && (
-              <p className="font-mono-geist text-[10px] sm:text-[11px] text-theme-orange uppercase tracking-[0.1em] mb-3 relative z-10">
-                Target {target} · Need {runsNeeded} off {ballsLeft ?? "—"} balls{requiredRate ? ` · RRR ${requiredRate}` : ""}
-              </p>
-            )}
-            {inningsNumber === 1 && <div className="mb-3" />}
-
-            {/* Striker / Non-Striker / Bowler — drag a name in, or tap to open the picker.
-               Mobile: Striker + Non-Striker sit side by side (2-up), Bowler spans full
-               width beneath. Desktop (sm+): unchanged 3-across row. */}
-            <div className="mb-3 relative z-10">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <CrewSlot
-                  title="Striker *"
-                  accentColor="#e8c468"
-                  active={activeSlot === "striker"}
-                  onActivate={() => { setActiveSlot("striker"); setPlayerPicker("striker"); }}
-                  displayName={striker.name}
-                  statLine={striker.name ? `${striker.runs} (${striker.balls}) · ${striker.fours}x4 ${striker.sixes}x6` : undefined}
-                  allNames={battingRoster}
-                  onAssign={(name) => assignBatter("striker", name)}
-                  onClear={() => setStriker(emptyBatter())}
-                  placeholder="Select striker"
-                  dismissedNames={dismissedPlayers}
-                  blockedName={nonStriker.name || undefined}
-                />
-                <CrewSlot
-                  title="Non-Striker"
-                  active={activeSlot === "nonStriker"}
-                  onActivate={() => { setActiveSlot("nonStriker"); setPlayerPicker("nonStriker"); }}
-                  displayName={nonStriker.name}
-                  statLine={nonStriker.name ? `${nonStriker.runs} (${nonStriker.balls})` : undefined}
-                  allNames={battingRoster}
-                  onAssign={(name) => assignBatter("nonStriker", name)}
-                  onClear={() => setNonStriker(emptyBatter())}
-                  placeholder="Select non-striker"
-                  dismissedNames={dismissedPlayers}
-                  blockedName={striker.name || undefined}
-                />
-                <div className="col-span-2 sm:col-span-1">
-                  <CrewSlot
-                    title="Bowler"
-                    accentColor="#818cf8"
-                    active={activeSlot === "bowler"}
-                    onActivate={() => { setActiveSlot("bowler"); setPlayerPicker("bowler"); }}
-                    displayName={bowler.name}
-                    statLine={bowler.name ? `${bowler.overs}.${bowler.balls}-${bowler.runs}-${bowler.wickets}` : undefined}
-                    allNames={bowlingRoster}
-                    onAssign={(name) => assignBowler(name)}
-                    placeholder="Pick from roster ◂"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap mb-5 pt-2 relative z-10">
-              <button
-                onClick={() => { const s = striker; setStriker(nonStriker); setNonStriker(s); }}
-                className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20"
-              >
-                <Icon name="swap_horiz" style={{ fontSize: 13 }} /> Rotate Strike
-              </button>
-              {inningsNumber === 1 && (
-                <button
-                  onClick={endInnings}
-                  className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20"
-                >
-                  <Icon name="sports_score" style={{ fontSize: 13 }} /> End Innings
-                </button>
-              )}
-              <button
-                onClick={handleUndo}
-                disabled={history.length === 0}
-                className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20 disabled:opacity-30"
-              >
-                <Icon name="undo" style={{ fontSize: 13 }} /> Undo
-              </button>
-            </div>
-
-            <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-2.5 relative z-10">Extra</p>
-            <div className="flex items-center gap-2 mb-2 flex-wrap relative z-10">
-              {extraOptions.map((label) => {
-                const isFreeHit = label === "Free Hit";
-                const key = extraKeyFor(label);
-                const active = isFreeHit ? freeHit : extraMode === key;
-                return (
-                  <button
-                    key={label}
-                    onClick={() => (isFreeHit ? setFreeHit((v) => !v) : setExtraMode(active ? null : key))}
-                    className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3.5 py-1.5 rounded transition-all"
-                    style={{ border: `1px solid ${active ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.1)"}`, background: active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)", color: active ? "#c9971f" : "rgba(255,255,255,0.5)" }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] mb-4 pt-4  relative z-10">
-              Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb}
-            </p>
-
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 relative z-10">
-              {[0, 1, 2, 3, 4, 6].map((n) => (
-                <button key={n} onClick={() => handleRun(n)} className="rounded-lg py-3.5 sm:py-4 font-archivo text-lg sm:text-xl font-bold transition-all hover:brightness-110 active:scale-95 border border-white/10"
-                  style={n === 4 || n === 6 ? { background: GOLD_GRADIENT, color: "#1a1304", border: "1px solid rgba(255,255,255,0.1)" } : { background: "rgba(255,255,255,0.03)" }}>
-                  {n}
-                </button>
-              ))}
-              <button onClick={handleOut} disabled={freeHit} className="rounded-lg py-3.5 sm:py-4 font-mono-geist text-xs sm:text-sm font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10 disabled:opacity-30">
-                Out
-              </button>
-            </div>
-          </div>
-
-          {/* Partnership / boundary stat strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0 mb-2">
-            {statCards.map((s) => (
-              <div key={s.label} className="rounded-xl px-4 py-3 glass-panel">
-                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.16em] font-bold mb-1">{s.label}</p>
-                <p className="font-archivo text-lg font-bold tabular-nums">{s.value}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        <ScoringSection
+          mobileTab={mobileTab}
+          teamRuns={teamRuns} wkts={wkts} overs={overs} rr={rr}
+          matchSetup={matchSetup} battingTeam={battingTeam} inningsNumber={inningsNumber}
+          target={target} runsNeeded={runsNeeded} ballsLeft={ballsLeft} requiredRate={requiredRate}
+          stamp={stamp}
+          striker={striker} nonStriker={nonStriker} bowler={bowler}
+          setStriker={setStriker} setNonStriker={setNonStriker}
+          activeSlot={activeSlot} setActiveSlot={setActiveSlot}
+          playerPicker={playerPicker} setPlayerPicker={setPlayerPicker}
+          dismissedPlayers={dismissedPlayers}
+          battingRoster={battingRoster} bowlingRoster={bowlingRoster} bowlingTeam={bowlingTeam}
+          assignBatter={assignBatter} assignBowler={assignBowler}
+          extraMode={extraMode} setExtraMode={setExtraMode} freeHit={freeHit} setFreeHit={setFreeHit} extras={extras}
+          handleRun={handleRun} handleOut={handleOut} handleUndo={handleUndo} history={history}
+          endInnings={endInnings} pushLiveState={pushLiveState} livePushed={livePushed} liveDirty={liveDirty}
+          statCards={statCards}
+          battingRoleMap={battingRoleMap} bowlingRoleMap={bowlingRoleMap}
+        />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
-        <aside className="order-3 flex mb-0 p-3 lg:p-0 lg:pt-4 lg:pb-4 lg:px-4 flex-col lg:h-full bg-surface-container-low border-t lg:border-t-0 lg:border-l border-outline-variant shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">          {/* Match Setup — locked summary bar / edit. Moved here (top-right)
-             so the left rail can give its full height to the roster picker,
-             which balances the three columns within one viewport. */}
-          <div className={`glass-panel rounded-2xl p-4 shrink-0 ${mobileTab === "setup" ? "" : "hidden"} lg:block`}>
-            {!setupEditing ? (
-              <>
-                <div className="flex items-center justify-between mb-2 gap-2">
-                  <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded bg-theme-orange/10 border border-theme-orange/20 text-theme-orange">Match Setup · Locked</span>
-                  <button onClick={() => setSetupEditing(true)} className="h-7 w-7 rounded-lg flex items-center justify-center border border-white/10 shrink-0">
-                    <Icon name="edit" className="text-on-surface-variant" style={{ fontSize: 13 }} />
-                  </button>
-                </div>
-                <p className="font-archivo text-sm font-bold uppercase italic">{matchSetup.teamA} <span className="text-on-surface-variant not-italic font-normal">vs</span> {matchSetup.teamB}</p>
-                <p className="font-mono-geist text-[10px] text-on-surface-variant uppercase tracking-[0.08em] mt-1">{matchSetup.matchTitle} · {matchSetup.venue} · {matchSetup.format}</p>
-                {/* Mobile-only: the desktop Batting toggle lives next to the
-                   roster panel, which is hidden below lg, so it needs a
-                   stand-in here on mobile. */}
-                <div className="flex items-center gap-2 mt-3 lg:hidden">
-                  <GroupLabel>Batting</GroupLabel>
-                  <TogglePill label={matchSetup.teamA} on={battingTeam === "teamA"} dotColor="#c9971f" onClick={() => setBattingTeam("teamA")} />
-                  <TogglePill label={matchSetup.teamB} on={battingTeam === "teamB"} dotColor="#c9971f" onClick={() => setBattingTeam("teamB")} />
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-3">Editing Match Setup</p>
-                <p className="font-mono-geist text-[10px] text-on-surface-variant leading-relaxed mb-3">
-                  Team names, squads, toss and venue live in the full Match Editor. This is a locked summary — push again once you're done there.
-                </p>
-                <div className="flex gap-2">
-                  <button onClick={() => setSetupEditing(false)} className="flex-1 py-2 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] border border-white/10 text-on-surface-variant">Cancel</button>
-                  <button onClick={pushMatchSetup} className="flex-1 py-2 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em]" style={{ background: GOLD_GRADIENT, color: "#1a1304" }}>
-                    {setupPushed ? "Pushed ✓" : "Push Setup"}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+        <aside className="order-3 flex mb-0 p-3 lg:p-0 lg:pt-4 lg:pb-4 lg:px-4 flex-col lg:h-full bg-surface-container-low border-t lg:border-t-0 lg:border-l border-outline-variant shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">
+          <MatchSetupPanel
+            matchSetup={matchSetup}
+            setupEditing={setupEditing}
+            setSetupEditing={setSetupEditing}
+            setupPushed={setupPushed}
+            pushMatchSetup={pushMatchSetup}
+            battingTeam={battingTeam}
+            setBattingTeam={setBattingTeam}
+            mobileTab={mobileTab}
+          />
 
-          {/* Broadcast Channels — mobile-only replacement for the desktop
-              sticky pill bar. Compact + gridded. */}
+          {/* Broadcast Channels — mobile-only replacement for the desktop sticky pill bar. */}
           <div className={`glass-panel rounded-2xl p-3 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
-
             <div>
-              <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">
-                Broadcast Channels
-              </h3>
-              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
-                Toggle what's live on the overlay.
-              </p>
+              <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
+              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">Toggle what's live on the overlay.</p>
             </div>
 
-            {/* On Air */}
             <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
-                On Air
-              </span>
-
-              <div className="grid grid-cols-2 gap-1.5 mt-1">
-                <MobileChannelRow
-                  icon="partly_cloudy_day"
-                  label="Weather"
-                  on={alwaysOn.weather}
-                  dotColor="#22c55e"
-                  onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))}
-                />
-
-                <MobileChannelRow
-                  icon="scoreboard"
-                  label="Live Score Bar"
-                  on={alwaysOn.liveScoreBar}
-                  dotColor="#22c55e"
-                  onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))}
-                />
-
-                <MobileChannelRow
-                  icon="military_tech"
-                  label="Tournament Logo"
-                  on={alwaysOn.tournamentLogo}
-                  dotColor="#22c55e"
-                  onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))}
-                />
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">On Air</span>
+              <div className="grid grid-cols-3 gap-1.5 mt-1">
+                <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
+                <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
+                <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
               </div>
             </div>
 
-            {/* Full-Screen */}
             <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
-                Full-Screen
-              </span>
-
-              <div className="grid grid-cols-2 gap-1.5 mt-1">
-                <MobileChannelRow
-                  icon="leaderboard"
-                  label="Points Table"
-                  on={fullScreen.pointsTable}
-                  dotColor="#c9971f"
-                  onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))}
-                />
-
-                <MobileChannelRow
-                  icon="receipt_long"
-                  label="Match Scorecard"
-                  on={fullScreen.matchScorecard}
-                  dotColor="#c9971f"
-                  onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))}
-                />
-
-                <MobileChannelRow
-                  icon="theaters"
-                  label="Match Intro"
-                  on={fullScreen.matchIntro}
-                  dotColor="#c9971f"
-                  onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))}
-                />
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen</span>
+              <div className="grid grid-cols-3 gap-1.5 mt-1">
+                <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
+                <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
+                <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
               </div>
             </div>
 
-            {/* Moments */}
             <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
-                Moments
-              </span>
-
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Moments</span>
               <div className="grid grid-cols-2 gap-1.5 mt-1">
-                <MobileChannelRow
-                  icon="stadium"
-                  label="Match Boundaries"
-                  on={boundaryChannels.matchBoundaries}
-                  dotColor="#e8c468"
-                  onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))}
-                />
-
-                <MobileChannelRow
-                  icon="emoji_events"
-                  label="Tournament Boundaries"
-                  on={boundaryChannels.tournamentBoundaries}
-                  dotColor="#e8c468"
-                  onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))}
-                />
+                <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))} />
+                <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))} />
               </div>
             </div>
-
           </div>
 
-          {/* Moments — grows to fill the remaining column height on desktop,
-             pushing Weather down to the bottom of the aside. Its own content
-             scrolls internally so the aside itself never needs to scroll. */}
-          <div className={`glass-panel rounded-2xl p-4 shrink-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden ${mobileTab === "overlay" ? "flex" : "hidden"} lg:flex`}>            <button onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
+          {/* Moments */}
+          <div className={`glass-panel rounded-2xl p-4 shrink-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden ${mobileTab === "overlay" ? "flex" : "hidden"} lg:flex`}>
+            <button onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
               <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
               <Icon name={showMoments ? "expand_less" : "expand_more"} className="text-on-surface-variant" style={{ fontSize: 18 }} />
             </button>
             {showMoments && (
-             <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
+              <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
                 <div className="grid grid-cols-3 gap-2.5">
                   <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
                   <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
@@ -1415,48 +857,20 @@ export default function OverlayAdminConsole() {
             )}
           </div>
 
-          {/* Weather */}
-            <div className={`glass-panel rounded-2xl p-4 mb-8 lg:mb-0 shrink-0 ${mobileTab === "overlay" ? "" : "hidden"} lg:block`}>            <div className="flex items-center justify-between mb-2 gap-2">
-              <h3 className="font-archivo text-sm font-bold italic uppercase">Weather</h3>
-              <button onClick={() => setWeatherEditing((v) => !v)} className="h-7 w-7 rounded-lg flex items-center justify-center border border-white/10 shrink-0">
-                <Icon name="edit" className="text-on-surface-variant" style={{ fontSize: 13 }} />
-              </button>
-            </div>
-            {!weatherEditing ? (
-              <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-white/[0.02] border border-white/10">
-                <Icon name="partly_cloudy_day" className="text-theme-orange shrink-0" style={{ fontSize: 22 }} />
-                <div className="min-w-0">
-                  <p className="font-archivo text-sm font-bold truncate">{weather.venue} — {weather.temp}°C, {weather.condition}</p>
-                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.1em] mt-0.5">Pushed with Match Setup</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <input value={weather.venue} onChange={(e) => setWeather((w) => ({ ...w, venue: e.target.value.toUpperCase() }))} className="w-full rounded-lg px-3 py-2 text-xs font-mono-geist bg-white/[0.03] border border-white/10 text-on-surface" placeholder="Venue" />
-                <div className="flex gap-2">
-                  <input type="number" value={weather.temp} onChange={(e) => setWeather((w) => ({ ...w, temp: Number(e.target.value) }))} className="w-1/2 rounded-lg px-3 py-2 text-xs font-mono-geist bg-white/[0.03] border border-white/10 text-on-surface" placeholder="°C" />
-                  <input value={weather.condition} onChange={(e) => setWeather((w) => ({ ...w, condition: e.target.value }))} className="w-1/2 rounded-lg px-3 py-2 text-xs font-mono-geist bg-white/[0.03] border border-white/10 text-on-surface" placeholder="condition" />
-                </div>
-                <button
-                  onClick={() => { setWeatherEditing(false); pushLog(`Weather set — ${weather.venue}: ${weather.temp}°C, ${weather.condition}`); fireToast("Weather pushed"); }}
-                  className="w-full py-2 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em]" style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
-                >
-                  Push Weather
-                </button>
-              </div>
-            )}
-          </div>
-
+          <WeatherPanel
+            weather={weather}
+            setWeather={setWeather}
+            weatherEditing={weatherEditing}
+            setWeatherEditing={setWeatherEditing}
+            pushLog={pushLog}
+            fireToast={fireToast}
+            mobileTab={mobileTab}
+          />
         </aside>
       </main>
 
-      {/* ══════════ MOBILE BOTTOM TAB BAR — Scoring / Overlay / Setup ══════════
-          Desktop is untouched: this bar is lg:hidden, and every section it
-          controls falls back to always-visible at the lg breakpoint. */}
-      <nav
-        className="lg:hidden fixed bottom-0 inset-x-0 z-[350] flex items-stretch glass-panel border-t border-white/10"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
+      {/* ══════════ MOBILE BOTTOM TAB BAR ══════════ */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-[350] flex items-stretch glass-panel border-t border-white/10" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {[
           { key: "overlay", label: "Overlay", icon: "tv" },
           { key: "scoring", label: "Scoring", icon: "sports_cricket" },
@@ -1464,22 +878,12 @@ export default function OverlayAdminConsole() {
         ].map((tab) => {
           const active = mobileTab === tab.key;
           return (
-            <button
-              key={tab.key}
-              onClick={() => setMobileTab(tab.key)}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors"
-            >
+            <button key={tab.key} onClick={() => setMobileTab(tab.key)} className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors">
               <Icon name={tab.icon} style={{ fontSize: 21 }} className={active ? "text-theme-orange" : "text-on-surface-variant"} />
-              <span
-                className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.12em]"
-                style={{ color: active ? "#e8c468" : "rgba(255,255,255,0.4)" }}
-              >
+              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.12em]" style={{ color: active ? "#e8c468" : "rgba(255,255,255,0.4)" }}>
                 {tab.label}
               </span>
-              <span
-                className="h-0.5 w-6 rounded-full transition-opacity"
-                style={{ background: "#e8c468", opacity: active ? 1 : 0 }}
-              />
+              <span className="h-0.5 w-6 rounded-full transition-opacity" style={{ background: "#e8c468", opacity: active ? 1 : 0 }} />
             </button>
           );
         })}
