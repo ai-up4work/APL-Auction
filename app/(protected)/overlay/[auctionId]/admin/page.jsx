@@ -785,11 +785,7 @@ export default function OverlayAdminConsole() {
           </div>
         ))}
       </div>
-      {freeHit && (
-        <div className="fixed top-24 sm:top-20 left-1/2 -translate-x-1/2 z-[295] cr-freehit-glow flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-2 rounded-full text-[11px] sm:text-xs font-bold max-w-[calc(100vw-2rem)] text-center" style={{ background: "rgba(201,151,31,0.12)", border: "1px solid rgba(201,151,31,0.4)", color: "#e8c468", fontFamily: "'Geist Mono', monospace", backdropFilter: "blur(12px)" }}>
-          <Icon name="bolt" style={{ fontSize: 14 }} /><span className="truncate">Free Hit — no wicket on this ball</span>
-        </div>
-      )}
+
 
       {/* mobile bottom-sheet picker — shared by all three slots */}
       {playerPicker && (
@@ -1034,7 +1030,7 @@ export default function OverlayAdminConsole() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap mb-5 relative z-10">
+            <div className="flex items-center gap-2 flex-wrap mb-5 pt-2 relative z-10">
               <button
                 onClick={() => { const s = striker; setStriker(nonStriker); setNonStriker(s); }}
                 className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20"
@@ -1049,38 +1045,34 @@ export default function OverlayAdminConsole() {
                   <Icon name="sports_score" style={{ fontSize: 13 }} /> End Innings
                 </button>
               )}
-            </div>
-
-            {/* This ball */}
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-3 relative z-10">
-              <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">This Ball</span>
-              <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={handleUndo} disabled={history.length === 0} className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.16em] px-4 py-2 rounded transition-all hover:brightness-110 active:scale-95 disabled:opacity-30 bg-theme-orange/10 border border-theme-orange/20 text-theme-orange">
-                  <Icon name="undo" style={{ fontSize: 14 }} /> Undo
-                </button>
-                <button onClick={() => setFreeHit((v) => !v)} className="flex items-center gap-2.5">
-                  <span className="relative h-5 w-9 rounded-full transition-colors" style={{ background: freeHit ? "#c9971f" : "rgba(255,255,255,0.15)" }}>
-                    <span className="absolute top-0.5 h-4 w-4 rounded-full bg-black transition-all" style={{ left: freeHit ? "18px" : "2px" }} />
-                  </span>
-                  <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em]">Free Hit</span>
-                </button>
-              </div>
+              <button
+                onClick={handleUndo}
+                disabled={history.length === 0}
+                className="flex items-center gap-1.5 font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3 py-1.5 rounded text-theme-orange border border-theme-orange/20 disabled:opacity-30"
+              >
+                <Icon name="undo" style={{ fontSize: 13 }} /> Undo
+              </button>
             </div>
 
             <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold mb-2.5 relative z-10">Extra</p>
             <div className="flex items-center gap-2 mb-2 flex-wrap relative z-10">
               {extraOptions.map((label) => {
+                const isFreeHit = label === "Free Hit";
                 const key = extraKeyFor(label);
-                const active = extraMode === key;
+                const active = isFreeHit ? freeHit : extraMode === key;
                 return (
-                  <button key={label} onClick={() => setExtraMode(active ? null : key)} className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3.5 py-1.5 rounded transition-all"
-                    style={{ border: `1px solid ${active ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.1)"}`, background: active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)", color: active ? "#c9971f" : "rgba(255,255,255,0.5)" }}>
+                  <button
+                    key={label}
+                    onClick={() => (isFreeHit ? setFreeHit((v) => !v) : setExtraMode(active ? null : key))}
+                    className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] px-3.5 py-1.5 rounded transition-all"
+                    style={{ border: `1px solid ${active ? "rgba(201,151,31,0.3)" : "rgba(255,255,255,0.1)"}`, background: active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)", color: active ? "#c9971f" : "rgba(255,255,255,0.5)" }}
+                  >
                     {label}
                   </button>
                 );
               })}
             </div>
-            <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] mb-4 relative z-10">
+            <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] mb-4 pt-4  relative z-10">
               Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb}
             </p>
 
@@ -1149,31 +1141,109 @@ export default function OverlayAdminConsole() {
           </div>
 
           {/* Broadcast Channels — mobile-only replacement for the desktop
-             sticky pill bar. Bigger tap targets, grouped, proper switches.
-             Includes On Air, Full-Screen, and Moments (Match/Tournament
-             Boundaries) — matching the groups shown on desktop. */}
-          <div className={`glass-panel rounded-2xl p-4 shrink-0 lg:hidden flex-col gap-4 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
+              sticky pill bar. Compact + gridded. */}
+          <div className={`glass-panel rounded-2xl p-3 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
+
             <div>
-              <h3 className="font-archivo text-base font-bold italic uppercase mb-1">Broadcast Channels</h3>
-              <p className="font-mono-geist text-[10px] text-on-surface-variant uppercase tracking-[0.08em] leading-relaxed">Toggle what's live on the overlay right now.</p>
+              <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">
+                Broadcast Channels
+              </h3>
+              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
+                Toggle what's live on the overlay.
+              </p>
             </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-theme-orange">On Air</span>
-              <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
-              <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
-              <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
+
+            {/* On Air */}
+            <div>
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
+                On Air
+              </span>
+
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <MobileChannelRow
+                  icon="partly_cloudy_day"
+                  label="Weather"
+                  on={alwaysOn.weather}
+                  dotColor="#22c55e"
+                  onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))}
+                />
+
+                <MobileChannelRow
+                  icon="scoreboard"
+                  label="Live Score Bar"
+                  on={alwaysOn.liveScoreBar}
+                  dotColor="#22c55e"
+                  onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))}
+                />
+
+                <MobileChannelRow
+                  icon="military_tech"
+                  label="Tournament Logo"
+                  on={alwaysOn.tournamentLogo}
+                  dotColor="#22c55e"
+                  onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-theme-orange">Full-Screen</span>
-              <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
-              <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
-              <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
+
+            {/* Full-Screen */}
+            <div>
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
+                Full-Screen
+              </span>
+
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <MobileChannelRow
+                  icon="leaderboard"
+                  label="Points Table"
+                  on={fullScreen.pointsTable}
+                  dotColor="#c9971f"
+                  onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))}
+                />
+
+                <MobileChannelRow
+                  icon="receipt_long"
+                  label="Match Scorecard"
+                  on={fullScreen.matchScorecard}
+                  dotColor="#c9971f"
+                  onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))}
+                />
+
+                <MobileChannelRow
+                  icon="theaters"
+                  label="Match Intro"
+                  on={fullScreen.matchIntro}
+                  dotColor="#c9971f"
+                  onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-theme-orange">Moments</span>
-              <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))} />
-              <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))} />
+
+            {/* Moments */}
+            <div>
+              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
+                Moments
+              </span>
+
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <MobileChannelRow
+                  icon="stadium"
+                  label="Match Boundaries"
+                  on={boundaryChannels.matchBoundaries}
+                  dotColor="#e8c468"
+                  onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))}
+                />
+
+                <MobileChannelRow
+                  icon="emoji_events"
+                  label="Tournament Boundaries"
+                  on={boundaryChannels.tournamentBoundaries}
+                  dotColor="#e8c468"
+                  onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))}
+                />
+              </div>
             </div>
+
           </div>
 
           {/* Moments — grows to fill the remaining column height on desktop,
@@ -1189,7 +1259,7 @@ export default function OverlayAdminConsole() {
 
             {showMoments && (
              <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-3 gap-2.5">
                   <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
                   <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
                   <MomentButton label="Wicket" danger active={showWicketForm} onClick={() => setShowWicketForm((v) => !v)} />
