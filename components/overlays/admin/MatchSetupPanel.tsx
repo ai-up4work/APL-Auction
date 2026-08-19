@@ -571,6 +571,7 @@ export default function MatchSetupPanel({
   onVenueSelect,
   matchId,
   auctionAdminHref,
+  onEditingChange,
 }: {
   auctionId: string | null | undefined;
   matchSetup: MatchSetup;
@@ -583,6 +584,10 @@ export default function MatchSetupPanel({
   matchId?: string | null;
   /** Full URL/path to the Auctions admin tab. Optional — falls back to plain text if not passed. */
   auctionAdminHref?: string;
+  /** Fires whenever this panel flips between the locked summary bar and
+      the full editable form, so the page can hide live scoring while
+      the operator is mid-edit on setup. */
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const roster = useAuctionRoster(auctionId);
   const teamsState = useAuctionTeams(auctionId);
@@ -593,6 +598,14 @@ export default function MatchSetupPanel({
   useEffect(() => {
     if (completed) setLocked(true);
   }, [completed]);
+
+  // Tell the parent every time we flip between the locked summary bar
+  // and the open form, so it can hide LiveStatePanel while an edit is
+  // in progress.
+  useEffect(() => {
+    onEditingChange?.(!locked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked]);
 
   const [drawerOpen, setDrawerOpen] = useState(true);
 

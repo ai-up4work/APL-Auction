@@ -16,9 +16,24 @@ import {
   type Toast,
   type EngineSyncState,
 } from "@/hooks/useLiveScoringEngine";
-import ManualCorrectionPanel from "./ManualCorrectionPanel";
 import { X, AlertTriangle, ArrowRight, UserX, Trophy, RotateCcw, Undo2 } from "lucide-react";
 import Image from "next/image";
+
+// NEW — tracks whether we're under the 640px mobile breakpoint (the same
+// one already used by the CSS in this file) so the crew slots can swap
+// the inline drag-carousel for a tap-to-open player picker overlay.
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [breakpoint]);
+  return isMobile;
+}
 
 function initials(name: string) {
   return (
@@ -184,6 +199,107 @@ function PlayerCarousel({
   );
 }
 
+// NEW — mobile-only replacement for the inline drag carousel. Tapping a
+// crew slot on a narrow viewport opens this as a bottom sheet instead of
+// scrolling to a horizontal strip — same avatars, same lock rules, just a
+// bigger, tappable grid that doesn't require a drag gesture.
+function PlayerPickerSheet({
+  title,
+  teamLabel,
+  players,
+  onSelect,
+  onClose,
+  dismissedNames,
+  roleByName,
+  emptyLabel,
+}: {
+  title: string;
+  teamLabel: string;
+  players: SquadPlayer[];
+  onSelect: (p: SquadPlayer) => void;
+  onClose: () => void;
+  dismissedNames?: Set<string>;
+  roleByName?: Map<string, { role: PlayerRole; locked?: boolean }>;
+  emptyLabel?: string;
+}) {
+  return (
+    <div className="scorer-dialog-backdrop player-picker-backdrop" onClick={onClose}>
+      <div className="player-picker-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="player-picker-header">
+          <div className="flex flex-col min-w-0">
+            <span className="player-picker-title">{title}</span>
+            <span className="player-picker-sub">{teamLabel}</span>
+          </div>
+          <button type="button" className="player-picker-close" onClick={onClose} aria-label="Close">
+            <X size={16} strokeWidth={2.4} />
+          </button>
+        </div>
+
+        {players.length === 0 ? (
+          <p className="player-picker-empty">
+            {emptyLabel ?? "No squad loaded — set this team's squad in Match Setup."}
+          </p>
+        ) : (
+          <div className="player-picker-grid">
+            {players.map((p) => {
+              const isOut = !!dismissedNames?.has(p.name);
+              const roleInfo = roleByName?.get(p.name);
+              const isLocked = isOut || !!roleInfo;
+              const roleLabel =
+                roleInfo?.role === "striker"
+                  ? "On Strike"
+                  : roleInfo?.role === "nonStriker"
+                  ? "Non-Striker"
+                  : roleInfo?.role === "bowler"
+                  ? "Bowling"
+                  : undefined;
+
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={isLocked}
+                  onClick={() => {
+                    if (isLocked) return;
+                    onSelect(p);
+                    onClose();
+                  }}
+                  className="player-picker-chip"
+                  style={
+                    isOut
+                      ? { opacity: 0.55, outline: "2px solid rgba(217,83,79,0.55)", outlineOffset: 1, background: "rgba(217,83,79,0.07)" }
+                      : isLocked
+                      ? { opacity: 0.65, outline: "2px solid rgba(76,175,80,0.55)", outlineOffset: 1, background: "rgba(76,175,80,0.07)" }
+                      : undefined
+                  }
+                >
+                  <span className="squad-avatar" style={{ width: 52, height: 52 }}>
+                    {p.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <Image src={p.imageUrl} alt="" width={52} height={52} />
+                    ) : (
+                      <span className="squad-avatar-fallback" style={{ fontSize: 15 }}>
+                        {initials(p.name)}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className="player-picker-chip-name"
+                    style={isOut ? { color: "var(--color-error)" } : isLocked ? { color: "#4CAF50" } : undefined}
+                  >
+                    {p.name}
+                    {isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // NEW — `readOnly` disables activation/assign/clear/drag-drop without
 // touching any of the visual logic.
 function CrewSlot({
@@ -203,6 +319,7 @@ function CrewSlot({
   blockedName,
   noReplacement,
   readOnly,
+  avatarSize,
 }: {
   title: string;
   accentColor?: string;
@@ -220,7 +337,13 @@ function CrewSlot({
   blockedName?: string;
   noReplacement?: boolean;
   readOnly?: boolean;
+  // NEW — lets the caller shrink the avatar (and matching fallback-initial
+  // size) for tight layouts, e.g. keeping Striker/Non-Striker side by side
+  // on mobile instead of stacking them.
+  avatarSize?: number;
 }) {
+  const size = avatarSize ?? 48;
+  const fallbackFontSize = Math.max(10, Math.round(size * 0.3));
   const isEmpty = !displayName;
   const effectivelyLocked = !!locked || !!readOnly;
 
@@ -231,8 +354,8 @@ function CrewSlot({
           <Eyebrow color="var(--color-outline)">{title}</Eyebrow>
         </div>
         <div className="crew-slot-body crew-slot-no-replacement-body">
-          <span className="squad-avatar" style={{ width: 48, height: 48, opacity: 0.5 }}>
-            <span className="squad-avatar-fallback" style={{ fontSize: 14 }}>
+          <span className="squad-avatar" style={{ width: size, height: size, opacity: 0.5 }}>
+            <span className="squad-avatar-fallback" style={{ fontSize: fallbackFontSize }}>
               —
             </span>
           </span>
@@ -288,17 +411,17 @@ function CrewSlot({
         </div>
       </div>
       <div className="crew-slot-body">
-        <span className="squad-avatar" style={{ width: 48, height: 48 }}>
+        <span className="squad-avatar" style={{ width: size, height: size }}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <Image src={imageUrl} alt="" width={48} height={48}/>
+            <Image src={imageUrl} alt="" width={size} height={size}/>
           ) : (
-            <span className="squad-avatar-fallback" style={{ fontSize: 14 }}>
+            <span className="squad-avatar-fallback" style={{ fontSize: fallbackFontSize }}>
               {displayName ? initials(displayName) : "＋"}
             </span>
           )}
         </span>
-        <div className="flex flex-col">
+        <div className="flex flex-col min-w-0">
           <span className="crew-slot-name">{displayName || placeholder}</span>
           {statLine && <span className="crew-slot-stat">{statLine}</span>}
         </div>
@@ -751,6 +874,12 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
 ) {
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
+  // NEW — on mobile, tapping Striker/Non-Striker/Bowler opens a full
+  // overlay picker (playerPicker) instead of relying on the inline
+  // horizontal carousel, which stays for desktop only.
+  const isMobile = useIsMobile();
+  const [playerPicker, setPlayerPicker] = useState<null | "striker" | "nonStriker" | "bowler">(null);
+
   const battingTeamKey: "teamA" | "teamB" = useMemo(() => {
     const firstInningsTeamIsA = (() => {
       if (matchSetup?.tossWinner && matchSetup.tossDecision) {
@@ -847,6 +976,51 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
 
   const controlsLocked = engine.assignmentsMissing();
 
+  // NEW — replaces the old persistent "assignment needed" banner. Instead
+  // of always occupying space above the scoreboard, this only appears —
+  // as a bottom-right toast, same stack as the engine's own toasts — the
+  // moment someone actually tries to score without a Striker, Non-Striker,
+  // and Bowler assigned yet.
+  const [localToasts, setLocalToasts] = useState<Toast[]>([]);
+  const localToastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = localToastTimers.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
+
+  const showAssignmentToast = () => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const toast = { id, text: "Pick a Striker, Non-Striker & Bowler before you can score", tone: "wicket" } as Toast;
+    setLocalToasts((prev) => [...prev, toast]);
+    const timer = setTimeout(() => {
+      setLocalToasts((prev) => prev.filter((t) => t.id !== id));
+      localToastTimers.current.delete(id);
+    }, 3200);
+    localToastTimers.current.set(id, timer);
+  };
+
+  const handleScoreBall = (runs: 0 | 1 | 2 | 3 | 4 | 6) => {
+    if (readOnly) return;
+    if (controlsLocked) {
+      showAssignmentToast();
+      return;
+    }
+    engine.recordBall(runs);
+  };
+
+  const handleRecordWicket = () => {
+    if (readOnly) return;
+    if (controlsLocked) {
+      showAssignmentToast();
+      return;
+    }
+    engine.recordWicket();
+  };
+
   const strikerNeedsReplacement = engine.noPartnerAvailable && !liveState.striker.name;
   const nonStrikerNeedsReplacement = engine.noPartnerAvailable && !liveState.nonStriker.name;
 
@@ -904,13 +1078,80 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           50% { box-shadow: 0 0 0 12px rgba(201,151,31,0.14), 0 12px 32px rgba(0,0,0,0.35); }
         }
 
-        .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; }
-        .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+        .scorer-toast-stack { position: fixed; bottom: 20px; right: 20px; top: auto; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 6px; align-items: flex-end; pointer-events: none; max-width: calc(100vw - 24px); }
+        .scorer-toast { font-family: var(--font-label-mono); font-size: 11px; font-weight: 700; padding: 8px 14px; border-radius: 8px; animation: scorerToastIn 160ms ease-out; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,0.35); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
         .scorer-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 9000; animation: scorerBackdropIn 140ms ease-out; padding: 16px; }
         .scorer-dialog { width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--color-surface-container-low); border: 1px solid var(--color-border-overlay); border-radius: 14px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); animation: scorerDialogIn 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
-        .ball-controls-row { margin-bottom: 12px; }
-        .ball-controls-extras { display: flex; flex-direction: column; gap: 4px; }
         .ball-controls-label { font-family: var(--font-label-mono); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-outline); }
+        /* NEW — "This Ball" is now a single card: Undo + Free Hit share a
+           row up top, the Extra selector sits below in its own row. Groups
+           the per-ball controls visually instead of a bare flex row that
+           competed with the Eyebrow for attention. */
+        .ball-context-card {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding: 12px 12px 14px;
+          border-radius: 14px;
+          background: var(--color-surface-container-low);
+          border: 1px solid var(--color-border-overlay);
+          margin-bottom: 10px;
+        }
+        .ball-context-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .ball-context-extra { display: flex; flex-direction: column; gap: 6px; }
+        .undo-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-family: var(--font-label-mono);
+          font-size: 10.5px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--color-warning, #E8C468);
+          background: rgba(232,196,104,0.1);
+          border: 1px solid rgba(232,196,104,0.35);
+          border-radius: 999px;
+          padding: 7px 13px;
+          cursor: pointer;
+          transition: all 140ms ease;
+        }
+        .undo-btn:hover:not(:disabled) {
+          background: rgba(232,196,104,0.18);
+          border-color: rgba(232,196,104,0.55);
+        }
+        .undo-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        /* NEW — pill action next to the "Who's Involved" eyebrow, replacing
+           the lone SmallButton that used to sit disconnected below the
+           crew groups. */
+        .new-partnership-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-family: var(--font-label-mono);
+          font-size: 9.5px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--color-outline);
+          background: var(--color-surface-container-low);
+          border: 1px solid var(--color-border-overlay);
+          border-radius: 999px;
+          padding: 5px 11px;
+          cursor: pointer;
+          transition: all 140ms ease;
+        }
+        .new-partnership-btn:hover {
+          color: var(--color-theme-orange);
+          border-color: rgba(201,151,31,0.5);
+          background: rgba(201,151,31,0.08);
+        }
         .free-hit-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border-radius: 999px; border: 1px solid var(--color-border-overlay); background: var(--color-surface-container-low); transition: all 160ms ease; flex-shrink: 0; }
         .free-hit-toggle-track { position: relative; width: 30px; height: 18px; border-radius: 999px; background: var(--color-surface-container-high); transition: background 160ms ease; flex-shrink: 0; }
         .free-hit-toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-outline); transition: transform 160ms ease, background 160ms ease; }
@@ -989,6 +1230,122 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           font-weight: 700;
           color: var(--color-outline);
         }
+        /* NEW — visually separates the batting pair from the bowler so the
+           three crew slots don't read as one undifferentiated group,
+           especially on mobile where they stack vertically. */
+        .crew-group {
+          border-radius: 14px;
+          padding: 10px 10px 12px;
+          border: 1px solid transparent;
+        }
+        .crew-group-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-family: var(--font-label-mono);
+          font-size: 9px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--color-outline);
+          margin-bottom: 8px;
+        }
+        .crew-group-dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
+        .crew-group-dot-batting { background: #E8C468; }
+        .crew-group-dot-bowling { background: #60A5FA; }
+
+        /* NEW — player picker: a centered modal by default (laptop/
+           desktop), used everywhere a crew slot is tapped/clicked instead
+           of the old inline drag carousel. Becomes a bottom sheet only on
+           narrow (mobile) viewports — see the max-width:640px override
+           below. */
+        .player-picker-sheet {
+          width: 560px;
+          max-width: calc(100vw - 64px);
+          max-height: 76vh;
+          overflow-y: auto;
+          background: var(--color-surface-container-low);
+          border: 1px solid var(--color-border-overlay);
+          border-radius: 18px;
+          padding: 20px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+          animation: scorerDialogIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+        }
+        .player-picker-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+        .player-picker-title {
+          font-family: var(--font-label-mono);
+          font-size: 13px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--color-on-surface);
+        }
+        .player-picker-sub {
+          font-family: var(--font-label-mono);
+          font-size: 10px;
+          color: var(--color-outline);
+          margin-top: 2px;
+        }
+        .player-picker-close {
+          width: 28px;
+          height: 28px;
+          border-radius: 999px;
+          border: 1px solid var(--color-border-overlay);
+          background: var(--color-surface-container-low);
+          color: var(--color-outline);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          cursor: pointer;
+        }
+        .player-picker-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+          gap: 10px;
+        }
+        .player-picker-chip {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 10px 6px;
+          border-radius: 12px;
+          background: var(--color-surface-container-high, rgba(255,255,255,0.03));
+          border: 1px solid var(--color-border-overlay);
+          cursor: pointer;
+        }
+        .player-picker-chip:disabled { cursor: not-allowed; }
+        .player-picker-chip-name {
+          font-family: var(--font-label-mono);
+          font-size: 9.5px;
+          font-weight: 700;
+          text-align: center;
+          line-height: 1.25;
+          color: var(--color-on-surface);
+          word-break: break-word;
+        }
+        .player-picker-empty {
+          font-family: var(--font-label-mono);
+          font-size: 10px;
+          color: var(--color-outline);
+          text-align: center;
+          padding: 20px 10px;
+        }
+        .player-picker-hint {
+          font-family: var(--font-label-mono);
+          font-size: 10px;
+          color: var(--color-outline);
+          text-align: center;
+          margin-top: 8px;
+        }
+
         .carousel-exhausted {
           display: flex;
           align-items: center;
@@ -1120,17 +1477,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           filter: brightness(1.05);
         }
         .innings-status-btn:active { transform: translateY(0); }
-        .assignment-needed-banner {
-          font-family: var(--font-label-mono);
-          font-size: 11px;
-          font-weight: 700;
-          padding: 10px 14px;
-          border-radius: 10px;
-          background: rgba(217,83,79,0.08);
-          border: 1px dashed rgba(217,83,79,0.4);
-          color: var(--color-error);
-          margin-bottom: 12px;
-        }
         .match-over-screen {
           position: relative;
           overflow: hidden;
@@ -1299,14 +1645,101 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           box-shadow: 0 6px 26px rgba(201,151,31,0.5);
           filter: brightness(1.06);
         }
+
+        /* ── Mobile responsive overrides ──────────────────────────────
+           Everything above already assumed a wide desktop canvas. These
+           rules kick in under 640px (phones) and 480px (small phones)
+           to keep dialogs, the match-over screen, and status cards from
+           overflowing or clipping on a narrow viewport. Nothing here
+           hides content that was visible on mobile before — it only
+           resizes/reflows what's already shown. */
+        @media (max-width: 640px) {
+          .scorer-toast-stack { bottom: 12px; right: 12px; left: 12px; align-items: stretch; }
+          .scorer-toast { white-space: normal; text-align: center; }
+          .scorer-dialog { width: 100%; padding: 16px; }
+          /* NEW — swap the inline drag carousel for the tap-to-open
+             overlay picker on phones; dragging chips across a narrow
+             screen is fiddly, tapping a slot and picking from a big
+             grid isn't. */
+          /* NEW — on mobile the centered player-picker modal becomes a
+             bottom sheet instead: full width, docked to the bottom,
+             top corners only, with safe-area padding for the home
+             indicator. */
+          .player-picker-backdrop { align-items: flex-end; padding: 0; }
+          .player-picker-sheet {
+            width: 100%;
+            max-width: 100%;
+            max-height: 78vh;
+            border-radius: 18px 18px 0 0;
+            padding: 16px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+            box-shadow: 0 -12px 40px rgba(0,0,0,0.4);
+          }
+          .player-picker-grid { grid-template-columns: repeat(3, 1fr); }
+          /* NEW — Striker/Non-Striker now stay side by side on mobile
+             (see the row above), so each card gets half the width. Stack
+             avatar over name instead of side by side, shrink the swap
+             button, and clip long names/stats so nothing overflows or
+             pushes the two cards out of alignment. */
+          .crew-group-batting .crew-slot-body {
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 4px;
+          }
+          .crew-group-batting .crew-slot-name,
+          .crew-group-batting .crew-slot-stat {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .crew-group-batting .crew-slot-pick-hint { display: none; }
+          .crew-group-batting .crew-slot-header { flex-wrap: wrap; row-gap: 4px; }
+          .swap-strike-btn { width: 28px; height: 28px; font-size: 14px; margin-top: 20px; }
+          .innings-status-card { flex-wrap: wrap; padding: 14px; gap: 12px; }
+          .innings-status-btn { width: 100%; justify-content: center; }
+          .match-over-screen { padding: 34px 18px 28px; border-radius: 18px; }
+          .match-over-badge { width: 76px; height: 76px; margin-bottom: 14px; }
+          .match-over-logo-fallback { font-size: 22px; }
+          .match-over-title { font-size: 19px; }
+          .match-over-margin { font-size: 11px; padding: 5px 12px; margin-top: 10px; }
+          .match-over-actions { margin-top: 20px; gap: 8px; }
+          .match-over-btn { flex: 1 1 auto; justify-content: center; padding: 11px 14px; }
+          .crew-slot-body { gap: 8px; }
+          .carousel-row { gap: 8px; }
+        }
+        @media (max-width: 420px) {
+          .match-over-eyebrow { margin-bottom: 16px; font-size: 9.5px; }
+          .match-over-title { font-size: 17px; }
+        }
       `}</style>
 
       <ViewportPortal>
-        <ToastStack toasts={engine.toasts} />
+        <ToastStack toasts={[...engine.toasts, ...localToasts]} />
       </ViewportPortal>
       {engine.pendingWicket && (
         <ViewportPortal>
           <WicketDetailDialog pending={engine.pendingWicket} onResolve={readOnly ? () => {} : engine.resolveWicket} />
+        </ViewportPortal>
+      )}
+      {playerPicker && !readOnly && (
+        <ViewportPortal>
+          <PlayerPickerSheet
+            title={
+              playerPicker === "striker"
+                ? "Select Striker"
+                : playerPicker === "nonStriker"
+                ? "Select Non-Striker"
+                : "Select Bowler"
+            }
+            teamLabel={playerPicker === "bowler" ? bowlingTeamLabel : battingTeamLabel}
+            players={playerPicker === "bowler" ? bowlingSquad : battingSquad}
+            onSelect={(p) => engine.assignPlayer(playerPicker, p)}
+            onClose={() => setPlayerPicker(null)}
+            dismissedNames={playerPicker === "bowler" ? undefined : engine.dismissedPlayers}
+            roleByName={playerPicker === "bowler" ? bowlingRoleMap : battingRoleMap}
+            emptyLabel="No squad loaded for this side yet — add one in Match Setup."
+          />
         </ViewportPortal>
       )}
       {showEndInningsConfirm && (
@@ -1349,13 +1782,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
         />
       ) : (
         <>
-          {controlsLocked && !engine.noPartnerAvailable && (
-            <div className="assignment-needed-banner">
-              ⚠ Pick a Striker, Non-Striker, and Bowler below before you can score. This is expected right
-              after starting a new innings.
-            </div>
-          )}
-
           {engine.noPartnerAvailable && (
             <div className="innings-status-card">
               <span className="innings-status-icon-badge">
@@ -1382,12 +1808,12 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
             </div>
           )}
 
-          <div className="scoreboard-strip">
+          <div className="scoreboard-strip flex flex-wrap items-center gap-x-2 gap-y-1">
             <div className="scoreboard-main">
               <span className="scoreboard-runs">{liveState.score.runs}</span>
               <span className="scoreboard-wkts">/{liveState.score.wickets}</span>
             </div>
-            <div className="scoreboard-meta">
+            <div className="scoreboard-meta flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>{liveState.score.overs}.{liveState.score.balls} ov</span>
               <span>·</span>
               <span>RR {runRate}</span>
@@ -1426,66 +1852,108 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
           </div>
 
           <div>
-            <Eyebrow className="block mb-2">Who&apos;s Involved</Eyebrow>
+            <div className="flex items-center justify-between mb-2">
+              <Eyebrow>Who&apos;s Involved</Eyebrow>
+              {!readOnly && (
+                <button type="button" onClick={engine.newPartnership} className="new-partnership-btn">
+                  <RotateCcw size={11} strokeWidth={2.4} />
+                  New Partnership
+                </button>
+              )}
+            </div>
 
-            <div className="flex flex-col md:flex-row items-stretch gap-3">
-              <div className="flex-1 min-w-0">
-                <CrewSlot
-                  title="Striker *"
-                  accentColor="#E8C468"
-                  active={engine.activeSlot === "striker"}
-                  onActivate={() => engine.setActiveSlot("striker")}
-                  displayName={liveState.striker.name}
-                  imageUrl={liveState.striker.imageUrl}
-                  statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
-                  allPlayers={battingSquad}
-                  onAssign={(p) => engine.assignPlayer("striker", p)}
-                  onClear={() => engine.clearSlot("striker")}
-                  placeholder="Select striker"
-                  dismissedNames={engine.dismissedPlayers}
-                  blockedName={liveState.nonStriker.name || undefined}
-                  noReplacement={strikerNeedsReplacement}
-                  readOnly={readOnly}
-                />
+            {/* NEW — Striker + Non-Striker are wrapped in their own tinted
+               group ("Batting Pair"), and the Bowler sits in a separate
+               group with a different accent color below. On the previous
+               layout all three slots shared identical styling, which read
+               as one undifferentiated block on mobile — this makes the
+               batting pair vs. the bowler visually distinct at a glance. */}
+            <div className="crew-group crew-group-batting">
+              <div className="crew-group-label">
+                <span className="crew-group-dot crew-group-dot-batting" />
+                Batting Pair
               </div>
+              {/* NEW — always row (was flex-col md:flex-row), so the pair
+                 stays side by side on mobile too. avatarSize shrinks the
+                 photo/initials circle on mobile so both cards + the swap
+                 button fit comfortably on a narrow screen. */}
+              <div className="flex flex-row items-stretch gap-2 sm:gap-3">
+                <div className="flex-1 min-w-0">
+                  <CrewSlot
+                    title="Striker *"
+                    accentColor="#E8C468"
+                    active={engine.activeSlot === "striker"}
+                    onActivate={() => {
+                      engine.setActiveSlot("striker");
+                      // NEW — clicking/tapping the slot opens the player
+                      // picker modal on every screen size now (centered
+                      // on laptop/desktop, bottom sheet on mobile).
+                      if (!readOnly) setPlayerPicker("striker");
+                    }}
+                    displayName={liveState.striker.name}
+                    imageUrl={liveState.striker.imageUrl}
+                    statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
+                    allPlayers={battingSquad}
+                    onAssign={(p) => engine.assignPlayer("striker", p)}
+                    onClear={() => engine.clearSlot("striker")}
+                    placeholder="Select striker"
+                    dismissedNames={engine.dismissedPlayers}
+                    blockedName={liveState.nonStriker.name || undefined}
+                    noReplacement={strikerNeedsReplacement}
+                    readOnly={readOnly}
+                    avatarSize={isMobile ? 36 : 48}
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={readOnly ? undefined : engine.swapStrike}
-                disabled={readOnly}
-                className="swap-strike-btn"
-                title="Swap Strike"
-                aria-label="Swap strike between batters"
-                style={readOnly ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
-              >
-                ⇄
-              </button>
+                <button
+                  type="button"
+                  onClick={readOnly ? undefined : engine.swapStrike}
+                  disabled={readOnly}
+                  className="swap-strike-btn"
+                  title="Swap Strike"
+                  aria-label="Swap strike between batters"
+                  style={readOnly ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                >
+                  ⇄
+                </button>
 
-              <div className="flex-1 min-w-0">
-                <CrewSlot
-                  title="Non-Striker"
-                  active={engine.activeSlot === "nonStriker"}
-                  onActivate={() => engine.setActiveSlot("nonStriker")}
-                  displayName={liveState.nonStriker.name}
-                  imageUrl={liveState.nonStriker.imageUrl}
-                  statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
-                  allPlayers={battingSquad}
-                  onAssign={(p) => engine.assignPlayer("nonStriker", p)}
-                  onClear={() => engine.clearSlot("nonStriker")}
-                  placeholder="Select non-striker"
-                  dismissedNames={engine.dismissedPlayers}
-                  blockedName={liveState.striker.name || undefined}
-                  noReplacement={nonStrikerNeedsReplacement}
-                  readOnly={readOnly}
-                />
+                <div className="flex-1 min-w-0">
+                  <CrewSlot
+                    title="Non-Striker"
+                    active={engine.activeSlot === "nonStriker"}
+                    onActivate={() => {
+                      engine.setActiveSlot("nonStriker");
+                      if (!readOnly) setPlayerPicker("nonStriker");
+                    }}
+                    displayName={liveState.nonStriker.name}
+                    imageUrl={liveState.nonStriker.imageUrl}
+                    statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
+                    allPlayers={battingSquad}
+                    onAssign={(p) => engine.assignPlayer("nonStriker", p)}
+                    onClear={() => engine.clearSlot("nonStriker")}
+                    placeholder="Select non-striker"
+                    dismissedNames={engine.dismissedPlayers}
+                    blockedName={liveState.striker.name || undefined}
+                    noReplacement={nonStrikerNeedsReplacement}
+                    readOnly={readOnly}
+                    avatarSize={isMobile ? 36 : 48}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="mt-3">
+            <div className="crew-group crew-group-bowling mt-3">
+              <div className="crew-group-label">
+                <span className="crew-group-dot crew-group-dot-bowling" />
+                Bowling
+              </div>
               <CrewSlot
                 title={`Bowler (${bowlingTeamLabel})`}
                 active={engine.activeSlot === "bowler"}
-                onActivate={() => engine.setActiveSlot("bowler")}
+                onActivate={() => {
+                  engine.setActiveSlot("bowler");
+                  if (!readOnly) setPlayerPicker("bowler");
+                }}
                 displayName={liveState.bowler.name}
                 imageUrl={liveState.bowler.imageUrl}
                 statLine={liveState.bowler.name ? `${liveState.bowler.overs}.${liveState.bowler.balls}-${liveState.bowler.maidens}-${liveState.bowler.runs}-${liveState.bowler.wickets}` : undefined}
@@ -1496,34 +1964,45 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
               />
             </div>
 
-            <div className="mt-3">
-              <Eyebrow className="block mb-1">{engine.activeSlot === "bowler" ? `Pick from ${bowlingTeamLabel}` : `Pick from ${battingTeamLabel}`}</Eyebrow>
+            {/* Desktop-only inline carousel — hidden under 640px in favor
+             of the tap-to-open overlay above (see .player-carousel-inline
+             / .player-carousel-mobile-hint in the stylesheet). */}
+            <div className="mt-3 hidden sm:block">
+              <Eyebrow className="block mb-1">
+                {engine.activeSlot === "bowler"
+                  ? `Pick from ${bowlingTeamLabel}`
+                  : `Pick from ${battingTeamLabel}`}
+              </Eyebrow>
+
               <PlayerCarousel
                 players={engine.activeSlot === "bowler" ? bowlingSquad : battingSquad}
                 onSelect={(p) => engine.assignPlayer(engine.activeSlot, p)}
-                emptyLabel="No squad loaded for this side yet — add one in Match Setup, or type names manually in the Fix a Mistake section below."
+                emptyLabel="No squad loaded for this side yet — add one in Match Setup."
                 dismissedNames={engine.activeSlot === "bowler" ? undefined : engine.dismissedPlayers}
                 roleByName={engine.activeSlot === "bowler" ? bowlingRoleMap : battingRoleMap}
                 disabled={readOnly}
               />
             </div>
-
-            {!readOnly && (
-              <div className="flex items-center gap-2 mt-3">
-                <SmallButton onClick={engine.newPartnership}>New Partnership</SmallButton>
-              </div>
-            )}
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
               <Eyebrow>This Ball</Eyebrow>
-              <div className="flex items-center gap-2">
-                {engine.canUndo && !readOnly && (
-                  <SmallButton onClick={engine.undo} style={{ color: "var(--color-warning)" }}>
-                    ↶ Undo Last Ball
-                  </SmallButton>
-                )}
+            </div>
+
+            <div className="ball-context-card">
+              <div className="ball-context-top">
+                <button
+                  type="button"
+                  onClick={() => !readOnly && engine.canUndo && engine.undo()}
+                  disabled={readOnly || !engine.canUndo}
+                  className="undo-btn"
+                  title={engine.canUndo ? "Undo the last scored ball — reverses runs, extras, and wickets alike" : "Nothing to undo yet"}
+                >
+                  <Undo2 size={13} strokeWidth={2.4} />
+                  Undo
+                </button>
+
                 <button
                   type="button"
                   onClick={() => !readOnly && engine.setIsFreeHit((v) => !v)}
@@ -1541,28 +2020,26 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
                   </span>
                 </button>
               </div>
-            </div>
 
-            <div className="ball-controls-row">
-              <div className="ball-controls-extras">
+              <div className="ball-context-extra">
                 <span className="ball-controls-label">Extra</span>
                 <SegmentedControl options={EXTRA_OPTIONS} value={engine.extraType} onChange={(v) => !readOnly && engine.setExtraType(v as ExtraType)} />
               </div>
             </div>
 
-            <div className="ball-pad" style={readOnly ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
+            <div className="ball-pad grid grid-cols-4 sm:grid-cols-7 gap-2" style={readOnly ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
               {[0, 1, 2, 3, 4, 6].map((r) => (
                 <button
                   key={r}
                   type="button"
                   disabled={readOnly}
                   className={`ball-btn ${r === 4 || r === 6 ? "ball-btn-boundary" : ""}`}
-                  onClick={() => engine.recordBall(r)}
+                  onClick={() => handleScoreBall(r as 0 | 1 | 2 | 3 | 4 | 6)}
                 >
                   {r}
                 </button>
               ))}
-              <button type="button" disabled={readOnly} className="ball-btn ball-btn-wicket" onClick={engine.recordWicket}>
+              <button type="button" disabled={readOnly} className="ball-btn ball-btn-wicket col-span-2 sm:col-span-1" onClick={handleRecordWicket}>
                 OUT
               </button>
             </div>
@@ -1595,14 +2072,6 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
             </div>
           </div>
 
-          {!readOnly && (
-            <ManualCorrectionPanel
-              liveState={liveState}
-              setLiveState={setLiveState}
-              setLiveDirty={setLiveDirty}
-              patchLive={engine.patchLive}
-            />
-          )}
         </>
       )}
 

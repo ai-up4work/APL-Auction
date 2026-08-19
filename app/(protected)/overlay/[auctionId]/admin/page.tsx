@@ -235,9 +235,8 @@ function BatterPickerButton({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW — hydration UI: a lightweight skeleton shown while the Supabase load
-// is in flight, and an error banner shown if it failed. Both live here so
-// the main render tree below stays uncluttered.
+// hydration UI: skeleton shown while the Supabase load is in flight, and an
+// error banner shown if it failed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function HydrationSkeleton() {
@@ -336,7 +335,7 @@ export default function OverlayAdminPage({ params }: { params: Promise<{ auction
 function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const matchIdRef = useRef<string | null>(null);
-  
+
 
   const onAirRef = useRef<OnAirChannelsHandle>(null);
   const [connected, setConnected] = useState(false);
@@ -349,6 +348,15 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(emptyMatchSetup);
   const [setupPushed, setSetupPushed] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
+
+  // NEW — mirrors MatchSetupPanel's own locked/unlocked state. True
+  // whenever the operator has the full Match Setup form open (editing
+  // teams, squads, toss, etc). Drives hiding LiveStatePanel below while
+  // an edit is in progress, and — the other direction — MatchSetupPanel
+  // already collapses itself to the compact LockedSummaryBar once
+  // matchSetupCompleted flips true and it's not being edited, so the
+  // two panels never fight for the same screen space either way.
+  const [matchSetupEditing, setMatchSetupEditing] = useState(false);
 
   // Single source-of-truth hydration flag. True only once the Supabase
   // load (success OR failure) has resolved. Nothing writes to Supabase
@@ -872,61 +880,21 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
         }}
       />
 
-      <div className="relative z-10 max-w-[1600px] mx-auto px-6 lg:px-10 py-8">
-        <div className="flex flex-col items-center text-center gap-5 mb-10 pb-8" style={{ borderBottom: "1px solid var(--color-border-overlay)" }}>
-          <span
-            className="flex items-center gap-2.5 text-[10px] font-black uppercase tracking-[0.3em]"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
-          >
-            <span
-              className="tally"
-              style={{
-                background: connected
-                  ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
-                  : "radial-gradient(circle at 35% 30%, #ff9d94, var(--color-error, #d9534f) 65%)",
-                boxShadow: connected
-                  ? "0 0 6px 1px var(--color-success-green, #4caf50)"
-                  : "0 0 6px 1px rgba(217,83,79,0.55)",
-                animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
-              }}
-            />
-            On Air Control
-            <span
-              className="tally"
-              style={{
-                background: connected
-                  ? "radial-gradient(circle at 35% 30%, #7ee8a8, var(--color-success-green, #4caf50) 60%)"
-                  : "radial-gradient(circle at 35% 30%, #ff9d94, var(--color-error, #d9534f) 65%)",
-                boxShadow: connected
-                  ? "0 0 6px 1px var(--color-success-green, #4caf50)"
-                  : "0 0 6px 1px rgba(217,83,79,0.55)",
-                animation: connected ? undefined : "connPulse 1.4s ease-in-out infinite",
-              }}
-            />
-          </span>
-
-          <h2
-            style={{
-              fontFamily: "var(--font-headline-lg)",
-              fontSize: "38px",
-              lineHeight: "44px",
-              fontWeight: 700,
-              letterSpacing: "0.01em",
-              color: "var(--color-on-surface)",
-            }}
-          >
-            Overlay Control Room
-          </h2>
-
-          <div
-            className="w-10 h-[3px] rounded-full"
-            style={{ background: "linear-gradient(90deg, transparent, var(--color-theme-orange), transparent)" }}
-          /> 
+      <div className="relative z-10 max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-5 sm:py-8">
+        {/* ── Header — now IS the On Air panel. On desktop it's the full
+            styled row inline; on mobile OnAirChannels renders a compact
+            trigger pill instead that opens a bottom-sheet overlay, so it
+            never has to be manually collapsed/expanded here. ── */}
+        <div
+          className="mb-6 sm:mb-8 pb-4 sm:pb-6"
+          style={{ borderBottom: "1px solid var(--color-border-overlay)" }}
+        >
+          <OnAirChannels ref={onAirRef} fire={fire} matchId={matchId} />
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-8 items-start">
-          <div className="flex-1 min-w-0 flex flex-col gap-6">
-            {/* NEW — gate the entire editable column on hydration state.
+        <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 items-start">
+          <div className="w-full lg:flex-1 lg:min-w-0 flex flex-col gap-5 sm:gap-6">
+            {/* Gate the entire editable column on hydration state.
                 Previously MatchSetupPanel rendered fully interactive
                 immediately on mount, using the empty in-memory defaults,
                 while the Supabase fetch was still in flight. If an
@@ -943,13 +911,14 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
               <>
                 <MatchSetupPanel
                   auctionId={sourceAuctionId}
-                  matchId={matchId}                 // NEW — enables the Match Editor link
+                  matchId={matchId}                 // enables the Match Editor link
                   auctionAdminHref={undefined}      // set this to your real Auctions tab route
                   matchSetup={matchSetup}
                   setMatchSetup={setMatchSetup}
                   onPush={pushMatchSetup}
                   pushLabel={setupPushed ? "Pushed ✓" : "Push Match Setup"}
                   completed={matchSetupCompleted}
+                  onEditingChange={setMatchSetupEditing}
                   onVenueSelect={async (match, displayName) => {
                     try {
                       // your geocode/weather logic here, using `match` (GeocodeMatch)
@@ -959,7 +928,41 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                   }}
                 />
 
-                {matchSetupCompleted ? (
+                {/* NEW — the two panels now hide each other instead of
+                    both being on screen at once. While Match Setup is
+                    open for editing (matchSetupEditing), Live State is
+                    swapped out for a short "come back when you're done"
+                    placeholder — editing teams/squads mid-innings is
+                    exactly the scenario that used to let a Match Setup
+                    save silently pull the rug out from under an active
+                    scoring session. The reverse direction is already
+                    handled by MatchSetupPanel itself: once completed and
+                    not being edited, it collapses to the compact
+                    LockedSummaryBar, so it never competes for space with
+                    Live State either. */}
+                {matchSetupEditing ? (
+                  <div
+                    className="rounded-xl p-6 text-center"
+                    style={{
+                      background: "var(--color-surface-glass)",
+                      backdropFilter: "blur(24px)",
+                      border: "1px dashed var(--color-border-overlay)",
+                    }}
+                  >
+                    <span
+                      className="material-symbols-outlined block mx-auto mb-2"
+                      style={{ fontSize: 22, color: "var(--color-outline)" }}
+                    >
+                      edit_note
+                    </span>
+                    <p
+                      className="text-[11px] uppercase tracking-widest"
+                      style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
+                    >
+                      Live scoring is hidden while Match Setup is open — push or close it above to come back
+                    </p>
+                  </div>
+                ) : matchSetupCompleted ? (
                   <LiveStatePanel
                     auctionId={auctionId}
                     matchId={matchId}
@@ -1008,9 +1011,10 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
             )}
           </div>
 
-          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh + 3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
-            <ProgramMonitor overlayUrl={overlayUrl} />
-
+          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh + 3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
+              <div className="hidden md:block">
+                <ProgramMonitor overlayUrl={overlayUrl} />
+              </div>
               <Section
                 title="Moments"
                 description="Fire the graphic the instant it happens on the ball."
@@ -1019,7 +1023,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                   <button
                     type="button"
                     onClick={() => setShowMoments((v) => !v)}
-                    className="flex items-center justify-between w-full rounded-lg px-3 py-2 transition-colors"
+                    className="flex items-center justify-between w-full rounded-lg px-3 py-2.5 sm:py-2 transition-colors"
                     style={{
                       background: "var(--color-surface-container-low)",
                       border: "1px solid var(--color-border-overlay)",
@@ -1461,23 +1465,24 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
               </Section>
 
               <WeatherPanel ref={weatherPanelRef} matchId={matchId} defaultVenue={matchSetup.venue} onFetched={pushFetchedWeather} autoFetchKey={setupPushCount} />
-              <OnAirChannels ref={onAirRef} fire={fire} matchId={matchId} />
 
-            <Section title="Event Log">
-              <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
-                {log.length === 0 ? (
-                  <p className="text-[11px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-                    Nothing fired yet.
-                  </p>
-                ) : (
-                  log.map((l, i) => (
-                    <div key={i} className="text-[11px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
-                      {l}
-                    </div>
-                  ))
-                )}
-              </div>
-            </Section>
+            <div className="hidden md:block">
+              <Section title="Event Log">
+                <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
+                  {log.length === 0 ? (
+                    <p className="text-[11px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
+                      Nothing fired yet.
+                    </p>
+                  ) : (
+                    log.map((l, i) => (
+                      <div key={i} className="text-[11px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
+                        {l}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Section>
+            </div>
           </aside>
         </div>
       </div>

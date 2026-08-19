@@ -2,7 +2,7 @@
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ChannelVisibility, OverlayEvent } from "@/lib/overlayBus";
-import { Section, ChannelRow } from "./ui";
+import { Section } from "./ui";
 import { loadOnAirChannels, saveOnAirChannels } from "@/lib/matchPersistence"; // CHANGED — was localStorage
 
 const AMBIENT_CHANNELS = [
@@ -96,7 +96,7 @@ function computeVisible(on: Record<ChannelKey, boolean>, suppressed: Record<Supp
 
 export type OnAirChannelsHandle = {
   notifyMomentFired: () => void;
-  // NEW — match has ended: drop everything except the ambient channels
+  // match has ended: drop everything except the ambient channels
   // that should keep running post-match (weather + tournament logo).
   notifyMatchOver: () => void;
   getVisibleSnapshot: () => ChannelVisibility;
@@ -104,10 +104,9 @@ export type OnAirChannelsHandle = {
 
 const OnAirChannels = forwardRef<
   OnAirChannelsHandle,
-  // CHANGED — auctionId swapped for matchId. matchId is the Supabase
-  // row id, resolved asynchronously by page.tsx's getOrCreateMatch();
-  // it's `null` until that resolves, so every effect below waits for
-  // it before touching the DB.
+  // matchId is the Supabase row id, resolved asynchronously by
+  // page.tsx's getOrCreateMatch(); it's `null` until that resolves, so
+  // every effect below waits for it before touching the DB.
   { fire: (event: OverlayEvent, label: string) => void; matchId: string | null }
 >(function OnAirChannels({ fire, matchId }, ref) {
   const [on, setOn] = useState<Record<ChannelKey, boolean>>(initialOn);
@@ -118,6 +117,34 @@ const OnAirChannels = forwardRef<
   // the localStorage version's hydrated flag: don't fire/persist the
   // default on-air state and stomp on whatever was really live.
   const [hydrated, setHydrated] = useState(false);
+
+  // Mobile-only: whether the bottom-sheet overlay is open. Desktop
+  // never reads this — the full row is always inline there.
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+
+  // NEW — the mobile trigger bar is `position: fixed` (see render below),
+  // not `sticky`. `sticky` only stays pinned while its own parent
+  // container is scrolled through; the div this component renders into
+  // (page.tsx's thin header wrapper) is barely taller than the bar
+  // itself, so a sticky bar would unstick and scroll away again after a
+  // few pixels of scroll. Fixed positioning pins it to the viewport
+  // instead, but that also takes it out of normal document flow, so we
+  // measure its real height here and render an equal-height spacer in
+  // its place to stop the rest of the page jumping up underneath it.
+  const mobileBarRef = useRef<HTMLDivElement>(null);
+  const [mobileBarHeight, setMobileBarHeight] = useState(0);
+
+  useEffect(() => {
+    const el = mobileBarRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setMobileBarHeight(entry.contentRect.height);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const prevVisibleRef = useRef<Record<ChannelKey, boolean>>({
     weather: false,
@@ -131,11 +158,11 @@ const OnAirChannels = forwardRef<
     testBg: false,
   });
 
-  // CHANGED — load persisted On Air state from Supabase instead of
-  // localStorage. Waits for matchId to resolve (it starts as null
-  // while page.tsx's getOrCreateMatch() is still in flight). This is
-  // what makes On Air state shared across devices/tabs instead of
-  // being stuck per-browser the way localStorage was.
+  // Load persisted On Air state from Supabase instead of localStorage.
+  // Waits for matchId to resolve (it starts as null while page.tsx's
+  // getOrCreateMatch() is still in flight). This is what makes On Air
+  // state shared across devices/tabs instead of being stuck per-browser
+  // the way localStorage was.
   useEffect(() => {
     if (!matchId) return;
     let cancelled = false;
@@ -150,7 +177,7 @@ const OnAirChannels = forwardRef<
     };
   }, [matchId]);
 
-  // CHANGED — persist every change to Supabase instead of localStorage.
+  // Persist every change to Supabase instead of localStorage.
   useEffect(() => {
     if (!hydrated || !matchId) return;
     saveOnAirChannels(matchId, on);
@@ -215,11 +242,10 @@ const OnAirChannels = forwardRef<
     notifyMomentFired() {
       setOn((prev) => ({ ...prev, pointsTable: false, matchScorecard: false, matchIntro: false }));
     },
-    // NEW — match has ended: drop everything except the two ambient
-    // channels that should keep running post-match (weather +
-    // tournament logo). Everything else (score bar, boundaries,
-    // fullscreen panels, test bg) goes off. This is a one-shot reset,
-    // not a lock — the regular toggle* functions above still work
+    // match has ended: drop everything except the two ambient channels
+    // that should keep running post-match (weather + tournament logo).
+    // Everything else (score bar, boundaries, fullscreen panels, test
+    // bg) goes off. One-shot reset, not a lock — toggle* still works
     // normally afterward, so anyone can manually flip a channel back
     // on from the panel.
     notifyMatchOver() {
@@ -244,15 +270,67 @@ const OnAirChannels = forwardRef<
     color: "var(--color-outline)",
   };
 
-  return (
-    <Section title="On Air" description="Toggle overlay channels live on the broadcast.">
-      <div className="flex flex-col gap-2.5">
-        <span className="text-[9px] font-bold uppercase tracking-widest" style={labelStyle}>
-          Always On
-        </span>
-        <div className="grid grid-cols-2 gap-2">
+  // Local pill/chip — used for both the inline desktop row and the
+  // mobile bottom sheet, so this view doesn't depend on ChannelRow's
+  // (unknown-to-us) prop shape at all.
+  function StatusChip({
+    label,
+    on: chipOn,
+    onToggle,
+    tone = "green",
+  }: {
+    label: string;
+    on: boolean;
+    onToggle: () => void;
+    tone?: "green" | "blue";
+  }) {
+    const activeColor = tone === "blue" ? "#60a5fa" : "var(--color-success-green, #4caf50)";
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-1 rounded-full text-[10px] font-bold uppercase tracking-wide whitespace-nowrap transition-colors"
+        style={{
+          fontFamily: "var(--font-label-mono)",
+          background: chipOn ? `${activeColor}24` : "var(--color-surface-container-low)",
+          border: `1px solid ${chipOn ? `${activeColor}66` : "var(--color-border-overlay)"}`,
+          color: chipOn ? activeColor : "var(--color-outline)",
+        }}
+      >
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: "999px",
+            background: chipOn ? activeColor : "var(--color-outline)",
+            flexShrink: 0,
+          }}
+        />
+        {label}
+      </button>
+    );
+  }
+
+  const liveCount =
+    Number(on.weather && !suppressed.weather) +
+    Number(on.liveScoreBar && !suppressed.liveScoreBar) +
+    Number(on.tournamentLogo && !suppressed.tournamentLogo) +
+    Number(on.pointsTable) +
+    Number(on.matchScorecard) +
+    Number(on.matchIntro) +
+    Number(on.matchBoundaries && !suppressed.matchBoundaries) +
+    Number(on.tournamentBoundaries && !suppressed.tournamentBoundaries) +
+    Number(on.testBg);
+
+  function renderChipGroups() {
+    return (
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={labelStyle}>
+            Always On
+          </span>
           {AMBIENT_CHANNELS.map((c) => (
-            <ChannelRow
+            <StatusChip
               key={c.key}
               label={c.label}
               on={on[c.key] && !suppressed[c.key]}
@@ -261,21 +339,25 @@ const OnAirChannels = forwardRef<
           ))}
         </div>
 
-        <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={labelStyle}>
-          Full-Screen · one at a time
-        </span>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="h-4 w-px hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={labelStyle}>
+            Full-Screen
+          </span>
           {FULLSCREEN_CHANNELS.map((c) => (
-            <ChannelRow key={c.key} label={c.label} on={on[c.key]} onToggle={() => toggleFullscreen(c.key)} />
+            <StatusChip key={c.key} label={c.label} on={on[c.key]} onToggle={() => toggleFullscreen(c.key)} />
           ))}
         </div>
 
-        <span className="text-[9px] font-bold uppercase tracking-widest mt-1" style={labelStyle}>
-          Boundaries · manual, one at a time
-        </span>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="h-4 w-px hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-bold uppercase tracking-widest" style={labelStyle}>
+            Boundaries
+          </span>
           {BOUNDARY_CHANNELS.map((c) => (
-            <ChannelRow
+            <StatusChip
               key={c.key}
               label={c.label}
               on={on[c.key] && !suppressed[c.key]}
@@ -284,9 +366,13 @@ const OnAirChannels = forwardRef<
           ))}
         </div>
 
+        <div className="h-4 w-px hidden sm:block" style={{ background: "var(--color-border-overlay)" }} />
+
+        <StatusChip label="Test BG" on={on.testBg} onToggle={toggleTestBg} tone="blue" />
+
         <button
           onClick={clearAll}
-          className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide mt-1"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide sm:ml-auto"
           style={{
             fontFamily: "var(--font-label-mono)",
             background: "var(--color-error-container)",
@@ -294,20 +380,116 @@ const OnAirChannels = forwardRef<
             color: "var(--color-error)",
           }}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>
+          <span className="material-symbols-outlined" style={{ fontSize: "13px" }}>
             restart_alt
           </span>
-          Clear Everything
+          Clear
         </button>
-
-        <div className="h-px my-1" style={{ background: "var(--color-outline-variant)" }} />
-
-        <ChannelRow label="Test Background" on={on.testBg} tone="blue" onToggle={toggleTestBg} />
-        <p className="text-[10px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-          Sample footage for layout testing — off before going live.
-        </p>
       </div>
-    </Section>
+    );
+  }
+
+  return (
+    <>
+      {/* Desktop / tablet — inline, full row, no bottom sheet */}
+      <div className="hidden sm:block">
+        <Section title="On Air" description="Toggle overlay channels live on the broadcast.">
+          {renderChipGroups()}
+        </Section>
+      </div>
+
+      {/* Mobile — small trigger pill, pinned to the top of the viewport
+          with `position: fixed` (not `sticky` — see the mobileBarRef
+          comment above for why sticky doesn't actually stay put here)
+          so "Manage" stays reachable while scrolling the rest of the
+          admin page. The spacer div below reserves the bar's real
+          measured height in normal flow so page content doesn't jump
+          up underneath it. Tapping the bar opens a bottom sheet overlay
+          instead of pushing page content down. */}
+      <div className="sm:hidden">
+        <div aria-hidden="true" style={{ height: mobileBarHeight || undefined }} />
+        <div
+          ref={mobileBarRef}
+          className="fixed top-0 left-0 right-0 z-30 px-4 py-2"
+          style={{
+            background: "var(--color-background)",
+            borderBottom: "1px solid var(--color-border-overlay)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileSheetOpen(true)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg"
+            style={{
+              background: "var(--color-surface-container-low)",
+              border: "1px solid var(--color-border-overlay)",
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "999px",
+                  background: liveCount > 0 ? "var(--color-success-green, #4caf50)" : "var(--color-outline)",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                className="text-[11px] font-black uppercase tracking-widest"
+                style={{ fontFamily: "var(--font-label-mono)" }}
+              >
+                On Air
+              </span>
+              <span className="text-[10px]" style={{ color: "var(--color-outline)" }}>
+                {liveCount} live
+              </span>
+            </span>
+            <span
+              className="text-[10px] font-bold uppercase tracking-wide"
+              style={{ color: "var(--color-theme-orange)" }}
+            >
+              Manage
+            </span>
+          </button>
+        </div>
+
+        {mobileSheetOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              style={{ background: "rgba(0,0,0,0.5)" }}
+              onClick={() => setMobileSheetOpen(false)}
+            />
+            <div
+              className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] max-h-[75vh] overflow-y-auto"
+              style={{
+                background: "var(--color-surface-container-low)",
+                borderTop: "1px solid var(--color-border-overlay)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <span
+                  className="text-[12px] font-black uppercase tracking-widest"
+                  style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-theme-orange)" }}
+                >
+                  On Air
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMobileSheetOpen(false)}
+                  className="text-[11px] font-bold uppercase tracking-wide"
+                  style={{ color: "var(--color-outline)" }}
+                >
+                  Done
+                </button>
+              </div>
+              <div className="flex flex-col gap-4">{renderChipGroups()}</div>
+            </div>
+          </>
+        )}
+      </div>
+    </>
   );
 });
 
