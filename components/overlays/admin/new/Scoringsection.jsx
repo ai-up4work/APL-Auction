@@ -279,7 +279,7 @@ export default function ScoringSection({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-3 mb-4 relative z-10">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 relative z-10">
         {/* Extras */}
         <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em]">
             Extras total — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb} · Free Hit {extras.FreeHit}
