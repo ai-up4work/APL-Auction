@@ -8,7 +8,7 @@ import LiveStatePanel from "@/components/overlays/admin/LiveStatePanel";
 import ProgramMonitor from "@/components/overlays/admin/ProgramMonitor";
 import OnAirChannels, { type OnAirChannelsHandle } from "@/components/overlays/admin/OnAirChannels";
 import { Section, StatusPill, ActionButton } from "@/components/overlays/admin/ui";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, AlertTriangle, PenLine, Trophy as TrophyIcon } from "lucide-react";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 import { supabase } from "@/lib/supabase";
 import {
@@ -199,36 +199,25 @@ function BatterPickerButton({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all"
-      style={{
-        background: selected ? "rgba(201,151,31,0.12)" : "var(--color-surface-container-low)",
-        border: `1px solid ${selected ? "rgba(201,151,31,0.45)" : "var(--color-border-overlay)"}`,
-      }}
+      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all border ${
+        selected ? "bg-gold/[0.12] border-gold/45" : "bg-white/[0.02] border-gold/10 hover:border-gold/25"
+      }`}
     >
-      <span
-        className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0"
-        style={{ background: "var(--color-surface-container-high)" }}
-      >
+      <span className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 bg-black/60 border border-gold/10">
         {batter.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={batter.imageUrl} alt="" className="w-full h-full object-cover" />
         ) : (
-          <span
-            className="text-[10px] font-bold"
-            style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-          >
+          <span className="text-[10px] font-bold font-cinzel text-gray-500">
             {(batter.name || label).slice(0, 2).toUpperCase()}
           </span>
         )}
       </span>
       <span className="flex flex-col min-w-0">
-        <span
-          className="text-[11px] font-bold truncate"
-          style={{ fontFamily: "var(--font-label-mono)", color: selected ? "var(--color-theme-orange)" : "var(--color-on-surface)" }}
-        >
+        <span className={`text-[11px] font-bold font-cinzel truncate ${selected ? "text-gold" : "text-gray-100"}`}>
           {batter.name || label}
         </span>
-        <span className="text-[9px] uppercase tracking-wide" style={{ color: "var(--color-outline)" }}>{label}</span>
+        <span className="text-[9px] uppercase tracking-wide font-cinzel text-gray-500">{label}</span>
       </span>
     </button>
   );
@@ -241,72 +230,38 @@ function BatterPickerButton({
 
 function HydrationSkeleton() {
   return (
-    <div
-      className="rounded-xl p-8 flex flex-col items-center justify-center gap-3 text-center"
-      style={{
-        background: "var(--color-surface-glass)",
-        backdropFilter: "blur(24px)",
-        border: "1px dashed var(--color-border-overlay)",
-        minHeight: 220,
-      }}
-    >
+    <div className="rounded-xl p-8 flex flex-col items-center justify-center gap-3 text-center bg-black/50 backdrop-blur-xl border border-dashed border-gold/20 min-h-[220px]">
       <span
-        className="tally"
+        className="h-2.5 w-2.5 rounded-full"
         style={{
-          width: 10,
-          height: 10,
-          borderRadius: "999px",
-          background: "radial-gradient(circle at 35% 30%, #ffe08a, var(--color-theme-orange) 65%)",
-          boxShadow: "0 0 8px 1px rgba(201,151,31,0.5)",
+          background: "radial-gradient(circle at 35% 30%, #ffe08a, #F5A623 65%)",
+          boxShadow: "0 0 8px 1px rgba(245,166,35,0.5)",
           animation: "connPulse 1.2s ease-in-out infinite",
         }}
       />
-      <p
-        className="text-[11px] uppercase tracking-widest"
-        style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-      >
-        Loading match data…
-      </p>
+      <style>{`@keyframes connPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }`}</style>
+      <p className="text-[11px] uppercase tracking-widest font-cinzel text-gray-500">Loading match data…</p>
     </div>
   );
 }
 
 function HydrationErrorBanner({ onRetry }: { onRetry: () => void }) {
   return (
-    <div
-      className="rounded-xl p-5 flex flex-col gap-3"
-      style={{
-        background: "var(--color-error-container)",
-        border: "1px solid rgba(255,180,171,0.35)",
-      }}
-    >
+    <div className="rounded-xl p-5 flex flex-col gap-3 bg-red-500/[0.06] border border-red-400/30">
       <div className="flex items-center gap-2">
-        <span
-          className="material-symbols-outlined"
-          style={{ fontSize: 20, color: "var(--color-error)" }}
-        >
-          error
-        </span>
-        <span
-          className="text-[11px] font-black uppercase tracking-widest"
-          style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}
-        >
-          Couldn't load match data
+        <AlertTriangle className="h-5 w-5 text-red-400" />
+        <span className="text-[11px] font-black uppercase tracking-widest font-cinzel text-red-400">
+          Couldn&apos;t load match data
         </span>
       </div>
-      <p className="text-[12px] leading-snug" style={{ color: "var(--color-on-surface-variant)" }}>
+      <p className="text-[12px] leading-snug text-gray-300">
         The saved setup, live state, or weather for this match failed to load from the database.
         Editing now risks overwriting existing data with blank defaults — retry before making changes.
         Check the browser console for details.
       </p>
       <button
         onClick={onRetry}
-        className="self-start px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide"
-        style={{
-          fontFamily: "var(--font-label-mono)",
-          background: "var(--color-error)",
-          color: "var(--color-on-primary)",
-        }}
+        className="self-start px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-wide font-cinzel bg-red-500 text-white hover:bg-red-600 transition-colors"
       >
         Retry
       </button>
@@ -868,22 +823,15 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
     liveState.score.runs > 0 || liveState.score.wickets > 0 || liveState.score.overs > 0 || liveState.score.balls > 0;
 
   return (
-    <div className="min-h-screen w-full" style={{ background: "var(--color-background)", color: "var(--color-on-background)" }}>
-      <div
-        className="fixed inset-0 pointer-events-none"
-        style={{
-          zIndex: 0,
-        }}
-      />
+    <div className="min-h-screen w-full bg-black text-white">
+      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_top,_rgba(245,166,35,0.06),_transparent_55%)]" style={{ zIndex: 0 }} />
 
-      <div className="relative z-10 mb-0 lg:mb-6 flex flex-col gap-6 sm:gap-8">
+      <div className="relative z-10 max-w-[1600px] mx-auto px-4 sm:px-6 py-6 mb-0 lg:mb-6 flex flex-col gap-6 sm:gap-8">
         {/* ── Header — now IS the On Air panel. On desktop it's the full
             styled row inline; on mobile OnAirChannels renders a compact
             trigger pill instead that opens a bottom-sheet overlay, so it
             never has to be manually collapsed/expanded here. ── */}
-        <div
-          className=""
-        >
+        <div>
           <OnAirChannels ref={onAirRef} fire={fire} matchId={matchId} />
         </div>
 
@@ -936,24 +884,9 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                     LockedSummaryBar, so it never competes for space with
                     Live State either. */}
                 {matchSetupEditing ? (
-                  <div
-                    className="rounded-xl p-6 text-center"
-                    style={{
-                      background: "var(--color-surface-glass)",
-                      backdropFilter: "blur(24px)",
-                      border: "1px dashed var(--color-border-overlay)",
-                    }}
-                  >
-                    <span
-                      className="material-symbols-outlined block mx-auto mb-2"
-                      style={{ fontSize: 22, color: "var(--color-outline)" }}
-                    >
-                      edit_note
-                    </span>
-                    <p
-                      className="text-[11px] uppercase tracking-widest"
-                      style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-                    >
+                  <div className="rounded-xl p-6 text-center bg-black/50 backdrop-blur-xl border border-dashed border-gold/20">
+                    <PenLine className="h-5 w-5 mx-auto mb-2 text-gray-500" />
+                    <p className="text-[11px] uppercase tracking-widest font-cinzel text-gray-500">
                       Live scoring is hidden while Match Setup is open — push or close it above to come back
                     </p>
                   </div>
@@ -980,24 +913,9 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                     onEngineStateChange={handleEngineStateChange}
                   />
                 ) : (
-                  <div
-                    className="rounded-xl p-6 text-center"
-                    style={{
-                      background: "var(--color-surface-glass)",
-                      backdropFilter: "blur(24px)",
-                      border: "1px dashed var(--color-border-overlay)",
-                    }}
-                  >
-                    <span
-                      className="material-symbols-outlined block mx-auto mb-2"
-                      style={{ fontSize: 22, color: "var(--color-outline)" }}
-                    >
-                      scoreboard
-                    </span>
-                    <p
-                      className="text-[11px] uppercase tracking-widest"
-                      style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-outline)" }}
-                    >
+                  <div className="rounded-xl p-6 text-center bg-black/50 backdrop-blur-xl border border-dashed border-gold/20">
+                    <TrophyIcon className="h-5 w-5 mx-auto mb-2 text-gray-500" />
+                    <p className="text-[11px] uppercase tracking-widest font-cinzel text-gray-500">
                       Push Match Setup above to unlock live scoring
                     </p>
                   </div>
@@ -1006,7 +924,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
             )}
           </div>
 
-          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh + 3rem)] lg:overflow-y-auto lg:pr-1 log-scroll">
+          <aside className="w-full lg:w-[380px] flex-shrink-0 flex flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh_+_3rem)] lg:overflow-y-auto lg:pr-1">
               <div className="hidden md:block">
                 <ProgramMonitor overlayUrl={overlayUrl} />
               </div>
@@ -1018,36 +936,21 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                   <button
                     type="button"
                     onClick={() => setShowMoments((v) => !v)}
-                    className="flex items-center justify-between w-full rounded-lg px-3 py-2.5 sm:py-2 transition-colors"
-                    style={{
-                      background: "var(--color-surface-container-low)",
-                      border: "1px solid var(--color-border-overlay)",
-                    }}
+                    className="flex items-center justify-between w-full rounded-lg px-3 py-2.5 sm:py-2 transition-colors bg-white/[0.02] border border-gold/10 hover:border-gold/30"
                   >
-                    <span
-                      className="text-[11px] font-black uppercase tracking-widest"
-                      style={{ fontFamily: "var(--font-label-mono)" }}
-                    >
+                    <span className="text-[11px] font-black uppercase tracking-widest font-cinzel text-gray-300">
                       Show Moments Controls
                     </span>
 
                     <ChevronDown
                       size={18}
-                      className={`transition-transform duration-200 ${
-                        showMoments ? "rotate-180" : ""
-                      }`}
+                      className={`text-gray-500 transition-transform duration-200 ${showMoments ? "rotate-180" : ""}`}
                     />
                   </button>
 
                   {showMoments && (
                     <>
-                      <p
-                        className="text-[10px] leading-snug"
-                        style={{
-                          color: "var(--color-outline)",
-                          fontFamily: "var(--font-body-md)",
-                        }}
-                      >
+                      <p className="text-[10px] leading-snug text-gray-500">
                         Four, Six, Fifty and Hundred now also fire automatically from the
                         ball pad in the Scorer panel — these buttons are still here for
                         manual/backup firing. Maiden overs fire automatically too, and the
@@ -1099,13 +1002,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                       />
 
                       <div className="flex flex-col gap-2 pt-1">
-                        <span
-                          className="text-[9px] font-bold uppercase tracking-widest"
-                          style={{
-                            fontFamily: "var(--font-label-mono)",
-                            color: "var(--color-outline)",
-                          }}
-                        >
+                        <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-500">
                           Fifty / Hundred for
                         </span>
 
@@ -1127,31 +1024,13 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                       </div>
 
                       {showWicketForm && (
-                        <div
-                          className="flex flex-col gap-3 p-4 rounded-lg mt-1"
-                          style={{
-                            background: "var(--color-error-container)",
-                            border: "1px solid rgba(255,180,171,0.25)",
-                          }}
-                        >
-                          <span
-                            className="text-[10px] font-black uppercase tracking-widest"
-                            style={{
-                              fontFamily: "var(--font-label-mono)",
-                              color: "var(--color-error)",
-                            }}
-                          >
+                        <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-red-500/[0.06] border border-red-400/25">
+                          <span className="text-[10px] font-black uppercase tracking-widest font-cinzel text-red-400">
                             Wicket Detail
                           </span>
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Batsman Out
                             </span>
 
@@ -1183,13 +1062,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Dismissal
                             </span>
 
@@ -1202,12 +1075,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                                     e.target.value as WicketDraft["dismissalType"],
                                 }))
                               }
-                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                              style={{
-                                background: "var(--color-surface-container-low)",
-                                border: "1px solid var(--color-border-overlay)",
-                                color: "var(--color-on-surface)",
-                              }}
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-gold/10 text-gray-100"
                             >
                               <option value="bowled">Bowled</option>
                               <option value="caught">Caught</option>
@@ -1219,13 +1087,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Fielder (if any)
                             </span>
 
@@ -1238,31 +1100,18 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                                 }))
                               }
                               placeholder="Fielder name"
-                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                              style={{
-                                background: "var(--color-surface-container-low)",
-                                border: "1px solid var(--color-border-overlay)",
-                                color: "var(--color-on-surface)",
-                              }}
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-gold/10 text-gray-100 placeholder:text-gray-600"
                             />
                           </div>
 
-                          <p
-                            className="text-[10px]"
-                            style={{ color: "var(--color-outline)" }}
-                          >
+                          <p className="text-[10px] text-gray-500">
                             Bowler pulled automatically from Live State:{" "}
                             {liveState.bowler.name || "—"}
                           </p>
 
                           <button
                             onClick={fireWicketMoment}
-                            className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
-                            style={{
-                              fontFamily: "var(--font-label-mono)",
-                              background: "var(--color-error)",
-                              color: "var(--color-on-primary)",
-                            }}
+                            className="w-full py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-cinzel bg-red-500 text-white hover:bg-red-600 transition-colors"
                           >
                             Fire Wicket
                           </button>
@@ -1270,31 +1119,13 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                       )}
 
                       {showMatchWonForm && (
-                        <div
-                          className="flex flex-col gap-3 p-4 rounded-lg mt-1"
-                          style={{
-                            background: "rgba(201,151,31,0.08)",
-                            border: "1px solid rgba(201,151,31,0.3)",
-                          }}
-                        >
-                          <span
-                            className="text-[10px] font-black uppercase tracking-widest"
-                            style={{
-                              fontFamily: "var(--font-label-mono)",
-                              color: "var(--color-theme-orange)",
-                            }}
-                          >
+                        <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-gold/[0.06] border border-gold/25">
+                          <span className="text-[10px] font-black uppercase tracking-widest font-cinzel text-gold">
                             Match Won Detail
                           </span>
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Winning Team
                             </span>
 
@@ -1310,28 +1141,16 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                                   key={opt.key}
                                   type="button"
                                   onClick={() => setMatchWonDraft((p) => ({ ...p, winner: opt.key }))}
-                                  className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all"
-                                  style={{
-                                    background:
-                                      matchWonDraft.winner === opt.key
-                                        ? "rgba(201,151,31,0.16)"
-                                        : "var(--color-surface-container-low)",
-                                    border: `1px solid ${
-                                      matchWonDraft.winner === opt.key
-                                        ? "rgba(201,151,31,0.5)"
-                                        : "var(--color-border-overlay)"
-                                    }`,
-                                  }}
+                                  className={`flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all border ${
+                                    matchWonDraft.winner === opt.key
+                                      ? "bg-gold/[0.16] border-gold/50"
+                                      : "bg-white/[0.02] border-gold/10 hover:border-gold/25"
+                                  }`}
                                 >
                                   <span
-                                    className="text-[11px] font-bold truncate max-w-full"
-                                    style={{
-                                      fontFamily: "var(--font-label-mono)",
-                                      color:
-                                        matchWonDraft.winner === opt.key
-                                          ? "var(--color-theme-orange)"
-                                          : "var(--color-on-surface)",
-                                    }}
+                                    className={`text-[11px] font-bold font-cinzel truncate max-w-full ${
+                                      matchWonDraft.winner === opt.key ? "text-gold" : "text-gray-100"
+                                    }`}
                                   >
                                     {opt.label}
                                   </span>
@@ -1342,13 +1161,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
 
                           {matchWonDraft.winner === "custom" && (
                             <div className="flex flex-col gap-1.5">
-                              <span
-                                className="text-[9px] font-bold uppercase tracking-widest"
-                                style={{
-                                  fontFamily: "var(--font-label-mono)",
-                                  color: "var(--color-on-surface-variant)",
-                                }}
-                              >
+                              <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                                 Team Name
                               </span>
                               <input
@@ -1357,47 +1170,25 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                                   setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))
                                 }
                                 placeholder="Winning team name"
-                                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                                style={{
-                                  background: "var(--color-surface-container-low)",
-                                  border: "1px solid var(--color-border-overlay)",
-                                  color: "var(--color-on-surface)",
-                                }}
+                                className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-gold/10 text-gray-100 placeholder:text-gray-600"
                               />
                             </div>
                           )}
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Margin / Result Text
                             </span>
                             <input
                               value={matchWonDraft.margin}
                               onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
                               placeholder="e.g. won by 4 wickets"
-                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                              style={{
-                                background: "var(--color-surface-container-low)",
-                                border: "1px solid var(--color-border-overlay)",
-                                color: "var(--color-on-surface)",
-                              }}
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-gold/10 text-gray-100 placeholder:text-gray-600"
                             />
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest"
-                              style={{
-                                fontFamily: "var(--font-label-mono)",
-                                color: "var(--color-on-surface-variant)",
-                              }}
-                            >
+                            <span className="text-[9px] font-bold uppercase tracking-widest font-cinzel text-gray-400">
                               Method
                             </span>
                             <select
@@ -1408,12 +1199,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                                   method: e.target.value as "batting" | "bowling" | "tie" | "runs" | "wickets",
                                 }))
                               }
-                              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                              style={{
-                                background: "var(--color-surface-container-low)",
-                                border: "1px solid var(--color-border-overlay)",
-                                color: "var(--color-on-surface)",
-                              }}
+                              className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-gold/10 text-gray-100"
                             >
                               <option value="batting">Chasing side won (by wickets)</option>
                               <option value="bowling">Defending side won (by runs)</option>
@@ -1421,7 +1207,7 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
                             </select>
                           </div>
 
-                          <p className="text-[10px]" style={{ color: "var(--color-outline)" }}>
+                          <p className="text-[10px] text-gray-500">
                             {liveState.matchResult
                               ? "Pre-filled from the last computed result — the graphic already fired automatically. Edit and re-fire if it needs a correction."
                               : "No result on record yet — fill this in by hand to fire early."}
@@ -1429,25 +1215,14 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
 
                           <button
                             onClick={fireMatchWonMomentFromForm}
-                            className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
-                            style={{
-                              fontFamily: "var(--font-label-mono)",
-                              background: "var(--color-theme-orange)",
-                              color: "var(--color-on-primary)",
-                            }}
+                            className="w-full py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-cinzel bg-gold text-black hover:bg-gold/90 transition-colors"
                           >
                             Fire Match Won
                           </button>
                         </div>
                       )}
 
-                      <p
-                        className="text-[10px] pt-1"
-                        style={{
-                          color: "var(--color-outline)",
-                          fontFamily: "var(--font-body-md)",
-                        }}
-                      >
+                      <p className="text-[10px] pt-1 text-gray-500">
                         Milestone and wicket graphics auto-hide after a few seconds — no need
                         to turn them off. Maiden pulls the bowler currently set in Live
                         State. Match Won fires automatically the instant the match is
@@ -1465,12 +1240,10 @@ function OverlayAdminPageContent({ auctionId }: { auctionId: string }) {
               <Section title="Event Log">
                 <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
                   {log.length === 0 ? (
-                    <p className="text-[11px]" style={{ color: "var(--color-outline)", fontFamily: "var(--font-body-md)" }}>
-                      Nothing fired yet.
-                    </p>
+                    <p className="text-[11px] text-gray-500">Nothing fired yet.</p>
                   ) : (
                     log.map((l, i) => (
-                      <div key={i} className="text-[11px]" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-on-surface-variant)" }}>
+                      <div key={i} className="text-[11px] font-cinzel text-gray-400">
                         {l}
                       </div>
                     ))
