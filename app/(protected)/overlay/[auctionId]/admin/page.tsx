@@ -1,3 +1,5 @@
+"use client";
+
 import { use, useEffect, useState } from "react";
 import OverlayAdminConsole from "@/components/overlays/admin/new/OverlayAdminConsole";
 import { getOrCreateMatch } from "@/lib/matchPersistence";
