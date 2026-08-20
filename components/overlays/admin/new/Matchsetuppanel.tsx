@@ -877,6 +877,7 @@ export interface MatchSetupPanelProps {
       Desktop layout is untouched: don't pass this prop (or render
       WeatherPanel separately) for the desktop column. */
   mobileWeatherSlot?: React.ReactNode;
+  tournamentLogoUrl?: string;
 }
 
 export default function MatchSetupPanel({
@@ -1099,8 +1100,10 @@ export default function MatchSetupPanel({
             </div>
 
             <div className="col-span-2">
+              <div className="mb-1.5 font-mono-geist text-[10px] uppercase tracking-[0.1em]" style={{ color: "#9ca3af" }}>
+                Venue
+              </div>
               <LocationAutocompleteInput
-                label="Venue"
                 value={matchSetup.venue}
                 onChange={(v) => setMatchSetup((p) => ({ ...p, venue: v }))}
                 onSelect={onVenueSelect}

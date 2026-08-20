@@ -30,6 +30,7 @@ interface TeamInfo {
   code:  string;
   color: string;
   logo:  string;
+  logoUrl?: string;
 }
 
 // ── derived helpers ───────────────────────────────────────────────────────────
