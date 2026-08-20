@@ -572,7 +572,7 @@ export default function ScoringSection({
 
         <div className="grid grid-cols-4 sm:[grid-template-columns:repeat(auto-fit,minmax(120px,1fr))] gap-2 sm:gap-3 shrink-0">
           {statCards.map((s) => (
-            <div key={s.label} className="rounded-xl px-3 sm:px-4 py-2 sm:py-3 glass-panel">
+            <div key={s.label} className="rounded-xl px-2 sm:px-4 py-2 sm:py-3 glass-panel">
               <p className="font-mono-geist text-[8.5px] sm:text-[9px] text-on-surface-variant uppercase tracking-[0.16em] font-bold mb-0.5 sm:mb-1">{s.label}</p>
               <p className="font-archivo text-base sm:text-lg font-bold tabular-nums">{s.value}</p>
             </div>
