@@ -1407,7 +1407,7 @@ export default function OverlayAdminConsole({
               </div>
             )}
           </div>
-          <div className="px-4 mb-12 lg:mb-4 shrink-0">
+            <div className={`px-4 mb-12 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} lg:block`}>
             <WeatherPanel
                 weather={weather}
                 setWeather={setWeather}
@@ -1418,7 +1418,7 @@ export default function OverlayAdminConsole({
                 mobileTab={mobileTab}
                 desktopVisible={!matchSetupEditing}
             />
-          </div>
+            </div>
         </aside>
       </main>
 
