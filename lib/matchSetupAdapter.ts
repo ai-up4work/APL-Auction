@@ -82,14 +82,11 @@ function squadPlayersFromDb(squads: DbSquad[] | undefined, teamId: "team1" | "te
 function overlayTeamFromDb(dbTeam: DbTeam | undefined, squads: DbSquad[] | undefined, teamId: "team1" | "team2"): TeamInfo {
   const squadPlayers = squadPlayersFromDb(squads, teamId)
   return {
-    // Deliberately left undefined — MatchSetupPanel already resolves
-    // this from name/shortCode against the `teams` table itself (see
-    // its resolveTeamId effect), so the adapter doesn't need to guess.
     teamId: undefined,
     name: dbTeam?.name ?? "",
     shortCode: dbTeam?.short ?? "",
     color: dbTeam?.color ?? DEFAULT_TEAM_COLOR,
-    logoUrl: dbTeam?.logo ?? undefined,
+    logoUrl: dbTeam?.logo ?? "",
     squadPlayers,
     squad: squadPlayers.map((p) => p.name),
   }
@@ -107,9 +104,6 @@ export function dbRowToOverlaySetup(raw: DbMatchSetupRow | null | undefined, fal
   const tossWinnerSide: "A" | "B" | "" =
     raw.tossWinner && raw.tossWinner === team1Name ? "A" : raw.tossWinner && raw.tossWinner === team2Name ? "B" : ""
 
-  // DB keeps date/time separate; overlay only has one free-text
-  // kickoff field. Combine for display — this is lossy on the way
-  // back out (see the `time`-only note in overlaySetupToDbPatch).
   const kickoffTime = [raw.date, raw.time].filter(Boolean).join(" ").trim()
 
   return {
@@ -125,6 +119,8 @@ export function dbRowToOverlaySetup(raw: DbMatchSetupRow | null | undefined, fal
     teamB: overlayTeamFromDb(raw.team2, raw.squads, "team2"),
     tossWinner: tossWinnerSide || fallback.tossWinner,
     tossDecision: (raw.tossDecision as MatchSetup["tossDecision"]) ?? fallback.tossDecision,
+    matchMeta: fallback.matchMeta,
+    tournament: fallback.tournament,
   }
 }
 
@@ -148,7 +144,7 @@ function buildSquadPatch(team: TeamInfo, existingRaw: DbMatchSetupRow | null | u
     // The overlay UI has no captain field — always carry forward
     // whatever the Match Editor's Squads tab last set.
     captain: prevSquad?.captain ?? "",
-    players: team.squadPlayers.map((p) => {
+    players: team.squadPlayers?.map((p) => {
       const playerId = p.id.startsWith("manual:") ? undefined : p.id
       // Same reasoning as captain: role/XI are Match-Editor-owned
       // fields the overlay UI can't set, so preserve them for any
