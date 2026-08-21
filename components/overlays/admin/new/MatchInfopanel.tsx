@@ -282,11 +282,11 @@ function DrawerSection({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           {headerExtra}
-          <Icon
+          {/* <Icon
             name="chevron_right"
             className={`text-on-surface-variant transition-transform duration-200 ${mobileAlwaysOpen ? "hidden lg:inline-flex" : ""}`}
             style={{ fontSize: 16, transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-          />
+          /> */}
         </div>
       </button>
       <div className={`flex-col p-4 gap-3 lg:gap-2.5 min-h-0 lg:flex-1 overflow-y-auto ${HIDE_SCROLLBAR} ${contentVisibilityClass}`}>

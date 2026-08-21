@@ -1196,7 +1196,11 @@ export default function OverlayAdminConsole({
               `desktopRightTab === "overlay"` (the second of the two
               desktop tabs, alongside "Match Info" for Setup).
               ════════════════════════════════════════════════════════════ */}
-          <div className={`flex-col min-h-0 lg:contents ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
+          <div
+            className={`flex-col min-h-0 max-h-[calc(100dvh-6rem)] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:max-h-none lg:overflow-visible lg:contents ${
+              mobileTab === "overlay" ? "flex" : "hidden"
+            }`}
+          >
             {/* Broadcast Channels */}
             <div className="p-4 shrink-0 lg:hidden flex flex-col gap-2.5">
               <div>
@@ -1239,12 +1243,64 @@ export default function OverlayAdminConsole({
                   (this whole block only renders there when mobileTab ===
                   "overlay"), and on desktop whenever the "Overlay" tab is
                   the active one of the two desktop tabs. */}
-              <div className={`shrink-0 px-4 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
+              <div className={`shrink-0 pt-4 px-4 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
                 <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Overlay Advanced</h3>
-                <p className="font-mono-geist hidden lg:block text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
+                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
                   Moments &amp; live weather, together in one view.
                 </p>
               </div>
+
+              {/* Mobile: a compact Weather trigger row instead of the full
+                  panel inline. Tapping it opens WeatherPanel inside a
+                  centered overlay (see CenteredOverlay above). Deliberately
+                  placed ABOVE Moments — Weather is the thing operators check
+                  most often, so it stays reachable near the top of the
+                  mobile Overlay tab even if Moments or other sections get
+                  pushed below the fold on shorter screens. Desktop is
+                  untouched: the desktop inline Weather panel further below
+                  keeps its original position alongside Moments. */}
+              <div className="px-4 shrink-0 lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setWeatherOverlayOpen(true)}
+                  className="w-full flex items-center justify-between gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] active:scale-[0.98] transition-all"
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.3)" }}
+                    >
+                      <Icon name="partly_cloudy_day" style={{ fontSize: 16, color: "#22c55e" }} />
+                    </span>
+                    <span className="flex flex-col items-start min-w-0">
+                      <span className="font-archivo text-sm font-bold text-on-surface truncate">Weather</span>
+                      <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
+                        {weather.venue} · {weather.temp}°
+                      </span>
+                    </span>
+                  </span>
+                  <Icon name="chevron_right" className="text-on-surface-variant shrink-0" style={{ fontSize: 16 }} />
+                </button>
+              </div>
+
+              <CenteredOverlay
+                open={weatherOverlayOpen}
+                onClose={() => setWeatherOverlayOpen(false)}
+                title="Weather"
+                icon="partly_cloudy_day"
+                iconColor="#22c55e"
+              >
+                <WeatherPanel
+                  weather={weather}
+                  setWeather={setWeather}
+                  weatherEditing={true}
+                  setWeatherEditing={setWeatherEditing}
+                  pushLog={pushLog}
+                  fireToast={fireToast}
+                  mobileTab={mobileTab}
+                  desktopVisible={desktopRightTab === "overlay"}
+                />
+              </CenteredOverlay>
 
               {/* ── Moments (desktop tab: "overlay", shown together with Weather) ── */}
               <div className={`px-4 shrink-0 flex flex-col lg:min-h-0 lg:overflow-hidden ${desktopRightTab === "overlay" ? "lg:flex lg:flex-1" : "lg:hidden"}`}>
@@ -1464,56 +1520,6 @@ export default function OverlayAdminConsole({
                   desktopVisible={desktopRightTab === "overlay"}
                 />
               </div>
-
-              {/* Mobile: a compact trigger row instead of the full panel
-                  inline. Tapping it opens WeatherPanel inside a centered
-                  overlay (see CenteredOverlay above). This is what keeps
-                  the "Overlay" tab short enough to fit on one mobile
-                  screen without scrolling — Moments + this trigger now
-                  comfortably fit under Broadcast Channels with no
-                  internal scroll region needed. */}
-              <div className="px-4 shrink-0 lg:hidden">
-                <button
-                  type="button"
-                  onClick={() => setWeatherOverlayOpen(true)}
-                  className="w-full flex items-center justify-between gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] active:scale-[0.98] transition-all"
-                >
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.3)" }}
-                    >
-                      <Icon name="partly_cloudy_day" style={{ fontSize: 16, color: "#22c55e" }} />
-                    </span>
-                    <span className="flex flex-col items-start min-w-0">
-                      <span className="font-archivo text-sm font-bold text-on-surface truncate">Weather</span>
-                      <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
-                        {weather.venue} · {weather.temp}°
-                      </span>
-                    </span>
-                  </span>
-                  <Icon name="chevron_right" className="text-on-surface-variant shrink-0" style={{ fontSize: 16 }} />
-                </button>
-              </div>
-
-              <CenteredOverlay
-                open={weatherOverlayOpen}
-                onClose={() => setWeatherOverlayOpen(false)}
-                title="Weather"
-                icon="partly_cloudy_day"
-                iconColor="#22c55e"
-              >
-                <WeatherPanel
-                  weather={weather}
-                  setWeather={setWeather}
-                  weatherEditing={true}
-                  setWeatherEditing={setWeatherEditing}
-                  pushLog={pushLog}
-                  fireToast={fireToast}
-                  mobileTab={mobileTab}
-                  desktopVisible={desktopRightTab === "overlay"}
-                />
-              </CenteredOverlay>
             </div>
           </div>
         </aside>
