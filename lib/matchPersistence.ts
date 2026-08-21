@@ -82,6 +82,7 @@ export interface BallInsert {
   batsmanOut?: string;
   fielder?: string;
   isFreeHit: boolean;
+  noBallRunOrigin?: string;
 }
 
 // Fire-and-forget by design — callers don't await this on the scoring

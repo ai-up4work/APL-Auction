@@ -6,9 +6,10 @@ import { createPortal } from "react-dom";
 import CricketBall from "@/components/overlays/shared/CricketBall";
 import {
   useLiveScoringEngine,
-  EXTRA_OPTIONS, // { key: ExtraType, label: string }[] — e.g. {key:"none",label:"Legal"},{key:"wide",label:"Wide"},{key:"noBall",label:"No Ball"},{key:"bye",label:"Bye"},{key:"legBye",label:"Leg Bye"}
+  EXTRA_OPTIONS,
+  NO_BALL_RUN_ORIGIN_OPTIONS,
   getValidDismissalOptions,
-  isDismissalLockedToRunOutOnly,
+  isDismissalRestricted,
 } from "@/hooks/useLiveScoringEngine";
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
@@ -33,7 +34,6 @@ function Icon({ name, className = "", style }) {
   );
 }
 
-/* ── "This Over" ball styling — unchanged from the original design ── */
 const OVER_BALL_STYLES = {
   wicket: {
     fill: "radial-gradient(circle at 32% 26%, #f87171 0%, #dc2626 45%, #7f1d1d 85%, #450a0a 100%)",
@@ -57,17 +57,17 @@ const OVER_BALL_STYLES = {
   },
 };
 
-// NEW — normalizes an entry from liveState.thisOver (which stores ball
-// display values as produced by the engine: "W", "wd", "nb", ".", or a
-// numeric-string run count) into whatever ballOutcome() below expects
-// (numbers for runs, "W"/"Wd"/"Nb"/"Lb"/"By" for everything else). The
-// engine's ledger format and this component's original display format
-// predate each other, so this is the one place they're reconciled.
+// FIX — now also recognizes the "nb+b" / "nb+lb" combo tokens produced
+// by the engine for No Ball + Bye / No Ball + Leg Bye deliveries.
+// Previously these strings would have fallen through to the generic
+// Number(raw) branch, produced NaN, and rendered as a blank/garbled ball.
 function normalizeOverEntry(raw) {
   if (raw == null) return null;
   if (raw === "W") return "W";
   if (raw === "wd" || raw === "Wd") return "Wd";
   if (raw === "nb" || raw === "Nb") return "Nb";
+  if (raw === "nb+b") return "Nb+B";
+  if (raw === "nb+lb") return "Nb+LB";
   if (raw === "b" || raw === "By" || raw === "bye") return "By";
   if (raw === "lb" || raw === "Lb" || raw === "legBye") return "Lb";
   if (raw === ".") return 0;
@@ -79,6 +79,8 @@ function ballOutcome(entry) {
   if (entry === "W") return { kind: "wicket", label: "W" };
   if (entry === "Wd") return { kind: "extra", label: "wd" };
   if (entry === "Nb") return { kind: "extra", label: "nb" };
+  if (entry === "Nb+B") return { kind: "extra", label: "nb+b" };
+  if (entry === "Nb+LB") return { kind: "extra", label: "nb+lb" };
   if (entry === "Lb") return { kind: "extra", label: "lb" };
   if (entry === "By") return { kind: "extra", label: "b" };
   if (entry === 4 || entry === 6) return { kind: "boundary", label: String(entry) };
@@ -97,15 +99,14 @@ function OverBall({ entry }) {
   }
   const { kind, label } = ballOutcome(entry);
   const style = OVER_BALL_STYLES[kind];
+  const isCombo = label.length > 3;
   return (
     <CricketBall size={20} fill={style.fill} seamColor={style.seamColor}>
-      <span style={{ fontSize: 9, fontWeight: 700, color: style.textColor, lineHeight: 1 }}>{label}</span>
+      <span style={{ fontSize: isCombo ? 6.5 : 9, fontWeight: 700, color: style.textColor, lineHeight: 1 }}>{label}</span>
     </CricketBall>
   );
 }
 
-/* ── mobile bottom sheet: selects a full SquadPlayer object,
-     not just a name string, since engine.assignPlayer needs it ── */
 function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismissedNames, roleByName }) {
   return (
     <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -179,11 +180,6 @@ function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismi
   );
 }
 
-/* ── the crew slot itself — visual design unchanged. Drag/drop carries
-     a player id (looked up against `allPlayers`) instead of a bare
-     name, since assignment needs the full object. The drag SOURCE
-     (the roster list in page.tsx) must set "text/player-id" with a
-     real SquadPlayer.id for this to work — see page.tsx. ── */
 function CrewSlot({
   title, accentColor, active, onActivate, displayName, imageUrl, statLine,
   allPlayers, onAssign, onClear, placeholder, dismissedNames, blockedName,
@@ -258,39 +254,71 @@ function CrewSlot({
         </span>
         <div className="flex flex-col min-w-0">
           <span className={`font-archivo font-bold truncate text-on-surface ${compact ? "text-[11px]" : "text-[12px]"}`}>{displayName || placeholder}</span>
-          {statLine && !compact && <span className="text-[10px] font-mono-geist text-on-surface-variant">{statLine}</span>}
+          {statLine && <span className={`font-mono-geist text-on-surface-variant truncate ${compact ? "text-[9px]" : "text-[10px]"}`}>{statLine}</span>}
         </div>
       </div>
     </div>
   );
 }
 
-/* ── admin/rare actions popover. Free Hit + extras flip real engine
-     state instead of firing a cosmetic toast. ── */
-function MoreActionsMenu({ onFreeHit, onAdminAction }) {
+function MoreActionsMenu({ onAdminAction, onPenaltyClick, disabled }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null);
+  const buttonRef = useRef(null);
+
   const items = [
-    { key: "FreeHit", label: "Free Hit", color: "#c4b5fd", action: onFreeHit },
-    { key: "Bonus", label: "Bonus", color: "#86efac", action: () => onAdminAction("Bonus") },
+    { key: "Penalty", label: "Penalty +5", color: "#fca5a5", action: onPenaltyClick },
     { key: "Injured", label: "Injured", color: "#fdba74", action: () => onAdminAction("Injured") },
     { key: "Abandon", label: "Abandon", color: "#fecaca", action: () => onAdminAction("Abandon") },
   ];
+
+  function reposition() {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setCoords({
+      bottom: Math.max(8, window.innerHeight - rect.top + 8),
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }
+
+  function toggleOpen() {
+    if (disabled) return;
+    if (!open) reposition();
+    setOpen((o) => !o);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
+        disabled={disabled}
         aria-haspopup="true"
         aria-expanded={open}
-        className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 border flex items-center justify-center gap-1"
+        className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 border flex items-center justify-center gap-1 disabled:opacity-35 disabled:cursor-not-allowed"
         style={{ fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}
       >
         More <Icon name={open ? "expand_less" : "expand_more"} style={{ fontSize: "1.1em" }} />
       </button>
-      {open && (
+      {open && !disabled && coords && typeof document !== "undefined" && createPortal(
         <>
           <div className="fixed inset-0 z-[199]" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full right-0 mb-2 z-[200] w-40 rounded-xl border border-white/10 bg-surface-container-lowest p-1.5 shadow-xl">
+          <div
+            className="fixed z-[200] w-40 rounded-xl border border-white/10 bg-surface-container-lowest p-1.5 shadow-xl"
+            style={{ bottom: coords.bottom, right: coords.right }}
+          >
             {items.map((it) => (
               <button
                 type="button"
@@ -303,13 +331,13 @@ function MoreActionsMenu({ onFreeHit, onAdminAction }) {
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
 }
 
-/* ── Wicket Detail dialog ── */
 function BatterPickerButton({ batter, label, selected, onClick }) {
   return (
     <button
@@ -357,24 +385,47 @@ function CenteredOverlay({ open, onClose, title, icon, iconColor = "#e8c468", ch
   );
 }
 
-function WicketDetailDialog({ pending, onResolve }) {
+// FIX — this dialog no longer resolves (records) a wicket on close.
+// `onCancel` is now called from the CenteredOverlay's onClose (both the
+// backdrop click and the X button), and it does nothing but discard the
+// in-progress selection — no dismissal is recorded, no defaults are
+// applied. Only the explicit "Fire Wicket Graphic" button below calls
+// onResolve, and only once the scorer has actually made a choice.
+//
+// Banner logic also now derived directly from extraType/isFreeHitActive
+// via isDismissalRestricted instead of a boolean that used to claim a
+// Free Hit was "locked to Run Out only" (no longer true — Obstructing
+// the Field and Retired Out are valid on a Free Hit too).
+function WicketDetailDialog({ pending, onResolve, onCancel }) {
   const [batsmanOut, setBatsmanOut] = useState("striker");
   const options = getValidDismissalOptions(pending.extraType, pending.isFreeHitActive);
-  const lockedToRunOutOnly = isDismissalLockedToRunOutOnly(pending.extraType, pending.isFreeHitActive);
+  const restricted = isDismissalRestricted(pending.extraType, pending.isFreeHitActive);
+  const isByeType = pending.extraType === "bye" || pending.extraType === "legBye";
+  const isNbCombo = pending.extraType === "noBall" && pending.noBallRunOrigin !== "bat";
   const [dismissalType, setDismissalType] = useState(options[0].value);
   const [fielder, setFielder] = useState("");
   const [runsCompleted, setRunsCompleted] = useState(0);
 
+  const bannerText = pending.extraType === "noBall"
+    ? "🔵 No Ball — Bowled, Caught, LBW, Stumped, and Hit Wicket aren't valid here"
+    : pending.isFreeHitActive
+    ? "🔓 Free Hit — Bowled, Caught, LBW, Stumped, and Hit Wicket aren't valid here"
+    : pending.extraType === "wide"
+    ? "🔵 Wide — Bowled, Caught, and LBW aren't valid here"
+    : isByeType
+    ? `🔵 ${pending.extraType === "bye" ? "Bye" : "Leg Bye"} — Bowled, Caught, and LBW aren't valid here`
+    : null;
+
   return (
-    <CenteredOverlay open onClose={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)} title="Wicket Detail" icon="sports_cricket" iconColor="#f87171">
-      {lockedToRunOutOnly && (
+    <CenteredOverlay open onClose={onCancel} title="Wicket Detail" icon="sports_cricket" iconColor="#f87171">
+      {restricted && bannerText && (
         <div className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-mono-geist" style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#93c5fd" }}>
-          🔓 {pending.extraType === "noBall" ? "No Ball" : "Free Hit"} — only Run Out is valid
+          {bannerText}
         </div>
       )}
-      {!lockedToRunOutOnly && pending.extraType === "wide" && (
-        <div className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-mono-geist" style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#93c5fd" }}>
-          🔵 Wide — Bowled, Caught, and LBW aren&apos;t valid here
+      {isNbCombo && (
+        <div className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-mono-geist" style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.3)", color: "#7dd3fc" }}>
+          🔵 No Ball + {pending.noBallRunOrigin === "bye" ? "Bye" : "Leg Bye"} — completed runs count as extras, not off the bat
         </div>
       )}
 
@@ -388,14 +439,27 @@ function WicketDetailDialog({ pending, onResolve }) {
 
       <div className="flex flex-col gap-1.5">
         <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
-        <select
-          value={dismissalType}
-          disabled={options.length === 1}
-          onChange={(e) => setDismissalType(e.target.value)}
-          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
-        >
-          {options.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-        </select>
+        <div className="grid grid-cols-2 gap-2">
+          {options.map((d) => {
+            const selected = dismissalType === d.value;
+            const onlyOption = options.length === 1;
+            return (
+              <button
+                key={d.value}
+                type="button"
+                onClick={() => !onlyOption && setDismissalType(d.value)}
+                className="px-3 py-2.5 rounded-lg text-left text-[11.5px] font-archivo font-bold border transition-all"
+                style={
+                  selected
+                    ? { background: "rgba(201,151,31,0.14)", borderColor: "rgba(201,151,31,0.5)", color: "#e8c468" }
+                    : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "#e5e7eb", cursor: onlyOption ? "default" : "pointer" }
+                }
+              >
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {dismissalType === "runOut" && (
@@ -427,19 +491,88 @@ function WicketDetailDialog({ pending, onResolve }) {
         />
       </div>
 
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide bg-white/[0.02] border border-white/10 text-on-surface"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onResolve(batsmanOut, dismissalType, fielder, runsCompleted)}
+          className="flex-1 py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+          style={{ background: "#ef4444", color: "#fff" }}
+        >
+          Fire Wicket Graphic
+        </button>
+      </div>
+    </CenteredOverlay>
+  );
+}
+
+function PenaltyDialog({ battingTeamLabel, bowlingTeamLabel, onConfirm, onClose }) {
+  const [team, setTeam] = useState("batting");
+  const [description, setDescription] = useState("");
+
+  return (
+    <CenteredOverlay open onClose={onClose} title="Add Penalty" icon="gavel" iconColor="#fca5a5">
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Award +5 To</span>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setTeam("batting")}
+            className="px-3 py-2.5 rounded-lg text-left text-[11.5px] font-archivo font-bold border transition-all"
+            style={
+              team === "batting"
+                ? { background: "rgba(201,151,31,0.14)", borderColor: "rgba(201,151,31,0.5)", color: "#e8c468" }
+                : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "#e5e7eb" }
+            }
+          >
+            {battingTeamLabel}
+            <span className="block font-mono-geist text-[8.5px] font-normal uppercase tracking-wide opacity-70 mt-0.5">Batting</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTeam("bowling")}
+            className="px-3 py-2.5 rounded-lg text-left text-[11.5px] font-archivo font-bold border transition-all"
+            style={
+              team === "bowling"
+                ? { background: "rgba(201,151,31,0.14)", borderColor: "rgba(201,151,31,0.5)", color: "#e8c468" }
+                : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "#e5e7eb" }
+            }
+          >
+            {bowlingTeamLabel}
+            <span className="block font-mono-geist text-[8.5px] font-normal uppercase tracking-wide opacity-70 mt-0.5">Bowling</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Description (optional)</span>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+          placeholder="e.g. Fielder encroached on the pitch"
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant resize-none"
+        />
+      </div>
+
       <button
         type="button"
-        onClick={() => onResolve(batsmanOut, true, dismissalType, fielder, runsCompleted)}
+        onClick={() => onConfirm(team, description)}
         className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
         style={{ background: "#ef4444", color: "#fff" }}
       >
-        Fire Wicket Graphic
+        Add +5 Penalty
       </button>
     </CenteredOverlay>
   );
 }
 
-/* ── Match Over screen ── */
 function MatchOverScreen({ winningTeamName, winningTeamLogo, margin, method, canUndo, onUndo, onRestart }) {
   const isTie = method === "tie";
   return (
@@ -506,7 +639,7 @@ export default function ScoringSection({
   onEngineStateChange,
   initialEngineState,
   onAdminAction,
-  onDismissedPlayersChange, // NEW — lets the parent mirror engine.dismissedPlayers for its own read-only roster display
+  onDismissedPlayersChange,
 }) {
   const battingTeamLabel = matchSetup[battingTeamKey];
   const bowlingTeamLabel = matchSetup[bowlingTeamKey];
@@ -530,13 +663,27 @@ export default function ScoringSection({
     initialEngineState,
   });
 
-  const [playerPicker, setPlayerPicker] = useState(null); // "striker" | "nonStriker" | "bowler" | null
+  const [playerPicker, setPlayerPicker] = useState(null);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const [showBowlerChangePrompt, setShowBowlerChangePrompt] = useState(false);
+  const [showPenaltyDialog, setShowPenaltyDialog] = useState(false);
 
-  // NEW — mirror dismissed players up to the parent so the standalone
-  // roster list (outside this component) can show OUT/locked state
-  // without owning its own copy of that state.
+  const prevOversRef = useRef(liveState.score.overs);
+  useEffect(() => {
+    const prevOvers = prevOversRef.current;
+    if (
+      prevOvers !== undefined &&
+      liveState.score.overs > prevOvers &&
+      liveState.score.balls === 0 &&
+      !liveState.matchComplete
+    ) {
+      setShowBowlerChangePrompt(true);
+    }
+    prevOversRef.current = liveState.score.overs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveState.score.overs, liveState.score.balls]);
+
   useEffect(() => {
     onDismissedPlayersChange?.(engine.dismissedPlayers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -565,26 +712,10 @@ export default function ScoringSection({
   const runsNeeded = liveState.target !== undefined ? Math.max(0, liveState.target - liveState.score.runs) : undefined;
   const requiredRate = runsNeeded !== undefined && ballsLeft ? ((runsNeeded / ballsLeft) * 6).toFixed(2) : undefined;
 
-  // FIX (bug #2) — previously read the non-existent liveState.bowler.nonStriker.
-  // The actual non-striker slot lives at liveState.nonStriker.
   const strikerNeedsReplacement = engine.noPartnerAvailable && !liveState.striker.name;
   const nonStrikerNeedsReplacement = engine.noPartnerAvailable && !liveState.nonStriker.name;
 
-  // FIX (bug #3) — "This Over" now reads directly from liveState.thisOver,
-  // which the engine builds and — critically — correctly reverts on
-  // engine.undo() (since undo() restores the whole liveState snapshot).
-  // The previous local `overBalls` shadow array was never touched by
-  // undo(), so the ball strip could show a ball that had just been
-  // undone everywhere else. No local mirror, no desync.
   const thisOverDisplay = liveState.thisOver ?? [];
-
-  function extraLabel(extraType) {
-    if (extraType === "wide") return "Wd";
-    if (extraType === "noBall") return "Nb";
-    if (extraType === "bye") return "By";
-    if (extraType === "legBye") return "Lb";
-    return null;
-  }
 
   const controlsLocked = engine.assignmentsMissing();
   const [localToasts, setLocalToasts] = useState([]);
@@ -593,14 +724,27 @@ export default function ScoringSection({
     const timers = localToastTimers.current;
     return () => { timers.forEach(clearTimeout); timers.clear(); };
   }, []);
-  function showAssignmentToast() {
+  function pushLocalToast(text, tone = "info") {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    setLocalToasts((prev) => [...prev, { id, text: "Pick a Striker, Non-Striker & Bowler first", tone: "wicket" }]);
+    setLocalToasts((prev) => [...prev, { id, text, tone }]);
     const timer = setTimeout(() => {
       setLocalToasts((prev) => prev.filter((t) => t.id !== id));
       localToastTimers.current.delete(id);
     }, 3200);
     localToastTimers.current.set(id, timer);
+  }
+  function showAssignmentToast() {
+    pushLocalToast("Pick a Striker, Non-Striker & Bowler first", "wicket");
+  }
+
+  function handlePenaltyConfirm(team, description) {
+    const teamLabel = team === "batting" ? battingTeamLabel : bowlingTeamLabel;
+    if (team === "batting") {
+      engine.patchLive({ score: { ...liveState.score, runs: liveState.score.runs + 5 } });
+    }
+    onAdminAction?.("Penalty", { runs: 5, team, teamLabel, description });
+    pushLocalToast(`⚖️ +5 Penalty — ${teamLabel}${description ? ` (${description})` : ""}`, "warning");
+    setShowPenaltyDialog(false);
   }
   function handleTapRun(n) {
     if (controlsLocked) return showAssignmentToast();
@@ -611,29 +755,30 @@ export default function ScoringSection({
     engine.recordWicket();
   }
 
-  // NEW — Wide / No Ball / Leg Bye promoted from the small "Extra" pill
-  // row into full tiles inside the main scoring pad, since during live
-  // scoring the two-tap "pick extra type, then tap runs" flow via tiny
-  // pills was slow and easy to mis-tap. Tapping a tile here just arms
-  // engine.extraType (tapping the same tile again disarms it back to
-  // "none") — the actual recordBall(n) call still happens exactly like
-  // before when a run number is tapped afterwards, so no engine changes
-  // needed. Bye stays as a small pill up in the header (not requested
-  // to move) since it's the least-used of the four extra types.
   const EXTRA_TILE_META = {
     wide: { abbr: "WD", icon: "open_in_full" },
     noBall: { abbr: "NB", icon: "front_hand" },
     legBye: { abbr: "LB", icon: "directions_run" },
+    bye: { abbr: "BY", icon: "directions_walk" },
   };
-  const extraGridTiles = EXTRA_OPTIONS.filter((o) => EXTRA_TILE_META[o.key]);
-  const byeOption = EXTRA_OPTIONS.find((o) => o.key === "bye");
+  const EXTRA_TILE_ORDER = ["wide", "noBall", "legBye", "bye"];
+  const extraGridTiles = EXTRA_TILE_ORDER
+    .map((key) => EXTRA_OPTIONS.find((o) => o.key === key))
+    .filter(Boolean);
   const armedExtra = engine.extraType && engine.extraType !== "none"
     ? EXTRA_OPTIONS.find((o) => o.key === engine.extraType)
     : null;
 
+  // Any armed extra blocks switching to a different one; the armed
+  // tile itself still toggles off normally (re-tap to cancel).
+  const extraArmed = engine.extraType !== "none";
+  const isNoBallArmed = engine.extraType === "noBall";
+
   function handleTapExtra(key) {
     if (controlsLocked) return showAssignmentToast();
+    if (extraArmed && engine.extraType !== key) return;
     engine.setExtraType(engine.extraType === key ? "none" : key);
+    if (key === "noBall") engine.setNoBallRunOrigin("bat");
   }
 
   const statCards = [
@@ -647,18 +792,11 @@ export default function ScoringSection({
   }
 
   return (
-    // CHANGED — mobile height is now bounded to the real viewport (100dvh,
-    // which tracks the visible viewport as mobile browser chrome
-    // collapses/expands, unlike 100vh) instead of growing unbounded with
-    // overflow-hidden clipping the excess behind the bottom nav. overflow-y-auto
-    // is a scroll fallback of last resort — the inner flex-1/min-h-0 block
-    // below is what actually does the dynamic shrinking.
     <section
       className={`order-1 lg:order-2 flex-col lg:h-full min-h-0 px-4 pt-4 sm:px-3 sm:pt-3 lg:p-4 gap-2.5 sm:gap-4
         ${mobileTab === "scoring" ? "flex fixed inset-0 overflow-hidden pb-[calc(80px+env(safe-area-inset-bottom))]" : "hidden"}
         lg:flex lg:static lg:h-full lg:overflow-hidden lg:pb-4`}
     >
-      {/* toasts — engine's own + local assignment reminders, one stack */}
       {typeof document !== "undefined" && createPortal(
         <div className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-[9999] flex flex-col-reverse gap-2 items-end pointer-events-none max-w-[calc(100vw-2rem)] sm:max-w-xs">
           {[...engine.toasts, ...localToasts].map((t) => (
@@ -680,7 +818,7 @@ export default function ScoringSection({
       )}
 
       {engine.pendingWicket && (
-        <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} />
+        <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} onCancel={engine.cancelWicket} />
       )}
 
       {playerPicker && (
@@ -709,11 +847,47 @@ export default function ScoringSection({
         </div>
       </CenteredOverlay>
 
+      {showPenaltyDialog && (
+        <PenaltyDialog
+          battingTeamLabel={battingTeamLabel}
+          bowlingTeamLabel={bowlingTeamLabel}
+          onConfirm={handlePenaltyConfirm}
+          onClose={() => setShowPenaltyDialog(false)}
+        />
+      )}
+
       <CenteredOverlay open={showRestartConfirm} onClose={() => setShowRestartConfirm(false)} title="Restart Match?" icon="restart_alt" iconColor="#e8c468">
         <p className="text-[12px] text-on-surface">Starts a fresh match with the same teams/squads. Score, overs, crew, and result reset. This can&apos;t be undone.</p>
         <div className="flex gap-2 mt-3">
           <button type="button" onClick={() => setShowRestartConfirm(false)} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-white/[0.02] border border-white/10 text-on-surface">Cancel</button>
           <button type="button" onClick={() => { engine.resetEngineState(); onRestartMatch?.(); setShowRestartConfirm(false); }} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-theme-orange text-black">Restart Match</button>
+        </div>
+      </CenteredOverlay>
+
+      <CenteredOverlay open={showBowlerChangePrompt} onClose={() => setShowBowlerChangePrompt(false)} title="Over Complete" icon="autorenew" iconColor="#818cf8">
+        <p className="text-[12px] text-on-surface">
+          {liveState.bowler.name ? `${liveState.bowler.name} has finished the over.` : "The over is complete."} Continue with the same bowler, or pick a new one for the next over.
+        </p>
+        <div className="flex gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => setShowBowlerChangePrompt(false)}
+            className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-white/[0.02] border border-white/10 text-on-surface"
+          >
+            Continue{liveState.bowler.name ? ` ${liveState.bowler.name}` : ""}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowBowlerChangePrompt(false);
+              engine.clearSlot("bowler");
+              engine.setActiveSlot("bowler");
+              setPlayerPicker("bowler");
+            }}
+            className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-theme-orange text-black"
+          >
+            Change Bowler
+          </button>
         </div>
       </CenteredOverlay>
 
@@ -742,14 +916,6 @@ export default function ScoringSection({
             </div>
           )}
 
-          {/* ── score header (LiveScoreBar design). CHANGED — explicit
-              shrink-0 so this card holds its intrinsic size and never
-              gets squeezed by flexbox; it's the run-pad/This-Over/stat
-              block below (flex-1 min-h-0) that absorbs whatever space
-              is left on short mobile viewports. containerType: "size"
-              lets the crew-slot row and extra-selector scale their
-              gaps/padding down via cqh/cqi units on short screens,
-              same pattern already used by the run-pad below. ── */}
           <div
             className="relative overflow-hidden shrink-0 rounded-2xl border border-white/10 bg-white/[0.035] px-3 sm:px-4 pt-3 sm:pt-4 pb-2.5 sm:pb-3 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]"
             style={{ containerType: "inline-size" }}
@@ -791,7 +957,7 @@ export default function ScoringSection({
                   onActivate={() => { engine.setActiveSlot("striker"); setPlayerPicker("striker"); }}
                   displayName={liveState.striker.name}
                   imageUrl={liveState.striker.imageUrl}
-                  statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
+                  statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls}) · 4s ${liveState.striker.fours} · 6s ${liveState.striker.sixes}` : undefined}
                   allPlayers={battingSquad}
                   onAssign={(p) => engine.assignPlayer("striker", p)}
                   onClear={() => engine.clearSlot("striker")}
@@ -807,7 +973,7 @@ export default function ScoringSection({
                   onActivate={() => { engine.setActiveSlot("nonStriker"); setPlayerPicker("nonStriker"); }}
                   displayName={liveState.nonStriker.name}
                   imageUrl={liveState.nonStriker.imageUrl}
-                  statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
+                  statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls}) · 4s ${liveState.nonStriker.fours} · 6s ${liveState.nonStriker.sixes}` : undefined}
                   allPlayers={battingSquad}
                   onAssign={(p) => engine.assignPlayer("nonStriker", p)}
                   onClear={() => engine.clearSlot("nonStriker")}
@@ -838,36 +1004,29 @@ export default function ScoringSection({
               <button type="button" onClick={engine.swapStrike} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20">
                 <Icon name="swap_horiz" style={{ fontSize: 13 }} /> Rotate Strike
               </button>
-              <button type="button" onClick={engine.newPartnership} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20">
-                <Icon name="autorenew" style={{ fontSize: 13 }} /> New Partnership
-              </button>
-                {/* Extra selector — trimmed to Bye + Free Hit. Wide / No Ball /
-                    Leg Bye now live as full tiles in the scoring pad below,
-                    where they're one tap away instead of buried in a small
-                    pill row. */}
-                <div className="flex flex-col gap-1.5 relative z-10">
-                    <button
-                    type="button"
-                    onClick={() => engine.setIsFreeHit((v) => !v)}
-                    className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded border transition-all"
-                    style={
-                        engine.isFreeHit
-                        ? {
-                            color: "#38bdf8",
-                            borderColor: "rgba(56,189,248,0.4)",
-                            background: "rgba(56,189,248,0.12)",
-                            }
-                        : {
-                            color: "#c9971f",
-                            borderColor: "rgba(201,151,31,0.2)",
-                            background: "transparent",
-                            }
-                    }
-                    >
-                    <Icon name="flash_on" style={{ fontSize: 13 }} />
-                    Free Hit {engine.isFreeHit ? "· Active" : ""}
-                    </button>
-                </div>
+              <div className="flex flex-col gap-1.5 relative z-10">
+                <button
+                  type="button"
+                  onClick={() => engine.setIsFreeHit((v) => !v)}
+                  className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded border transition-all"
+                  style={
+                    engine.isFreeHit
+                      ? {
+                          color: "#38bdf8",
+                          borderColor: "rgba(56,189,248,0.4)",
+                          background: "rgba(56,189,248,0.12)",
+                        }
+                      : {
+                          color: "#c9971f",
+                          borderColor: "rgba(201,151,31,0.2)",
+                          background: "transparent",
+                        }
+                  }
+                >
+                  <Icon name="flash_on" style={{ fontSize: 13 }} />
+                  Free Hit {engine.isFreeHit ? "· Active" : ""}
+                </button>
+              </div>
               {!engine.noPartnerAvailable && (
                 <button type="button" onClick={() => setShowEndConfirm(true)} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-red-400 border border-red-400/25 ml-auto">
                   <Icon name="sports_score" style={{ fontSize: 13 }} /> {isSecondInnings ? "End Match" : "End Innings"}
@@ -876,31 +1035,51 @@ export default function ScoringSection({
             </div>
           </div>
 
-          {/* ── run pad + This Over + stat cards. flex-1 makes this block
-              claim all remaining height inside the bounded <section>,
-              min-h-0 lets a flex child shrink below its content size
-              (the flexbox default is min-height:auto, which otherwise
-              blocks shrinking entirely). overflow-hidden — no scrollbar
-              anywhere in the scoring section; content must compress to
-              fit instead of scrolling. ── */}
           <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10 overflow-hidden">
-            {/* NEW — armed-extra status banner. Shows only while Wide /
-                No Ball / Leg Bye / Bye is armed, so it's obvious the next
-                run tap will be recorded as that extra rather than a
-                normal delivery, with a one-tap way to back out. */}
             {armedExtra && (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg shrink-0" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.4)" }}>
-                <span className="font-mono-geist text-[9.5px] font-bold uppercase tracking-[0.12em] text-sky-300 flex items-center gap-1.5 min-w-0">
-                  <Icon name="bolt" style={{ fontSize: 13 }} className="shrink-0" />
-                  <span className="truncate">{armedExtra.label} armed — tap a run to record</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => engine.setExtraType("none")}
-                  className="font-mono-geist text-[9px] font-bold uppercase px-2 py-1 rounded text-sky-300 border border-sky-400/30 hover:bg-sky-400/10 shrink-0"
-                >
-                  Cancel
-                </button>
+              <div className="flex flex-col gap-2 shrink-0">
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.4)" }}>
+                  <span className="font-mono-geist text-[9.5px] font-bold uppercase tracking-[0.12em] text-sky-300 flex items-center gap-1.5 min-w-0">
+                    <Icon name="bolt" style={{ fontSize: 13 }} className="shrink-0" />
+                    <span className="truncate">{armedExtra.label} armed — tap a run to record</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { engine.setExtraType("none"); engine.setNoBallRunOrigin("bat"); }}
+                    className="font-mono-geist text-[9px] font-bold uppercase px-2 py-1 rounded text-sky-300 border border-sky-400/30 hover:bg-sky-400/10 shrink-0"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {/* NEW — No Ball can combine with runs off the bat, OR
+                    with byes, OR with leg byes (Law 21 + Law 26 both
+                    apply to the same delivery). This selector is only
+                    shown while No Ball is armed; it resets to "Off Bat"
+                    whenever No Ball is armed/disarmed or a ball is
+                    recorded. */}
+                {isNoBallArmed && (
+                  <div className="flex items-center gap-1.5 px-1">
+                    {NO_BALL_RUN_ORIGIN_OPTIONS.map((opt) => {
+                      const active = engine.noBallRunOrigin === opt.key;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => engine.setNoBallRunOrigin(opt.key)}
+                          className="flex-1 py-1.5 rounded-lg font-mono-geist text-[9.5px] font-bold uppercase tracking-[0.08em] border transition-all"
+                          style={
+                            active
+                              ? { background: "rgba(56,189,248,0.18)", borderColor: "rgba(56,189,248,0.5)", color: "#7dd3fc" }
+                              : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "#93c5fd" }
+                          }
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -917,20 +1096,17 @@ export default function ScoringSection({
                 </button>
               ))}
 
-              {/* NEW — Wide / No Ball / Leg Bye as proper tiles instead of
-                  small pills. Blue accent ties them visually to the
-                  "extra" ball chips already used in This Over. Active
-                  (armed) state gets a filled gradient + inset glow so
-                  it's unmistakable mid-match which mode you're in. */}
               {extraGridTiles.map((opt) => {
                 const meta = EXTRA_TILE_META[opt.key];
                 const active = engine.extraType === opt.key;
+                const tileDisabled = extraArmed && !active;
                 return (
                   <button
                     type="button"
                     key={`extra-${opt.key}`}
                     onClick={() => handleTapExtra(opt.key)}
-                    className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border flex flex-col items-center justify-center gap-0.5"
+                    disabled={tileDisabled}
+                    className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border flex flex-col items-center justify-center gap-0.5 disabled:opacity-35 disabled:cursor-not-allowed"
                     style={active
                       ? { background: "linear-gradient(135deg,#3b82f6,#1e3a8a)", borderColor: "rgba(147,197,253,0.6)", color: "#fff", boxShadow: "0 0 0 2px rgba(96,165,250,0.25) inset" }
                       : { background: "rgba(59,130,246,0.08)", borderColor: "rgba(96,165,250,0.25)", color: "#93c5fd" }}
@@ -944,28 +1120,22 @@ export default function ScoringSection({
               <button
                 type="button"
                 onClick={handleTapWicket}
-                className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10"
+                className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10 disabled:opacity-35 disabled:cursor-not-allowed"
                 style={{ fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)" }}
               >
                 Out
               </button>
 
-              {/* NEW — Undo moved here from the header action row, next
-                  to Out/extras so the two "fix a mistake" controls
-                  (Undo + the extras that are easiest to mis-tap) sit
-                  together. */}
               <button
                 type="button"
                 onClick={() => engine.canUndo && engine.undo()}
-                disabled={!engine.canUndo}
+                disabled={!engine.canUndo || extraArmed}
                 className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.1em] transition-all hover:brightness-110 active:scale-95 border disabled:opacity-35 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
                 style={{ color: "#fbbf24", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
               >
                 <Icon name="undo" style={{ fontSize: "clamp(0.9rem, min(6cqh, 7cqi), 1.6rem)" }} />
                 <span style={{ fontSize: "clamp(0.6rem, min(3.6cqh, 4.5cqi), 0.85rem)" }}>Undo</span>
               </button>
-
-              <MoreActionsMenu onFreeHit={() => engine.setIsFreeHit((v) => !v)} onAdminAction={onAdminAction} />
             </div>
 
             <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">
