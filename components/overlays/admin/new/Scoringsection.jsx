@@ -401,8 +401,8 @@ export default function ScoringSection({
 
         <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2 relative z-10">
           <div className="flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1">
-            <span className="font-archivo text-2xl sm:text-3xl lg:text-5xl font-bold tabular-nums shrink-0">{teamRuns}/{wkts}</span>
-            <span className="font-mono-geist text-[8.5px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">{overs} ov · RR {rr} · {matchSetup[battingTeam]} batting{inningsNumber === 2 ? " · Inns 2" : ""}</span>
+            <span className="font-archivo text-6xl sm:text-6xl lg:text-6xl font-bold tabular-nums shrink-0">{teamRuns}/{wkts}</span>
+            <span className="font-mono-geist text-[8px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">{overs} ov · RR {rr} · {matchSetup[battingTeam]} batting{inningsNumber === 2 ? " · Inns 2" : ""}</span>
           </div>
           <button
             type="button"

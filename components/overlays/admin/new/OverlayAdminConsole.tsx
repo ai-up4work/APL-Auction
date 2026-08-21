@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
-import MatchSetupPanel from "@/components/overlays/admin/new/Matchsetuppanel";
+import MatchSetupPanel from "@/components/overlays/admin/new/MatchInfopanel";
 import ScoringSection from "@/components/overlays/admin/new/Scoringsection";
 import type { MatchSetup, TeamInfo } from "@/lib/overlayBus";
 import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
@@ -1221,8 +1221,8 @@ export default function OverlayAdminConsole({
         />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
-        <aside className="order-3 flex mb-0 lg:pt-4 lg:pb-4 flex-col lg:h-full bg-surface-container-low border-t lg:border-t-0 lg:border-l border-outline-variant shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">
-          <MatchSetupPanel
+        <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full bg-surface-container-low shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">            
+            <MatchSetupPanel
             auctionId={auctionId}
             matchSetup={matchSetup}
             setMatchSetup={setMatchSetup}
@@ -1407,7 +1407,7 @@ export default function OverlayAdminConsole({
               </div>
             )}
           </div>
-            <div className={`px-4 mb-12 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} lg:block`}>
+            <div className={`px-4 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} lg:block`}>
             <WeatherPanel
                 weather={weather}
                 setWeather={setWeather}
