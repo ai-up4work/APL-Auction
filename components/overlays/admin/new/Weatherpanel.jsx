@@ -37,7 +37,7 @@ export default function WeatherPanel({
 }) {
   return (
     <div
-      className={`glass-panel rounded-2xl p-4 shrink-0 ${
+      className={`glass-panel rounded-2xl p-4 mb-8 lg:mb-0 shrink-0 ${
         mobileTab === "overlay" ? "" : "hidden"
       } ${desktopVisible ? "lg:block" : "lg:hidden"}`}
     >

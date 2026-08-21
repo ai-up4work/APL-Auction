@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
 import MatchSetupPanel from "@/components/overlays/admin/new/MatchInfopanel";
@@ -10,107 +11,6 @@ import type { MatchSetup, TeamInfo } from "@/lib/overlayBus";
 import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
 import { supabase } from "@/lib/supabase";
 import { dbRowToOverlaySetup, overlaySetupToDbPatch, type DbMatchSetupRow } from "@/lib/matchSetupAdapter";
-
-/* ─────────────────────────────────────────────────────────────
-   Auction-console visual language. Striker / Non-Striker / Bowler
-   are picked via the ScoringSection's crew slots (drag on desktop,
-   bottom-sheet tap on mobile). Weather and Match Setup are their
-   own cards. Everything else — moments, on-air toggles, roster
-   rail, event feed — lives here in the shell.
-
-   MATCH SETUP CONTRACT (this pass):
-   - `matchSetup` on this page now matches the real `MatchSetup` /
-     `TeamInfo` shape from `@/lib/overlayBus` (teamA/teamB are
-     objects with name/shortCode/color/logoUrl/squadPlayers — not
-     bare strings). MatchSetupPanel owns the full editing UI,
-     roster lookups, and its own locked/editing state; this page
-     just holds the source-of-truth state and reacts to
-     `onPush` / `onEditingChange`.
-   - ScoringSection (and the rest of this file's pre-existing
-     display logic) was built against an older FLAT shape
-     (`teamA: "JSH"`, `teamAColor`, ...). Rather than rewrite that
-     component blind, `legacyMatchSetup` below derives that same
-     flat shape from the real `matchSetup` state, so everything
-     downstream keeps working off one source of truth.
-
-   MATCH SETUP ↔ DB CONSISTENCY (this pass):
-   - Previously this page's `matchSetup` was PURELY LOCAL — it
-     initialized from `defaultMatchSetup()` and "Push Match Setup"
-     only logged/toasted. It never read or wrote the same
-     `matches.match_setup` row the Match Editor page
-     (app/(protected)/match/[matchId]/edit) uses, and even if it
-     had, the two used incompatible shapes (teamA/teamB+shortCode+
-     logoUrl here vs team1/team2+short+logo+a separate squads array
-     there). A match set up in one place was invisible in the
-     other.
-   - Fixed via `lib/matchSetupAdapter.ts`: on mount (when `matchId`
-     is present) this page now loads `matches.match_setup` +
-     `match_setup_completed` and hydrates `matchSetup` /
-     `matchSetupCompleted` from it. `handleMatchSetupPush` now also
-     writes back through the same `patch_match_setup` RPC the Match
-     Editor uses (a shallow, top-level merge), so fields the overlay
-     console doesn't manage — date, round, officials, overs,
-     matchMeta, rosterLocked, and each squad's captain/role/XI — are
-     left exactly as the Match Editor last set them. `dbSetupRef`
-     tracks the last-loaded/saved raw row so the adapter has
-     something to preserve those fields against.
-
-   SCORING CONTRACT (fixed in an earlier pass):
-   - record(runsAdded, opts) is the single source of truth for every
-     ball. `runsAdded` is ALWAYS a number. Extras are tagged via
-     opts.extra using the short codes "Wd" | "Nb" | "Lb" | "By" —
-     the same codes the `extras` state object and ScoringSection's
-     ballOutcome() expect. Nothing should ever call setTeamRuns with
-     a non-numeric runsAdded — that was the bug where tapping Wide/
-     No Ball/Bye/LB turned teamRuns into a string ("5Wide4...") and
-     silently broke every downstream calculation (run rate, target,
-     required rate).
-   - Undo goes through the real handleUndo()/history stack, not
-     through record()/handleRun().
-   - currentOverBalls is tracked explicitly here (overBalls state)
-     and passed down — ScoringSection has no way to derive it on
-     its own.
-
-   OVER-STRIP RESET FIX (this pass):
-   - The "This Over" strip (overBalls) must only reset once 6 LEGAL
-     deliveries have been bowled — not once the array hits 6 items.
-     Wides/No Balls are appended to the strip but don't count as
-     legal deliveries, so an over with extras in it has MORE than 6
-     entries before it's actually complete. The previous check used
-     `prev.length >= 6`, which counted extras too — so on an over
-     containing e.g. 3 legal balls + 3 extras, the next legal ball
-     saw length 6, wrongly reset the whole strip to just that one
-     new entry, and silently ate everything that came before it
-     (including the extras). Fixed below by counting only legal
-     entries (excluding "Wd"/"Nb") when deciding whether to reset.
-
-   TOURNAMENT LOGO FIX (this pass):
-   - The header logo was hardcoded to always render DEFAULT_LOGO_SRC
-     and never looked at `matchSetup.tournamentLogoUrl` at all — so
-     a logo uploaded/pushed in Match Setup never showed up here. It
-     now prefers `matchSetup.tournamentLogoUrl`, falling back to the
-     league placeholder only when that's unset or fails to load.
-     `logoFailed` is reset whenever the tournament logo URL itself
-     changes, so a stale failure doesn't stick around after a valid
-     logo is pushed.
-
-   DESKTOP RIGHT-PANEL TABS (this pass):
-   - The right rail (Match Setup / Moments / Weather) used to be
-     three sections stacked vertically on desktop, with Moments and
-     Weather hiding only while the Match Setup drawer was expanded
-     (`matchSetupEditing`). That meant on desktop you could still end
-     up scrolling past Setup to get to Moments/Weather, and there was
-     no single place to jump straight to one section.
-   - `desktopRightTab` ("setup" | "moments" | "weather") now drives a
-     small desktop-only tab bar at the top of the right aside — the
-     same one-active-section-at-a-time pattern as the mobile bottom
-     nav (`mobileTab`), but independent of it. Each section's `lg:`
-     visibility now keys off `desktopRightTab` instead of
-     `matchSetupEditing`, so exactly one section shows on desktop at
-     a time. Mobile is completely untouched — it still uses
-     `mobileTab` ("overlay" / "scoring" / "setup") via its own bottom
-     nav, unaffected by this new desktop-only tab bar.
-   ───────────────────────────────────────────────────────────── */
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
 const PARTICLE_COLORS_BOUNDARY = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
@@ -122,17 +22,11 @@ const BOUNDARY_CHANNELS = [
   { key: "tournamentBoundaries", label: "Tournament Boundaries" },
 ] as const;
 
-// Human-readable labels for extras, keyed by the same short codes
-// used everywhere else (extras state, ballOutcome, record()).
 const EXTRA_LABELS: Record<"Wd" | "Nb" | "By" | "Lb", string> = { Wd: "Wide", Nb: "No Ball", By: "Bye", Lb: "Leg Bye" };
 
-// Desktop-only right-rail tabs. Kept next to the other top-level
-// constants since it's referenced both by the tab bar and by each
-// section's visibility check below.
 const DESKTOP_RIGHT_TABS = [
-  { key: "setup" as const, label: "Setup", icon: "tune" },
-  { key: "moments" as const, label: "Moments", icon: "bolt" },
-  { key: "weather" as const, label: "Weather", icon: "partly_cloudy_day" },
+  { key: "setup" as const, label: "Match Info", icon: "tune" },
+  { key: "overlay" as const, label: "Overlay", icon: "bolt" },
 ];
 
 let idCtr = 0;
@@ -155,8 +49,6 @@ function Icon({ name, className = "", style }: { name: string; className?: strin
   );
 }
 
-/* Tracks whether we're under the 640px mobile breakpoint so the crew
-   slots can swap the inline drag strip for a tap-to-open bottom sheet. */
 function useIsMobile(breakpoint = 640) {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -170,7 +62,6 @@ function useIsMobile(breakpoint = 640) {
   return isMobile;
 }
 
-/* ── small shared pieces ─────────────────────────────────────── */
 function TogglePill({
   label,
   on,
@@ -280,6 +171,68 @@ function MomentButton({
   );
 }
 
+/* Generic centered overlay (portal) — a fixed, backdrop-blurred dialog
+   rendered into document.body, sized to its own content and capped to the
+   viewport with its own internal scroller so it can never run taller than
+   the screen. Same pattern MatchInfopanel already uses for the read-only
+   squad list (SquadOverlay). Used for:
+     - the Weather panel on mobile (trigger row → overlay)
+     - the Wicket Detail form on BOTH mobile and desktop
+     - the Fifty / Hundred batter picker on BOTH mobile and desktop
+   — none of these are gated by any lg:/mobile class, so each renders
+   identically as a centered modal on every screen size. */
+function CenteredOverlay({
+  open,
+  onClose,
+  title,
+  icon,
+  iconColor = "#e8c468",
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  icon?: string;
+  iconColor?: string;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[380] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[440px] max-h-[85dvh] overflow-y-auto custom-scrollbar rounded-2xl glass-panel border border-white/10 p-4 flex flex-col gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {icon && (
+              <span
+                className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: `${iconColor}24`, border: `1px solid ${iconColor}4d` }}
+              >
+                <Icon name={icon} style={{ fontSize: 16, color: iconColor }} />
+              </span>
+            )}
+            <h3 className="truncate font-archivo text-sm font-bold uppercase text-on-surface">{title}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border border-white/10 text-on-surface-variant hover:text-on-surface hover:bg-white/[0.04] transition-colors"
+          >
+            <Icon name="close" style={{ fontSize: 16 }} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 interface Batter {
   name: string;
   runs: number;
@@ -366,45 +319,21 @@ export default function OverlayAdminConsole({
   auctionId = null,
   matchId = null,
 }: {
-  /** The auction whose sold-players roster backs the Match Setup team pickers. */
   auctionId?: string | null;
-  /** Used to build the "Match Editor" link inside the Match Setup roster panel, and to load/save the shared matches.match_setup row. */
   matchId?: string | null;
 } = {}) {
-  /* ── On Air channel toggles ── */
   const [alwaysOn, setAlwaysOn] = useState({ weather: true, liveScoreBar: true, tournamentLogo: true });
   const [fullScreen, setFullScreen] = useState({ pointsTable: false, matchScorecard: false, matchIntro: false });
   const [boundaryChannels, setBoundaryChannels] = useState({ matchBoundaries: false, tournamentBoundaries: false });
 
-  /* ── Match Setup ──
-     Real MatchSetup/TeamInfo shape (from @/lib/overlayBus). MatchSetupPanel
-     owns the editing UI and its own locked/editing toggle; this page just
-     holds the state and reacts to onPush / onEditingChange. */
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(defaultMatchSetup());
   const [matchSetupEditing, setMatchSetupEditing] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
 
-  /* ── Desktop right-rail tabs ──
-     One of "setup" | "moments" | "weather" — drives which of the three
-     right-column sections is visible on desktop (`lg:` and up). This is
-     independent from `mobileTab`, which still drives the mobile bottom
-     nav exactly as before. See the DESKTOP RIGHT-PANEL TABS note near
-     the top of this file. */
-  const [desktopRightTab, setDesktopRightTab] = useState<"setup" | "moments" | "weather">("moments");
+  const [desktopRightTab, setDesktopRightTab] = useState<"setup" | "overlay">("overlay");
 
-  // Last-loaded/saved raw `matches.match_setup` row, in the DB's own
-  // shape (team1/team2/squads/...). Used purely so overlaySetupToDbPatch
-  // can carry forward fields the overlay UI has no controls for —
-  // date, round, officials, overs, matchMeta, rosterLocked, and each
-  // squad's captain/role/XI — instead of blanking them on every push.
   const dbSetupRef = useRef<DbMatchSetupRow | null>(null);
 
-  // ── Load the shared match_setup row on mount ──
-  // Previously `matchSetup` was purely local/ephemeral here — a match
-  // set up in the Match Editor page was invisible in this console, and
-  // vice versa. This hydrates from the same row the Editor reads/writes,
-  // via the adapter in lib/matchSetupAdapter.ts (see the MATCH SETUP ↔
-  // DB CONSISTENCY note near the top of this file).
   useEffect(() => {
     if (!matchId) return;
     let cancelled = false;
@@ -433,10 +362,6 @@ export default function OverlayAdminConsole({
     };
   }, [matchId]);
 
-  // Flat legacy view of matchSetup for the pre-existing display logic below
-  // (header, aside labels, ScoringSection, moment strings) that was built
-  // against the older `{ teamA: "JSH", teamAColor, ... }` shape. Derived
-  // from the single real `matchSetup` state so there's one source of truth.
   const legacyMatchSetup = useMemo(
     () => ({
       teamA: matchSetup.teamA.shortCode || matchSetup.teamA.name || "Team A",
@@ -454,19 +379,12 @@ export default function OverlayAdminConsole({
     [matchSetup]
   );
 
-  // Pushes to the overlay bus (unchanged, local/log-based) AND now also
-  // persists to the same `matches.match_setup` row the Match Editor
-  // reads/writes, via patch_match_setup's shallow top-level merge — so
-  // fields this console doesn't manage are left exactly as the Editor
-  // last set them. Failure to save is reported but doesn't undo the
-  // overlay push, since the live graphics update is the more
-  // time-sensitive half of this action.
   async function handleMatchSetupPush() {
     pushLog(`Match Setup pushed — ${legacyMatchSetup.teamA} vs ${legacyMatchSetup.teamB}, ${matchSetup.venue}`);
     fireToast("Match Setup pushed to overlay");
     setMatchSetupCompleted(true);
 
-    if (!matchId) return; // no DB row to persist to — overlay-only / preview mode
+    if (!matchId) return;
 
     const patch = overlaySetupToDbPatch(matchSetup, dbSetupRef.current);
     const { error: patchErr } = await supabase.rpc("patch_match_setup", { p_match_id: matchId, p_patch: patch });
@@ -488,11 +406,9 @@ export default function OverlayAdminConsole({
     setWeather((w) => ({ ...w, venue: name.toUpperCase() }));
   }
 
-  /* ── Which side is currently at the crease ── */
   const [battingTeam, setBattingTeam] = useState<"teamA" | "teamB">("teamA");
   const bowlingTeam = battingTeam === "teamA" ? "teamB" : "teamA";
 
-  /* ── Live scoring state ── */
   const [striker, setStriker] = useState<Batter>(emptyBatter());
   const [nonStriker, setNonStriker] = useState<Batter>(emptyBatter());
   const [bowler, setBowler] = useState<Bowler>(emptyBowler());
@@ -507,37 +423,20 @@ export default function OverlayAdminConsole({
   const [livePushed, setLivePushed] = useState(false);
   const [liveDirty, setLiveDirty] = useState(false);
 
-  /* ── This-over ball-by-ball strip, e.g. [0, 4, "Wd", "W", 1] ──
-     Cleared at the start of a new over, and on innings/match reset.
-     This drives ScoringSection's "This Over" strip — it previously
-     had nothing feeding it and always showed empty placeholders.
-
-     IMPORTANT: this array can legitimately hold MORE than 6 entries
-     mid-over, because "Wd"/"Nb" extras are appended here but don't
-     count toward the 6 legal deliveries that end an over. It only
-     gets cleared once 6 legal deliveries have actually been bowled
-     — see the legalCount check inside record() below. */
   const [overBalls, setOverBalls] = useState<(number | string)[]>([]);
 
-  /* ── who's out this innings, and which slot is "active" for picking ── */
   const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(() => new Set());
   const [activeSlot, setActiveSlot] = useState<"striker" | "nonStriker" | "bowler">("striker");
   const [playerPicker, setPlayerPicker] = useState<null | "striker" | "nonStriker" | "bowler">(null);
   useIsMobile();
 
-  // Header logo failure flag. Reset whenever the tournament logo URL
-  // itself changes — see the TOURNAMENT LOGO FIX note near the top of
-  // this file — so a stale failure from a previous (or missing) logo
-  // doesn't keep the fallback icon stuck after a valid one is pushed.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => {
     setLogoFailed(false);
   }, [matchSetup.tournamentLogoUrl]);
 
-  /* ── Mobile-only bottom-nav tabs: Scoring / Overlay / Setup. ── */
   const [mobileTab, setMobileTab] = useState<"overlay" | "scoring" | "setup">("scoring");
 
-  /* ── Innings / target tracking ── */
   const [inningsNumber, setInningsNumber] = useState(1);
   const [firstInnings, setFirstInnings] = useState<{ runs: number; wkts: number; overs: string; team: string } | null>(null);
 
@@ -561,9 +460,6 @@ export default function OverlayAdminConsole({
     "Yohan Raj",
     "Kusal Fernando",
   ];
-  // Prefer the real squad picked in Match Setup once it has players;
-  // fall back to placeholder rosters so scoring stays usable before
-  // a squad's been assembled.
   const rosterTeamA = matchSetup.teamA.squad?.length ? matchSetup.teamA.squad : rosterTeamAFallback;
   const rosterTeamB = matchSetup.teamB.squad?.length ? matchSetup.teamB.squad : rosterTeamBFallback;
   const battingRoster = battingTeam === "teamA" ? rosterTeamA : rosterTeamB;
@@ -595,9 +491,6 @@ export default function OverlayAdminConsole({
     pushLog(`Bowler set — ${name}`);
   }
 
-  // The left rail is the *only* pick/drop list on desktop — it swaps
-  // between the batting squad and the bowling squad depending on which
-  // crew slot is currently active.
   const isBattingSlotActive = activeSlot === "striker" || activeSlot === "nonStriker";
   const asideTeamKey: "teamA" | "teamB" = isBattingSlotActive ? battingTeam : bowlingTeam;
   const asideRoster = isBattingSlotActive ? battingRoster : bowlingRoster;
@@ -608,11 +501,15 @@ export default function OverlayAdminConsole({
     else assignBowler(name);
   }
 
-  /* ── Moments panel ── */
   const [showMoments, setShowMoments] = useState(true);
   const [showWicketForm, setShowWicketForm] = useState(false);
   const [wicketDraft, setWicketDraft] = useState({ batsmanOut: "striker" as "striker" | "nonStriker", dismissalType: "bowled", fielder: "" });
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
+  // Fifty / Hundred picker — now its own centered overlay, opened only
+  // when the Fifty or Hundred moment button is tapped (mirrors the
+  // Wicket Detail overlay pattern below).
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
+  const [milestoneKind, setMilestoneKind] = useState<"fifty" | "hundred">("fifty");
   const [showMatchWonForm, setShowMatchWonForm] = useState(false);
   const [matchWonDraft, setMatchWonDraft] = useState({
     winner: "teamA" as "teamA" | "teamB" | "custom",
@@ -621,11 +518,12 @@ export default function OverlayAdminConsole({
     method: "batting",
   });
 
-  /* ── Weather ── */
   const [weather, setWeather] = useState({ venue: "GALLE FORT", temp: 28, condition: "partly-cloudy" });
   const [weatherEditing, setWeatherEditing] = useState(false);
+  // Mobile-only: whether the centered Weather overlay (portal) is open.
+  // Desktop never reads this — WeatherPanel stays inline there unchanged.
+  const [weatherOverlayOpen, setWeatherOverlayOpen] = useState(false);
 
-  /* ── Event feed — bottom-right stacked cards ── */
   const [toasts, setToasts] = useState<{ id: number; text: string; tone: "wicket" | "boundary" | "info" }[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   useEffect(() => {
@@ -696,7 +594,6 @@ export default function OverlayAdminConsole({
     }, 1400);
   }
 
-  /* ── push actions (simulated overlay bus) ── */
   function pushLiveState() {
     setLivePushed(true);
     setLiveDirty(false);
@@ -704,11 +601,6 @@ export default function OverlayAdminConsole({
     setTimeout(() => setLivePushed(false), 1500);
   }
 
-  /* ── scoring ──
-     record() is the ONLY place that mutates teamRuns/wkts/legalBalls/etc.
-     `runsAdded` must always be a number. `extra`, when present, must be
-     one of the short codes "Wd" | "Nb" | "Lb" | "By" — matching the keys
-     in `extras` state and ScoringSection's ballOutcome(). */
   function snapshot() {
     return { striker, nonStriker, bowler, wkts, legalBalls, partnership, matchBoundaries, extras, teamRuns, overBalls };
   }
@@ -737,15 +629,6 @@ export default function OverlayAdminConsole({
     });
     setLiveDirty(true);
 
-    // This-over strip: entry is "W" for a wicket, the extra code, or the
-    // numeric runs off the bat.
-    //
-    // Reset rule: only clear the strip when a LEGAL ball arrives AND the
-    // strip already contains 6 legal deliveries. We deliberately do NOT
-    // use the raw array length here — Wd/Nb entries inflate the array
-    // without being legal deliveries, so counting raw length caused the
-    // strip to reset a delivery early (and silently drop whatever ball
-    // was tapped right at the reset boundary, plus everything before it).
     const entry: number | string = wicket ? "W" : extra ? extra : runsAdded;
     setOverBalls((prev) => {
       const legalCount = prev.filter((e) => e !== "Wd" && e !== "Nb").length;
@@ -776,13 +659,9 @@ export default function OverlayAdminConsole({
     setFreeHit(false);
   }
 
-  // Run-pad buttons (0/1/2/3/4/6) — ONLY ever called with a number.
   function handleRun(n: number) {
     return record(n);
   }
-  // Extras — Wide / No Ball / Leg Bye / Bye. Awards 1 run of the given
-  // extra type. (Runs taken off a wide/no-ball beyond the automatic 1
-  // aren't modeled here — extend this if you need that.)
   function onExtra(code: "Wd" | "Nb" | "By" | "Lb") {
     return record(1, { extra: code });
   }
@@ -795,9 +674,6 @@ export default function OverlayAdminConsole({
     pushLog("Free Hit armed for next ball");
     fireToast("Free Hit armed");
   }
-  // Low-frequency admin events with no dedicated game-state model yet —
-  // logged to the event feed. Wire these up to real state if/when the
-  // product defines what Bonus/Injured/Abandon should actually do.
   function onAdminAction(label: string) {
     pushLog(`Admin — ${label}`);
     fireToast(label);
@@ -863,7 +739,6 @@ export default function OverlayAdminConsole({
     setPlayerPicker(null);
   }
 
-  /* ── Moments: manual fires ── */
   function fireBoundaryMoment(kind: string) {
     fireStamp("boundary", kind.toUpperCase());
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
@@ -1297,199 +1172,350 @@ export default function OverlayAdminConsole({
             />
           </div>
 
-          {/* Broadcast Channels — mobile-only replacement for the desktop sticky pill bar. */}
-          <div className={`p-4 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
-            <div>
-              <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
-              <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">Toggle what's live on the overlay.</p>
-            </div>
+          {/* ════════════════════════════════════════════════════════════
+              Broadcast Channels + "Overlay Advanced" (Moments + Weather
+              combined) — mobile-only body of the "Overlay" bottom-nav
+              tab. Previously this whole block was capped to
+              `calc(100dvh - 6rem)` with Moments/Weather scrolling
+              internally underneath a pinned Broadcast Channels section.
+              Now that the Wicket Detail form, the Fifty/Hundred picker,
+              and the full Weather panel all live in their own centered
+              overlays (see CenteredOverlay) instead of sitting inline
+              here, the remaining content — Broadcast Channels, the
+              Moments grid, and the compact Weather trigger row — is
+              short enough to render at its natural height and fit inside
+              one screen without any internal scrollbar. The cap + inner
+              scroller are removed entirely; if a phone is ever short
+              enough that content doesn't fit, the page itself scrolls as
+              a single unit (same as any other normal page) instead of
+              nesting a second scroll region inside this tab.
 
-            <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">On Air</span>
-              <div className="grid grid-cols-3 gap-1.5 mt-1">
-                <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
-                <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
-                <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
+              On desktop this wrapper is `lg:contents`, so it has zero
+              layout effect there — Moments and Weather fall back to
+              being plain aside children, both shown together whenever
+              `desktopRightTab === "overlay"` (the second of the two
+              desktop tabs, alongside "Match Info" for Setup).
+              ════════════════════════════════════════════════════════════ */}
+          <div className={`flex-col min-h-0 lg:contents ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
+            {/* Broadcast Channels */}
+            <div className="p-4 shrink-0 lg:hidden flex flex-col gap-2.5">
+              <div>
+                <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
+                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">Toggle what's live on the overlay.</p>
               </div>
-            </div>
 
-            <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen</span>
-              <div className="grid grid-cols-3 gap-1.5 mt-1">
-                <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
-                <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
-                <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
-              </div>
-            </div>
-
-            <div>
-              <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Moments</span>
-              <div className="grid grid-cols-2 gap-1.5 mt-1">
-                <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))} />
-                <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))} />
-              </div>
-            </div>
-          </div>
-
-          {/* ── Moments (desktop tab: "moments") ── */}
-          <div
-            className={`px-4 shrink-0 flex-col lg:min-h-0 lg:overflow-hidden ${
-              mobileTab === "overlay" ? "flex" : "hidden"
-            } ${desktopRightTab === "moments" ? "lg:flex lg:flex-1" : "lg:hidden"}`}
-          >
-            <button type="button" onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
-              <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
-            </button>
-            {showMoments && (
-              <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
-                <div className="grid grid-cols-3 gap-2.5">
-                  <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
-                  <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
-                  <MomentButton label="Wicket" danger active={showWicketForm} onClick={() => setShowWicketForm((v) => !v)} />
-                  <MomentButton label="Fifty" onClick={() => fireMilestoneMoment("fifty")} />
-                  <MomentButton label="Maiden" onClick={fireMaidenMoment} />
-                  <MomentButton label="Match Won" active={showMatchWonForm} onClick={() => setShowMatchWonForm((v) => !v)} />
+              <div>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">On Air</span>
+                <div className="grid grid-cols-3 gap-1.5 mt-1">
+                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
+                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
+                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
                 </div>
-                <MomentButton label="Hundred" full onClick={() => fireMilestoneMoment("hundred")} />
+              </div>
 
-                <div className="flex flex-col gap-2 pt-1">
-                  <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-on-surface-variant">Fifty / Hundred For</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <BatterPickerButton batter={striker} label="Striker" selected={milestoneBatter === "striker"} onClick={() => setMilestoneBatter("striker")} />
-                    <BatterPickerButton batter={nonStriker} label="Non-Striker" selected={milestoneBatter === "nonStriker"} onClick={() => setMilestoneBatter("nonStriker")} />
-                  </div>
+              <div>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen</span>
+                <div className="grid grid-cols-3 gap-1.5 mt-1">
+                  <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
+                  <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
+                  <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
                 </div>
+              </div>
 
-                {showWicketForm && (
-                  <div className="flex flex-col gap-3 p-4 rounded-lg mt-1" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
-                    <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "#f87171" }}>
-                      Wicket Detail
-                    </span>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <BatterPickerButton batter={striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
-                        <BatterPickerButton batter={nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
-                      <select
-                        value={wicketDraft.dismissalType}
-                        onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value }))}
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
-                      >
-                        <option value="bowled">Bowled</option>
-                        <option value="caught">Caught</option>
-                        <option value="lbw">LBW</option>
-                        <option value="runOut">Run Out</option>
-                        <option value="stumped">Stumped</option>
-                        <option value="hitWicket">Hit Wicket</option>
-                      </select>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Fielder (if any)</span>
-                      <input
-                        value={wicketDraft.fielder}
-                        onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
-                        placeholder="Fielder name"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
-                      />
-                    </div>
-                    <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {bowler.name || "—"}</p>
-                    <button
-                      type="button"
-                      onClick={fireWicketMoment}
-                      className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
-                      style={{ background: "#ef4444", color: "#fff" }}
-                    >
-                      Fire Wicket
-                    </button>
-                  </div>
-                )}
+              <div>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Moments</span>
+                <div className="grid grid-cols-2 gap-1.5 mt-1">
+                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))} />
+                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))} />
+                </div>
+              </div>
+            </div>
 
-                {showMatchWonForm && (
-                  <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-theme-orange/10 border border-theme-orange/25">
-                    <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.18em] text-theme-orange">Match Won Detail</span>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Winning Team</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { key: "teamA" as const, label: legacyMatchSetup.teamA },
-                          { key: "teamB" as const, label: legacyMatchSetup.teamB },
-                          { key: "custom" as const, label: "Other" },
-                        ].map((opt) => (
-                          <button
-                            type="button"
-                            key={opt.key}
-                            onClick={() => setMatchWonDraft((p) => ({ ...p, winner: opt.key }))}
-                            className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all"
-                            style={{
-                              border: `1px solid ${matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
-                              background: matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
-                            }}
-                          >
-                            <span className={`text-[11px] font-archivo font-bold truncate max-w-full ${matchWonDraft.winner === opt.key ? "text-theme-orange" : "text-on-surface"}`}>
-                              {opt.label}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {matchWonDraft.winner === "custom" && (
-                      <input
-                        value={matchWonDraft.customName}
-                        onChange={(e) => setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))}
-                        placeholder="Winning team name"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+            {/* Overlay Advanced — no internal scroll anymore. Renders at
+                natural height right underneath Broadcast Channels. */}
+            <div className="flex flex-col gap-4 pb-4 lg:contents lg:pb-0">
+
+              {/* Heading for the combined panel — shown on mobile always
+                  (this whole block only renders there when mobileTab ===
+                  "overlay"), and on desktop whenever the "Overlay" tab is
+                  the active one of the two desktop tabs. */}
+              <div className={`shrink-0 px-4 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
+                <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Overlay Advanced</h3>
+                <p className="font-mono-geist hidden lg:block text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
+                  Moments &amp; live weather, together in one view.
+                </p>
+              </div>
+
+              {/* ── Moments (desktop tab: "overlay", shown together with Weather) ── */}
+              <div className={`px-4 shrink-0 flex flex-col lg:min-h-0 lg:overflow-hidden ${desktopRightTab === "overlay" ? "lg:flex lg:flex-1" : "lg:hidden"}`}>
+                <button type="button" onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
+                  <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
+                </button>
+                {showMoments && (
+                  <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
+                      <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
+                      <MomentButton label="Wicket" danger active={showWicketForm} onClick={() => setShowWicketForm((v) => !v)} />
+                      <MomentButton
+                        label="Fifty"
+                        active={showMilestoneForm && milestoneKind === "fifty"}
+                        onClick={() => {
+                          setMilestoneKind("fifty");
+                          setShowMilestoneForm(true);
+                        }}
                       />
-                    )}
-                    <input
-                      value={matchWonDraft.margin}
-                      onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
-                      placeholder="e.g. won by 4 wickets"
-                      className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                      <MomentButton label="Maiden" onClick={fireMaidenMoment} />
+                      <MomentButton label="Match Won" active={showMatchWonForm} onClick={() => setShowMatchWonForm((v) => !v)} />
+                    </div>
+                    <MomentButton
+                      label="Hundred"
+                      full
+                      active={showMilestoneForm && milestoneKind === "hundred"}
+                      onClick={() => {
+                        setMilestoneKind("hundred");
+                        setShowMilestoneForm(true);
+                      }}
                     />
-                    <select
-                      value={matchWonDraft.method}
-                      onChange={(e) => setMatchWonDraft((p) => ({ ...p, method: e.target.value }))}
-                      className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
+
+                    {/* Wicket Detail — a centered overlay (portal) instead of an
+                        inline card. Renders the same way on mobile and desktop:
+                        a modal centered over the whole viewport, capped to
+                        `85dvh` with its own internal scroll. See
+                        CenteredOverlay above. */}
+                    <CenteredOverlay
+                      open={showWicketForm}
+                      onClose={() => setShowWicketForm(false)}
+                      title="Wicket Detail"
+                      icon="sports_cricket"
+                      iconColor="#f87171"
                     >
-                      <option value="batting">Chasing side won (by wickets)</option>
-                      <option value="bowling">Defending side won (by runs)</option>
-                      <option value="tie">Tie</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={fireMatchWonMoment}
-                      className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
-                      style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <BatterPickerButton batter={striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
+                            <BatterPickerButton batter={nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
+                          <select
+                            value={wicketDraft.dismissalType}
+                            onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value }))}
+                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
+                          >
+                            <option value="bowled">Bowled</option>
+                            <option value="caught">Caught</option>
+                            <option value="lbw">LBW</option>
+                            <option value="runOut">Run Out</option>
+                            <option value="stumped">Stumped</option>
+                            <option value="hitWicket">Hit Wicket</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Fielder (if any)</span>
+                          <input
+                            value={wicketDraft.fielder}
+                            onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
+                            placeholder="Fielder name"
+                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                          />
+                        </div>
+                        <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {bowler.name || "—"}</p>
+                        <button
+                          type="button"
+                          onClick={fireWicketMoment}
+                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                          style={{ background: "#ef4444", color: "#fff" }}
+                        >
+                          Fire Wicket
+                        </button>
+                      </div>
+                    </CenteredOverlay>
+
+                    {/* Fifty / Hundred batter picker — centered overlay,
+                        opened only from the Fifty / Hundred moment buttons
+                        above. Mirrors the Wicket Detail overlay pattern:
+                        no inline content sits in the Moments list the rest
+                        of the time. */}
+                    <CenteredOverlay
+                      open={showMilestoneForm}
+                      onClose={() => setShowMilestoneForm(false)}
+                      title={milestoneKind === "fifty" ? "Fifty For" : "Hundred For"}
+                      icon="military_tech"
+                      iconColor="#e8c468"
                     >
-                      Fire Match Won
-                    </button>
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batter</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <BatterPickerButton
+                              batter={striker}
+                              label="Striker"
+                              selected={milestoneBatter === "striker"}
+                              onClick={() => setMilestoneBatter("striker")}
+                            />
+                            <BatterPickerButton
+                              batter={nonStriker}
+                              label="Non-Striker"
+                              selected={milestoneBatter === "nonStriker"}
+                              onClick={() => setMilestoneBatter("nonStriker")}
+                            />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            fireMilestoneMoment(milestoneKind, milestoneBatter);
+                            setShowMilestoneForm(false);
+                          }}
+                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                          style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                        >
+                          Fire {milestoneKind === "fifty" ? "Fifty" : "Hundred"}
+                        </button>
+                      </div>
+                    </CenteredOverlay>
+
+                    {showMatchWonForm && (
+                      <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-theme-orange/10 border border-theme-orange/25">
+                        <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.18em] text-theme-orange">Match Won Detail</span>
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Winning Team</span>
+                          <div className="grid grid-cols-3 gap-2">
+                            {[
+                              { key: "teamA" as const, label: legacyMatchSetup.teamA },
+                              { key: "teamB" as const, label: legacyMatchSetup.teamB },
+                              { key: "custom" as const, label: "Other" },
+                            ].map((opt) => (
+                              <button
+                                type="button"
+                                key={opt.key}
+                                onClick={() => setMatchWonDraft((p) => ({ ...p, winner: opt.key }))}
+                                className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all"
+                                style={{
+                                  border: `1px solid ${matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
+                                  background: matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
+                                }}
+                              >
+                                <span className={`text-[11px] font-archivo font-bold truncate max-w-full ${matchWonDraft.winner === opt.key ? "text-theme-orange" : "text-on-surface"}`}>
+                                  {opt.label}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {matchWonDraft.winner === "custom" && (
+                          <input
+                            value={matchWonDraft.customName}
+                            onChange={(e) => setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))}
+                            placeholder="Winning team name"
+                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                          />
+                        )}
+                        <input
+                          value={matchWonDraft.margin}
+                          onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
+                          placeholder="e.g. won by 4 wickets"
+                          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                        />
+                        <select
+                          value={matchWonDraft.method}
+                          onChange={(e) => setMatchWonDraft((p) => ({ ...p, method: e.target.value }))}
+                          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
+                        >
+                          <option value="batting">Chasing side won (by wickets)</option>
+                          <option value="bowling">Defending side won (by runs)</option>
+                          <option value="tie">Tie</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={fireMatchWonMoment}
+                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                          style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                        >
+                          Fire Match Won
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* ── Weather (desktop tab: "weather") ── */}
-          <div
-            className={`px-4 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} ${
-              desktopRightTab === "weather" ? "lg:block" : "lg:hidden"
-            }`}
-          >
-            <WeatherPanel
-                weather={weather}
-                setWeather={setWeather}
-                weatherEditing={weatherEditing}
-                setWeatherEditing={setWeatherEditing}
-                pushLog={pushLog}
-                fireToast={fireToast}
-                mobileTab={mobileTab}
-                desktopVisible={desktopRightTab === "weather"}
-            />
+              {/* ── Weather (desktop tab: "overlay", shown together with Moments) ──
+                  `weatherEditing` is hardcoded to `true` here — see the
+                  WEATHER PANEL ALWAYS OPEN note near the top of this file —
+                  so the panel always renders expanded regardless of the
+                  underlying `weatherEditing` state. `setWeatherEditing` is
+                  still passed through in case WeatherPanel uses the setter
+                  for something other than a collapse toggle. */}
+              {/* Desktop: unchanged — WeatherPanel renders inline exactly
+                  as before, gated purely by `desktopRightTab`. */}
+              <div className={`hidden px-4 lg:mb-4 shrink-0 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
+                <WeatherPanel
+                  weather={weather}
+                  setWeather={setWeather}
+                  weatherEditing={true}
+                  setWeatherEditing={setWeatherEditing}
+                  pushLog={pushLog}
+                  fireToast={fireToast}
+                  mobileTab={mobileTab}
+                  desktopVisible={desktopRightTab === "overlay"}
+                />
+              </div>
+
+              {/* Mobile: a compact trigger row instead of the full panel
+                  inline. Tapping it opens WeatherPanel inside a centered
+                  overlay (see CenteredOverlay above). This is what keeps
+                  the "Overlay" tab short enough to fit on one mobile
+                  screen without scrolling — Moments + this trigger now
+                  comfortably fit under Broadcast Channels with no
+                  internal scroll region needed. */}
+              <div className="px-4 shrink-0 lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setWeatherOverlayOpen(true)}
+                  className="w-full flex items-center justify-between gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] active:scale-[0.98] transition-all"
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.3)" }}
+                    >
+                      <Icon name="partly_cloudy_day" style={{ fontSize: 16, color: "#22c55e" }} />
+                    </span>
+                    <span className="flex flex-col items-start min-w-0">
+                      <span className="font-archivo text-sm font-bold text-on-surface truncate">Weather</span>
+                      <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
+                        {weather.venue} · {weather.temp}°
+                      </span>
+                    </span>
+                  </span>
+                  <Icon name="chevron_right" className="text-on-surface-variant shrink-0" style={{ fontSize: 16 }} />
+                </button>
+              </div>
+
+              <CenteredOverlay
+                open={weatherOverlayOpen}
+                onClose={() => setWeatherOverlayOpen(false)}
+                title="Weather"
+                icon="partly_cloudy_day"
+                iconColor="#22c55e"
+              >
+                <WeatherPanel
+                  weather={weather}
+                  setWeather={setWeather}
+                  weatherEditing={true}
+                  setWeatherEditing={setWeatherEditing}
+                  pushLog={pushLog}
+                  fireToast={fireToast}
+                  mobileTab={mobileTab}
+                  desktopVisible={desktopRightTab === "overlay"}
+                />
+              </CenteredOverlay>
             </div>
+          </div>
         </aside>
       </main>
 

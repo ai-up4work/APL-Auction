@@ -261,7 +261,7 @@ function DrawerSection({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-3.5 lg:py-2.5 text-left border-b flex-shrink-0 ${
+        className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 lg:py-1.5 text-left border-b flex-shrink-0 ${
           showBottomBorderMobile ? "border-white/10" : "border-transparent"
         } ${open ? "lg:border-white/10" : "lg:border-transparent"}`}
       >
@@ -507,7 +507,7 @@ function MatchDetailsView({ matchSetup }: { matchSetup: MatchSetup }) {
         <TeamSummaryCard team={matchSetup.teamB} label="Team B" />
       </div>
 
-      <div className="grid grid-cols-2 mt-4 gap-3 lg:gap-2.5">
+      <div className="grid grid-cols-2 mt-4 lg:mt-0 gap-3 lg:gap-2.5">        
         <DetailField label="Toss Winner" value={tossWinnerLabel} />
         <DetailField label="Toss Decision" value={tossDecisionLabel} />
       </div>
@@ -577,7 +577,7 @@ export default function MatchSetupPanel({
   // *content* visibility (mobileAlwaysOpen keeps it always rendered,
   // since mobile has its own dedicated tab) but desktop uses it to
   // decide whether to expand to fill the column.
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(true);
 
   // Tell the parent whenever the section opens/closes, so it can hide
   // LiveStatePanel / Weather / Moments only while this section is
