@@ -611,6 +611,31 @@ export default function ScoringSection({
     engine.recordWicket();
   }
 
+  // NEW — Wide / No Ball / Leg Bye promoted from the small "Extra" pill
+  // row into full tiles inside the main scoring pad, since during live
+  // scoring the two-tap "pick extra type, then tap runs" flow via tiny
+  // pills was slow and easy to mis-tap. Tapping a tile here just arms
+  // engine.extraType (tapping the same tile again disarms it back to
+  // "none") — the actual recordBall(n) call still happens exactly like
+  // before when a run number is tapped afterwards, so no engine changes
+  // needed. Bye stays as a small pill up in the header (not requested
+  // to move) since it's the least-used of the four extra types.
+  const EXTRA_TILE_META = {
+    wide: { abbr: "WD", icon: "open_in_full" },
+    noBall: { abbr: "NB", icon: "front_hand" },
+    legBye: { abbr: "LB", icon: "directions_run" },
+  };
+  const extraGridTiles = EXTRA_OPTIONS.filter((o) => EXTRA_TILE_META[o.key]);
+  const byeOption = EXTRA_OPTIONS.find((o) => o.key === "bye");
+  const armedExtra = engine.extraType && engine.extraType !== "none"
+    ? EXTRA_OPTIONS.find((o) => o.key === engine.extraType)
+    : null;
+
+  function handleTapExtra(key) {
+    if (controlsLocked) return showAssignmentToast();
+    engine.setExtraType(engine.extraType === key ? "none" : key);
+  }
+
   const statCards = [
     { label: "Partnership", value: `${liveState.partnership.runs} (${liveState.partnership.balls})` },
     { label: "Match 4s / 6s", value: `${liveState.matchBoundaries.fours} / ${liveState.matchBoundaries.sixes}` },
@@ -816,55 +841,38 @@ export default function ScoringSection({
               <button type="button" onClick={engine.newPartnership} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20">
                 <Icon name="autorenew" style={{ fontSize: 13 }} /> New Partnership
               </button>
+                {/* Extra selector — trimmed to Bye + Free Hit. Wide / No Ball /
+                    Leg Bye now live as full tiles in the scoring pad below,
+                    where they're one tap away instead of buried in a small
+                    pill row. */}
+                <div className="flex flex-col gap-1.5 relative z-10">
+                    <button
+                    type="button"
+                    onClick={() => engine.setIsFreeHit((v) => !v)}
+                    className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded border transition-all"
+                    style={
+                        engine.isFreeHit
+                        ? {
+                            color: "#38bdf8",
+                            borderColor: "rgba(56,189,248,0.4)",
+                            background: "rgba(56,189,248,0.12)",
+                            }
+                        : {
+                            color: "#c9971f",
+                            borderColor: "rgba(201,151,31,0.2)",
+                            background: "transparent",
+                            }
+                    }
+                    >
+                    <Icon name="flash_on" style={{ fontSize: 13 }} />
+                    Free Hit {engine.isFreeHit ? "· Active" : ""}
+                    </button>
+                </div>
               {!engine.noPartnerAvailable && (
                 <button type="button" onClick={() => setShowEndConfirm(true)} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-red-400 border border-red-400/25 ml-auto">
                   <Icon name="sports_score" style={{ fontSize: 13 }} /> {isSecondInnings ? "End Match" : "End Innings"}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => engine.canUndo && engine.undo()}
-                disabled={!engine.canUndo}
-                className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded disabled:opacity-40"
-                style={{ color: "#fbbf24", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
-              >
-                <Icon name="undo" style={{ fontSize: 13 }} /> Undo
-              </button>
-            </div>
-
-            {/* Extra-type selector. FIX (bug #1) — EXTRA_OPTIONS entries are
-                { key, label }, not { value, label }. The previous version
-                read opt.value (always undefined), so no extra type could
-                ever actually be selected — every tap called
-                setExtraType(undefined) and the active-state check
-                (engine.extraType === opt.value) was always false. */}
-            <div className="flex flex-col gap-1.5 relative z-10">
-              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Extra</span>
-              <div className="flex gap-1.5 flex-wrap">
-                {EXTRA_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => engine.setExtraType(opt.key)}
-                    className="px-2.5 py-1.5 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-wide border transition-all"
-                    style={engine.extraType === opt.key
-                      ? { background: "rgba(96,165,250,0.16)", borderColor: "rgba(96,165,250,0.5)", color: "#93c5fd" }
-                      : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)" }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => engine.setIsFreeHit((v) => !v)}
-                className="self-start mt-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-all"
-                style={engine.isFreeHit ? { background: "rgba(96,165,250,0.14)", borderColor: "rgba(96,165,250,0.5)" } : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)" }}
-              >
-                <span className={`font-mono-geist text-[9px] font-black uppercase tracking-wide ${engine.isFreeHit ? "text-sky-400" : "text-gray-400"}`}>
-                  Free Hit {engine.isFreeHit ? "· Active" : ""}
-                </span>
-              </button>
             </div>
           </div>
 
@@ -876,6 +884,26 @@ export default function ScoringSection({
               anywhere in the scoring section; content must compress to
               fit instead of scrolling. ── */}
           <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10 overflow-hidden">
+            {/* NEW — armed-extra status banner. Shows only while Wide /
+                No Ball / Leg Bye / Bye is armed, so it's obvious the next
+                run tap will be recorded as that extra rather than a
+                normal delivery, with a one-tap way to back out. */}
+            {armedExtra && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg shrink-0" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.4)" }}>
+                <span className="font-mono-geist text-[9.5px] font-bold uppercase tracking-[0.12em] text-sky-300 flex items-center gap-1.5 min-w-0">
+                  <Icon name="bolt" style={{ fontSize: 13 }} className="shrink-0" />
+                  <span className="truncate">{armedExtra.label} armed — tap a run to record</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => engine.setExtraType("none")}
+                  className="font-mono-geist text-[9px] font-bold uppercase px-2 py-1 rounded text-sky-300 border border-sky-400/30 hover:bg-sky-400/10 shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-4 lg:grid-cols-6 gap-1.5 sm:gap-2 flex-1 min-h-0" style={{ gridAutoRows: "1fr", containerType: "size" }}>
               {[0, 1, 2, 3, 4, 6].map((n) => (
                 <button
@@ -888,6 +916,31 @@ export default function ScoringSection({
                   {n}
                 </button>
               ))}
+
+              {/* NEW — Wide / No Ball / Leg Bye as proper tiles instead of
+                  small pills. Blue accent ties them visually to the
+                  "extra" ball chips already used in This Over. Active
+                  (armed) state gets a filled gradient + inset glow so
+                  it's unmistakable mid-match which mode you're in. */}
+              {extraGridTiles.map((opt) => {
+                const meta = EXTRA_TILE_META[opt.key];
+                const active = engine.extraType === opt.key;
+                return (
+                  <button
+                    type="button"
+                    key={`extra-${opt.key}`}
+                    onClick={() => handleTapExtra(opt.key)}
+                    className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border flex flex-col items-center justify-center gap-0.5"
+                    style={active
+                      ? { background: "linear-gradient(135deg,#3b82f6,#1e3a8a)", borderColor: "rgba(147,197,253,0.6)", color: "#fff", boxShadow: "0 0 0 2px rgba(96,165,250,0.25) inset" }
+                      : { background: "rgba(59,130,246,0.08)", borderColor: "rgba(96,165,250,0.25)", color: "#93c5fd" }}
+                  >
+                    <Icon name={meta.icon} style={{ fontSize: "clamp(0.9rem, min(6cqh, 7cqi), 1.6rem)" }} />
+                    <span className="font-mono-geist" style={{ fontSize: "clamp(0.65rem, min(4cqh, 5cqi), 0.95rem)", letterSpacing: "0.06em" }}>{meta.abbr}</span>
+                  </button>
+                );
+              })}
+
               <button
                 type="button"
                 onClick={handleTapWicket}
@@ -896,6 +949,22 @@ export default function ScoringSection({
               >
                 Out
               </button>
+
+              {/* NEW — Undo moved here from the header action row, next
+                  to Out/extras so the two "fix a mistake" controls
+                  (Undo + the extras that are easiest to mis-tap) sit
+                  together. */}
+              <button
+                type="button"
+                onClick={() => engine.canUndo && engine.undo()}
+                disabled={!engine.canUndo}
+                className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.1em] transition-all hover:brightness-110 active:scale-95 border disabled:opacity-35 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
+                style={{ color: "#fbbf24", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
+              >
+                <Icon name="undo" style={{ fontSize: "clamp(0.9rem, min(6cqh, 7cqi), 1.6rem)" }} />
+                <span style={{ fontSize: "clamp(0.6rem, min(3.6cqh, 4.5cqi), 0.85rem)" }}>Undo</span>
+              </button>
+
               <MoreActionsMenu onFreeHit={() => engine.setIsFreeHit((v) => !v)} onAdminAction={onAdminAction} />
             </div>
 
