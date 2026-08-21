@@ -1067,7 +1067,7 @@ export default function OverlaySandboxPage() {
       batsmanOut: payload.batsmanOut,
       player: payload.batter.name || (payload.batsmanOut === "striker" ? "Striker" : "Non-striker"),
       score: `${payload.batter.runs}(${payload.batter.balls})`,
-      dismissalType: payload.dismissalType,
+      dismissalType: payload.dismissalType as MomentPayload["dismissalType"],
       bowler: payload.bowlerName,
       fielder: payload.fielder,
     });
