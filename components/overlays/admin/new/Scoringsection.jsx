@@ -927,7 +927,7 @@ export default function ScoringSection({
               <div className="flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1">
                 <span className="font-archivo text-6xl font-bold tabular-nums shrink-0">{liveState.score.runs}/{liveState.score.wickets}</span>
                 <span className="font-mono-geist text-[8px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">
-                  {overs} ov · RR {rr} · {battingTeamLabel} batting{isSecondInnings ? " · Inns 2" : ""}
+                  {overs} overs · RR {rr} · {battingTeamLabel} batting{isSecondInnings ? " · Inns 2" : ""}
                 </span>
               </div>
               <button
