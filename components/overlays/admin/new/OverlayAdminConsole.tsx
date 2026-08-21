@@ -7,10 +7,23 @@ import Image from "next/image";
 import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
 import MatchSetupPanel from "@/components/overlays/admin/new/MatchInfopanel";
 import ScoringSection from "@/components/overlays/admin/new/Scoringsection";
-import type { MatchSetup, TeamInfo } from "@/lib/overlayBus";
+import type { MatchSetup, TeamInfo, LiveState, SquadPlayer } from "@/lib/overlayBus";
 import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
+import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 import { supabase } from "@/lib/supabase";
-import { dbRowToOverlaySetup, overlaySetupToDbPatch, type DbMatchSetupRow } from "@/lib/matchSetupAdapter";
+import {
+  dbRowToOverlaySetup,
+  overlaySetupToDbPatch,
+  type DbMatchSetupRow,
+} from "@/lib/matchSetupAdapter";
+import {
+  loadLiveState,
+  saveLiveState,
+  loadEngineState,
+  saveEngineState,
+  clearEngineState,
+  deleteAllBalls,
+} from "@/lib/matchPersistence";
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
 const PARTICLE_COLORS_BOUNDARY = ["#E8C468", "#A87815", "#FDECC8", "#ffffff"];
@@ -21,8 +34,6 @@ const BOUNDARY_CHANNELS = [
   { key: "matchBoundaries", label: "Match Boundaries" },
   { key: "tournamentBoundaries", label: "Tournament Boundaries" },
 ] as const;
-
-const EXTRA_LABELS: Record<"Wd" | "Nb" | "By" | "Lb", string> = { Wd: "Wide", Nb: "No Ball", By: "Bye", Lb: "Leg Bye" };
 
 const DESKTOP_RIGHT_TABS = [
   { key: "setup" as const, label: "Match Info", icon: "tune" },
@@ -70,14 +81,15 @@ function TogglePill({
 }: {
   label: string;
   on: boolean;
-  onClick: () => void;
+  onClick?: () => void;
   dotColor: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 font-mono-geist text-[10px] uppercase tracking-[0.12em] font-bold px-3 py-1.5 rounded transition-all shrink-0"
+      disabled={!onClick}
+      className="flex items-center gap-1.5 font-mono-geist text-[10px] uppercase tracking-[0.12em] font-bold px-3 py-1.5 rounded transition-all shrink-0 disabled:cursor-default"
       style={{
         background: on ? `${dotColor}1a` : "rgba(255,255,255,0.03)",
         border: `1px solid ${on ? `${dotColor}40` : "rgba(255,255,255,0.08)"}`,
@@ -171,16 +183,7 @@ function MomentButton({
   );
 }
 
-/* Generic centered overlay (portal) — a fixed, backdrop-blurred dialog
-   rendered into document.body, sized to its own content and capped to the
-   viewport with its own internal scroller so it can never run taller than
-   the screen. Same pattern MatchInfopanel already uses for the read-only
-   squad list (SquadOverlay). Used for:
-     - the Weather panel on mobile (trigger row → overlay)
-     - the Wicket Detail form on BOTH mobile and desktop
-     - the Fifty / Hundred batter picker on BOTH mobile and desktop
-   — none of these are gated by any lg:/mobile class, so each renders
-   identically as a centered modal on every screen size. */
+/* Generic centered overlay (portal) — see original comment; unchanged. */
 function CenteredOverlay({
   open,
   onClose,
@@ -233,19 +236,13 @@ function CenteredOverlay({
   );
 }
 
-interface Batter {
+// Minimal read-only shape the Moments panel's batter picker needs —
+// satisfied by LiveState's BatterState (name/runs/balls/fours/sixes
+// plus an optional imageUrl this component ignores).
+interface BatterLike {
   name: string;
   runs: number;
   balls: number;
-  fours: number;
-  sixes: number;
-}
-interface Bowler {
-  name: string;
-  overs: number;
-  balls: number;
-  runs: number;
-  wickets: number;
 }
 
 function BatterPickerButton({
@@ -254,7 +251,7 @@ function BatterPickerButton({
   selected,
   onClick,
 }: {
-  batter: Batter;
+  batter: BatterLike;
   label: string;
   selected: boolean;
   onClick: () => void;
@@ -285,9 +282,6 @@ function BatterPickerButton({
   );
 }
 
-const emptyBatter = (): Batter => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 });
-const emptyBowler = (): Bowler => ({ name: "", overs: 0, balls: 0, runs: 0, wickets: 0 });
-
 const emptyTeam = (name: string, shortCode: string, color: string, logoUrl?: string): TeamInfo => ({
   teamId: undefined,
   name,
@@ -314,6 +308,56 @@ const defaultMatchSetup = (): MatchSetup => ({
   tossWinner: "A",
   tossDecision: "bat",
 });
+
+// NEW — single source of truth for scoring state, shared with
+// ScoringSection (and, inside it, useLiveScoringEngine). Everything
+// that used to live in this file as separate striker/nonStriker/bowler/
+// wkts/legalBalls/partnership/matchBoundaries/teamRuns/overBalls state
+// now lives inside this one object instead, matching what the engine
+// hook and the persistence layer (matchPersistence.ts) already expect.
+function initialLiveState(): LiveState {
+  return {
+    inningsNumber: 1,
+    target: undefined,
+    score: { runs: 0, wickets: 0, overs: 0, balls: 0 },
+    striker: { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined },
+    nonStriker: { name: "", runs: 0, balls: 0, fours: 0, sixes: 0, imageUrl: undefined },
+    bowler: { name: "", overs: 0, balls: 0, maidens: 0, runs: 0, wickets: 0, imageUrl: undefined },
+    partnership: { runs: 0, balls: 0 },
+    matchBoundaries: { fours: 0, sixes: 0 },
+    tournamentBoundaries: { fours: 0, sixes: 0 },
+    thisOver: [],
+    pointsTable: [],
+    matchComplete: false,
+    matchResult: undefined,
+  } as LiveState;
+}
+
+// Fallback squads (as SquadPlayer[] now, not bare strings) used only
+// when a team has no squad configured in Match Setup yet.
+function fallbackSquad(names: string[]): SquadPlayer[] {
+  return names.map((name) => ({ id: `manual:${name}`, name }));
+}
+const ROSTER_TEAM_A_FALLBACK = fallbackSquad([
+  "Ravindu Bandara",
+  "Chamika Silva",
+  "Isuru Weerasekara",
+  "Nadun Karunaratne",
+  "Lakindu Peris",
+  "Tharindu Costa",
+  "Ashen Gunaratne",
+  "Binura Jayasuriya",
+]);
+const ROSTER_TEAM_B_FALLBACK = fallbackSquad([
+  "Hasitha Perera",
+  "Niroshan Jay",
+  "Kavindu Silva",
+  "Danushka Mendis",
+  "Sahan Fernando",
+  "Kaveen Mendis",
+  "Yohan Raj",
+  "Kusal Fernando",
+]);
 
 export default function OverlayAdminConsole({
   auctionId = null,
@@ -406,28 +450,66 @@ export default function OverlayAdminConsole({
     setWeather((w) => ({ ...w, venue: name.toUpperCase() }));
   }
 
-  const [battingTeam, setBattingTeam] = useState<"teamA" | "teamB">("teamA");
-  const bowlingTeam = battingTeam === "teamA" ? "teamB" : "teamA";
-
-  const [striker, setStriker] = useState<Batter>(emptyBatter());
-  const [nonStriker, setNonStriker] = useState<Batter>(emptyBatter());
-  const [bowler, setBowler] = useState<Bowler>(emptyBowler());
-  const [wkts, setWkts] = useState(0);
-  const [legalBalls, setLegalBalls] = useState(0);
-  const [freeHit, setFreeHit] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
-  const [partnership, setPartnership] = useState({ runs: 0, balls: 0 });
-  const [matchBoundaries, setMatchBoundaries] = useState({ fours: 0, sixes: 0 });
-  const [extras, setExtras] = useState<Record<"Wd" | "Nb" | "By" | "Lb", number>>({ Wd: 0, Nb: 0, By: 0, Lb: 0 });
-  const [teamRuns, setTeamRuns] = useState(0);
+  // ── NEW: single scoring state, shared with ScoringSection ──────────
+  const [liveState, setLiveState] = useState<LiveState>(initialLiveState());
   const [livePushed, setLivePushed] = useState(false);
   const [liveDirty, setLiveDirty] = useState(false);
+  const [initialEngineState, setInitialEngineState] = useState<EngineSyncState | null>(null);
 
-  const [overBalls, setOverBalls] = useState<(number | string)[]>([]);
+  // Mirrors ScoringSection's internal engine.dismissedPlayers purely so
+  // the standalone roster list below can show OUT / locked styling
+  // without owning a second copy of "who's out" state.
+  const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set());
 
-  const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(() => new Set());
-  const [activeSlot, setActiveSlot] = useState<"striker" | "nonStriker" | "bowler">("striker");
-  const [playerPicker, setPlayerPicker] = useState<null | "striker" | "nonStriker" | "bowler">(null);
+  // Load persisted liveState + engine_state for this match on mount /
+  // whenever matchId resolves (mirrors the match_setup load effect
+  // above).
+  useEffect(() => {
+    if (!matchId) return;
+    let cancelled = false;
+    (async () => {
+      const [ls, es] = await Promise.all([loadLiveState(matchId), loadEngineState(matchId)]);
+      if (cancelled) return;
+      if (ls) setLiveState(ls);
+      setInitialEngineState(es);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [matchId]);
+
+  // battingTeamKey / bowlingTeamKey — derived from toss + which innings
+  // we're in, rather than a manual operator toggle. Innings 1 batting
+  // side comes from the toss; innings 2 flips it.
+  const inningsOneBattingTeam: "teamA" | "teamB" = useMemo(() => {
+    if (matchSetup.tossWinner === "A") return matchSetup.tossDecision === "bat" ? "teamA" : "teamB";
+    if (matchSetup.tossWinner === "B") return matchSetup.tossDecision === "bat" ? "teamB" : "teamA";
+    return "teamA"; // no toss recorded yet — sensible default
+  }, [matchSetup.tossWinner, matchSetup.tossDecision]);
+
+  const battingTeamKey: "teamA" | "teamB" =
+    (liveState.inningsNumber ?? 1) === 1
+      ? inningsOneBattingTeam
+      : inningsOneBattingTeam === "teamA"
+      ? "teamB"
+      : "teamA";
+  const bowlingTeamKey: "teamA" | "teamB" = battingTeamKey === "teamA" ? "teamB" : "teamA";
+
+  const battingSquad: SquadPlayer[] =
+    matchSetup[battingTeamKey].squadPlayers?.length
+      ? matchSetup[battingTeamKey].squadPlayers
+      : battingTeamKey === "teamA"
+      ? ROSTER_TEAM_A_FALLBACK
+      : ROSTER_TEAM_B_FALLBACK;
+  const bowlingSquad: SquadPlayer[] =
+    matchSetup[bowlingTeamKey].squadPlayers?.length
+      ? matchSetup[bowlingTeamKey].squadPlayers
+      : bowlingTeamKey === "teamA"
+      ? ROSTER_TEAM_A_FALLBACK
+      : ROSTER_TEAM_B_FALLBACK;
+
+  const maxOvers = matchSetup.format === "T20" ? 20 : matchSetup.format === "ODI" ? 50 : undefined;
+
   useIsMobile();
 
   const [logoFailed, setLogoFailed] = useState(false);
@@ -437,77 +519,35 @@ export default function OverlayAdminConsole({
 
   const [mobileTab, setMobileTab] = useState<"overlay" | "scoring" | "setup">("scoring");
 
-  const [inningsNumber, setInningsNumber] = useState(1);
-  const [firstInnings, setFirstInnings] = useState<{ runs: number; wkts: number; overs: string; team: string } | null>(null);
-
-  const rosterTeamAFallback = [
-    "Ravindu Bandara",
-    "Chamika Silva",
-    "Isuru Weerasekara",
-    "Nadun Karunaratne",
-    "Lakindu Peris",
-    "Tharindu Costa",
-    "Ashen Gunaratne",
-    "Binura Jayasuriya",
-  ];
-  const rosterTeamBFallback = [
-    "Hasitha Perera",
-    "Niroshan Jay",
-    "Kavindu Silva",
-    "Danushka Mendis",
-    "Sahan Fernando",
-    "Kaveen Mendis",
-    "Yohan Raj",
-    "Kusal Fernando",
-  ];
-  const rosterTeamA = matchSetup.teamA.squad?.length ? matchSetup.teamA.squad : rosterTeamAFallback;
-  const rosterTeamB = matchSetup.teamB.squad?.length ? matchSetup.teamB.squad : rosterTeamBFallback;
-  const battingRoster = battingTeam === "teamA" ? rosterTeamA : rosterTeamB;
-  const bowlingRoster = bowlingTeam === "teamA" ? rosterTeamA : rosterTeamB;
-
-  const battingRoleMap = (() => {
+  // Read-only display of who's currently in which role, for the
+  // standalone left roster list. Same derivation ScoringSection does
+  // internally off the same liveState — safe to duplicate since it's a
+  // pure projection, not a second source of truth.
+  const battingRoleMap = useMemo(() => {
     const m = new Map<string, { role: string }>();
-    if (striker.name) m.set(striker.name, { role: "striker" });
-    if (nonStriker.name) m.set(nonStriker.name, { role: "nonStriker" });
+    if (liveState.striker.name) m.set(liveState.striker.name, { role: "striker" });
+    if (liveState.nonStriker.name) m.set(liveState.nonStriker.name, { role: "nonStriker" });
     return m;
-  })();
-  const bowlingRoleMap = (() => {
+  }, [liveState.striker.name, liveState.nonStriker.name]);
+  const bowlingRoleMap = useMemo(() => {
     const m = new Map<string, { role: string }>();
-    if (bowler.name) m.set(bowler.name, { role: "bowler" });
+    if (liveState.bowler.name) m.set(liveState.bowler.name, { role: "bowler" });
     return m;
-  })();
+  }, [liveState.bowler.name]);
 
-  function assignBatter(slot: "striker" | "nonStriker", name: string) {
-    if (dismissedPlayers.has(name)) return;
-    const blocked = slot === "striker" ? nonStriker.name : striker.name;
-    if (name === blocked) return;
-    const fresh = { ...emptyBatter(), name };
-    if (slot === "striker") setStriker(fresh);
-    else setNonStriker(fresh);
-    pushLog(`${slot === "striker" ? "Striker" : "Non-Striker"} set — ${name}`);
-  }
-  function assignBowler(name: string) {
-    setBowler((b) => (b.name === name ? emptyBowler() : { ...emptyBowler(), name }));
-    pushLog(`Bowler set — ${name}`);
-  }
-
-  const isBattingSlotActive = activeSlot === "striker" || activeSlot === "nonStriker";
-  const asideTeamKey: "teamA" | "teamB" = isBattingSlotActive ? battingTeam : bowlingTeam;
-  const asideRoster = isBattingSlotActive ? battingRoster : bowlingRoster;
-  const asideDismissed = isBattingSlotActive ? dismissedPlayers : undefined;
-  const asideRoleMap = isBattingSlotActive ? battingRoleMap : bowlingRoleMap;
-  function assignFromAsideList(name: string) {
-    if (isBattingSlotActive) assignBatter(activeSlot as "striker" | "nonStriker", name);
-    else assignBowler(name);
-  }
+  // Which team's roster the standalone left panel is currently
+  // browsing. Purely a display toggle now — assignment itself happens
+  // via ScoringSection's own picker sheet / crew-slot drag targets, not
+  // through this list directly (it can still be dragged FROM, though).
+  const [rosterView, setRosterView] = useState<"batting" | "bowling">("batting");
+  const asideTeamKey: "teamA" | "teamB" = rosterView === "batting" ? battingTeamKey : bowlingTeamKey;
+  const asideRoster: SquadPlayer[] = rosterView === "batting" ? battingSquad : bowlingSquad;
+  const asideRoleMap = rosterView === "batting" ? battingRoleMap : bowlingRoleMap;
 
   const [showMoments, setShowMoments] = useState(true);
   const [showWicketForm, setShowWicketForm] = useState(false);
   const [wicketDraft, setWicketDraft] = useState({ batsmanOut: "striker" as "striker" | "nonStriker", dismissalType: "bowled", fielder: "" });
   const [milestoneBatter, setMilestoneBatter] = useState<"striker" | "nonStriker">("striker");
-  // Fifty / Hundred picker — now its own centered overlay, opened only
-  // when the Fifty or Hundred moment button is tapped (mirrors the
-  // Wicket Detail overlay pattern below).
   const [showMilestoneForm, setShowMilestoneForm] = useState(false);
   const [milestoneKind, setMilestoneKind] = useState<"fifty" | "hundred">("fifty");
   const [showMatchWonForm, setShowMatchWonForm] = useState(false);
@@ -520,8 +560,6 @@ export default function OverlayAdminConsole({
 
   const [weather, setWeather] = useState({ venue: "GALLE FORT", temp: 28, condition: "partly-cloudy" });
   const [weatherEditing, setWeatherEditing] = useState(false);
-  // Mobile-only: whether the centered Weather overlay (portal) is open.
-  // Desktop never reads this — WeatherPanel stays inline there unchanged.
   const [weatherOverlayOpen, setWeatherOverlayOpen] = useState(false);
 
   const [toasts, setToasts] = useState<{ id: number; text: string; tone: "wicket" | "boundary" | "info" }[]>([]);
@@ -548,15 +586,6 @@ export default function OverlayAdminConsole({
     },
     []
   );
-
-  const overs = `${Math.floor(legalBalls / 6)}.${legalBalls % 6}`;
-  const oversLimit = matchSetup.format === "T20" ? 20 : matchSetup.format === "ODI" ? 50 : null;
-  const rr = legalBalls > 0 ? (teamRuns / (legalBalls / 6)).toFixed(2) : "0.00";
-
-  const target = firstInnings ? firstInnings.runs + 1 : null;
-  const runsNeeded = target !== null ? Math.max(target - teamRuns, 0) : null;
-  const ballsLeft = oversLimit !== null ? Math.max(oversLimit * 6 - legalBalls, 0) : null;
-  const requiredRate = target !== null && ballsLeft ? (runsNeeded! / (ballsLeft / 6)).toFixed(2) : null;
 
   function pushLog(label: string) {
     const id = idCtr++;
@@ -594,181 +623,125 @@ export default function OverlayAdminConsole({
     }, 1400);
   }
 
-  function pushLiveState() {
-    setLivePushed(true);
-    setLiveDirty(false);
-    pushLog("Live State pushed to overlay");
-    setTimeout(() => setLivePushed(false), 1500);
-  }
-
-  function snapshot() {
-    return { striker, nonStriker, bowler, wkts, legalBalls, partnership, matchBoundaries, extras, teamRuns, overBalls };
-  }
-
-  function record(runsAdded: number, { wicket = false, extra = null as null | "Wd" | "Nb" | "By" | "Lb" } = {}) {
-    setHistory((h) => [...h, snapshot()]);
-    const isLegal = !["Wd", "Nb"].includes(extra as string);
-
-    setStriker((s) => ({
-      ...s,
-      runs: s.runs + (extra ? 0 : runsAdded),
-      balls: s.balls + (isLegal ? 1 : 0),
-      fours: runsAdded === 4 && !extra ? s.fours + 1 : s.fours,
-      sixes: runsAdded === 6 && !extra ? s.sixes + 1 : s.sixes,
-    }));
-    if (wicket) setWkts((w) => w + 1);
-    if (isLegal) setLegalBalls((b) => b + 1);
-    setTeamRuns((r) => r + runsAdded);
-    setPartnership((p) => (wicket ? { runs: 0, balls: 0 } : { runs: p.runs + runsAdded, balls: p.balls + (isLegal ? 1 : 0) }));
-    if (extra) setExtras((ex) => ({ ...ex, [extra]: ex[extra] + 1 }));
-    if (runsAdded === 4 && !extra) setMatchBoundaries((m) => ({ ...m, fours: m.fours + 1 }));
-    if (runsAdded === 6 && !extra) setMatchBoundaries((m) => ({ ...m, sixes: m.sixes + 1 }));
-    setBowler((f) => {
-      const balls = f.balls + (isLegal ? 1 : 0);
-      return { ...f, overs: Math.floor(balls / 6), balls: balls % 6, runs: f.runs + runsAdded, wickets: f.wickets + (wicket ? 1 : 0) };
-    });
-    setLiveDirty(true);
-
-    const entry: number | string = wicket ? "W" : extra ? extra : runsAdded;
-    setOverBalls((prev) => {
-      const legalCount = prev.filter((e) => e !== "Wd" && e !== "Nb").length;
-      const base = isLegal && legalCount >= 6 ? [] : prev;
-      return [...base, entry];
-    });
-
-    if (wicket) {
-      fireStamp("wicket", "OUT");
-      spawnParticles(PARTICLE_COLORS_WICKET);
-      pushLog(`Ball — Wicket! ${striker.name || "Striker"} b ${bowler.name || "bowler"}`);
-      setShowWicketForm(true);
-    } else if (runsAdded === 4 && !extra) {
-      fireStamp("boundary", "FOUR");
-      spawnParticles(PARTICLE_COLORS_BOUNDARY);
-      pushLog(`Moment: FOUR — ${striker.name || "Striker"} ${striker.runs + 4}(${striker.balls + 1})`);
-    } else if (runsAdded === 6 && !extra) {
-      fireStamp("boundary", "SIX");
-      spawnParticles(PARTICLE_COLORS_BOUNDARY);
-      pushLog(`Moment: SIX — ${striker.name || "Striker"} ${striker.runs + 6}(${striker.balls + 1})`);
-    } else {
-      pushLog(`Ball — ${extra ? EXTRA_LABELS[extra] : runsAdded === 0 ? "Dot ball" : `${runsAdded} run${runsAdded === 1 ? "" : "s"}`}`);
-    }
-    const newRuns = striker.runs + (extra ? 0 : runsAdded);
-    if (!extra && !wicket && (newRuns === 50 || newRuns === 100)) {
-      fireMilestoneMoment(newRuns === 50 ? "fifty" : "hundred", "striker");
-    }
-    setFreeHit(false);
-  }
-
-  function handleRun(n: number) {
-    return record(n);
-  }
-  function onExtra(code: "Wd" | "Nb" | "By" | "Lb") {
-    return record(1, { extra: code });
-  }
-  function handleOut() {
-    if (freeHit) return;
-    record(0, { wicket: true });
-  }
-  function onFreeHit() {
-    setFreeHit(true);
-    pushLog("Free Hit armed for next ball");
-    fireToast("Free Hit armed");
-  }
   function onAdminAction(label: string) {
     pushLog(`Admin — ${label}`);
     fireToast(label);
   }
 
-  function handleUndo() {
-    const prev = history[history.length - 1];
-    if (!prev) return;
-    setStriker(prev.striker);
-    setNonStriker(prev.nonStriker);
-    setBowler(prev.bowler);
-    setWkts(prev.wkts);
-    setLegalBalls(prev.legalBalls);
-    setPartnership(prev.partnership);
-    setMatchBoundaries(prev.matchBoundaries);
-    setExtras(prev.extras);
-    setTeamRuns(prev.teamRuns);
-    setOverBalls(prev.overBalls ?? []);
-    setHistory((h) => h.slice(0, -1));
-    fireToast("Last ball undone");
+  // ── NEW: callbacks handed to ScoringSection — these fire the visual
+  // moment (stamp/particles/toast) whenever the engine actually records
+  // that event against liveState. They no longer duplicate any scoring
+  // logic themselves. ─────────────────────────────────────────────────
+  function handleBoundaryMoment(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
+    fireStamp("boundary", moment.toUpperCase());
+    spawnParticles(PARTICLE_COLORS_BOUNDARY);
+    pushLog(`Moment: ${moment.toUpperCase()} — ${batter.name || "Striker"} ${batter.runs}(${batter.balls})`);
   }
-  function handleClear() {
-    setStriker(emptyBatter());
-    setNonStriker(emptyBatter());
-    setBowler(emptyBowler());
-    setWkts(0);
-    setLegalBalls(0);
-    setHistory([]);
-    setPartnership({ runs: 0, balls: 0 });
-    setMatchBoundaries({ fours: 0, sixes: 0 });
-    setExtras({ Wd: 0, Nb: 0, By: 0, Lb: 0 });
-    setTeamRuns(0);
-    setOverBalls([]);
-    setInningsNumber(1);
-    setFirstInnings(null);
-    setBattingTeam("teamA");
-    setFreeHit(false);
+  function handleMilestoneMoment(
+    moment: "fifty" | "hundred",
+    batter: { name: string; runs: number; balls: number; label?: string }
+  ) {
+    fireStamp("boundary", moment === "fifty" ? "FIFTY" : "HUNDRED");
+    spawnParticles(PARTICLE_COLORS_BOUNDARY);
+    pushLog(`Moment: ${moment.toUpperCase()} — ${batter.label || batter.name || "Batter"} ${batter.runs}(${batter.balls})`);
+  }
+  function handleWicketConfirm(payload: {
+    batsmanOut: "striker" | "nonStriker";
+    batter: { name: string; runs: number; balls: number };
+    dismissalType: string;
+    fielder: string;
+    bowlerName: string;
+  }) {
+    fireStamp("wicket", "OUT");
+    spawnParticles(PARTICLE_COLORS_WICKET);
+    pushLog(
+      `Moment: WICKET — ${payload.batter.name || "Batter"} ${payload.dismissalType}${
+        payload.bowlerName ? ` b ${payload.bowlerName}` : ""
+      }${payload.fielder ? ` c ${payload.fielder}` : ""}`
+    );
+  }
+  function fireMaidenMoment(payload: { bowlerName: string; maidens: number }) {
+    if (!payload?.bowlerName) {
+      fireToast("Set a bowler in Live State first");
+      return;
+    }
+    pushLog(`Moment: MAIDEN OVER — ${payload.bowlerName}`);
+    fireToast(`Maiden fired for ${payload.bowlerName}`);
+  }
+  function handleInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
+    pushLog(`Innings break — target set to ${payload.target}`);
+    fireToast(`Target set: ${payload.target}`);
+  }
+  function handleMatchComplete(result: { winningTeamName: string; margin: string; method: string }) {
+    fireStamp("boundary", "WON");
+    spawnParticles(PARTICLE_COLORS_BOUNDARY);
+    pushLog(`Moment: MATCH WON — ${result.winningTeamName} ${result.margin}`);
+  }
+
+  function pushLiveState() {
+    setLivePushed(true);
+    setLiveDirty(false);
+    pushLog("Live State pushed to overlay");
+    if (matchId) saveLiveState(matchId, liveState);
+    setTimeout(() => setLivePushed(false), 1500);
+  }
+
+  function handleEngineStateChange(state: EngineSyncState) {
+    if (matchId) saveEngineState(matchId, state);
+  }
+
+  async function restartMatchAndEngine() {
+    const fresh = initialLiveState();
+    setLiveState(fresh);
+    setLiveDirty(false);
+    setInitialEngineState(null);
+    setDismissedPlayers(new Set());
     setShowClearConfirm(false);
-    setDismissedPlayers(new Set());
-    setActiveSlot("striker");
-    setPlayerPicker(null);
     pushLog("Innings cleared / match restarted");
-    fireToast("Innings cleared");
+    fireToast("Match restarted");
+
+    if (matchId) {
+      await saveLiveState(matchId, fresh);
+      await clearEngineState(matchId);
+      await deleteAllBalls(matchId);
+    }
   }
-  function endInnings() {
-    setFirstInnings({ runs: teamRuns, wkts, overs, team: legacyMatchSetup[battingTeam] });
-    pushLog(`Innings break — ${legacyMatchSetup[battingTeam]} finished ${teamRuns}/${wkts} (${overs} ov)`);
-    fireToast(`${legacyMatchSetup[battingTeam]} innings closed at ${teamRuns}/${wkts}`);
-    setBattingTeam((t) => (t === "teamA" ? "teamB" : "teamA"));
-    setStriker(emptyBatter());
-    setNonStriker(emptyBatter());
-    setBowler(emptyBowler());
-    setWkts(0);
-    setLegalBalls(0);
-    setHistory([]);
-    setPartnership({ runs: 0, balls: 0 });
-    setExtras({ Wd: 0, Nb: 0, By: 0, Lb: 0 });
-    setTeamRuns(0);
-    setOverBalls([]);
-    setInningsNumber(2);
-    setDismissedPlayers(new Set());
-    setActiveSlot("striker");
-    setPlayerPicker(null);
-  }
+
+  // Derived display bits the Moments panel / restart-confirm dialog
+  // still need, now read straight off liveState instead of the old
+  // local score state.
+  const overs = `${liveState.score.overs}.${liveState.score.balls}`;
+  const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
 
   function fireBoundaryMoment(kind: string) {
     fireStamp("boundary", kind.toUpperCase());
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
-    pushLog(`Moment: ${kind.toUpperCase()} (manual) — ${striker.name || "Striker"} ${striker.runs}(${striker.balls})`);
+    pushLog(`Moment: ${kind.toUpperCase()} (manual) — ${liveState.striker.name || "Striker"} ${liveState.striker.runs}(${liveState.striker.balls})`);
   }
+  // NOTE — these two "manual" Moments-panel fires are cosmetic only:
+  // they fire the on-air stamp/toast without mutating liveState. Actual
+  // scoring (which affects the real score, dismissed-players list, etc)
+  // happens exclusively through ScoringSection's engine (the Out button
+  // + its own Wicket Detail dialog, and boundary/milestone auto-fire
+  // off recordBall). Previously this panel ALSO mutated dismissedPlayers/
+  // striker/nonStriker directly, which is exactly the kind of second
+  // source of truth that desyncs from the real engine state — removed.
   function fireMilestoneMoment(kind: "fifty" | "hundred", who: "striker" | "nonStriker" = milestoneBatter) {
-    const batter = who === "striker" ? striker : nonStriker;
+    const batter = who === "striker" ? liveState.striker : liveState.nonStriker;
     const label = batter.name || (who === "striker" ? "Striker" : "Non-Striker");
     fireStamp("boundary", kind === "fifty" ? "FIFTY" : "HUNDRED");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
-    pushLog(`Moment: ${kind.toUpperCase()} — ${label} ${batter.runs}(${batter.balls})`);
-  }
-  function fireMaidenMoment() {
-    if (!bowler.name) return fireToast("Set a bowler in Live State first");
-    pushLog(`Moment: MAIDEN OVER — ${bowler.name}`);
-    fireToast(`Maiden fired for ${bowler.name}`);
+    pushLog(`Moment: ${kind.toUpperCase()} (manual) — ${label} ${batter.runs}(${batter.balls})`);
   }
   function fireWicketMoment() {
-    const batter = wicketDraft.batsmanOut === "striker" ? striker : nonStriker;
+    const batter = wicketDraft.batsmanOut === "striker" ? liveState.striker : liveState.nonStriker;
+    fireStamp("wicket", "OUT");
+    spawnParticles(PARTICLE_COLORS_WICKET);
     pushLog(
-      `Moment: WICKET — ${batter.name || "Batter"} ${wicketDraft.dismissalType}${bowler.name ? ` b ${bowler.name}` : ""}${
-        wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""
-      }`
+      `Moment: WICKET (manual) — ${batter.name || "Batter"} ${wicketDraft.dismissalType}${
+        liveState.bowler.name ? ` b ${liveState.bowler.name}` : ""
+      }${wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""}`
     );
-    if (batter.name) {
-      setDismissedPlayers((prev) => new Set(prev).add(batter.name));
-      if (wicketDraft.batsmanOut === "striker") setStriker(emptyBatter());
-      else setNonStriker(emptyBatter());
-      setActiveSlot(wicketDraft.batsmanOut);
-    }
     setWicketDraft({ batsmanOut: "striker", dismissalType: "bowled", fielder: "" });
     setShowWicketForm(false);
   }
@@ -782,18 +755,8 @@ export default function OverlayAdminConsole({
     const margin = matchWonDraft.margin || "Match Won";
     fireStamp("boundary", "WON");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
-    pushLog(`Moment: MATCH WON — ${name} ${margin}`);
+    pushLog(`Moment: MATCH WON (manual) — ${name} ${margin}`);
     setShowMatchWonForm(false);
-  }
-
-  const statCards: { label: string; value: string }[] = [
-    { label: "Partnership", value: `${partnership.runs} (${partnership.balls})` },
-    { label: "Match 4s / 6s", value: `${matchBoundaries.fours} / ${matchBoundaries.sixes}` },
-    { label: "Overs", value: overs },
-    { label: "Extras", value: `${extras.Wd + extras.Nb + extras.By + extras.Lb}` },
-  ];
-  if (inningsNumber === 2 && target !== null) {
-    statCards.push({ label: "Target", value: `${target}` });
   }
 
   return (
@@ -970,8 +933,7 @@ export default function OverlayAdminConsole({
         </div>
       </header>
 
-      {/* ── On Air channels — desktop only; mobile gets a purpose-built card
-           inside the Overlay tab. ── */}
+      {/* ── On Air channels — desktop only ── */}
       <div className="hidden lg:flex sticky top-16 w-full z-40 px-3 sm:px-6 py-1.5 sm:py-3 items-start gap-4 flex-wrap border-b border-white/5 bg-surface-container-lowest">
         <div className="flex flex-col items-center gap-1.5">
           <GroupLabel center>On Air</GroupLabel>
@@ -1013,11 +975,11 @@ export default function OverlayAdminConsole({
           <div className="hidden lg:flex lg:flex-1 lg:min-h-0 flex-col lg:overflow-hidden">
             <div className="flex items-center justify-between mb-1 shrink-0 gap-2 flex-wrap">
               <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.18em] font-bold">
-                Pick From {legacyMatchSetup[asideTeamKey]}
+                Roster — {legacyMatchSetup[asideTeamKey]}
               </p>
               <div className="flex items-center gap-1.5 shrink-0">
-                <TogglePill label={legacyMatchSetup.teamA} on={battingTeam === "teamA"} dotColor="#c9971f" onClick={() => setBattingTeam("teamA")} />
-                <TogglePill label={legacyMatchSetup.teamB} on={battingTeam === "teamB"} dotColor="#c9971f" onClick={() => setBattingTeam("teamB")} />
+                <TogglePill label="Batting" on={rosterView === "batting"} dotColor="#c9971f" onClick={() => setRosterView("batting")} />
+                <TogglePill label="Bowling" on={rosterView === "bowling"} dotColor="#c9971f" onClick={() => setRosterView("bowling")} />
               </div>
             </div>
 
@@ -1026,9 +988,9 @@ export default function OverlayAdminConsole({
             </div>
 
             <div className="max-h-72 lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden space-y-2">
-              {asideRoster.map((name) => {
-                const isOut = !!asideDismissed?.has(name);
-                const roleInfo = asideRoleMap.get(name);
+              {asideRoster.map((player) => {
+                const isOut = dismissedPlayers.has(player.name);
+                const roleInfo = asideRoleMap.get(player.name);
                 const isLocked = isOut || !!roleInfo;
                 const roleLabel =
                   roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
@@ -1036,7 +998,7 @@ export default function OverlayAdminConsole({
                 return (
                   <button
                     type="button"
-                    key={name}
+                    key={player.id}
                     draggable={!isLocked}
                     disabled={isLocked}
                     onDragStart={(e) => {
@@ -1044,9 +1006,15 @@ export default function OverlayAdminConsole({
                         e.preventDefault();
                         return;
                       }
-                      e.dataTransfer.setData("text/player-name", name);
+                      // FIX (bug #4) — CrewSlot's onDrop reads
+                      // "text/player-id" and looks the player up by id
+                      // against the squad it was handed. The old drag
+                      // source here set "text/player-name" with a bare
+                      // string, which no drop target ever read — drag
+                      // & drop assignment was silently a no-op. Now the
+                      // key AND payload match what CrewSlot expects.
+                      e.dataTransfer.setData("text/player-id", player.id);
                     }}
-                    onClick={() => !isLocked && assignFromAsideList(name)}
                     className="w-full flex items-center gap-3 rounded-lg pl-2.5 pr-3 py-3 text-left transition-all"
                     style={
                       isOut
@@ -1057,14 +1025,19 @@ export default function OverlayAdminConsole({
                     }
                   >
                     <span
-                      className="h-9 w-9 rounded-full flex items-center justify-center font-mono-geist text-[11px] font-bold shrink-0"
+                      className="h-9 w-9 rounded-full flex items-center justify-center font-mono-geist text-[11px] font-bold shrink-0 overflow-hidden"
                       style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "#e5e7eb" }}
                     >
-                      {initials(name)}
+                      {player.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={player.imageUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        initials(player.name)
+                      )}
                     </span>
                     <span className="flex flex-col min-w-0">
                       <span className="font-archivo text-sm font-bold truncate" style={{ color: isOut ? "#f87171" : roleInfo ? "#4ade80" : "var(--color-on-surface)" }}>
-                        {name}
+                        {player.name}
                       </span>
                       <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.08em]">
                         {legacyMatchSetup[asideTeamKey]}
@@ -1081,59 +1054,38 @@ export default function OverlayAdminConsole({
           </div>
         </aside>
 
-        {/* ══════════ CENTER: Live State scorer (default on mobile) ══════════ */}
+        {/* ══════════ CENTER: Live scoring (ScoringSection owns the engine) ══════════ */}
         <ScoringSection
           mobileTab={mobileTab}
-          teamRuns={teamRuns}
-          wkts={wkts}
-          overs={overs}
-          rr={rr}
+          matchId={matchId}
           matchSetup={legacyMatchSetup}
-          battingTeam={battingTeam}
-          inningsNumber={inningsNumber}
-          target={target}
-          runsNeeded={runsNeeded}
-          ballsLeft={ballsLeft}
-          requiredRate={requiredRate}
-          stamp={stamp}
-          striker={striker}
-          nonStriker={nonStriker}
-          bowler={bowler}
-          setStriker={setStriker}
-          setNonStriker={setNonStriker}
-          activeSlot={activeSlot}
-          setActiveSlot={setActiveSlot}
-          playerPicker={playerPicker}
-          setPlayerPicker={setPlayerPicker}
-          dismissedPlayers={dismissedPlayers}
-          battingRoster={battingRoster}
-          bowlingRoster={bowlingRoster}
-          bowlingTeam={bowlingTeam}
-          assignBatter={assignBatter}
-          assignBowler={assignBowler}
-          freeHit={freeHit}
-          extras={extras}
-          handleRun={handleRun}
-          onExtra={onExtra}
-          onFreeHit={onFreeHit}
-          onAdminAction={onAdminAction}
-          handleOut={handleOut}
-          onUndo={handleUndo}
-          endInnings={endInnings}
-          pushLiveState={pushLiveState}
-          livePushed={livePushed}
+          battingTeamKey={battingTeamKey}
+          bowlingTeamKey={bowlingTeamKey}
+          battingSquad={battingSquad}
+          bowlingSquad={bowlingSquad}
+          maxOvers={maxOvers}
+          liveState={liveState}
+          setLiveState={setLiveState}
           liveDirty={liveDirty}
-          statCards={statCards}
-          battingRoleMap={battingRoleMap}
-          bowlingRoleMap={bowlingRoleMap}
-          currentOverBalls={overBalls}
+          setLiveDirty={setLiveDirty}
+          onPush={pushLiveState}
+          pushLabel={livePushed ? "Pushed ✓" : "Push Live State"}
+          onBoundary={handleBoundaryMoment}
+          onMilestone={handleMilestoneMoment}
+          onWicketConfirm={handleWicketConfirm}
+          onMaiden={fireMaidenMoment}
+          onInningsEnd={handleInningsEnd}
+          onMatchComplete={handleMatchComplete}
+          onRestartMatch={restartMatchAndEngine}
+          onEngineStateChange={handleEngineStateChange}
+          initialEngineState={initialEngineState}
+          onAdminAction={onAdminAction}
+          onDismissedPlayersChange={setDismissedPlayers}
         />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
         <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">
 
-          {/* Desktop-only tab bar. Mobile is untouched — it keeps its own
-              bottom nav (mobileTab) and this bar never renders there. */}
           <div className="hidden lg:flex items-center gap-1.5 px-3 pt-3 shrink-0">
             {DESKTOP_RIGHT_TABS.map((tab) => {
               const active = desktopRightTab === tab.key;
@@ -1172,30 +1124,6 @@ export default function OverlayAdminConsole({
             />
           </div>
 
-          {/* ════════════════════════════════════════════════════════════
-              Broadcast Channels + "Overlay Advanced" (Moments + Weather
-              combined) — mobile-only body of the "Overlay" bottom-nav
-              tab. Previously this whole block was capped to
-              `calc(100dvh - 6rem)` with Moments/Weather scrolling
-              internally underneath a pinned Broadcast Channels section.
-              Now that the Wicket Detail form, the Fifty/Hundred picker,
-              and the full Weather panel all live in their own centered
-              overlays (see CenteredOverlay) instead of sitting inline
-              here, the remaining content — Broadcast Channels, the
-              Moments grid, and the compact Weather trigger row — is
-              short enough to render at its natural height and fit inside
-              one screen without any internal scrollbar. The cap + inner
-              scroller are removed entirely; if a phone is ever short
-              enough that content doesn't fit, the page itself scrolls as
-              a single unit (same as any other normal page) instead of
-              nesting a second scroll region inside this tab.
-
-              On desktop this wrapper is `lg:contents`, so it has zero
-              layout effect there — Moments and Weather fall back to
-              being plain aside children, both shown together whenever
-              `desktopRightTab === "overlay"` (the second of the two
-              desktop tabs, alongside "Match Info" for Setup).
-              ════════════════════════════════════════════════════════════ */}
           <div
             className={`flex-col min-h-0 max-h-[calc(100dvh-6rem)] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:max-h-none lg:overflow-visible lg:contents ${
               mobileTab === "overlay" ? "flex" : "hidden"
@@ -1235,14 +1163,7 @@ export default function OverlayAdminConsole({
               </div>
             </div>
 
-            {/* Overlay Advanced — no internal scroll anymore. Renders at
-                natural height right underneath Broadcast Channels. */}
             <div className="flex flex-col gap-4 pb-4 lg:contents lg:pb-0">
-
-              {/* Heading for the combined panel — shown on mobile always
-                  (this whole block only renders there when mobileTab ===
-                  "overlay"), and on desktop whenever the "Overlay" tab is
-                  the active one of the two desktop tabs. */}
               <div className={`shrink-0 pt-4 px-4 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
                 <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Overlay Advanced</h3>
                 <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
@@ -1250,15 +1171,6 @@ export default function OverlayAdminConsole({
                 </p>
               </div>
 
-              {/* Mobile: a compact Weather trigger row instead of the full
-                  panel inline. Tapping it opens WeatherPanel inside a
-                  centered overlay (see CenteredOverlay above). Deliberately
-                  placed ABOVE Moments — Weather is the thing operators check
-                  most often, so it stays reachable near the top of the
-                  mobile Overlay tab even if Moments or other sections get
-                  pushed below the fold on shorter screens. Desktop is
-                  untouched: the desktop inline Weather panel further below
-                  keeps its original position alongside Moments. */}
               <div className="px-4 shrink-0 lg:hidden">
                 <button
                   type="button"
@@ -1302,7 +1214,7 @@ export default function OverlayAdminConsole({
                 />
               </CenteredOverlay>
 
-              {/* ── Moments (desktop tab: "overlay", shown together with Weather) ── */}
+              {/* ── Moments — all fields now read from liveState ── */}
               <div className={`px-4 shrink-0 flex flex-col lg:min-h-0 lg:overflow-hidden ${desktopRightTab === "overlay" ? "lg:flex lg:flex-1" : "lg:hidden"}`}>
                 <button type="button" onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
                   <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
@@ -1321,7 +1233,7 @@ export default function OverlayAdminConsole({
                           setShowMilestoneForm(true);
                         }}
                       />
-                      <MomentButton label="Maiden" onClick={fireMaidenMoment} />
+                      <MomentButton label="Maiden" onClick={() => fireMaidenMoment({ bowlerName: liveState.bowler.name, maidens: liveState.bowler.maidens })} />
                       <MomentButton label="Match Won" active={showMatchWonForm} onClick={() => setShowMatchWonForm((v) => !v)} />
                     </div>
                     <MomentButton
@@ -1334,11 +1246,6 @@ export default function OverlayAdminConsole({
                       }}
                     />
 
-                    {/* Wicket Detail — a centered overlay (portal) instead of an
-                        inline card. Renders the same way on mobile and desktop:
-                        a modal centered over the whole viewport, capped to
-                        `85dvh` with its own internal scroll. See
-                        CenteredOverlay above. */}
                     <CenteredOverlay
                       open={showWicketForm}
                       onClose={() => setShowWicketForm(false)}
@@ -1347,11 +1254,14 @@ export default function OverlayAdminConsole({
                       iconColor="#f87171"
                     >
                       <div className="flex flex-col gap-3">
+                        <p className="font-mono-geist text-[9.5px] text-on-surface-variant uppercase tracking-[0.08em]">
+                          Manual graphic only — doesn&apos;t record a real dismissal. Use the Out button in Scoring for that.
+                        </p>
                         <div className="flex flex-col gap-1.5">
                           <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
                           <div className="grid grid-cols-2 gap-2">
-                            <BatterPickerButton batter={striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
-                            <BatterPickerButton batter={nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
+                            <BatterPickerButton batter={liveState.striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
+                            <BatterPickerButton batter={liveState.nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
                           </div>
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -1378,7 +1288,7 @@ export default function OverlayAdminConsole({
                             className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
                           />
                         </div>
-                        <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {bowler.name || "—"}</p>
+                        <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {liveState.bowler.name || "—"}</p>
                         <button
                           type="button"
                           onClick={fireWicketMoment}
@@ -1390,11 +1300,6 @@ export default function OverlayAdminConsole({
                       </div>
                     </CenteredOverlay>
 
-                    {/* Fifty / Hundred batter picker — centered overlay,
-                        opened only from the Fifty / Hundred moment buttons
-                        above. Mirrors the Wicket Detail overlay pattern:
-                        no inline content sits in the Moments list the rest
-                        of the time. */}
                     <CenteredOverlay
                       open={showMilestoneForm}
                       onClose={() => setShowMilestoneForm(false)}
@@ -1407,13 +1312,13 @@ export default function OverlayAdminConsole({
                           <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batter</span>
                           <div className="grid grid-cols-2 gap-2">
                             <BatterPickerButton
-                              batter={striker}
+                              batter={liveState.striker}
                               label="Striker"
                               selected={milestoneBatter === "striker"}
                               onClick={() => setMilestoneBatter("striker")}
                             />
                             <BatterPickerButton
-                              batter={nonStriker}
+                              batter={liveState.nonStriker}
                               label="Non-Striker"
                               selected={milestoneBatter === "nonStriker"}
                               onClick={() => setMilestoneBatter("nonStriker")}
@@ -1499,15 +1404,6 @@ export default function OverlayAdminConsole({
                 )}
               </div>
 
-              {/* ── Weather (desktop tab: "overlay", shown together with Moments) ──
-                  `weatherEditing` is hardcoded to `true` here — see the
-                  WEATHER PANEL ALWAYS OPEN note near the top of this file —
-                  so the panel always renders expanded regardless of the
-                  underlying `weatherEditing` state. `setWeatherEditing` is
-                  still passed through in case WeatherPanel uses the setter
-                  for something other than a collapse toggle. */}
-              {/* Desktop: unchanged — WeatherPanel renders inline exactly
-                  as before, gated purely by `desktopRightTab`. */}
               <div className={`hidden px-4 lg:mb-4 shrink-0 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
                 <WeatherPanel
                   weather={weather}
@@ -1570,7 +1466,7 @@ export default function OverlayAdminConsole({
               <div className="text-center">
                 <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.15em] mb-1">Current Score</p>
                 <p className="font-archivo text-xl sm:text-2xl font-bold text-white">
-                  {teamRuns}/{wkts}
+                  {liveState.score.runs}/{liveState.score.wickets}
                 </p>
               </div>
               <div className="text-center">
@@ -1589,7 +1485,7 @@ export default function OverlayAdminConsole({
               </button>
               <button
                 type="button"
-                onClick={handleClear}
+                onClick={restartMatchAndEngine}
                 className="flex-1 py-3 rounded-xl font-mono-geist text-xs font-bold uppercase tracking-[0.2em] transition-all hover:brightness-110 active:scale-95"
                 style={{ background: "linear-gradient(135deg, #991b1b, #ef4444)", color: "#fff", boxShadow: "0 4px 24px rgba(239,68,68,0.3)" }}
               >

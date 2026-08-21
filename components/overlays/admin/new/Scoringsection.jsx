@@ -1,22 +1,39 @@
+// application/components/overlays/admin/new/ScoringSection.jsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import CricketBall from "@/components/overlays/shared/CricketBall"
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import CricketBall from "@/components/overlays/shared/CricketBall";
+import {
+  useLiveScoringEngine,
+  EXTRA_OPTIONS, // { key: ExtraType, label: string }[] — e.g. {key:"none",label:"Legal"},{key:"wide",label:"Wide"},{key:"noBall",label:"No Ball"},{key:"bye",label:"Bye"},{key:"legBye",label:"Leg Bye"}
+  getValidDismissalOptions,
+  isDismissalLockedToRunOutOnly,
+} from "@/hooks/useLiveScoringEngine";
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
 
+/* ───────────────────────── helpers ───────────────────────── */
+
 function initials(name) {
-  return (name || "").split(" ").filter(Boolean).map((p) => p[0]).join("").slice(0, 2).toUpperCase() || "—";
-}
-function Icon({ name, className = "", style }) {
-  return <span className={`material-symbols-outlined ${className}`} style={style}>{name}</span>;
+  return (name || "")
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "—";
 }
 
-/* ── This Over ball styling ────────────────────────────────────────
-   Maps a single delivery's outcome to a CricketBall fill + label so
-   the strip actually reads as "what happened this over" instead of
-   six identical balls numbered 1–6. Extend the color map or
-   ballOutcome() mapping if the real delivery-history shape differs. */
+function Icon({ name, className = "", style }) {
+  return (
+    <span className={`material-symbols-outlined ${className}`} style={style}>
+      {name}
+    </span>
+  );
+}
+
+/* ── "This Over" ball styling — unchanged from the original design ── */
 const OVER_BALL_STYLES = {
   wicket: {
     fill: "radial-gradient(circle at 32% 26%, #f87171 0%, #dc2626 45%, #7f1d1d 85%, #450a0a 100%)",
@@ -40,11 +57,26 @@ const OVER_BALL_STYLES = {
   },
 };
 
-// entry: number (runs off the bat, 0–6) or short outcome string
-// ("W" | "Wd" | "Nb" | "Lb" | "By"). This must match the codes
-// actually pushed into `currentOverBalls` by the parent's record().
+// NEW — normalizes an entry from liveState.thisOver (which stores ball
+// display values as produced by the engine: "W", "wd", "nb", ".", or a
+// numeric-string run count) into whatever ballOutcome() below expects
+// (numbers for runs, "W"/"Wd"/"Nb"/"Lb"/"By" for everything else). The
+// engine's ledger format and this component's original display format
+// predate each other, so this is the one place they're reconciled.
+function normalizeOverEntry(raw) {
+  if (raw == null) return null;
+  if (raw === "W") return "W";
+  if (raw === "wd" || raw === "Wd") return "Wd";
+  if (raw === "nb" || raw === "Nb") return "Nb";
+  if (raw === "b" || raw === "By" || raw === "bye") return "By";
+  if (raw === "lb" || raw === "Lb" || raw === "legBye") return "Lb";
+  if (raw === ".") return 0;
+  const n = Number(raw);
+  return Number.isNaN(n) ? raw : n;
+}
+
 function ballOutcome(entry) {
-  if (entry === "W" || entry === "Out") return { kind: "wicket", label: "W" };
+  if (entry === "W") return { kind: "wicket", label: "W" };
   if (entry === "Wd") return { kind: "extra", label: "wd" };
   if (entry === "Nb") return { kind: "extra", label: "nb" };
   if (entry === "Lb") return { kind: "extra", label: "lb" };
@@ -54,9 +86,6 @@ function ballOutcome(entry) {
   return { kind: "dot", label: String(entry ?? "") };
 }
 
-// One slot in the This Over strip. `entry == null` means the ball
-// hasn't been bowled yet — render a faint dashed placeholder instead
-// of a real (misleadingly styled) ball.
 function OverBall({ entry }) {
   if (entry == null) {
     return (
@@ -75,7 +104,8 @@ function OverBall({ entry }) {
   );
 }
 
-/* ── mobile bottom sheet: tap a roster name to fill the active slot ── */
+/* ── mobile bottom sheet: selects a full SquadPlayer object,
+     not just a name string, since engine.assignPlayer needs it ── */
 function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismissedNames, roleByName }) {
   return (
     <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -99,20 +129,23 @@ function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismi
         </div>
 
         {(!players || players.length === 0) ? (
-          <p className="font-mono-geist text-[10px] text-on-surface-variant text-center py-6">No squad loaded — set this team's squad in Match Setup.</p>
+          <p className="font-mono-geist text-[10px] text-on-surface-variant text-center py-6">
+            No squad loaded — set this team&apos;s squad in Match Setup.
+          </p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
-            {players.map((name) => {
-              const isOut = !!dismissedNames?.has(name);
-              const roleInfo = roleByName?.get(name);
+            {players.map((p) => {
+              const isOut = !!dismissedNames?.has(p.name);
+              const roleInfo = roleByName?.get(p.name);
               const isLocked = isOut || !!roleInfo;
-              const roleLabel = roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
+              const roleLabel =
+                roleInfo?.role === "striker" ? "On Strike" : roleInfo?.role === "nonStriker" ? "Non-Striker" : roleInfo?.role === "bowler" ? "Bowling" : undefined;
               return (
                 <button
                   type="button"
-                  key={name}
+                  key={p.id}
                   disabled={isLocked}
-                  onClick={() => { if (isLocked) return; onSelect(name); onClose(); }}
+                  onClick={() => { if (isLocked) return; onSelect(p); onClose(); }}
                   className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-xl border transition-colors"
                   style={
                     isOut
@@ -122,11 +155,19 @@ function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismi
                       : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.1)" }
                   }
                 >
-                  <span className="w-11 h-11 rounded-full flex items-center justify-center font-mono-geist text-[12px] font-bold" style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : isLocked ? "#4ade80" : "#e5e7eb" }}>
-                    {initials(name)}
+                  <span
+                    className="w-11 h-11 rounded-full flex items-center justify-center font-mono-geist text-[12px] font-bold overflow-hidden"
+                    style={{ border: "1px solid rgba(255,255,255,0.15)", color: isOut ? "#f87171" : isLocked ? "#4ade80" : "#e5e7eb" }}
+                  >
+                    {p.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      initials(p.name)
+                    )}
                   </span>
                   <span className="text-[9.5px] font-archivo font-bold text-center leading-tight break-words" style={{ color: isOut ? "#f87171" : isLocked ? "#4ade80" : "#e5e7eb" }}>
-                    {name}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
+                    {p.name}{isOut ? " · OUT" : roleLabel ? ` · ${roleLabel}` : ""}
                   </span>
                 </button>
               );
@@ -138,17 +179,19 @@ function PlayerPickerSheet({ title, teamLabel, players, onSelect, onClose, dismi
   );
 }
 
-/* ── the slot itself: shows the current player, doubles as a drop target,
-     opens the mobile picker (desktop dragging happens against this
-     element via onDragOver/onDrop). `compact` shrinks it for the
-     no-scroll mobile layout. ── */
+/* ── the crew slot itself — visual design unchanged. Drag/drop carries
+     a player id (looked up against `allPlayers`) instead of a bare
+     name, since assignment needs the full object. The drag SOURCE
+     (the roster list in page.tsx) must set "text/player-id" with a
+     real SquadPlayer.id for this to work — see page.tsx. ── */
 function CrewSlot({
-  title, accentColor, active, onActivate, displayName, statLine,
-  onAssign, onClear, placeholder, dismissedNames, blockedName,
-  noReplacement, avatarSize, compact,
+  title, accentColor, active, onActivate, displayName, imageUrl, statLine,
+  allPlayers, onAssign, onClear, placeholder, dismissedNames, blockedName,
+  noReplacement, avatarSize, compact, disabled,
 }) {
   const size = avatarSize ?? (compact ? 32 : 44);
   const isEmpty = !displayName;
+  const locked = !!disabled;
 
   if (noReplacement && isEmpty) {
     return (
@@ -164,23 +207,25 @@ function CrewSlot({
 
   return (
     <div
-      onClick={onActivate}
+      onClick={locked ? undefined : onActivate}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onActivate(); }}
-      className={`rounded-xl cursor-pointer transition-all ${compact ? "p-2" : "p-3"}`}
+      onKeyDown={(e) => { if (!locked && (e.key === "Enter" || e.key === " ")) onActivate(); }}
+      className={`rounded-xl transition-all ${compact ? "p-2" : "p-3"} ${locked ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
       style={{
         border: `1px ${isEmpty ? "dashed" : "solid"} ${isEmpty ? "rgba(239,68,68,0.4)" : active ? "rgba(201,151,31,0.45)" : "rgba(255,255,255,0.1)"}`,
         background: isEmpty ? "rgba(239,68,68,0.08)" : active ? "rgba(201,151,31,0.08)" : "rgba(255,255,255,0.02)",
       }}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => !locked && e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        const name = e.dataTransfer.getData("text/player-name");
-        if (!name) return;
-        if (dismissedNames?.has(name)) return;
-        if (blockedName && name === blockedName) return;
-        onAssign(name);
+        if (locked) return;
+        const id = e.dataTransfer.getData("text/player-id");
+        const player = allPlayers.find((p) => p.id === id);
+        if (!player) return;
+        if (dismissedNames?.has(player.name)) return;
+        if (blockedName && player.name === blockedName) return;
+        onAssign(player);
       }}
     >
       <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-2"}`}>
@@ -188,8 +233,8 @@ function CrewSlot({
           {isEmpty ? "⚠ " : ""}{title}
         </span>
         <div className="flex items-center gap-2 shrink-0">
-          {active && <span className="font-mono-geist text-[8.5px] text-theme-orange/70 hidden lg:inline">drag or tap ▾</span>}
-          {!isEmpty && onClear && (
+          {active && !locked && <span className="font-mono-geist text-[8.5px] text-theme-orange/70 hidden lg:inline">drag or tap ▾</span>}
+          {!isEmpty && onClear && !locked && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onClear(); }}
@@ -202,8 +247,14 @@ function CrewSlot({
         </div>
       </div>
       <div className="flex items-center gap-2 min-w-0">
-        <span className="rounded-full flex items-center justify-center shrink-0 font-mono-geist font-bold" style={{ width: size, height: size, border: "1px solid rgba(255,255,255,0.15)", fontSize: Math.max(9, size * 0.26), color: isEmpty ? "#f87171" : "#e5e7eb" }}>
-          {displayName ? initials(displayName) : "+"}
+        <span
+          className="rounded-full flex items-center justify-center shrink-0 font-mono-geist font-bold overflow-hidden"
+          style={{ width: size, height: size, border: "1px solid rgba(255,255,255,0.15)", fontSize: Math.max(9, size * 0.26), color: isEmpty ? "#f87171" : "#e5e7eb" }}
+        >
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+          ) : displayName ? initials(displayName) : "+"}
         </span>
         <div className="flex flex-col min-w-0">
           <span className={`font-archivo font-bold truncate text-on-surface ${compact ? "text-[11px]" : "text-[12px]"}`}>{displayName || placeholder}</span>
@@ -214,16 +265,11 @@ function CrewSlot({
   );
 }
 
-/* ── admin/rare actions live behind this popover instead of sitting in
-     the main pad at the same visual weight as scoring buttons.
-     Each item now maps to a real handler instead of being funneled
-     through handleRun(string) — that was the source of the
-     teamRuns-becomes-a-string bug. "By" (not "Bye") matches the
-     `extras` state key and ballOutcome() everywhere else. ── */
-function MoreActionsMenu({ onExtra, onFreeHit, onAdminAction }) {
+/* ── admin/rare actions popover. Free Hit + extras flip real engine
+     state instead of firing a cosmetic toast. ── */
+function MoreActionsMenu({ onFreeHit, onAdminAction }) {
   const [open, setOpen] = useState(false);
   const items = [
-    { key: "By", label: "Bye", color: "#93c5fd", action: () => onExtra("By") },
     { key: "FreeHit", label: "Free Hit", color: "#c4b5fd", action: onFreeHit },
     { key: "Bonus", label: "Bonus", color: "#86efac", action: () => onAdminAction("Bonus") },
     { key: "Injured", label: "Injured", color: "#fdba74", action: () => onAdminAction("Injured") },
@@ -263,322 +309,594 @@ function MoreActionsMenu({ onExtra, onFreeHit, onAdminAction }) {
   );
 }
 
-/**
- * Center "Live State" scorer card — score header, target line, the
- * Striker/Non-Striker/Bowler crew slots (+ mobile picker sheet), strike
- * rotation / end-innings / undo controls, extras, the run pad, and the
- * partnership/boundary stat strip underneath.
- *
- * Scoring contract with the parent (IMPORTANT — this was the source of
- * the earlier bugs):
- *  - `handleRun(n)` is called ONLY with a number: 0, 1, 2, 3, 4, or 6
- *    (runs off the bat). Never a string.
- *  - `onExtra(code)` is called with one of "Wd" | "Nb" | "Lb" | "By" for
- *    the extras buttons and the Bye admin action.
- *  - `onUndo()` reverts the last ball using the parent's real history
- *    stack (NOT routed through handleRun).
- *  - `onFreeHit()` arms a free hit (parent owns the `freeHit` flag).
- *  - `onAdminAction(label)` is a catch-all for the low-frequency,
- *    not-yet-modeled admin events (Bonus / Injured / Abandon) — the
- *    parent currently just logs these.
- *
- * `currentOverBalls` (This Over strip):
- *  - Owned by the parent (`overBalls` state). Can legitimately contain
- *    MORE than 6 entries mid-over, because wides/no-balls are appended
- *    to it without counting as legal deliveries. The strip below
- *    therefore renders `Math.max(6, currentOverBalls.length)` slots —
- *    always at least 6 (with dashed placeholders for balls not yet
- *    bowled), but growing to show every extra once an over runs long.
- *    The parent is responsible for resetting the array only once 6
- *    legal deliveries have actually been bowled.
- *
- * Layout notes:
- * - Mobile (`mobileTab === "scoring"`) is a fixed-height, non-scrolling
- *   column: `h-full overflow-hidden`, compact crew slots, and the rare
- *   admin actions (Free Hit / Bonus / Injured / Abandon) collapsed into
- *   a "More" popover instead of stacked as extra button rows.
- * - Desktop keeps the fuller layout but the same "More" popover, so the
- *   primary run pad isn't diluted by low-frequency admin buttons sitting
- *   at the same visual weight as the run/out/undo controls.
- * - Button label font-size is driven by `min(cqh, cqi)` rather than cqh
- *   alone, so text scales with whichever dimension (button height OR
- *   width) is actually the tighter constraint.
- *
- * All scoring state and mutators live in the parent and are passed down;
- * this component owns only the mobile player-picker sheet's open/close.
- */
+/* ── Wicket Detail dialog ── */
+function BatterPickerButton({ batter, label, selected, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all"
+      style={{
+        border: `1px solid ${selected ? "rgba(201,151,31,0.45)" : "rgba(255,255,255,0.08)"}`,
+        background: selected ? "rgba(201,151,31,0.1)" : "rgba(255,255,255,0.02)",
+      }}
+    >
+      <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-mono-geist text-[9px] font-bold" style={{ border: "1px solid rgba(255,255,255,0.15)", color: selected ? "#e8c468" : "#e5e7eb" }}>
+        {initials(batter?.name || label)}
+      </span>
+      <span className="flex flex-col min-w-0">
+        <span className={`text-[11px] font-archivo font-bold truncate ${selected ? "text-theme-orange" : "text-on-surface"}`}>{batter?.name || label}</span>
+        <span className="text-[9px] uppercase tracking-wide font-mono-geist text-on-surface-variant">{label}</span>
+      </span>
+    </button>
+  );
+}
+
+function CenteredOverlay({ open, onClose, title, icon, iconColor = "#e8c468", children }) {
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[380] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-[440px] max-h-[85dvh] overflow-y-auto custom-scrollbar rounded-2xl glass-panel border border-white/10 p-4 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {icon && (
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${iconColor}24`, border: `1px solid ${iconColor}4d` }}>
+                <Icon name={icon} style={{ fontSize: 16, color: iconColor }} />
+              </span>
+            )}
+            <h3 className="truncate font-archivo text-sm font-bold uppercase text-on-surface">{title}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border border-white/10 text-on-surface-variant hover:text-on-surface hover:bg-white/[0.04] transition-colors">
+            <Icon name="close" style={{ fontSize: 16 }} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function WicketDetailDialog({ pending, onResolve }) {
+  const [batsmanOut, setBatsmanOut] = useState("striker");
+  const options = getValidDismissalOptions(pending.extraType, pending.isFreeHitActive);
+  const lockedToRunOutOnly = isDismissalLockedToRunOutOnly(pending.extraType, pending.isFreeHitActive);
+  const [dismissalType, setDismissalType] = useState(options[0].value);
+  const [fielder, setFielder] = useState("");
+  const [runsCompleted, setRunsCompleted] = useState(0);
+
+  return (
+    <CenteredOverlay open onClose={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)} title="Wicket Detail" icon="sports_cricket" iconColor="#f87171">
+      {lockedToRunOutOnly && (
+        <div className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-mono-geist" style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#93c5fd" }}>
+          🔓 {pending.extraType === "noBall" ? "No Ball" : "Free Hit"} — only Run Out is valid
+        </div>
+      )}
+      {!lockedToRunOutOnly && pending.extraType === "wide" && (
+        <div className="px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-mono-geist" style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#93c5fd" }}>
+          🔵 Wide — Bowled, Caught, and LBW aren&apos;t valid here
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
+        <div className="grid grid-cols-2 gap-2">
+          <BatterPickerButton batter={pending.strikerBefore} label="Striker" selected={batsmanOut === "striker"} onClick={() => setBatsmanOut("striker")} />
+          <BatterPickerButton batter={pending.nonStrikerBefore} label="Non-Striker" selected={batsmanOut === "nonStriker"} onClick={() => setBatsmanOut("nonStriker")} />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
+        <select
+          value={dismissalType}
+          disabled={options.length === 1}
+          onChange={(e) => setDismissalType(e.target.value)}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
+        >
+          {options.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+        </select>
+      </div>
+
+      {dismissalType === "runOut" && (
+        <div className="flex flex-col gap-1.5">
+          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Runs Completed Before Run Out</span>
+          <div className="flex gap-2">
+            {[0, 1, 2, 3].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setRunsCompleted(n)}
+                className="flex-1 py-2 rounded-lg text-sm font-bold font-archivo border"
+                style={runsCompleted === n ? { background: "rgba(239,68,68,0.14)", borderColor: "rgba(248,113,113,0.5)", color: "#f87171" } : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "#e5e7eb" }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Fielder (if any)</span>
+        <input
+          value={fielder}
+          onChange={(e) => setFielder(e.target.value)}
+          placeholder="Fielder name"
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onResolve(batsmanOut, true, dismissalType, fielder, runsCompleted)}
+        className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+        style={{ background: "#ef4444", color: "#fff" }}
+      >
+        Fire Wicket Graphic
+      </button>
+    </CenteredOverlay>
+  );
+}
+
+/* ── Match Over screen ── */
+function MatchOverScreen({ winningTeamName, winningTeamLogo, margin, method, canUndo, onUndo, onRestart }) {
+  const isTie = method === "tie";
+  return (
+    <div className="relative overflow-hidden flex w-full box-border flex-col items-center text-center gap-1 py-14 px-6 sm:px-12 rounded-[22px] border border-theme-orange/25" style={{ background: "radial-gradient(120% 100% at 50% 0%, rgba(201,151,31,0.14) 0%, rgba(201,151,31,0.03) 45%, transparent 70%)" }}>
+      <span className="relative z-10 flex items-center gap-1.5 text-[10.5px] font-black uppercase tracking-[0.2em] font-mono-geist text-theme-orange mb-5">
+        <Icon name="emoji_events" style={{ fontSize: 14 }} />
+        Match Complete
+      </span>
+      <div className="relative z-10 w-24 h-24 sm:w-[104px] sm:h-[104px] rounded-full flex items-center justify-center bg-black/60 border-[3px] border-theme-orange/50 overflow-hidden mb-5">
+        {winningTeamLogo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={winningTeamLogo} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <span className="flex items-center justify-center text-theme-orange text-3xl">{isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: 36 }} />}</span>
+        )}
+      </div>
+      <h2 className="relative z-10 font-archivo text-[19px] sm:text-[26px] font-black uppercase text-white m-0">
+        {isTie ? "It's a Tie" : winningTeamName ? `${winningTeamName} Win` : "Match Complete"}
+      </h2>
+      {!isTie && margin && (
+        <p className="relative z-10 font-mono-geist text-[11px] sm:text-[12.5px] font-bold uppercase tracking-wide text-theme-orange mt-3.5 px-4 py-1.5 rounded-full bg-theme-orange/10 border border-theme-orange/30 inline-block">
+          {margin}
+        </p>
+      )}
+      <div className="relative z-10 flex gap-2.5 mt-6 flex-wrap justify-center">
+        {canUndo && (
+          <button type="button" onClick={onUndo} className="flex items-center gap-1.5 font-mono-geist text-[11px] font-black uppercase tracking-wide rounded-lg px-5 py-2.5 border border-red-400/35 bg-red-500/10 text-red-400 hover:bg-red-500/15 transition-all">
+            <Icon name="undo" style={{ fontSize: 14 }} /> Undo &amp; Keep Scoring
+          </button>
+        )}
+        {onRestart && (
+          <button type="button" onClick={onRestart} className="flex items-center gap-1.5 font-mono-geist text-[11px] font-black uppercase tracking-wide rounded-lg px-5 py-2.5 bg-theme-orange text-black transition-all">
+            <Icon name="restart_alt" style={{ fontSize: 14 }} /> Restart Match
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── main component ───────────────────────── */
 export default function ScoringSection({
   mobileTab,
-  teamRuns, wkts, overs, rr, matchSetup, battingTeam, inningsNumber,
-  target, runsNeeded, ballsLeft, requiredRate,
-  stamp,
-  striker, nonStriker, bowler,
-  setStriker, setNonStriker,
-  activeSlot, setActiveSlot,
-  playerPicker, setPlayerPicker,
-  dismissedPlayers,
-  battingRoster, bowlingRoster, bowlingTeam,
-  assignBatter, assignBowler,
-  freeHit, extras,
-  handleRun, onExtra, onFreeHit, onAdminAction,
-  handleOut, onUndo,
-  endInnings, pushLiveState, livePushed, liveDirty,
-  statCards,
-  battingRoleMap, bowlingRoleMap,
-  currentOverBalls,
+  matchId,
+  matchSetup,
+  battingTeamKey,
+  bowlingTeamKey,
+  battingSquad,
+  bowlingSquad,
+  maxOvers,
+  liveState,
+  setLiveState,
+  liveDirty,
+  setLiveDirty,
+  onPush,
+  pushLabel,
+  onBoundary,
+  onMilestone,
+  onWicketConfirm,
+  onMaiden,
+  onInningsEnd,
+  onMatchComplete,
+  onRestartMatch,
+  onEngineStateChange,
+  initialEngineState,
+  onAdminAction,
+  onDismissedPlayersChange, // NEW — lets the parent mirror engine.dismissedPlayers for its own read-only roster display
 }) {
-  // ── Dynamic mobile height ────────────────────────────────────────
-  const sectionRef = useRef(null);
-  const [mobileHeight, setMobileHeight] = useState(null);
+  const battingTeamLabel = matchSetup[battingTeamKey];
+  const bowlingTeamLabel = matchSetup[bowlingTeamKey];
 
-  const BOTTOM_NAV_PX = 72;
+  const engine = useLiveScoringEngine({
+    matchId,
+    liveState,
+    setLiveState,
+    setLiveDirty,
+    maxOvers,
+    battingTeamName: battingTeamLabel,
+    bowlingTeamName: bowlingTeamLabel,
+    battingSquad,
+    onBoundary,
+    onMilestone,
+    onWicketConfirm,
+    onMaiden,
+    onInningsEnd,
+    onMatchComplete,
+    onEngineStateChange,
+    initialEngineState,
+  });
 
+  const [playerPicker, setPlayerPicker] = useState(null); // "striker" | "nonStriker" | "bowler" | null
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+
+  // NEW — mirror dismissed players up to the parent so the standalone
+  // roster list (outside this component) can show OUT/locked state
+  // without owning its own copy of that state.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const recalc = () => {
-      const isMobile = window.innerWidth < 1024; // matches Tailwind's `lg` breakpoint
-      if (!isMobile) {
-        setMobileHeight(null);
-        return;
-      }
-      const el = sectionRef.current;
-      if (!el) return;
-      const viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      const top = el.getBoundingClientRect().top;
-      const available = Math.max(360, viewportH - top - BOTTOM_NAV_PX);
-      setMobileHeight(available);
-    };
-    recalc();
-    window.addEventListener("resize", recalc);
-    window.addEventListener("orientationchange", recalc);
-    window.visualViewport?.addEventListener("resize", recalc);
-    return () => {
-      window.removeEventListener("resize", recalc);
-      window.removeEventListener("orientationchange", recalc);
-      window.visualViewport?.removeEventListener("resize", recalc);
-    };
-  }, [mobileTab]);
+    onDismissedPlayersChange?.(engine.dismissedPlayers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine.dismissedPlayers]);
 
-  // Always show at least 6 slots (with dashed placeholders for balls
-  // not yet bowled); grow past 6 when the array itself has more
-  // entries — which happens whenever wides/no-balls are recorded
-  // mid-over, since those don't count toward the 6 legal deliveries
-  // that end an over.
-  const overSlotCount = Math.max(6, currentOverBalls?.length ?? 0);
+  const battingRoleMap = useMemo(() => {
+    const m = new Map();
+    if (liveState.striker.name) m.set(liveState.striker.name, { role: "striker" });
+    if (liveState.nonStriker.name) m.set(liveState.nonStriker.name, { role: "nonStriker" });
+    return m;
+  }, [liveState.striker.name, liveState.nonStriker.name]);
+  const bowlingRoleMap = useMemo(() => {
+    const m = new Map();
+    if (liveState.bowler.name) m.set(liveState.bowler.name, { role: "bowler" });
+    return m;
+  }, [liveState.bowler.name]);
+
+  const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
+  const overs = `${liveState.score.overs}.${liveState.score.balls}`;
+  const rr = liveState.score.overs + liveState.score.balls / 6 > 0
+    ? (liveState.score.runs / (liveState.score.overs + liveState.score.balls / 6)).toFixed(2)
+    : "0.00";
+  const ballsBowled = liveState.score.overs * 6 + liveState.score.balls;
+  const totalBalls = maxOvers !== undefined ? maxOvers * 6 : undefined;
+  const ballsLeft = totalBalls !== undefined ? Math.max(0, totalBalls - ballsBowled) : undefined;
+  const runsNeeded = liveState.target !== undefined ? Math.max(0, liveState.target - liveState.score.runs) : undefined;
+  const requiredRate = runsNeeded !== undefined && ballsLeft ? ((runsNeeded / ballsLeft) * 6).toFixed(2) : undefined;
+
+  // FIX (bug #2) — previously read the non-existent liveState.bowler.nonStriker.
+  // The actual non-striker slot lives at liveState.nonStriker.
+  const strikerNeedsReplacement = engine.noPartnerAvailable && !liveState.striker.name;
+  const nonStrikerNeedsReplacement = engine.noPartnerAvailable && !liveState.nonStriker.name;
+
+  // FIX (bug #3) — "This Over" now reads directly from liveState.thisOver,
+  // which the engine builds and — critically — correctly reverts on
+  // engine.undo() (since undo() restores the whole liveState snapshot).
+  // The previous local `overBalls` shadow array was never touched by
+  // undo(), so the ball strip could show a ball that had just been
+  // undone everywhere else. No local mirror, no desync.
+  const thisOverDisplay = liveState.thisOver ?? [];
+
+  function extraLabel(extraType) {
+    if (extraType === "wide") return "Wd";
+    if (extraType === "noBall") return "Nb";
+    if (extraType === "bye") return "By";
+    if (extraType === "legBye") return "Lb";
+    return null;
+  }
+
+  const controlsLocked = engine.assignmentsMissing();
+  const [localToasts, setLocalToasts] = useState([]);
+  const localToastTimers = useRef(new Map());
+  useEffect(() => {
+    const timers = localToastTimers.current;
+    return () => { timers.forEach(clearTimeout); timers.clear(); };
+  }, []);
+  function showAssignmentToast() {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setLocalToasts((prev) => [...prev, { id, text: "Pick a Striker, Non-Striker & Bowler first", tone: "wicket" }]);
+    const timer = setTimeout(() => {
+      setLocalToasts((prev) => prev.filter((t) => t.id !== id));
+      localToastTimers.current.delete(id);
+    }, 3200);
+    localToastTimers.current.set(id, timer);
+  }
+  function handleTapRun(n) {
+    if (controlsLocked) return showAssignmentToast();
+    engine.recordBall(n);
+  }
+  function handleTapWicket() {
+    if (controlsLocked) return showAssignmentToast();
+    engine.recordWicket();
+  }
+
+  const statCards = [
+    { label: "Partnership", value: `${liveState.partnership.runs} (${liveState.partnership.balls})` },
+    { label: "Match 4s / 6s", value: `${liveState.matchBoundaries.fours} / ${liveState.matchBoundaries.sixes}` },
+    { label: "Overs", value: overs },
+    { label: "Bowler Figures", value: `${liveState.bowler.overs}.${liveState.bowler.balls}-${liveState.bowler.maidens}-${liveState.bowler.runs}-${liveState.bowler.wickets}` },
+  ];
+  if (isSecondInnings && liveState.target !== undefined) {
+    statCards.splice(2, 0, { label: "Target", value: `${liveState.target}` });
+  }
 
   return (
     <section
-      ref={sectionRef}
-      style={mobileHeight ? { height: `${mobileHeight}px` } : undefined}
       className={`order-1 lg:order-2 flex-col lg:h-full min-h-0 p-4 sm:p-3 lg:p-4 gap-2.5 sm:gap-4 custom-scrollbar
         ${mobileTab === "scoring" ? "flex overflow-hidden" : "hidden"}
         lg:flex lg:overflow-y-auto`}
     >
+      {/* toasts — engine's own + local assignment reminders, one stack */}
+      {typeof document !== "undefined" && createPortal(
+        <div className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-[9999] flex flex-col-reverse gap-2 items-end pointer-events-none max-w-[calc(100vw-2rem)] sm:max-w-xs">
+          {[...engine.toasts, ...localToasts].map((t) => (
+            <div
+              key={t.id}
+              className="flex items-start gap-2 px-3.5 py-2.5 rounded-lg font-mono-geist text-[10.5px] font-bold leading-relaxed max-w-full glass-panel"
+              style={{
+                borderColor: t.tone === "wicket" ? "rgba(248,113,113,0.35)" : t.tone === "milestone" ? "rgba(201,151,31,0.4)" : "rgba(255,255,255,0.12)",
+                color: t.tone === "wicket" ? "#f87171" : t.tone === "milestone" ? "#e8c468" : "rgba(255,255,255,0.75)",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+              }}
+            >
+              <Icon name={t.tone === "wicket" ? "sports_cricket" : "bolt"} style={{ fontSize: 14, marginTop: 1 }} />
+              <span className="min-w-0">{t.text}</span>
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
+
+      {engine.pendingWicket && (
+        <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} />
+      )}
+
       {playerPicker && (
         <PlayerPickerSheet
           title={playerPicker === "striker" ? "Select Striker" : playerPicker === "nonStriker" ? "Select Non-Striker" : "Select Bowler"}
-          teamLabel={playerPicker === "bowler" ? matchSetup[bowlingTeam] : matchSetup[battingTeam]}
-          players={playerPicker === "bowler" ? bowlingRoster : battingRoster}
-          onSelect={(name) => (playerPicker === "bowler" ? assignBowler(name) : assignBatter(playerPicker, name))}
+          teamLabel={playerPicker === "bowler" ? bowlingTeamLabel : battingTeamLabel}
+          players={playerPicker === "bowler" ? bowlingSquad : battingSquad}
+          onSelect={(p) => engine.assignPlayer(playerPicker, p)}
           onClose={() => setPlayerPicker(null)}
-          dismissedNames={playerPicker === "bowler" ? undefined : dismissedPlayers}
+          dismissedNames={playerPicker === "bowler" ? undefined : engine.dismissedPlayers}
           roleByName={playerPicker === "bowler" ? bowlingRoleMap : battingRoleMap}
         />
       )}
 
-      <div className="relative overflow-hidden shrink-0 rounded-2xl border border-white/10 bg-white/[0.035] px-3 sm:px-4 pt-3 sm:pt-4 pb-2.5 sm:pb-3 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
-        <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: GOLD_GRADIENT, opacity: 0.6 }} />
-        <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full pointer-events-none" />
-        {stamp && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none px-4">
-            {stamp.kind === "boundary" ? (
-              <div className="cr-boundary-stamp"><div className="cr-stamp-face-gold"><span className="cr-stamp-word-gold">{stamp.label}</span><span className="cr-stamp-sub" style={{ color: "rgba(232,196,104,0.6)" }}>Moment Fired</span></div></div>
-            ) : (
-              <div className="cr-wicket-stamp"><div className="cr-stamp-face-grey"><span className="cr-stamp-word-grey">{stamp.label}</span><span className="cr-stamp-sub" style={{ color: "rgba(160,174,192,0.55)" }}>Wicket Falls</span></div></div>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2 relative z-10">
-          <div className="flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1">
-            <span className="font-archivo text-6xl sm:text-6xl lg:text-6xl font-bold tabular-nums shrink-0">{teamRuns}/{wkts}</span>
-            <span className="font-mono-geist text-[8px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">{overs} ov · RR {rr} · {matchSetup[battingTeam]} batting{inningsNumber === 2 ? " · Inns 2" : ""}</span>
-          </div>
-          <button
-            type="button"
-            onClick={pushLiveState}
-            className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.16em] px-2.5 sm:px-4 py-1.5 sm:py-2 rounded transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 shrink-0"
-            style={{ background: liveDirty ? GOLD_GRADIENT : "rgba(255,255,255,0.05)", color: liveDirty ? "#1a1304" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.1)" }}
-          >
-            <Icon name="cloud_upload" style={{ fontSize: 13 }} />
-            <span className="hidden sm:inline">{livePushed ? "Pushed ✓" : "Push Live State"}</span>
-            <span className="sm:hidden">{livePushed ? "✓" : "Push"}</span>
-          </button>
-        </div>
-
-        {inningsNumber === 2 && target !== null && (
-          <p className="font-mono-geist text-[9px] sm:text-[11px] text-theme-orange uppercase tracking-[0.1em] mb-1.5 sm:mb-3 relative z-10">
-            Target {target} · Need {runsNeeded} off {ballsLeft ?? "—"} balls{requiredRate ? ` · RRR ${requiredRate}` : ""}
-          </p>
-        )}
-        {inningsNumber === 1 && <div className="mb-1.5 sm:mb-3" />}
-
-        <div className="mb-1.5 sm:mb-3 relative z-10">
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-            <CrewSlot
-              compact
-              title="Striker *"
-              accentColor="#e8c468"
-              active={activeSlot === "striker"}
-              onActivate={() => { setActiveSlot("striker"); setPlayerPicker("striker"); }}
-              displayName={striker.name}
-              statLine={striker.name ? `${striker.runs} (${striker.balls}) · ${striker.fours}x4 ${striker.sixes}x6` : undefined}
-              onAssign={(name) => assignBatter("striker", name)}
-              onClear={() => setStriker((s) => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 }))}
-              placeholder="Select striker"
-              dismissedNames={dismissedPlayers}
-              blockedName={nonStriker.name || undefined}
-            />
-            <CrewSlot
-              compact
-              title="Non-Striker"
-              active={activeSlot === "nonStriker"}
-              onActivate={() => { setActiveSlot("nonStriker"); setPlayerPicker("nonStriker"); }}
-              displayName={nonStriker.name}
-              statLine={nonStriker.name ? `${nonStriker.runs} (${nonStriker.balls})` : undefined}
-              onAssign={(name) => assignBatter("nonStriker", name)}
-              onClear={() => setNonStriker((s) => ({ name: "", runs: 0, balls: 0, fours: 0, sixes: 0 }))}
-              placeholder="Select non-striker"
-              dismissedNames={dismissedPlayers}
-              blockedName={striker.name || undefined}
-            />
-            <div className="col-span-2 lg:col-span-1">
-              <CrewSlot
-                compact
-                title="Bowler"
-                accentColor="#818cf8"
-                active={activeSlot === "bowler"}
-                onActivate={() => { setActiveSlot("bowler"); setPlayerPicker("bowler"); }}
-                displayName={bowler.name}
-                statLine={bowler.name ? `${bowler.overs}.${bowler.balls}-${bowler.runs}-${bowler.wickets}` : undefined}
-                onAssign={(name) => assignBowler(name)}
-                placeholder="Pick from roster ◂"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap mb-1.5 sm:mb-5 relative z-10">
-          <button
-            type="button"
-            onClick={() => { const s = striker; setStriker(nonStriker); setNonStriker(s); }}
-            className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20"
-          >
-            <Icon name="swap_horiz" style={{ fontSize: 13 }} /> Rotate Strike
-          </button>
-          {inningsNumber === 1 && (
-            <button
-              type="button"
-              onClick={endInnings}
-              className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20"
-            >
-              <Icon name="sports_score" style={{ fontSize: 13 }} /> End Innings
-            </button>
-          )}
-        </div>
-
-        <p className="font-mono-geist text-[8.5px] sm:text-[9px] text-on-surface-variant uppercase tracking-[0.14em] truncate mb-1.5 sm:mb-4 relative z-10">
-          Extras — Wd {extras.Wd} · Nb {extras.Nb} · By {extras.By} · Lb {extras.Lb} · FH {extras.FreeHit ?? 0}
+      <CenteredOverlay open={showEndConfirm} onClose={() => setShowEndConfirm(false)} title={isSecondInnings ? "End Match?" : "End Innings?"} icon="sports_score" iconColor="#f87171">
+        <p className="text-[12px] text-on-surface">
+          {isSecondInnings
+            ? "This marks the match complete, computes the result, and locks scoring. You can still Undo afterwards."
+            : `This sets the target to ${liveState.score.runs + 1} and resets the score/overs/crew for Innings 2. You can Undo afterwards.`}
         </p>
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10">
-        <div
-          className="grid grid-cols-4 lg:grid-cols-6 gap-1.5 sm:gap-2 flex-1 min-h-0"
-          style={{ gridAutoRows: "1fr", containerType: "size" }}
-        >
-          {[0, 1, 2, 3, 4, 6].map((n) => (
-            <button
-              type="button"
-              key={`run-${n}`}
-              onClick={() => handleRun(n)}
-              className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border border-white/10"
-              style={{
-                fontSize: "clamp(1.1rem, min(9cqh, 12cqi), 3rem)",
-                ...(n === 4 || n === 6
-                  ? { background: GOLD_GRADIENT, color: "#1a1304", border: "1px solid rgba(255,255,255,0.1)" }
-                  : { background: "rgba(255,255,255,0.03)" }),
-              }}
-            >
-              {n}
-            </button>
-          ))}
-
-          <button
-            type="button"
-            onClick={handleOut}
-            disabled={freeHit}
-            className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10 disabled:opacity-30"
-            style={{ fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)" }}
-          >
-            Out
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={() => setShowEndConfirm(false)} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-white/[0.02] border border-white/10 text-on-surface">Cancel</button>
+          <button type="button" onClick={() => { engine.endInnings(); setShowEndConfirm(false); }} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-red-500 text-white">
+            {isSecondInnings ? "End Match" : "End Innings"}
           </button>
-          <button
-            type="button"
-            onClick={onUndo}
-            className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 border"
-            style={{
-              fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)",
-              background: "rgba(156,163,175,0.12)", color: "#d1d5db", border: "1px solid rgba(156,163,175,0.25)",
-            }}
-          >
-            Undo
-          </button>
-
-          {[
-            { label: "Wide", code: "Wd" },
-            { label: "No Ball", code: "Nb" },
-            { label: "LB", code: "Lb" },
-          ].map(({ label, code }) => (
-            <button
-              type="button"
-              key={code}
-              onClick={() => onExtra(code)}
-              className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border"
-              style={{
-                fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)",
-                ...(code === "Wd" || code === "Nb"
-                  ? { background: "rgba(245,158,11,0.18)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.35)" }
-                  : { background: "rgba(59,130,246,0.15)", color: "#93c5fd", border: "1px solid rgba(59,130,246,0.35)" }),
-              }}
-            >
-              {label}
-            </button>
-          ))}
-
-          <MoreActionsMenu onExtra={onExtra} onFreeHit={onFreeHit} onAdminAction={onAdminAction} />
         </div>
+      </CenteredOverlay>
 
-        <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">
-          <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] font-bold shrink-0">
-            This Over
-          </span>
-          <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
-            {Array.from({ length: overSlotCount }, (_, i) => (
-              <OverBall key={i} entry={currentOverBalls?.[i]} />
-            ))}
-          </div>
+      <CenteredOverlay open={showRestartConfirm} onClose={() => setShowRestartConfirm(false)} title="Restart Match?" icon="restart_alt" iconColor="#e8c468">
+        <p className="text-[12px] text-on-surface">Starts a fresh match with the same teams/squads. Score, overs, crew, and result reset. This can&apos;t be undone.</p>
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={() => setShowRestartConfirm(false)} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-white/[0.02] border border-white/10 text-on-surface">Cancel</button>
+          <button type="button" onClick={() => { engine.resetEngineState(); onRestartMatch?.(); setShowRestartConfirm(false); }} className="flex-1 py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-mono-geist bg-theme-orange text-black">Restart Match</button>
         </div>
+      </CenteredOverlay>
 
-        <div className="grid grid-cols-4 sm:[grid-template-columns:repeat(auto-fit,minmax(120px,1fr))] gap-2 sm:gap-3 shrink-0">
-          {statCards.map((s) => (
-            <div key={s.label} className="rounded-xl px-2 sm:px-4 py-2 sm:py-3 glass-panel">
-              <p className="font-mono-geist text-[8.5px] sm:text-[9px] text-on-surface-variant uppercase tracking-[0.16em] font-bold mb-0.5 sm:mb-1">{s.label}</p>
-              <p className="font-archivo text-base sm:text-lg font-bold tabular-nums">{s.value}</p>
+      {liveState.matchComplete ? (
+        <MatchOverScreen
+          winningTeamName={liveState.matchResult?.winningTeamName}
+          winningTeamLogo={undefined}
+          margin={liveState.matchResult?.margin}
+          method={liveState.matchResult?.method}
+          canUndo={engine.canUndo}
+          onUndo={engine.undo}
+          onRestart={onRestartMatch ? () => setShowRestartConfirm(true) : undefined}
+        />
+      ) : (
+        <>
+          {engine.noPartnerAvailable && (
+            <div className="flex items-center gap-3 p-3 rounded-xl mb-1" style={{ background: "rgba(201,151,31,0.08)", border: "1px solid rgba(201,151,31,0.3)" }}>
+              <Icon name="warning" style={{ fontSize: 18, color: "#e8c468" }} />
+              <div className="flex-1 min-w-0">
+                <p className="font-archivo text-[11px] font-bold uppercase text-on-surface">Last Man Batting</p>
+                <p className="font-mono-geist text-[9.5px] text-on-surface-variant">No replacement left — wrap up whenever ready.</p>
+              </div>
+              <button type="button" onClick={() => setShowEndConfirm(true)} className="font-mono-geist text-[10px] font-black uppercase px-3 py-2 rounded-lg bg-theme-orange text-black shrink-0">
+                {isSecondInnings ? "End Match" : "End Innings"}
+              </button>
             </div>
-          ))}
-        </div>
-      </div>
+          )}
+
+          {/* ── score header (LiveScoreBar design, unchanged) ── */}
+          <div className="relative overflow-hidden shrink-0 rounded-2xl border border-white/10 bg-white/[0.035] px-3 sm:px-4 pt-3 sm:pt-4 pb-2.5 sm:pb-3 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
+            <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: GOLD_GRADIENT, opacity: 0.6 }} />
+            <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full pointer-events-none" />
+
+            <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2 relative z-10">
+              <div className="flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1">
+                <span className="font-archivo text-6xl font-bold tabular-nums shrink-0">{liveState.score.runs}/{liveState.score.wickets}</span>
+                <span className="font-mono-geist text-[8px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.1em] truncate">
+                  {overs} ov · RR {rr} · {battingTeamLabel} batting{isSecondInnings ? " · Inns 2" : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onPush}
+                className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.16em] px-2.5 sm:px-4 py-1.5 sm:py-2 rounded transition-all hover:brightness-110 active:scale-95 shrink-0"
+                style={{ background: liveDirty ? GOLD_GRADIENT : "rgba(255,255,255,0.05)", color: liveDirty ? "#1a1304" : "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.1)" }}
+              >
+                <Icon name="cloud_upload" style={{ fontSize: 13 }} />
+                <span className="hidden sm:inline">{pushLabel}</span>
+              </button>
+            </div>
+
+            {isSecondInnings && liveState.target !== undefined && (
+              <p className="font-mono-geist text-[9px] sm:text-[11px] text-theme-orange uppercase tracking-[0.1em] mb-1.5 sm:mb-3 relative z-10">
+                Target {liveState.target} · Need {runsNeeded} off {ballsLeft ?? "—"} balls{requiredRate ? ` · RRR ${requiredRate}` : ""}
+              </p>
+            )}
+
+            <div className="mb-1.5 sm:mb-3 relative z-10">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                <CrewSlot
+                  compact
+                  title="Striker *"
+                  accentColor="#e8c468"
+                  active={engine.activeSlot === "striker"}
+                  onActivate={() => { engine.setActiveSlot("striker"); setPlayerPicker("striker"); }}
+                  displayName={liveState.striker.name}
+                  imageUrl={liveState.striker.imageUrl}
+                  statLine={liveState.striker.name ? `${liveState.striker.runs} (${liveState.striker.balls})` : undefined}
+                  allPlayers={battingSquad}
+                  onAssign={(p) => engine.assignPlayer("striker", p)}
+                  onClear={() => engine.clearSlot("striker")}
+                  placeholder="Select striker"
+                  dismissedNames={engine.dismissedPlayers}
+                  blockedName={liveState.nonStriker.name || undefined}
+                  noReplacement={strikerNeedsReplacement}
+                />
+                <CrewSlot
+                  compact
+                  title="Non-Striker"
+                  active={engine.activeSlot === "nonStriker"}
+                  onActivate={() => { engine.setActiveSlot("nonStriker"); setPlayerPicker("nonStriker"); }}
+                  displayName={liveState.nonStriker.name}
+                  imageUrl={liveState.nonStriker.imageUrl}
+                  statLine={liveState.nonStriker.name ? `${liveState.nonStriker.runs} (${liveState.nonStriker.balls})` : undefined}
+                  allPlayers={battingSquad}
+                  onAssign={(p) => engine.assignPlayer("nonStriker", p)}
+                  onClear={() => engine.clearSlot("nonStriker")}
+                  placeholder="Select non-striker"
+                  dismissedNames={engine.dismissedPlayers}
+                  blockedName={liveState.striker.name || undefined}
+                  noReplacement={nonStrikerNeedsReplacement}
+                />
+                <div className="col-span-2 lg:col-span-1">
+                  <CrewSlot
+                    compact
+                    title="Bowler"
+                    accentColor="#818cf8"
+                    active={engine.activeSlot === "bowler"}
+                    onActivate={() => { engine.setActiveSlot("bowler"); setPlayerPicker("bowler"); }}
+                    displayName={liveState.bowler.name}
+                    imageUrl={liveState.bowler.imageUrl}
+                    statLine={liveState.bowler.name ? `${liveState.bowler.overs}.${liveState.bowler.balls}-${liveState.bowler.maidens}-${liveState.bowler.runs}-${liveState.bowler.wickets}` : undefined}
+                    allPlayers={bowlingSquad}
+                    onAssign={(p) => engine.assignPlayer("bowler", p)}
+                    placeholder="Pick from roster ◂"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap mb-1.5 sm:mb-5 relative z-10">
+              <button type="button" onClick={engine.swapStrike} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20">
+                <Icon name="swap_horiz" style={{ fontSize: 13 }} /> Rotate Strike
+              </button>
+              <button type="button" onClick={engine.newPartnership} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-theme-orange border border-theme-orange/20">
+                <Icon name="autorenew" style={{ fontSize: 13 }} /> New Partnership
+              </button>
+              {!engine.noPartnerAvailable && (
+                <button type="button" onClick={() => setShowEndConfirm(true)} className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded text-red-400 border border-red-400/25 ml-auto">
+                  <Icon name="sports_score" style={{ fontSize: 13 }} /> {isSecondInnings ? "End Match" : "End Innings"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => engine.canUndo && engine.undo()}
+                disabled={!engine.canUndo}
+                className="flex items-center gap-1.5 font-mono-geist text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded disabled:opacity-40"
+                style={{ color: "#fbbf24", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
+              >
+                <Icon name="undo" style={{ fontSize: 13 }} /> Undo
+              </button>
+            </div>
+
+            {/* Extra-type selector. FIX (bug #1) — EXTRA_OPTIONS entries are
+                { key, label }, not { value, label }. The previous version
+                read opt.value (always undefined), so no extra type could
+                ever actually be selected — every tap called
+                setExtraType(undefined) and the active-state check
+                (engine.extraType === opt.value) was always false. */}
+            <div className="flex flex-col gap-1.5 relative z-10">
+              <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Extra</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {EXTRA_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => engine.setExtraType(opt.key)}
+                    className="px-2.5 py-1.5 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-wide border transition-all"
+                    style={engine.extraType === opt.key
+                      ? { background: "rgba(96,165,250,0.16)", borderColor: "rgba(96,165,250,0.5)", color: "#93c5fd" }
+                      : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)" }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => engine.setIsFreeHit((v) => !v)}
+                className="self-start mt-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-all"
+                style={engine.isFreeHit ? { background: "rgba(96,165,250,0.14)", borderColor: "rgba(96,165,250,0.5)" } : { background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.1)" }}
+              >
+                <span className={`font-mono-geist text-[9px] font-black uppercase tracking-wide ${engine.isFreeHit ? "text-sky-400" : "text-gray-400"}`}>
+                  Free Hit {engine.isFreeHit ? "· Active" : ""}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── run pad + This Over + stat cards (unchanged layout) ── */}
+          <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10">
+            <div className="grid grid-cols-4 lg:grid-cols-6 gap-1.5 sm:gap-2 flex-1 min-h-0" style={{ gridAutoRows: "1fr", containerType: "size" }}>
+              {[0, 1, 2, 3, 4, 6].map((n) => (
+                <button
+                  type="button"
+                  key={`run-${n}`}
+                  onClick={() => handleTapRun(n)}
+                  className="h-full w-full rounded-lg font-archivo font-bold transition-all hover:brightness-110 active:scale-95 border border-white/10"
+                  style={{ fontSize: "clamp(1.1rem, min(9cqh, 12cqi), 3rem)", ...(n === 4 || n === 6 ? { background: GOLD_GRADIENT, color: "#1a1304", border: "1px solid rgba(255,255,255,0.1)" } : { background: "rgba(255,255,255,0.03)" }) }}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleTapWicket}
+                className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.12em] transition-all hover:brightness-110 active:scale-95 bg-error-container text-on-error-container border border-white/10"
+                style={{ fontSize: "clamp(0.75rem, min(5cqh, 6cqi), 1.5rem)" }}
+              >
+                Out
+              </button>
+              <MoreActionsMenu onFreeHit={() => engine.setIsFreeHit((v) => !v)} onAdminAction={onAdminAction} />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">
+              <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] font-bold shrink-0">This Over</span>
+              <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
+                {Array.from({ length: Math.max(6, thisOverDisplay.length) }, (_, i) => (
+                  <OverBall key={i} entry={i < thisOverDisplay.length ? normalizeOverEntry(thisOverDisplay[i]) : null} />
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 sm:[grid-template-columns:repeat(auto-fit,minmax(120px,1fr))] gap-2 sm:gap-3 shrink-0">
+              {statCards.map((s) => (
+                <div key={s.label} className="rounded-xl px-2 sm:px-4 py-2 sm:py-3 glass-panel">
+                  <p className="font-mono-geist text-[8.5px] sm:text-[9px] text-on-surface-variant uppercase tracking-[0.16em] font-bold mb-0.5 sm:mb-1">{s.label}</p>
+                  <p className="font-archivo text-base sm:text-lg font-bold tabular-nums">{s.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
