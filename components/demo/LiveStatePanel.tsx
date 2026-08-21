@@ -9,7 +9,7 @@ import {
   useLiveScoringEngine,
   EXTRA_OPTIONS,
   getValidDismissalOptions,
-  isDismissalLockedToRunOutOnly,
+  isDismissalRestricted,
   type ExtraType,
   type DismissalType,
   type PendingWicket,
@@ -41,6 +41,22 @@ function ViewportPortal({ children }: { children: React.ReactNode }) {
   useEffect(() => setMounted(true), []);
   if (!mounted || typeof document === "undefined") return null;
   return createPortal(children, document.body);
+}
+
+function DialogShell({ onBackdropClick, children }: { onBackdropClick: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-[9000] p-4 scorer-backdrop-in"
+      onClick={onBackdropClick}
+    >
+      <div
+        className="w-[340px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-32px)] overflow-y-auto bg-black/80 backdrop-blur-xl border border-gold/20 rounded-2xl p-[18px] shadow-[0_12px_40px_rgba(0,0,0,0.5)] scorer-dialog-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 type PlayerRole = "striker" | "nonStriker" | "bowler";
@@ -347,59 +363,34 @@ function BatsmanOutOption({
 
 function WicketDetailDialog({
   pending,
-  onResolve,
-  readOnly,
+  onCancel,
+  onFire,
 }: {
   pending: PendingWicket;
-  onResolve: (batsmanOut: "striker" | "nonStriker", fire: boolean, dismissalType: DismissalType, fielder: string, runsCompleted: number) => void;
-  readOnly?: boolean;
+  onCancel: () => void;
+  onFire: (batsmanOut: "striker" | "nonStriker", dismissalType: DismissalType, fielder: string, runsCompleted: number) => void;
 }) {
   const [batsmanOut, setBatsmanOut] = useState<"striker" | "nonStriker">("striker");
   const options = getValidDismissalOptions(pending.extraType, pending.isFreeHitActive);
-  const lockedToRunOutOnly = isDismissalLockedToRunOutOnly(pending.extraType, pending.isFreeHitActive);
+  const restricted = isDismissalRestricted(pending.extraType, pending.isFreeHitActive);
   const [dismissalType, setDismissalType] = useState<DismissalType>(options[0].value);
   const [fielder, setFielder] = useState("");
   const [runsCompleted, setRunsCompleted] = useState(0);
 
   return (
-    <div
-      className="scorer-dialog-backdrop"
-      style={{ pointerEvents: readOnly ? "none" : undefined }}
-      onClick={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)}
-    >
-      <div className="scorer-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-black uppercase tracking-widest" style={{ fontFamily: "var(--font-label-mono)", color: "var(--color-error)" }}>
-            Wicket Detail
-          </span>
-          <button
-            id="demo-wicket-skip"
-            type="button"
-            onClick={() => onResolve(batsmanOut, false, dismissalType, fielder, runsCompleted)}
-            className="text-[11px]"
-            style={{ color: "var(--color-outline)", fontFamily: "var(--font-label-mono)" }}
-          >
-            Skip ✕
-          </button>
+    <DialogShell onBackdropClick={onCancel}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] font-black uppercase tracking-widest font-cinzel text-red-400">Wicket Detail</span>
+        <button type="button" onClick={onCancel} className="text-[11px] font-cinzel text-gray-500 hover:text-gray-300">
+          Skip ✕
+        </button>
+      </div>
+
+      {restricted && (
+        <div className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide font-cinzel bg-sky-400/[0.14] border border-sky-400/40 text-sky-400">
+          🔵 {pending.isFreeHitActive ? "Free Hit" : pending.extraType === "noBall" ? "No Ball" : pending.extraType === "wide" ? "Wide" : pending.extraType === "bye" ? "Bye" : "Leg Bye"} — some dismissals aren&apos;t valid here
         </div>
-
-        {lockedToRunOutOnly && (
-          <div
-            className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide"
-            style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#60A5FA", fontFamily: "var(--font-label-mono)" }}
-          >
-            🔓 {pending.extraType === "noBall" ? "No Ball" : "Free Hit"} — only Run Out is a valid dismissal
-          </div>
-        )}
-
-        {!lockedToRunOutOnly && pending.extraType === "wide" && (
-          <div
-            className="mb-3 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide"
-            style={{ background: "rgba(96,165,250,0.14)", border: "1px solid rgba(96,165,250,0.4)", color: "#60A5FA", fontFamily: "var(--font-label-mono)" }}
-          >
-            🔵 Wide — Bowled, Caught, and LBW aren&apos;t valid here
-          </div>
-        )}
+      )}
 
         <div className="flex flex-col gap-1.5 mb-3">
           <FieldLabel>Batsman Out</FieldLabel>
@@ -467,32 +458,18 @@ function WicketDetailDialog({
             </div>
           </div>
         )}
-
-        <div className="flex flex-col gap-1.5 mb-4">
-          <FieldLabel>Fielder (if any)</FieldLabel>
-          <input
-            id="demo-wicket-fielder-input"
-            value={fielder}
-            onChange={(e) => setFielder(e.target.value)}
-            placeholder="Fielder name"
-            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={{ background: "var(--color-surface-container-low)", border: "1px solid var(--color-border-overlay)", color: "var(--color-on-surface)" }}
-          />
-        </div>
-
-        <button
-          id="demo-wicket-fire"
-          type="button"
-          onClick={() => onResolve(batsmanOut, true, dismissalType, fielder, runsCompleted)}
-          className="w-full py-2.5 rounded-lg text-[11px] font-black uppercase tracking-wide"
-          style={{ fontFamily: "var(--font-label-mono)", background: "var(--color-error)", color: "var(--color-on-primary)" }}
-        >
-          Fire Wicket Graphic
-        </button>
-      </div>
-    </div>
+                
+      <button
+        type="button"
+        onClick={() => onFire(batsmanOut, dismissalType, fielder, runsCompleted)}
+        className="w-full py-2.5 rounded-full text-[11px] font-black uppercase tracking-wide font-cinzel bg-red-500 text-white hover:bg-red-600 transition-colors"
+      >
+        Fire Wicket Graphic
+      </button>
+    </DialogShell>
   );
 }
+
 
 function EndInningsDialog({
   currentRuns,
@@ -1377,7 +1354,11 @@ const LiveStatePanel = forwardRef<LiveStatePanelHandle, LiveStatePanelProps>(fun
 
       {engine.pendingWicket && (
         <ViewportPortal>
-          <WicketDetailDialog pending={engine.pendingWicket} onResolve={engine.resolveWicket} readOnly={readOnly} />
+          <WicketDetailDialog
+            pending={engine.pendingWicket}
+            onCancel={readOnly ? () => {} : engine.cancelWicket}
+            onFire={readOnly ? () => {} : engine.resolveWicket}
+          />
         </ViewportPortal>
       )}
       {showEndInningsConfirm && (
