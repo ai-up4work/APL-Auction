@@ -657,13 +657,6 @@ export default function MatchSetupPanel({
             <MutedNote tone="warning">No match id available yet — editing will be enabled once this match is saved.</MutedNote>
           )}
 
-
-          {!completed && (
-            <p className="font-mono-geist text-[9px] uppercase tracking-[0.12em] text-on-surface-variant">
-              Push to broadcast the current match setup live. To change any details, tap Edit.
-            </p>
-          )}
-
           {/* Weather, mobile-only: on small screens this Setup tab is
               where Weather lives (instead of a separate Overlay tab).
               Desktop is untouched. */}

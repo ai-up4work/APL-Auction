@@ -592,6 +592,15 @@ export function useLiveScoringEngine({
     setLiveDirty(true);
     setDismissedPlayers(new Set());
     overRunsConcededRef.current = 0;
+    // FIX (missing) — mirror endInnings()'s bench reset. This auto-
+    // completion path (all out / overs done) previously left
+    // benchedBattersRef/benchedBowlersRef holding Innings 1 data, while
+    // the manual "End Innings" button already cleared them — an
+    // inconsistency that could let a stale Innings 1 batter/bowler
+    // record get "recalled" (with wrong stats) if the same name is
+    // ever reused during Innings 2.
+    benchedBattersRef.current = {};
+    benchedBowlersRef.current = {};
     onInningsEnd?.({ target, previousInningsRuns: finalRuns, inningsNumber: 2 });
     pushToast(`🔁 Innings complete — target set to ${target}`, "info");
     notifyEngineStateChange();
@@ -766,7 +775,15 @@ export function useLiveScoringEngine({
     // off the bat or a wide (never for byes/leg byes, incl. NB+BY/NB+LB).
     const concededThisBall = legality.extraPenaltyRun + (legality.bowlerConcedesRuns ? runs : 0);
     const bowlerOverCompletesThisBall = legality.countsAsLegalBall && liveState.bowler.balls + 1 >= 6;
-    const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
+    // FIX — maiden tracking must use TOTAL runs added to the team score
+    // this ball (totalTeamRuns), not just the runs charged against the
+    // bowler's own figures (concededThisBall). Law 17.4: an over is only
+    // a maiden if NO runs were scored at all — byes and leg byes still
+    // break a maiden even though they're correctly excluded from the
+    // bowler's conceded-runs tally elsewhere. Using concededThisBall here
+    // was wrongly letting byes/leg-byes slip through as "maiden over"
+    // deliveries.
+    const overRunsAfterThisBall = overRunsConcededRef.current + totalTeamRuns;
     const maidenFired = bowlerOverCompletesThisBall && overRunsAfterThisBall === 0;
     overRunsConcededRef.current = bowlerOverCompletesThisBall ? 0 : overRunsAfterThisBall;
 
@@ -1049,7 +1066,12 @@ export function useLiveScoringEngine({
     // run out completed on a No Ball + Bye/Leg Bye doesn't wrongly
     // charge the bye runs against the bowler.
     const concededThisBall = legality.extraPenaltyRun + (legality.bowlerConcedesRuns ? completedRuns : 0);
-    const overRunsAfterThisBall = overRunsConcededRef.current + concededThisBall;
+    // FIX — same maiden-tracking correction as recordBall: use
+    // totalTeamRuns (every run added to the score this ball, including
+    // byes/leg-byes completed on a run out) rather than concededThisBall,
+    // since byes/leg-byes still break a maiden over even though they
+    // don't count against the bowler's own figures.
+    const overRunsAfterThisBall = overRunsConcededRef.current + totalTeamRuns;
     const maidenFired = overComplete && overRunsAfterThisBall === 0;
     overRunsConcededRef.current = overComplete ? 0 : overRunsAfterThisBall;
 

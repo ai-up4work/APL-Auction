@@ -89,24 +89,46 @@ export interface BallInsert {
 // hot path (recordBall/resolveWicket already committed local state and
 // broadcast before this resolves). A failed insert here means a gap in
 // the DB ledger, not a broken UI.
+//
+// FIX (race condition) — this used to be a plain `.insert(...)`, which
+// meant it could race against `undo()`'s `deleteLastBall(...)` for the
+// exact same (match_id, innings_number, sequence): undo() decrements
+// ballSequenceRef immediately and fires off an unawaited delete, so if
+// the user undoes and then immediately scores again, recordBall() reuses
+// that same sequence number and calls appendBall() before the prior
+// delete has necessarily committed — a straight duplicate-key violation
+// on balls_match_id_innings_number_sequence_key (23505), independent of
+// how fast the delete usually completes; it's a genuine race, not a
+// flake.
+//
+// Reusing the sequence after an undo is actually the correct semantic —
+// the new ball is meant to replace the one that was undone — so this is
+// now an upsert keyed on the exact columns the unique constraint covers.
+// That makes it commutative with the delete: whichever of (delete, new
+// insert) lands second, the end state is "the new ball occupies that
+// sequence slot," which is what we want either way, and there's no
+// longer a window where two writes to the same key can conflict.
 export async function appendBall(matchId: string, ball: BallInsert): Promise<boolean> {
-  const { error } = await supabase.from("balls").insert({
-    match_id: matchId,
-    innings_number: ball.inningsNumber,
-    sequence: ball.sequence,
-    over_number: ball.overNumber,
-    ball_number: ball.ballNumber,
-    striker_name: ball.strikerName || null,
-    non_striker_name: ball.nonStrikerName || null,
-    bowler_name: ball.bowlerName || null,
-    runs: ball.runs,
-    extra_type: ball.extraType,
-    is_wicket: ball.isWicket,
-    dismissal_type: ball.dismissalType ?? null,
-    batsman_out: ball.batsmanOut ?? null,
-    fielder: ball.fielder ?? null,
-    is_free_hit: ball.isFreeHit,
-  });
+  const { error } = await supabase.from("balls").upsert(
+    {
+      match_id: matchId,
+      innings_number: ball.inningsNumber,
+      sequence: ball.sequence,
+      over_number: ball.overNumber,
+      ball_number: ball.ballNumber,
+      striker_name: ball.strikerName || null,
+      non_striker_name: ball.nonStrikerName || null,
+      bowler_name: ball.bowlerName || null,
+      runs: ball.runs,
+      extra_type: ball.extraType,
+      is_wicket: ball.isWicket,
+      dismissal_type: ball.dismissalType ?? null,
+      batsman_out: ball.batsmanOut ?? null,
+      fielder: ball.fielder ?? null,
+      is_free_hit: ball.isFreeHit,
+    },
+    { onConflict: "match_id,innings_number,sequence" }
+  );
 
   if (error) {
     logDbError("appendBall", error);
