@@ -1094,7 +1094,8 @@ export default function OverlayAdminConsole({
             )}
           </div>
           <h1 className="font-archivo text-lg sm:text-2xl font-bold italic tracking-tighter uppercase shrink-0">
-            <span style={{ color: legacyMatchSetup.teamAColor }}>{legacyMatchSetup.teamA}</span> vs{" "}
+            <span style={{ color: legacyMatchSetup.teamAColor }}>{legacyMatchSetup.teamA}</span> 
+              vs{" "}
             <span style={{ color: legacyMatchSetup.teamBColor }}>{legacyMatchSetup.teamB}</span>
           </h1>
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full shrink-0" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)" }}>
