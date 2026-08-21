@@ -102,8 +102,21 @@ export interface LiveState {
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────
-export type DismissalType = "bowled" | "caught" | "lbw" | "runOut" | "stumped" | "hitWicket";
-
+// ── Moments (one-shot, event-based) ────────────────────────────────────
+// FIX — was missing obstructingField/retiredOut, which the scoring
+// engine (useLiveScoringEngine.ts) already supports as valid dismissal
+// types. Without this, a wicket moment fired for either of those two
+// couldn't be broadcast with a correctly-typed dismissalType.
+export type DismissalType =
+  | "bowled"
+  | "caught"
+  | "lbw"
+  | "runOut"
+  | "stumped"
+  | "hitWicket"
+  | "obstructingField"
+  | "retiredOut";
+  
 export interface MomentPayload {
   moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
   player?: string; // also doubles as winning team name for "matchWon"

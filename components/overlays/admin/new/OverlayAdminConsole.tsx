@@ -7,7 +7,18 @@ import Image from "next/image";
 import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
 import MatchSetupPanel from "@/components/overlays/admin/new/MatchInfopanel";
 import ScoringSection from "@/components/overlays/admin/new/Scoringsection";
-import type { MatchSetup, TeamInfo, LiveState, SquadPlayer } from "@/lib/overlayBus";
+import {
+  connectOverlayBus,
+  type MatchSetup,
+  type TeamInfo,
+  type LiveState,
+  type SquadPlayer,
+  type OverlayEvent,
+  type SyncSnapshot,
+  type ChannelVisibility,
+  type WeatherData,
+  type DismissalType as BusDismissalType,
+} from "@/lib/overlayBus";
 import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 import { supabase } from "@/lib/supabase";
@@ -183,7 +194,6 @@ function MomentButton({
   );
 }
 
-/* Generic centered overlay (portal) — see original comment; unchanged. */
 function CenteredOverlay({
   open,
   onClose,
@@ -236,9 +246,6 @@ function CenteredOverlay({
   );
 }
 
-// Minimal read-only shape the Moments panel's batter picker needs —
-// satisfied by LiveState's BatterState (name/runs/balls/fours/sixes
-// plus an optional imageUrl this component ignores).
 interface BatterLike {
   name: string;
   runs: number;
@@ -309,12 +316,6 @@ const defaultMatchSetup = (): MatchSetup => ({
   tossDecision: "bat",
 });
 
-// NEW — single source of truth for scoring state, shared with
-// ScoringSection (and, inside it, useLiveScoringEngine). Everything
-// that used to live in this file as separate striker/nonStriker/bowler/
-// wkts/legalBalls/partnership/matchBoundaries/teamRuns/overBalls state
-// now lives inside this one object instead, matching what the engine
-// hook and the persistence layer (matchPersistence.ts) already expect.
 function initialLiveState(): LiveState {
   return {
     inningsNumber: 1,
@@ -333,8 +334,6 @@ function initialLiveState(): LiveState {
   } as LiveState;
 }
 
-// Fallback squads (as SquadPlayer[] now, not bare strings) used only
-// when a team has no squad configured in Match Setup yet.
 function fallbackSquad(names: string[]): SquadPlayer[] {
   return names.map((name) => ({ id: `manual:${name}`, name }));
 }
@@ -359,6 +358,11 @@ const ROSTER_TEAM_B_FALLBACK = fallbackSquad([
   "Kusal Fernando",
 ]);
 
+// NEW — imperative handle shape exposed by ScoringSection via forwardRef.
+interface ScoringSectionHandle {
+  resetEngine: () => void;
+}
+
 export default function OverlayAdminConsole({
   auctionId = null,
   matchId = null,
@@ -377,6 +381,135 @@ export default function OverlayAdminConsole({
   const [desktopRightTab, setDesktopRightTab] = useState<"setup" | "overlay">("overlay");
 
   const dbSetupRef = useRef<DbMatchSetupRow | null>(null);
+
+  // ═══════════════════ NEW: Overlay bus connection ═══════════════════
+  // This is what actually makes the admin console talk to the on-air
+  // overlay page. Previously overlayBus.ts existed but nothing in this
+  // file ever called connectOverlayBus — every toggle/moment/push only
+  // updated local React state (and, separately, Supabase), so the
+  // broadcast overlay never received any of it in real time.
+  const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
+  const scoringSectionRef = useRef<ScoringSectionHandle | null>(null);
+
+  // Refs mirroring the latest values needed to answer a "requestSync"
+  // from a (re)connecting overlay page. Kept as refs (updated via
+  // effects below) rather than closed-over state, so the single
+  // long-lived bus.on() handler never sees stale data.
+  const channelsRef = useRef<ChannelVisibility>({
+    weather: true,
+    liveScoreBar: true,
+    tournamentLogo: true,
+    pointsTable: false,
+    matchScorecard: false,
+    matchIntro: false,
+    matchBoundaries: false,
+    tournamentBoundaries: false,
+    testBg: false,
+  });
+  const matchSetupRef = useRef<MatchSetup>(matchSetup);
+  const matchSetupCompletedRef = useRef(matchSetupCompleted);
+  const liveStateRef = useRef<LiveState>(initialLiveState());
+  const weatherRef = useRef({ venue: "GALLE FORT", temp: 28, condition: "partly-cloudy" });
+
+  function sendBus(event: OverlayEvent) {
+    busRef.current?.send(event);
+  }
+
+  function buildSyncSnapshot(): SyncSnapshot {
+    const w = weatherRef.current;
+    const weatherData: WeatherData = {
+      venue: w.venue,
+      temp: w.temp,
+      unit: "C",
+      condition: w.condition,
+      corner: "top-right",
+    };
+    return {
+      channels: channelsRef.current,
+      matchSetup: matchSetupRef.current,
+      matchSetupCompleted: matchSetupCompletedRef.current,
+      liveState: liveStateRef.current,
+      weather: weatherData,
+    };
+  }
+
+  useEffect(() => {
+    if (!auctionId) return;
+    const bus = connectOverlayBus(auctionId);
+    busRef.current = bus;
+
+    const unsubscribe = bus.on((event) => {
+      if (event.type === "requestSync") {
+        // The admin console is the single source of truth — answer any
+        // sync request (e.g. from an overlay page that just loaded or
+        // reconnected) with the current full snapshot.
+        sendBus({ type: "syncSnapshot", data: buildSyncSnapshot() });
+      }
+      // Other inbound event types are intentionally ignored here: this
+      // console never accepts remote state mutations, only broadcasts.
+    });
+
+    return () => {
+      unsubscribe();
+      bus.disconnect();
+      busRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auctionId]);
+
+  useEffect(() => {
+    channelsRef.current = {
+      weather: alwaysOn.weather,
+      liveScoreBar: alwaysOn.liveScoreBar,
+      tournamentLogo: alwaysOn.tournamentLogo,
+      pointsTable: fullScreen.pointsTable,
+      matchScorecard: fullScreen.matchScorecard,
+      matchIntro: fullScreen.matchIntro,
+      matchBoundaries: boundaryChannels.matchBoundaries,
+      tournamentBoundaries: boundaryChannels.tournamentBoundaries,
+      testBg: false,
+    };
+  }, [alwaysOn, fullScreen, boundaryChannels]);
+
+  useEffect(() => {
+    matchSetupRef.current = matchSetup;
+  }, [matchSetup]);
+
+  useEffect(() => {
+    matchSetupCompletedRef.current = matchSetupCompleted;
+  }, [matchSetupCompleted]);
+
+  function toggleAlwaysOn(key: "weather" | "liveScoreBar" | "tournamentLogo") {
+    setAlwaysOn((prev) => {
+      const value = !prev[key];
+      if (key === "weather") {
+        sendBus({ type: "weather", show: value, data: weatherRef.current });
+      } else if (key === "liveScoreBar") {
+        sendBus({ type: "liveScoreBar", show: value });
+      } else {
+        sendBus({ type: "tournamentLogo", show: value });
+      }
+      return { ...prev, [key]: value };
+    });
+  }
+
+  function toggleFullScreen(key: "pointsTable" | "matchScorecard" | "matchIntro") {
+    setFullScreen((prev) => {
+      const value = !prev[key];
+      sendBus({ type: key, show: value });
+      return { ...prev, [key]: value };
+    });
+  }
+
+  function toggleBoundaryChannel(key: "matchBoundaries" | "tournamentBoundaries") {
+    setBoundaryChannels((prev) => {
+      const value = !prev[key];
+      const counts = key === "matchBoundaries" ? liveStateRef.current.matchBoundaries : liveStateRef.current.tournamentBoundaries;
+      sendBus({ type: key, show: value, fours: counts.fours, sixes: counts.sixes });
+      return { ...prev, [key]: value };
+    });
+  }
+  // ══════════════════ END overlay bus connection ══════════════════
 
   useEffect(() => {
     if (!matchId) return;
@@ -426,7 +559,14 @@ export default function OverlayAdminConsole({
   async function handleMatchSetupPush() {
     pushLog(`Match Setup pushed — ${legacyMatchSetup.teamA} vs ${legacyMatchSetup.teamB}, ${matchSetup.venue}`);
     fireToast("Match Setup pushed to overlay");
+
+    // FIX — snapshot the previous value so it can be rolled back if the
+    // DB write below fails; previously this flipped to true optimistically
+    // and never reverted on failure, leaving the UI claiming "pushed" even
+    // though the match record wasn't actually updated.
+    const previousCompleted = matchSetupCompleted;
     setMatchSetupCompleted(true);
+    sendBus({ type: "matchSetup", data: matchSetup });
 
     if (!matchId) return;
 
@@ -435,6 +575,7 @@ export default function OverlayAdminConsole({
     if (patchErr) {
       console.error("[OverlayAdminConsole] failed to save match setup to DB:", patchErr.message);
       fireToast("Pushed to overlay, but saving to the match record failed — check console");
+      setMatchSetupCompleted(previousCompleted);
       return;
     }
     dbSetupRef.current = { ...(dbSetupRef.current ?? {}), ...patch };
@@ -448,22 +589,23 @@ export default function OverlayAdminConsole({
   function handleVenueSelect(match: GeocodeMatch, displayName?: string) {
     const name = (displayName || (match as any)?.name || matchSetup.venue || "").toString();
     setWeather((w) => ({ ...w, venue: name.toUpperCase() }));
+    // FIX — previously only the local weather-widget venue string was
+    // updated, so picking a venue from the weather search never synced
+    // back into Match Setup's own venue field.
+    setMatchSetup((prev) => ({ ...prev, venue: name }));
   }
 
-  // ── NEW: single scoring state, shared with ScoringSection ──────────
   const [liveState, setLiveState] = useState<LiveState>(initialLiveState());
   const [livePushed, setLivePushed] = useState(false);
   const [liveDirty, setLiveDirty] = useState(false);
   const [initialEngineState, setInitialEngineState] = useState<EngineSyncState | null>(null);
 
-  // Mirrors ScoringSection's internal engine.dismissedPlayers purely so
-  // the standalone roster list below can show OUT / locked styling
-  // without owning a second copy of "who's out" state.
   const [dismissedPlayers, setDismissedPlayers] = useState<Set<string>>(new Set());
 
-  // Load persisted liveState + engine_state for this match on mount /
-  // whenever matchId resolves (mirrors the match_setup load effect
-  // above).
+  useEffect(() => {
+    liveStateRef.current = liveState;
+  }, [liveState]);
+
   useEffect(() => {
     if (!matchId) return;
     let cancelled = false;
@@ -478,13 +620,10 @@ export default function OverlayAdminConsole({
     };
   }, [matchId]);
 
-  // battingTeamKey / bowlingTeamKey — derived from toss + which innings
-  // we're in, rather than a manual operator toggle. Innings 1 batting
-  // side comes from the toss; innings 2 flips it.
   const inningsOneBattingTeam: "teamA" | "teamB" = useMemo(() => {
     if (matchSetup.tossWinner === "A") return matchSetup.tossDecision === "bat" ? "teamA" : "teamB";
     if (matchSetup.tossWinner === "B") return matchSetup.tossDecision === "bat" ? "teamB" : "teamA";
-    return "teamA"; // no toss recorded yet — sensible default
+    return "teamA";
   }, [matchSetup.tossWinner, matchSetup.tossDecision]);
 
   const battingTeamKey: "teamA" | "teamB" =
@@ -519,10 +658,6 @@ export default function OverlayAdminConsole({
 
   const [mobileTab, setMobileTab] = useState<"overlay" | "scoring" | "setup">("scoring");
 
-  // Read-only display of who's currently in which role, for the
-  // standalone left roster list. Same derivation ScoringSection does
-  // internally off the same liveState — safe to duplicate since it's a
-  // pure projection, not a second source of truth.
   const battingRoleMap = useMemo(() => {
     const m = new Map<string, { role: string }>();
     if (liveState.striker.name) m.set(liveState.striker.name, { role: "striker" });
@@ -535,10 +670,6 @@ export default function OverlayAdminConsole({
     return m;
   }, [liveState.bowler.name]);
 
-  // Which team's roster the standalone left panel is currently
-  // browsing. Purely a display toggle now — assignment itself happens
-  // via ScoringSection's own picker sheet / crew-slot drag targets, not
-  // through this list directly (it can still be dragged FROM, though).
   const [rosterView, setRosterView] = useState<"batting" | "bowling">("batting");
   const asideTeamKey: "teamA" | "teamB" = rosterView === "batting" ? battingTeamKey : bowlingTeamKey;
   const asideRoster: SquadPlayer[] = rosterView === "batting" ? battingSquad : bowlingSquad;
@@ -561,6 +692,27 @@ export default function OverlayAdminConsole({
   const [weather, setWeather] = useState({ venue: "GALLE FORT", temp: 28, condition: "partly-cloudy" });
   const [weatherEditing, setWeatherEditing] = useState(false);
   const [weatherOverlayOpen, setWeatherOverlayOpen] = useState(false);
+
+  useEffect(() => {
+    weatherRef.current = weather;
+  }, [weather]);
+
+  // NEW — broadcast weather changes to the overlay. Skips the initial
+  // mount so we don't fire a spurious event before the bus is even
+  // connected / before any real change has happened.
+  const weatherMountedRef = useRef(false);
+  useEffect(() => {
+    if (!weatherMountedRef.current) {
+      weatherMountedRef.current = true;
+      return;
+    }
+    sendBus({
+      type: "weather",
+      show: alwaysOn.weather,
+      data: { venue: weather.venue, temp: weather.temp, condition: weather.condition },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weather]);
 
   const [toasts, setToasts] = useState<{ id: number; text: string; tone: "wicket" | "boundary" | "info" }[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -628,14 +780,13 @@ export default function OverlayAdminConsole({
     fireToast(label);
   }
 
-  // ── NEW: callbacks handed to ScoringSection — these fire the visual
-  // moment (stamp/particles/toast) whenever the engine actually records
-  // that event against liveState. They no longer duplicate any scoring
-  // logic themselves. ─────────────────────────────────────────────────
+  // ── callbacks handed to ScoringSection — fire the visual moment AND
+  // now also broadcast it as an OverlayEvent to the on-air overlay. ──
   function handleBoundaryMoment(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
     fireStamp("boundary", moment.toUpperCase());
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: ${moment.toUpperCase()} — ${batter.name || "Striker"} ${batter.runs}(${batter.balls})`);
+    sendBus({ type: "moment", moment, player: batter.name || "Striker", score: `${batter.runs}(${batter.balls})` });
   }
   function handleMilestoneMoment(
     moment: "fifty" | "hundred",
@@ -644,6 +795,7 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", moment === "fifty" ? "FIFTY" : "HUNDRED");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: ${moment.toUpperCase()} — ${batter.label || batter.name || "Batter"} ${batter.runs}(${batter.balls})`);
+    sendBus({ type: "moment", moment, player: batter.label || batter.name || "Batter", score: `${batter.runs}(${batter.balls})` });
   }
   function handleWicketConfirm(payload: {
     batsmanOut: "striker" | "nonStriker";
@@ -659,6 +811,16 @@ export default function OverlayAdminConsole({
         payload.bowlerName ? ` b ${payload.bowlerName}` : ""
       }${payload.fielder ? ` c ${payload.fielder}` : ""}`
     );
+    sendBus({
+      type: "moment",
+      moment: "wicket",
+      player: payload.batter.name || "Batter",
+      score: `${payload.batter.runs}(${payload.batter.balls})`,
+      batsmanOut: payload.batsmanOut,
+      dismissalType: payload.dismissalType as BusDismissalType,
+      bowler: payload.bowlerName,
+      fielder: payload.fielder,
+    });
   }
   function fireMaidenMoment(payload: { bowlerName: string; maidens: number }) {
     if (!payload?.bowlerName) {
@@ -667,6 +829,7 @@ export default function OverlayAdminConsole({
     }
     pushLog(`Moment: MAIDEN OVER — ${payload.bowlerName}`);
     fireToast(`Maiden fired for ${payload.bowlerName}`);
+    sendBus({ type: "moment", moment: "maiden", player: payload.bowlerName, maidens: payload.maidens });
   }
   function handleInningsEnd(payload: { target: number; previousInningsRuns: number; inningsNumber: 1 | 2 }) {
     pushLog(`Innings break — target set to ${payload.target}`);
@@ -676,12 +839,20 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", "WON");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: MATCH WON — ${result.winningTeamName} ${result.margin}`);
+    sendBus({
+      type: "moment",
+      moment: "matchWon",
+      player: result.winningTeamName,
+      score: result.margin,
+      method: result.method as "runs" | "wickets" | "tie",
+    });
   }
 
   function pushLiveState() {
     setLivePushed(true);
     setLiveDirty(false);
     pushLog("Live State pushed to overlay");
+    sendBus({ type: "liveState", data: liveState });
     if (matchId) saveLiveState(matchId, liveState);
     setTimeout(() => setLivePushed(false), 1500);
   }
@@ -691,14 +862,24 @@ export default function OverlayAdminConsole({
   }
 
   async function restartMatchAndEngine() {
+    // FIX (restart desync bug) — force the scoring engine's own internal
+    // state to reset too, regardless of whether this was triggered from
+    // the header/top-bar button or ScoringSection's own restart dialog
+    // (which already calls engine.resetEngineState() itself — calling it
+    // again here is a harmless no-op in that case). Previously only
+    // liveState/dismissedPlayers were reset here, leaving extraType,
+    // pendingWicket, the undo snapshot, and ballSequence stale whenever
+    // the header button was used.
+    scoringSectionRef.current?.resetEngine();
+
     const fresh = initialLiveState();
     setLiveState(fresh);
     setLiveDirty(false);
-    setInitialEngineState(null);
     setDismissedPlayers(new Set());
     setShowClearConfirm(false);
     pushLog("Innings cleared / match restarted");
     fireToast("Match restarted");
+    sendBus({ type: "liveState", data: fresh });
 
     if (matchId) {
       await saveLiveState(matchId, fresh);
@@ -707,9 +888,6 @@ export default function OverlayAdminConsole({
     }
   }
 
-  // Derived display bits the Moments panel / restart-confirm dialog
-  // still need, now read straight off liveState instead of the old
-  // local score state.
   const overs = `${liveState.score.overs}.${liveState.score.balls}`;
   const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
 
@@ -717,21 +895,20 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", kind.toUpperCase());
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: ${kind.toUpperCase()} (manual) — ${liveState.striker.name || "Striker"} ${liveState.striker.runs}(${liveState.striker.balls})`);
+    sendBus({
+      type: "moment",
+      moment: kind as "four" | "six",
+      player: liveState.striker.name || "Striker",
+      score: `${liveState.striker.runs}(${liveState.striker.balls})`,
+    });
   }
-  // NOTE — these two "manual" Moments-panel fires are cosmetic only:
-  // they fire the on-air stamp/toast without mutating liveState. Actual
-  // scoring (which affects the real score, dismissed-players list, etc)
-  // happens exclusively through ScoringSection's engine (the Out button
-  // + its own Wicket Detail dialog, and boundary/milestone auto-fire
-  // off recordBall). Previously this panel ALSO mutated dismissedPlayers/
-  // striker/nonStriker directly, which is exactly the kind of second
-  // source of truth that desyncs from the real engine state — removed.
   function fireMilestoneMoment(kind: "fifty" | "hundred", who: "striker" | "nonStriker" = milestoneBatter) {
     const batter = who === "striker" ? liveState.striker : liveState.nonStriker;
     const label = batter.name || (who === "striker" ? "Striker" : "Non-Striker");
     fireStamp("boundary", kind === "fifty" ? "FIFTY" : "HUNDRED");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: ${kind.toUpperCase()} (manual) — ${label} ${batter.runs}(${batter.balls})`);
+    sendBus({ type: "moment", moment: kind, player: label, score: `${batter.runs}(${batter.balls})` });
   }
   function fireWicketMoment() {
     const batter = wicketDraft.batsmanOut === "striker" ? liveState.striker : liveState.nonStriker;
@@ -742,6 +919,16 @@ export default function OverlayAdminConsole({
         liveState.bowler.name ? ` b ${liveState.bowler.name}` : ""
       }${wicketDraft.fielder ? ` c ${wicketDraft.fielder}` : ""}`
     );
+    sendBus({
+      type: "moment",
+      moment: "wicket",
+      player: batter.name || "Batter",
+      score: `${batter.runs}(${batter.balls})`,
+      batsmanOut: wicketDraft.batsmanOut,
+      dismissalType: wicketDraft.dismissalType as BusDismissalType,
+      bowler: liveState.bowler.name,
+      fielder: wicketDraft.fielder,
+    });
     setWicketDraft({ batsmanOut: "striker", dismissalType: "bowled", fielder: "" });
     setShowWicketForm(false);
   }
@@ -756,6 +943,14 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", "WON");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: MATCH WON (manual) — ${name} ${margin}`);
+    sendBus({
+      type: "moment",
+      moment: "matchWon",
+      player: name,
+      score: margin,
+      teamColor: matchWonDraft.winner === "teamA" ? legacyMatchSetup.teamAColor : matchWonDraft.winner === "teamB" ? legacyMatchSetup.teamBColor : undefined,
+      method: matchWonDraft.method === "batting" ? "wickets" : matchWonDraft.method === "bowling" ? "runs" : "tie",
+    });
     setShowMatchWonForm(false);
   }
 
@@ -938,18 +1133,18 @@ export default function OverlayAdminConsole({
         <div className="flex flex-col items-center gap-1.5">
           <GroupLabel center>On Air</GroupLabel>
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            <TogglePill label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
-            <TogglePill label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
-            <TogglePill label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
+            <TogglePill label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
+            <TogglePill label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
+            <TogglePill label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
           </div>
         </div>
         <span className="hidden sm:block w-px self-stretch bg-white/10" />
         <div className="flex flex-col items-center gap-1.5">
           <GroupLabel center>Full-Screen</GroupLabel>
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            <TogglePill label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
-            <TogglePill label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
-            <TogglePill label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
+            <TogglePill label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
+            <TogglePill label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
+            <TogglePill label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => toggleFullScreen("matchIntro")} />
           </div>
         </div>
         <span className="hidden sm:block w-px self-stretch bg-white/10" />
@@ -962,7 +1157,7 @@ export default function OverlayAdminConsole({
                 label={c.label}
                 on={boundaryChannels[c.key]}
                 dotColor="#e8c468"
-                onClick={() => setBoundaryChannels((b) => ({ ...b, [c.key]: !b[c.key] }))}
+                onClick={() => toggleBoundaryChannel(c.key)}
               />
             ))}
           </div>
@@ -1006,13 +1201,6 @@ export default function OverlayAdminConsole({
                         e.preventDefault();
                         return;
                       }
-                      // FIX (bug #4) — CrewSlot's onDrop reads
-                      // "text/player-id" and looks the player up by id
-                      // against the squad it was handed. The old drag
-                      // source here set "text/player-name" with a bare
-                      // string, which no drop target ever read — drag
-                      // & drop assignment was silently a no-op. Now the
-                      // key AND payload match what CrewSlot expects.
                       e.dataTransfer.setData("text/player-id", player.id);
                     }}
                     className="w-full flex items-center gap-3 rounded-lg pl-2.5 pr-3 py-3 text-left transition-all"
@@ -1056,6 +1244,7 @@ export default function OverlayAdminConsole({
 
         {/* ══════════ CENTER: Live scoring (ScoringSection owns the engine) ══════════ */}
         <ScoringSection
+          ref={scoringSectionRef}
           mobileTab={mobileTab}
           matchId={matchId}
           matchSetup={legacyMatchSetup}
@@ -1139,26 +1328,26 @@ export default function OverlayAdminConsole({
               <div>
                 <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">On Air</span>
                 <div className="grid grid-cols-3 gap-1.5 mt-1">
-                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, weather: !a.weather }))} />
-                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, liveScoreBar: !a.liveScoreBar }))} />
-                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => setAlwaysOn((a) => ({ ...a, tournamentLogo: !a.tournamentLogo }))} />
+                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
+                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
+                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
                 </div>
               </div>
 
               <div>
                 <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen</span>
                 <div className="grid grid-cols-3 gap-1.5 mt-1">
-                  <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, pointsTable: !f.pointsTable }))} />
-                  <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchScorecard: !f.matchScorecard }))} />
-                  <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => setFullScreen((f) => ({ ...f, matchIntro: !f.matchIntro }))} />
+                  <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
+                  <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
+                  <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => toggleFullScreen("matchIntro")} />
                 </div>
               </div>
 
               <div>
                 <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Moments</span>
                 <div className="grid grid-cols-2 gap-1.5 mt-1">
-                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, matchBoundaries: !b.matchBoundaries }))} />
-                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => setBoundaryChannels((b) => ({ ...b, tournamentBoundaries: !b.tournamentBoundaries }))} />
+                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("matchBoundaries")} />
+                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("tournamentBoundaries")} />
                 </div>
               </div>
             </div>
