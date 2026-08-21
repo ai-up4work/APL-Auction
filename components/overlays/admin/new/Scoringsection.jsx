@@ -622,10 +622,16 @@ export default function ScoringSection({
   }
 
   return (
+    // CHANGED — mobile height is now bounded to the real viewport (100dvh,
+    // which tracks the visible viewport as mobile browser chrome
+    // collapses/expands, unlike 100vh) instead of growing unbounded with
+    // overflow-hidden clipping the excess behind the bottom nav. overflow-y-auto
+    // is a scroll fallback of last resort — the inner flex-1/min-h-0 block
+    // below is what actually does the dynamic shrinking.
     <section
-      className={`order-1 lg:order-2 flex-col lg:h-full min-h-0 p-4 sm:p-3 lg:p-4 gap-2.5 sm:gap-4 custom-scrollbar
-        ${mobileTab === "scoring" ? "flex overflow-hidden" : "hidden"}
-        lg:flex lg:overflow-y-auto`}
+      className={`order-1 lg:order-2 flex-col lg:h-full min-h-0 px-4 pt-4 sm:px-3 sm:pt-3 lg:p-4 gap-2.5 sm:gap-4
+        ${mobileTab === "scoring" ? "flex fixed inset-0 overflow-hidden pb-[calc(80px+env(safe-area-inset-bottom))]" : "hidden"}
+        lg:flex lg:static lg:h-full lg:overflow-hidden lg:pb-4`}
     >
       {/* toasts — engine's own + local assignment reminders, one stack */}
       {typeof document !== "undefined" && createPortal(
@@ -699,7 +705,7 @@ export default function ScoringSection({
       ) : (
         <>
           {engine.noPartnerAvailable && (
-            <div className="flex items-center gap-3 p-3 rounded-xl mb-1" style={{ background: "rgba(201,151,31,0.08)", border: "1px solid rgba(201,151,31,0.3)" }}>
+            <div className="flex items-center gap-3 p-3 rounded-xl mb-1 shrink-0" style={{ background: "rgba(201,151,31,0.08)", border: "1px solid rgba(201,151,31,0.3)" }}>
               <Icon name="warning" style={{ fontSize: 18, color: "#e8c468" }} />
               <div className="flex-1 min-w-0">
                 <p className="font-archivo text-[11px] font-bold uppercase text-on-surface">Last Man Batting</p>
@@ -711,8 +717,18 @@ export default function ScoringSection({
             </div>
           )}
 
-          {/* ── score header (LiveScoreBar design, unchanged) ── */}
-          <div className="relative overflow-hidden shrink-0 rounded-2xl border border-white/10 bg-white/[0.035] px-3 sm:px-4 pt-3 sm:pt-4 pb-2.5 sm:pb-3 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
+          {/* ── score header (LiveScoreBar design). CHANGED — explicit
+              shrink-0 so this card holds its intrinsic size and never
+              gets squeezed by flexbox; it's the run-pad/This-Over/stat
+              block below (flex-1 min-h-0) that absorbs whatever space
+              is left on short mobile viewports. containerType: "size"
+              lets the crew-slot row and extra-selector scale their
+              gaps/padding down via cqh/cqi units on short screens,
+              same pattern already used by the run-pad below. ── */}
+          <div
+            className="relative overflow-hidden shrink-0 rounded-2xl border border-white/10 bg-white/[0.035] px-3 sm:px-4 pt-3 sm:pt-4 pb-2.5 sm:pb-3 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]"
+            style={{ containerType: "inline-size" }}
+          >
             <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: GOLD_GRADIENT, opacity: 0.6 }} />
             <div className="absolute -top-20 -right-20 w-80 h-80 bg-theme-orange/5 blur-[100px] rounded-full pointer-events-none" />
 
@@ -852,8 +868,14 @@ export default function ScoringSection({
             </div>
           </div>
 
-          {/* ── run pad + This Over + stat cards (unchanged layout) ── */}
-          <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10">
+          {/* ── run pad + This Over + stat cards. flex-1 makes this block
+              claim all remaining height inside the bounded <section>,
+              min-h-0 lets a flex child shrink below its content size
+              (the flexbox default is min-height:auto, which otherwise
+              blocks shrinking entirely). overflow-hidden — no scrollbar
+              anywhere in the scoring section; content must compress to
+              fit instead of scrolling. ── */}
+          <div className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-3 relative z-10 overflow-hidden">
             <div className="grid grid-cols-4 lg:grid-cols-6 gap-1.5 sm:gap-2 flex-1 min-h-0" style={{ gridAutoRows: "1fr", containerType: "size" }}>
               {[0, 1, 2, 3, 4, 6].map((n) => (
                 <button
