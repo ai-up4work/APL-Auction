@@ -485,6 +485,7 @@ function MatchDetailsView({ matchSetup }: { matchSetup: MatchSetup }) {
       </div>
 
         <DetailField label="Kickoff Time" value={matchSetup.kickoffTime} mono />
+
         <DetailField label="Match Title" value={matchSetup.matchTitle} />
 
       {matchSetup.tournamentLogoUrl && (
@@ -632,7 +633,7 @@ export default function MatchSetupPanel({
         .join(" ");
 
   return (
-    <div className={outerClassName} style={mobileHeightStyle}>
+    <div className={outerClassName}>
       <div className="flex flex-col min-h-0 lg:flex-1 lg:h-full overflow-hidden">
           <DrawerSection
           step="1"

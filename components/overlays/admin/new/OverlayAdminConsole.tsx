@@ -1172,7 +1172,7 @@ export default function OverlayAdminConsole({
           </div>
         </aside>
 
-        {/* ══════════ CENTER: Live State scorer (1st on mobile) ══════════ */}
+        {/* ══════════ CENTER: Live State scorer (default on mobile) ══════════ */}
         <ScoringSection
           mobileTab={mobileTab}
           teamRuns={teamRuns}
@@ -1221,7 +1221,7 @@ export default function OverlayAdminConsole({
         />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
-        <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full bg-surface-container-low shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">            
+        <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">            
             <MatchSetupPanel
             auctionId={auctionId}
             matchSetup={matchSetup}
