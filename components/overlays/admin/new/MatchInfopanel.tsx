@@ -614,7 +614,7 @@ export default function MatchSetupPanel({
   const outerClassName = mobileTab
     ? [
         "flex flex-col min-h-0",
-        "pt-4 px-0",
+        "pt-0 px-0",
         mobileTab === "setup" ? "flex" : "hidden",
         mobileHeightClasses,
         "lg:flex lg:flex-col lg:min-h-0",

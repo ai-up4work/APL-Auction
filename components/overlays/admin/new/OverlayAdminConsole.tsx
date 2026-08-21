@@ -93,6 +93,23 @@ import { dbRowToOverlaySetup, overlaySetupToDbPatch, type DbMatchSetupRow } from
      `logoFailed` is reset whenever the tournament logo URL itself
      changes, so a stale failure doesn't stick around after a valid
      logo is pushed.
+
+   DESKTOP RIGHT-PANEL TABS (this pass):
+   - The right rail (Match Setup / Moments / Weather) used to be
+     three sections stacked vertically on desktop, with Moments and
+     Weather hiding only while the Match Setup drawer was expanded
+     (`matchSetupEditing`). That meant on desktop you could still end
+     up scrolling past Setup to get to Moments/Weather, and there was
+     no single place to jump straight to one section.
+   - `desktopRightTab` ("setup" | "moments" | "weather") now drives a
+     small desktop-only tab bar at the top of the right aside — the
+     same one-active-section-at-a-time pattern as the mobile bottom
+     nav (`mobileTab`), but independent of it. Each section's `lg:`
+     visibility now keys off `desktopRightTab` instead of
+     `matchSetupEditing`, so exactly one section shows on desktop at
+     a time. Mobile is completely untouched — it still uses
+     `mobileTab` ("overlay" / "scoring" / "setup") via its own bottom
+     nav, unaffected by this new desktop-only tab bar.
    ───────────────────────────────────────────────────────────── */
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
@@ -108,6 +125,15 @@ const BOUNDARY_CHANNELS = [
 // Human-readable labels for extras, keyed by the same short codes
 // used everywhere else (extras state, ballOutcome, record()).
 const EXTRA_LABELS: Record<"Wd" | "Nb" | "By" | "Lb", string> = { Wd: "Wide", Nb: "No Ball", By: "Bye", Lb: "Leg Bye" };
+
+// Desktop-only right-rail tabs. Kept next to the other top-level
+// constants since it's referenced both by the tab bar and by each
+// section's visibility check below.
+const DESKTOP_RIGHT_TABS = [
+  { key: "setup" as const, label: "Setup", icon: "tune" },
+  { key: "moments" as const, label: "Moments", icon: "bolt" },
+  { key: "weather" as const, label: "Weather", icon: "partly_cloudy_day" },
+];
 
 let idCtr = 0;
 
@@ -357,6 +383,14 @@ export default function OverlayAdminConsole({
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(defaultMatchSetup());
   const [matchSetupEditing, setMatchSetupEditing] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
+
+  /* ── Desktop right-rail tabs ──
+     One of "setup" | "moments" | "weather" — drives which of the three
+     right-column sections is visible on desktop (`lg:` and up). This is
+     independent from `mobileTab`, which still drives the mobile bottom
+     nav exactly as before. See the DESKTOP RIGHT-PANEL TABS note near
+     the top of this file. */
+  const [desktopRightTab, setDesktopRightTab] = useState<"setup" | "moments" | "weather">("moments");
 
   // Last-loaded/saved raw `matches.match_setup` row, in the DB's own
   // shape (team1/team2/squads/...). Used purely so overlaySetupToDbPatch
@@ -1221,19 +1255,47 @@ export default function OverlayAdminConsole({
         />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
-        <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">            
+        <aside className="order-3 border-l border-outline-variant flex mb-0 flex-col min-h-0 lg:h-full shrink-0 lg:overflow-y-auto custom-scrollbar gap-4">
+
+          {/* Desktop-only tab bar. Mobile is untouched — it keeps its own
+              bottom nav (mobileTab) and this bar never renders there. */}
+          <div className="hidden lg:flex items-center gap-1.5 px-3 pt-3 shrink-0">
+            {DESKTOP_RIGHT_TABS.map((tab) => {
+              const active = desktopRightTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setDesktopRightTab(tab.key)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg font-mono-geist text-[10px] font-bold uppercase tracking-[0.14em] transition-all hover:brightness-110"
+                  style={{
+                    background: active ? "rgba(201,151,31,0.12)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${active ? "rgba(201,151,31,0.35)" : "rgba(255,255,255,0.08)"}`,
+                    color: active ? "#e8c468" : "rgba(255,255,255,0.45)",
+                  }}
+                >
+                  <Icon name={tab.icon} style={{ fontSize: 14 }} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── Setup (desktop tab: "setup") ── */}
+          <div className={desktopRightTab === "setup" ? "lg:flex lg:flex-col lg:flex-1 lg:min-h-0" : "lg:hidden"}>
             <MatchSetupPanel
-            auctionId={auctionId}
-            matchSetup={matchSetup}
-            setMatchSetup={setMatchSetup}
-            onPush={handleMatchSetupPush}
-            pushLabel={matchSetupCompleted ? "Update & Push Match Setup" : "Push Match Setup"}
-            completed={matchSetupCompleted}
-            onVenueSelect={handleVenueSelect}
-            matchId={matchId}
-            onEditingChange={setMatchSetupEditing}
-            mobileTab={mobileTab}
-          />
+              auctionId={auctionId}
+              matchSetup={matchSetup}
+              setMatchSetup={setMatchSetup}
+              onPush={handleMatchSetupPush}
+              pushLabel={matchSetupCompleted ? "Update & Push Match Setup" : "Push Match Setup"}
+              completed={matchSetupCompleted}
+              onVenueSelect={handleVenueSelect}
+              matchId={matchId}
+              onEditingChange={setMatchSetupEditing}
+              mobileTab={mobileTab}
+            />
+          </div>
 
           {/* Broadcast Channels — mobile-only replacement for the desktop sticky pill bar. */}
           <div className={`p-4 shrink-0 lg:hidden flex-col gap-2.5 ${mobileTab === "overlay" ? "flex" : "hidden"}`}>
@@ -1269,9 +1331,12 @@ export default function OverlayAdminConsole({
             </div>
           </div>
 
-          {/* Moments — hidden on desktop while Match Setup is being edited,
-             so the setup card can take over the whole right column. */}
-          <div className={`px-4 shrink-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden ${mobileTab === "overlay" ? "flex" : "hidden"} ${matchSetupEditing ? "lg:hidden" : "lg:flex"}`}>
+          {/* ── Moments (desktop tab: "moments") ── */}
+          <div
+            className={`px-4 shrink-0 flex-col lg:min-h-0 lg:overflow-hidden ${
+              mobileTab === "overlay" ? "flex" : "hidden"
+            } ${desktopRightTab === "moments" ? "lg:flex lg:flex-1" : "lg:hidden"}`}
+          >
             <button type="button" onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
               <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
             </button>
@@ -1407,7 +1472,13 @@ export default function OverlayAdminConsole({
               </div>
             )}
           </div>
-            <div className={`px-4 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} lg:block`}>
+
+          {/* ── Weather (desktop tab: "weather") ── */}
+          <div
+            className={`px-4 lg:mb-4 shrink-0 ${mobileTab === "overlay" ? "block" : "hidden"} ${
+              desktopRightTab === "weather" ? "lg:block" : "lg:hidden"
+            }`}
+          >
             <WeatherPanel
                 weather={weather}
                 setWeather={setWeather}
@@ -1416,7 +1487,7 @@ export default function OverlayAdminConsole({
                 pushLog={pushLog}
                 fireToast={fireToast}
                 mobileTab={mobileTab}
-                desktopVisible={!matchSetupEditing}
+                desktopVisible={desktopRightTab === "weather"}
             />
             </div>
         </aside>
