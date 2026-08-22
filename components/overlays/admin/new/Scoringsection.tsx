@@ -1079,7 +1079,7 @@ function MatchOverScreen({
         Match Complete
       </span>
       <div
-        className="relative z-10 w-24 h-24 sm:w-[104px] sm:h-[104px] rounded-full flex items-center justify-center bg-black/60 border-[3px] overflow-hidden mb-5"
+        className="relative z-10 w-36 h-36 sm:w-[200px] sm:h-[200px] rounded-full flex items-center justify-center bg-black/60 border-[3px] overflow-hidden mb-5"
         style={{ borderColor: `${accent}80` }}
       >
         {winningTeamLogo && !logoFailed ? (
@@ -1091,7 +1091,7 @@ function MatchOverScreen({
             onError={() => setLogoFailed(true)}
           />
         ) : (
-          <span className="flex items-center justify-center text-3xl" style={{ color: accent }}>
+          <span className="flex items-center justify-center text-5xl" style={{ color: accent }}>
             {isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: 36 }} />}
           </span>
         )}
