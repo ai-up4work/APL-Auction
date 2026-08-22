@@ -538,6 +538,7 @@ export function mergeOverlaySetupIntoRaw(
 export interface GetOrCreateMatchResult {
   match: MatchRow | null;
   error: { context: string; message: string; code?: string; hint?: string } | null;
+  id?: string;
 }
 
 function toResultError(context: string, error: unknown): GetOrCreateMatchResult["error"] {

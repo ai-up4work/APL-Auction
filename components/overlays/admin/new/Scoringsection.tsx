@@ -167,6 +167,7 @@ function resolveWinningTeamKey(
   teamBLabels: { shortLabel: string; fullName?: string }
 ): "teamA" | "teamB" | null {
   const name = normalizeTeamName(winningTeamName);
+  console.log("resolveWinningTeamKey", { winningTeamName, name, winningTeamLogos: { teamALabels, teamBLabels } });
   if (!name) return null;
 
   const aCandidates = [teamALabels.shortLabel, teamALabels.fullName]
