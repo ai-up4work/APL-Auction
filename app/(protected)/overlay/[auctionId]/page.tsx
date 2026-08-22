@@ -2,8 +2,14 @@
 "use client";
 
 import React, { use, useEffect, useReducer, useRef } from "react";
-import { connectOverlayBus, type OverlayEvent, type WeatherData, type MatchSetup, type LiveState } from "@/lib/overlayBus";
-import { getOrCreateMatch } from "@/lib/matchPersistence"; // NEW
+import { connectOverlayBus, type OverlayEvent, type WeatherData, type MatchSetup, type LiveState, type ChannelVisibility } from "@/lib/overlayBus";
+import {
+  getOrCreateMatch,
+  loadLiveState,
+  loadWeather,
+  loadOnAirChannels,
+  type WeatherCoords,
+} from "@/lib/matchPersistence"; // NEW — extras added alongside getOrCreateMatch
 
 import WeatherCard from "@/components/overlays/WeatherCard";
 import MatchBoundaries from "@/components/overlays/MatchBoundaries";
@@ -67,7 +73,53 @@ const initialState: OverlayState = {
   liveState: null,
 };
 
-function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
+// ─────────────────────────────────────────────────────────────
+// NEW — a local, non-bus action for hydrating matchSetup straight from
+// Postgres. Deliberately NOT part of the `OverlayEvent` union (that
+// type is the wire format for the realtime bus) — it's a
+// same-shaped-but-separate action the reducer also understands, fired
+// once getOrCreateMatch() resolves on this page. Keeping it as its own
+// variant (rather than reusing the bus's "matchSetup" event, which
+// unconditionally sets matchSetupCompleted: true) lets a DRAFT
+// (not-yet-pushed) row in the DB be loaded without falsely flipping
+// the "live" flag — same gating rule the bus's syncSnapshot case
+// already applies.
+// ─────────────────────────────────────────────────────────────
+interface DbHydrateAction {
+  type: "dbHydrate";
+  matchSetup: MatchSetup;
+  matchSetupCompleted: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────
+// NEW — same idea as DbHydrateAction, extended to the other tables
+// this page previously depended ENTIRELY on the realtime bus for:
+// live score state, weather, and per-channel on-air visibility. All
+// three of these only ever got populated by an admin tab's
+// syncSnapshot reply to requestSync — if no admin tab was open, or the
+// request/reply pair dropped (both of which the sync-retry logic
+// below exists to work around, but can't fully eliminate), this page
+// would silently sit on initialState for these fields forever, even
+// though the real values were already sitting in Postgres in
+// match_state / weather_readings / on_air_channels.
+//
+// Fields are optional/nullable here because any one of the three
+// underlying reads can legitimately come back null (e.g. a fresh
+// match with no weather ever set) — a null for a given field means
+// "nothing persisted yet," not "hide this," so the reducer only
+// applies a field when it actually has a value, leaving initialState
+// (or whatever the bus has already delivered) untouched otherwise.
+// ─────────────────────────────────────────────────────────────
+interface DbHydrateExtrasAction {
+  type: "dbHydrateExtras";
+  liveState: LiveState | null;
+  weather: { data: WeatherData; coords: WeatherCoords | null } | null;
+  channels: ChannelVisibility | null;
+}
+
+type Action = OverlayEvent | DbHydrateAction | DbHydrateExtrasAction;
+
+function reducer(state: OverlayState, event: Action): OverlayState {
   switch (event.type) {
     case "weather":
       return { ...state, weather: { show: event.show, data: { ...state.weather.data, ...event.data } } };
@@ -125,6 +177,54 @@ function reducer(state: OverlayState, event: OverlayEvent): OverlayState {
         liveState: event.data.liveState,
       };
     }
+    // DB-sourced hydration for matchSetup. UNLIKE syncSnapshot, this
+    // does NOT gate on matchSetupCompleted. That flag exists to stop
+    // the BUS from showing an admin's in-progress, unsaved local draft
+    // as if it were live — but anything read back out of
+    // `matches.match_setup` is by definition already persisted, not a
+    // draft, so it's always safe to display. Gating this the same way
+    // as the bus was the bug: match_setup_completed can be false (e.g.
+    // never flipped by the Match Editor, or the admin's "push" control
+    // being missing) even though the team/venue/toss data itself is
+    // real and correct in Postgres — which is exactly why teams were
+    // stuck on "TBD" after a refresh even though the DB had good data
+    // all along.
+    //
+    // This intentionally does NOT touch channel visibility (weather
+    // show/hide, live score bar, etc) — those are handled by the
+    // dbHydrateExtras case below, sourced from their own tables.
+    case "dbHydrate":
+      return {
+        ...state,
+        matchSetup: event.matchSetup,
+        matchSetupCompleted: event.matchSetupCompleted || state.matchSetupCompleted,
+      };
+    // DB-sourced hydration for everything else this page used to wait
+    // on the bus for. Same non-gated reasoning as dbHydrate above:
+    // these are persisted rows, not drafts, so there's no "completed"
+    // flag to check. Each field is only applied when the corresponding
+    // read actually returned something, so a match with e.g. no
+    // weather row yet doesn't clobber whatever the bus already set.
+    case "dbHydrateExtras": {
+      const c = event.channels;
+      return {
+        ...state,
+        weather: c
+          ? { show: c.weather, data: event.weather ? { ...state.weather.data, ...event.weather.data } : state.weather.data }
+          : state.weather,
+        matchBoundaries: c ? { ...state.matchBoundaries, show: c.matchBoundaries } : state.matchBoundaries,
+        tournamentBoundaries: c
+          ? { ...state.tournamentBoundaries, show: c.tournamentBoundaries }
+          : state.tournamentBoundaries,
+        liveScoreBar: c ? { show: c.liveScoreBar } : state.liveScoreBar,
+        pointsTable: c ? { show: c.pointsTable } : state.pointsTable,
+        matchScorecard: c ? { show: c.matchScorecard } : state.matchScorecard,
+        matchIntro: c ? { show: c.matchIntro } : state.matchIntro,
+        tournamentLogo: c ? { show: c.tournamentLogo } : state.tournamentLogo,
+        testBg: c ? { show: c.testBg } : state.testBg,
+        liveState: event.liveState ?? state.liveState,
+      };
+    }
     case "clearAll":
       return { ...initialState, testBg: state.testBg };
     default:
@@ -163,18 +263,56 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
   const [state, dispatch] = useReducer(reducer, initialState);
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
 
-  // NEW — resolved Supabase `matches.id` for this auctionId, independent
-  // of the bus. Needed by CricketScorecard to subscribe to the `balls`
-  // ledger directly. Resolved once on mount the same way the admin/scoring
-  // page does via getOrCreateMatch — this overlay page is read-only, so
-  // it's safe to call even though it may race the admin's own call (both
-  // resolve to the same row; getOrCreateMatch is idempotent).
+  // Resolved Supabase `matches.id` for this auctionId, independent of the
+  // bus. Needed by CricketScorecard to subscribe to the `balls` ledger
+  // directly, and now also used to drive the DB hydration below.
   const [matchId, setMatchId] = React.useState<string | null>(null);
 
+  // ─────────────────────────────────────────────────────────────
+  // FIX — this page used to depend ENTIRELY on the realtime bus for
+  // matchSetup, live score state, weather, and channel visibility: it
+  // would sit on initialState (every placeholder/"TBD"/hidden overlay)
+  // until an admin tab happened to be open, connected, and answered a
+  // requestSync. If no admin tab was open — or the very first
+  // requestSync/response pair dropped and every retry also missed —
+  // the overlay just never got real data, even though it was sitting
+  // right there in Postgres.
+  //
+  // getOrCreateMatch() already returns the fully normalized
+  // `match_setup` (via normalizeMatchSetup, which also handles the
+  // Match-Editor's team1/team2 shape) plus `match_setup_completed`.
+  // loadLiveState / loadWeather / loadOnAirChannels cover the rest of
+  // what the bus's syncSnapshot would otherwise be the only source
+  // for. All four reads seed local state directly, so:
+  //   - a hard refresh of THIS tab shows real data immediately, with
+  //     no dependency on any admin tab being open at all;
+  //   - the bus sync (below, unchanged) still runs and will overwrite
+  //     this with a fresher snapshot the moment it succeeds, so live
+  //     edits pushed after this initial load still propagate normally.
+  //
+  // The three extra reads run in parallel via Promise.all rather than
+  // sequentially — they're independent tables, no reason to wait on
+  // one before starting the next, and matchId is already known by the
+  // time we get here since getOrCreateMatch has already resolved.
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    getOrCreateMatch(auctionId).then((row) => {
-      if (!cancelled && row) setMatchId(row.id);
+    getOrCreateMatch(auctionId).then(async (row) => {
+      if (cancelled || !row) return;
+      setMatchId(row.id);
+      dispatch({
+        type: "dbHydrate",
+        matchSetup: row.match_setup,
+        matchSetupCompleted: !!row.match_setup_completed,
+      });
+
+      const [liveState, weather, channels] = await Promise.all([
+        loadLiveState(row.id),
+        loadWeather(row.id),
+        loadOnAirChannels(row.id),
+      ]);
+      if (cancelled) return;
+      dispatch({ type: "dbHydrateExtras", liveState, weather, channels });
     });
     return () => {
       cancelled = true;
@@ -286,9 +424,8 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       <PointsTable show={state.pointsTable.show} hideTrigger auctionId={auctionId}/>
 
 
-      {/* CHANGED — now fed matchId/matchSetup/liveState so it can derive
-          the batting/bowling cards from the balls ledger instead of the
-          old static matchData.ts imports. */}
+      {/* Fed matchId/matchSetup/liveState so it can derive the
+          batting/bowling cards from the balls ledger. */}
       <CricketScorecard
         show={state.matchScorecard.show}
         hideTrigger
@@ -306,22 +443,39 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
         matchMeta={state.matchSetup?.matchMeta ?? undefined}
       />
 
-      {state.tournamentLogo.show && (
-        <TournamentLogoDisplay
-          name={state.matchSetup?.tournamentName || undefined}
-          edition={
-            state.matchSetup
-              ? [
-                  state.matchSetup.season && `SEASON ${state.matchSetup.season}`,
-                  state.matchSetup.format,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || undefined
-              : undefined
-          }
-          logo={state.matchSetup?.tournamentLogoUrl || undefined}
-        />
-      )}
+      {state.tournamentLogo.show && (() => {
+        // A standalone match (no tournament attached) has a blank
+        // `tournamentName` — the Match Editor only populates that
+        // field when the match is created under a tournament. In
+        // that case, showing an empty/placeholder tournament banner
+        // is wrong; the useful thing to show instead is the match's
+        // own title (e.g. "Semi Final 1", "Friendly") and its own
+        // logo — both of which already exist on MatchSetup
+        // (`matchTitle`, `tournamentLogoUrl`) regardless of whether
+        // a tournament is attached, since the Match Editor lets a
+        // standalone match set its own logo into that same field.
+        const isStandalone = !state.matchSetup?.tournamentName?.trim();
+        const name = isStandalone
+          ? state.matchSetup?.matchTitle || undefined
+          : state.matchSetup?.tournamentName || undefined;
+        const edition = isStandalone
+          ? state.matchSetup?.format || undefined
+          : state.matchSetup
+          ? [
+              state.matchSetup.season && `SEASON ${state.matchSetup.season}`,
+              state.matchSetup.format,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          : undefined;
+        return (
+          <TournamentLogoDisplay
+            name={state.matchSetup?.tournamentName || state.matchSetup?.matchTitle || undefined}
+            edition={edition}
+            logo={state.matchSetup?.tournamentLogoUrl || undefined}
+          />
+        );
+      })()}
     </div>
   );
 }

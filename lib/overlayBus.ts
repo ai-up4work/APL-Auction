@@ -16,8 +16,8 @@ export interface SquadPlayer {
   id: string;
   name: string;
   imageUrl?: string;
-  color?: string;  // NEW
-  tier?: string;   // NEW
+  color?: string;
+  tier?: string;
 }
 
 export interface TeamInfo {
@@ -38,11 +38,11 @@ export interface MatchSetup {
   format: "T20" | "ODI" | "Test";
   matchNumber: string;
   matchTitle: string;
-  kickoffTime: string; // NEW — e.g. "19:30" or "7:30 PM IST", free text
+  kickoffTime: string;
   teamA: TeamInfo;
   teamB: TeamInfo;
-  matchMeta: string; // e.g. "Semi-Final", "Qualifier 2", free text
-  tournament: string; // e.g. "Season 7", free text
+  matchMeta: string;
+  tournament: string;
   tossWinner: "A" | "B" | "";
   tossDecision: "bat" | "bowl" | "";
 }
@@ -76,9 +76,6 @@ export interface PointsRow {
   points: number;
 }
 
-// The outcome of a completed match. Lives on LiveState so it rides along
-// automatically through persistence, sync snapshots, and pushes, same as
-// everything else in LiveState.
 export interface MatchResult {
   winningTeamName: string;
   margin: string;
@@ -102,11 +99,6 @@ export interface LiveState {
 }
 
 // ── Moments (one-shot, event-based) ────────────────────────────────────
-// ── Moments (one-shot, event-based) ────────────────────────────────────
-// FIX — was missing obstructingField/retiredOut, which the scoring
-// engine (useLiveScoringEngine.ts) already supports as valid dismissal
-// types. Without this, a wicket moment fired for either of those two
-// couldn't be broadcast with a correctly-typed dismissalType.
 export type DismissalType =
   | "bowled"
   | "caught"
@@ -116,17 +108,16 @@ export type DismissalType =
   | "hitWicket"
   | "obstructingField"
   | "retiredOut";
-  
+
 export interface MomentPayload {
   moment: "four" | "six" | "wicket" | "fifty" | "hundred" | "maiden" | "matchWon";
-  player?: string; // also doubles as winning team name for "matchWon"
-  score?: string; // also doubles as margin text for "matchWon"
+  player?: string;
+  score?: string;
   batsmanOut?: "striker" | "nonStriker";
   dismissalType?: DismissalType;
   bowler?: string;
   fielder?: string;
-  maidens?: number; // bowler's maiden count at the moment this fired
-  // for "matchWon", lets the overlay theme itself to the winning team
+  maidens?: number;
   teamColor?: string;
   teamLogoUrl?: string;
   method?: "runs" | "wickets" | "tie";
@@ -151,11 +142,6 @@ export interface SyncSnapshot {
   matchSetup: MatchSetup;
   matchSetupCompleted: boolean;
   liveState: LiveState;
-  // NEW — last known weather payload. Previously only `channels.weather`
-  // (a visibility boolean) was included in the snapshot, so a reconnecting
-  // overlay page correctly restored show/hide but always fell back to
-  // DEFAULT_WEATHER for the actual venue/temp/condition, since that data
-  // never rode along with anything persisted or resynced.
   weather: WeatherData;
 }
 
@@ -180,30 +166,90 @@ type Handler = (event: OverlayEvent) => void;
 
 const BROADCAST_EVENT_NAME = "overlay-event";
 
-export function connectOverlayBus(auctionId: string) {
+// Max number of send retries for a single event before giving up and
+// just logging. Keeps a single flaky send from silently retrying forever.
+const MAX_SEND_RETRIES = 2;
+
+// FIX — connectOverlayBus previously required a truthy `channelKey` to
+// be called at all in a meaningful way (page.tsx used to gate this
+// entirely on `auctionId`, which is null for matches with no auction —
+// e.g. friendly matches). That's fixed on the caller side (page.tsx now
+// falls back to `matchId` when `auctionId` is missing), but the
+// parameter here is renamed to make it clear this just needs to be
+// *some* stable, unique key — it does not have to be an auction id.
+export function connectOverlayBus(channelKey: string) {
   let ready = false;
   const handlers = new Set<Handler>();
   const readyWaiters = new Set<() => void>();
   const queue: OverlayEvent[] = [];
 
-  const channel: RealtimeChannel = supabase.channel(`overlay:${auctionId}`, {
+  const channel: RealtimeChannel = supabase.channel(`overlay:${channelKey}`, {
     config: { broadcast: { self: false } },
   });
 
   channel.on("broadcast", { event: BROADCAST_EVENT_NAME }, (msg) => {
     const event = msg.payload as OverlayEvent;
-    console.log("[overlayBus] received", event.type, event); // TEMP: confirm delivery
     handlers.forEach((h) => h(event));
   });
 
+  // FIX — channel.send() returns a Promise<"ok" | "timed out" | "error" |
+  // "rate_limited"> that was previously never awaited or inspected. That
+  // meant a dropped/rate-limited/timed-out broadcast failed completely
+  // silently — no console output, no retry, nothing — which made "the
+  // overlay just didn't update" reports impossible to diagnose. This
+  // wraps every actual channel.send() call, logs non-"ok" results, and
+  // retries a couple of times before giving up loudly.
+  function sendWithRetry(event: OverlayEvent, attempt = 1) {
+    channel
+      .send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event })
+      .then((resp) => {
+        if (resp !== "ok") {
+          if (attempt <= MAX_SEND_RETRIES) {
+            console.warn(
+              "[overlayBus] send returned",
+              resp,
+              "— retrying",
+              `(${attempt}/${MAX_SEND_RETRIES})`,
+              "event:",
+              event.type,
+              "channel:",
+              `overlay:${channelKey}`
+            );
+            sendWithRetry(event, attempt + 1);
+          } else {
+            console.warn(
+              "[overlayBus] send failed after retries:",
+              resp,
+              "event:",
+              event.type,
+              "channel:",
+              `overlay:${channelKey}`
+            );
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("[overlayBus] send threw:", err, "event:", event.type);
+      });
+  }
+
   channel.subscribe((status) => {
-    console.log("[overlayBus] status:", status); // TEMP: watch for CLOSED/CHANNEL_ERROR/TIMED_OUT
+    // FIX — removed two `console.log` debug lines ("[overlayBus]
+    // received ..." on every single event, and "[overlayBus] status:"
+    // on every status change) that were left in from development and
+    // were spamming the console in production on every ball bowled.
+    // Kept a single, intentional warning for genuine failure states —
+    // silently swallowing CHANNEL_ERROR/TIMED_OUT/CLOSED made connection
+    // drops invisible, which made "sync stopped working" reports much
+    // harder to diagnose than a one-line console.warn.
+    if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      console.warn("[overlayBus] connection issue:", status, "channel:", `overlay:${channelKey}`);
+    }
+
     ready = status === "SUBSCRIBED";
     if (ready) {
       if (queue.length) {
-        queue.splice(0).forEach((event) =>
-          channel.send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event })
-        );
+        queue.splice(0).forEach((event) => sendWithRetry(event));
       }
       readyWaiters.forEach((fn) => fn());
       readyWaiters.clear();
@@ -223,7 +269,7 @@ export function connectOverlayBus(auctionId: string) {
         queue.push(event);
         return;
       }
-      channel.send({ type: "broadcast", event: BROADCAST_EVENT_NAME, payload: event });
+      sendWithRetry(event);
     },
     on(handler: Handler) {
       handlers.add(handler);

@@ -29,10 +29,6 @@ import type { LiveState, SquadPlayer } from "@/lib/overlayBus";
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
 
 /* ───────────────────────── fielder requirement rules ───────────────────────── */
-// Caught / Run Out / Stumped always need a fielder (catcher, thrower/breaker of
-// the stumps, wicketkeeper respectively) — mandatory. Obstructing the Field can
-// optionally credit a fielder depending on how the broadcast wants to log it.
-// Bowled, LBW, Hit Wicket, and Retired Out never involve a fielder.
 const FIELDER_REQUIRED_DISMISSALS = new Set<DismissalType>(["caught", "runOut", "stumped"]);
 const FIELDER_OPTIONAL_DISMISSALS = new Set<DismissalType>(["obstructingField"]);
 
@@ -56,9 +52,6 @@ interface RoleInfo {
   role: "striker" | "nonStriker" | "bowler";
 }
 
-// The "legacy" flattened match-setup shape this component consumes
-// (as built by the admin page's `legacyMatchSetup` useMemo) — distinct
-// from the richer `MatchSetup` type used by MatchSetupPanel.
 interface LegacyMatchSetup {
   teamA: string;
   teamAColor: string;
@@ -537,10 +530,6 @@ function BatterPickerButton({
   );
 }
 
-// A compact, tappable player chip used by the fielder picker. Same visual
-// language as BatterPickerButton / PlayerPickerSheet's grid, but laid out
-// for a dense grid of an entire fielding squad inside a dialog that
-// already has other fields above/below it.
 function FielderOptionButton({
   player,
   selected,
@@ -582,9 +571,6 @@ function FielderOptionButton({
   );
 }
 
-// Renders the fielder picker section for the Wicket Detail dialog. Only
-// mounted at all when the dismissal type actually needs it (see
-// fielderRequirement above). Selecting the same player again deselects.
 function FielderPickerField({
   dismissalType,
   fieldingSquad,
@@ -676,13 +662,6 @@ function CenteredOverlay({
   );
 }
 
-// Fielder is picked (not typed) from the fielding side's squad, and is
-// only shown at all for dismissals where a fielder is meaningful. It's
-// mandatory for Caught / Run Out / Stumped and optional for Obstructing
-// the Field; Bowled / LBW / Hit Wicket / Retired Out never show the
-// field. Switching dismissal type clears any selected fielder that's no
-// longer relevant, and "Fire Wicket Graphic" is disabled until a
-// required fielder is chosen.
 function WicketDetailDialog({
   pending,
   onResolve,
@@ -708,8 +687,6 @@ function WicketDetailDialog({
   const [fielder, setFielder] = useState<SquadPlayer | null>(null);
   const [runsCompleted, setRunsCompleted] = useState(0);
 
-  // Clear a stale fielder selection whenever the dismissal type changes
-  // to one that no longer needs (or never needed) a fielder.
   useEffect(() => {
     if (fielderRequirement(dismissalType) === "none") {
       setFielder(null);
@@ -992,9 +969,6 @@ export interface ScoringSectionProps {
   onDismissedPlayersChange?: (players: Set<string>) => void;
 }
 
-// forwardRef so the parent admin console can imperatively reach into this
-// component's live scoring engine instance (e.g. to force a full engine
-// reset from a restart button that lives outside this component).
 const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(function ScoringSection(
   {
     mobileTab,
@@ -1047,13 +1021,6 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
     initialEngineState,
   });
 
-  // Exposes a single imperative escape hatch: a full engine reset.
-  // Without this, a restart triggered from outside this component (e.g.
-  // the page-level header "Restart Match" button) could only reset
-  // liveState/dismissedPlayers at the page level, leaving the engine's
-  // own internal state — dismissedPlayers, extraType, pendingWicket,
-  // undo snapshot, ballSequence, benched batters/bowlers — stale and
-  // desynced from the fresh liveState.
   useImperativeHandle(ref, () => ({
     resetEngine: () => engine.resetEngineState(),
   }));
@@ -1064,12 +1031,34 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
   const [showBowlerChangePrompt, setShowBowlerChangePrompt] = useState(false);
   const [showPenaltyDialog, setShowPenaltyDialog] = useState(false);
 
+  // FIX (false "over complete — change bowler?" prompt on load/resume)
+  // — this effect's very first run could see `liveState.score.overs`
+  // jump straight from the component's initial (empty) value to
+  // whatever a hydrated match's DB-loaded state actually has, e.g.
+  // 0 -> 5 in a single update (loadLiveState in the parent resolves
+  // asynchronously and calls setLiveState with the real, mid-match
+  // value). If that jump happened to land with `balls === 0` — very
+  // plausible right after resuming a match at the start of an over —
+  // this fired the bowler-change modal as a false positive on page
+  // load, not on any real over transition that happened while the page
+  // was open. `hasCheckedOversRef` makes the very first run of this
+  // effect only record a baseline instead of comparing against one, so
+  // the prompt can only fire for a genuine overs increment witnessed
+  // live.
   const prevOversRef = useRef(liveState.score.overs);
+  const hasCheckedOversRef = useRef(false);
   useEffect(() => {
     const prevOvers = prevOversRef.current;
-    if (prevOvers !== undefined && liveState.score.overs > prevOvers && liveState.score.balls === 0 && !liveState.matchComplete) {
+    if (
+      hasCheckedOversRef.current &&
+      prevOvers !== undefined &&
+      liveState.score.overs > prevOvers &&
+      liveState.score.balls === 0 &&
+      !liveState.matchComplete
+    ) {
       setShowBowlerChangePrompt(true);
     }
+    hasCheckedOversRef.current = true;
     prevOversRef.current = liveState.score.overs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveState.score.overs, liveState.score.balls]);
@@ -1133,13 +1122,6 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
 
   function handlePenaltyConfirm(team: "batting" | "bowling", description: string) {
     const teamLabel = team === "batting" ? battingTeamLabel : bowlingTeamLabel;
-    // This tool only tracks a single running score (the current innings'
-    // batting total), so there's no separate "bowling team score" field
-    // to credit — in practice penalty runs are how broadcast operators
-    // bump the on-screen total regardless of which side is nominally
-    // "awarded" them, so both branches actually apply the +5. Only the
-    // toast/log wording differs to record which side the penalty was
-    // against.
     engine.patchLive({ score: { ...liveState.score, runs: liveState.score.runs + 5 } });
     onAdminAction?.("Penalty", { runs: 5, team, teamLabel, description });
     pushLocalToast(`⚖️ +5 Penalty — ${teamLabel}${description ? ` (${description})` : ""}`, "warning");
@@ -1557,6 +1539,20 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
                 <Icon name="undo" style={{ fontSize: "clamp(0.9rem, min(6cqh, 7cqi), 1.6rem)" }} />
                 <span style={{ fontSize: "clamp(0.6rem, min(3.6cqh, 4.5cqi), 0.85rem)" }}>Undo</span>
               </button>
+
+              {/* FIX — MoreActionsMenu (Penalty +5 / Injured / Abandon)
+                  was fully implemented above (its own state, handlers,
+                  and the component itself) but was never actually
+                  mounted anywhere in this JSX — there was no button
+                  anywhere that could open it, so the feature was
+                  completely unreachable. Placed as the last cell in the
+                  same run/extras/Out/Undo grid so it keeps the same
+                  tap-target sizing as everything else here. */}
+              <MoreActionsMenu
+                onAdminAction={(label) => onAdminAction?.(label)}
+                onPenaltyClick={() => setShowPenaltyDialog(true)}
+                disabled={controlsLocked}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">

@@ -382,14 +382,21 @@ export default function OverlayAdminConsole({
 
   const dbSetupRef = useRef<DbMatchSetupRow | null>(null);
 
-  // ═══════════════════ NEW: Overlay bus connection ═══════════════════
-  // This is what actually makes the admin console talk to the on-air
-  // overlay page. Previously overlayBus.ts existed but nothing in this
-  // file ever called connectOverlayBus — every toggle/moment/push only
-  // updated local React state (and, separately, Supabase), so the
-  // broadcast overlay never received any of it in real time.
+  // ═══════════════════ Overlay bus connection ═══════════════════
   const busRef = useRef<ReturnType<typeof connectOverlayBus> | null>(null);
   const scoringSectionRef = useRef<ScoringSectionHandle | null>(null);
+
+  // FIX — connectOverlayBus's own docstring says "page.tsx now falls
+  // back to `matchId` when `auctionId` is missing" (referring to the
+  // overlay display page), but this admin console never got that same
+  // fix: it still gated the whole bus connection on `if (!auctionId)
+  // return`. Any match created without an auction (friendly matches,
+  // per the same file's comments) silently never connected the admin
+  // console to the bus at all — every toggle/moment/push looked like
+  // it worked (local state updated, toasts fired) but nothing ever
+  // reached the overlay. `busChannelKey` mirrors what the overlay page
+  // already does.
+  const busChannelKey = auctionId ?? matchId ?? null;
 
   // Refs mirroring the latest values needed to answer a "requestSync"
   // from a (re)connecting overlay page. Kept as refs (updated via
@@ -434,8 +441,8 @@ export default function OverlayAdminConsole({
   }
 
   useEffect(() => {
-    if (!auctionId) return;
-    const bus = connectOverlayBus(auctionId);
+    if (!busChannelKey) return;
+    const bus = connectOverlayBus(busChannelKey);
     busRef.current = bus;
 
     const unsubscribe = bus.on((event) => {
@@ -455,7 +462,7 @@ export default function OverlayAdminConsole({
       busRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auctionId]);
+  }, [busChannelKey]);
 
   useEffect(() => {
     channelsRef.current = {
@@ -479,35 +486,39 @@ export default function OverlayAdminConsole({
     matchSetupCompletedRef.current = matchSetupCompleted;
   }, [matchSetupCompleted]);
 
+  // FIX — these three toggle functions used to call sendBus(...) from
+  // *inside* the setState updater function passed to setAlwaysOn /
+  // setFullScreen / setBoundaryChannels. Updater functions are meant to
+  // be pure: React (Strict Mode in dev, and potentially future
+  // concurrent-rendering paths) can and does invoke them more than once
+  // to detect side effects, which meant a single toggle click could
+  // fire two broadcasts, possibly landing out of order on the overlay
+  // and causing a toggle to visually "flicker" or revert. Each handler
+  // now computes the next value first, fires the bus event exactly
+  // once, then calls setState with a plain value.
   function toggleAlwaysOn(key: "weather" | "liveScoreBar" | "tournamentLogo") {
-    setAlwaysOn((prev) => {
-      const value = !prev[key];
-      if (key === "weather") {
-        sendBus({ type: "weather", show: value, data: weatherRef.current });
-      } else if (key === "liveScoreBar") {
-        sendBus({ type: "liveScoreBar", show: value });
-      } else {
-        sendBus({ type: "tournamentLogo", show: value });
-      }
-      return { ...prev, [key]: value };
-    });
+    const value = !alwaysOn[key];
+    if (key === "weather") {
+      sendBus({ type: "weather", show: value, data: weatherRef.current });
+    } else if (key === "liveScoreBar") {
+      sendBus({ type: "liveScoreBar", show: value });
+    } else {
+      sendBus({ type: "tournamentLogo", show: value });
+    }
+    setAlwaysOn((prev) => ({ ...prev, [key]: value }));
   }
 
   function toggleFullScreen(key: "pointsTable" | "matchScorecard" | "matchIntro") {
-    setFullScreen((prev) => {
-      const value = !prev[key];
-      sendBus({ type: key, show: value });
-      return { ...prev, [key]: value };
-    });
+    const value = !fullScreen[key];
+    sendBus({ type: key, show: value });
+    setFullScreen((prev) => ({ ...prev, [key]: value }));
   }
 
   function toggleBoundaryChannel(key: "matchBoundaries" | "tournamentBoundaries") {
-    setBoundaryChannels((prev) => {
-      const value = !prev[key];
-      const counts = key === "matchBoundaries" ? liveStateRef.current.matchBoundaries : liveStateRef.current.tournamentBoundaries;
-      sendBus({ type: key, show: value, fours: counts.fours, sixes: counts.sixes });
-      return { ...prev, [key]: value };
-    });
+    const value = !boundaryChannels[key];
+    const counts = key === "matchBoundaries" ? liveStateRef.current.matchBoundaries : liveStateRef.current.tournamentBoundaries;
+    sendBus({ type: key, show: value, fours: counts.fours, sixes: counts.sixes });
+    setBoundaryChannels((prev) => ({ ...prev, [key]: value }));
   }
   // ══════════════════ END overlay bus connection ══════════════════
 
@@ -557,13 +568,13 @@ export default function OverlayAdminConsole({
   );
 
   async function handleMatchSetupPush() {
-    pushLog(`Match Setup pushed — ${legacyMatchSetup.teamA} vs ${legacyMatchSetup.teamB}, ${matchSetup.venue}`);
+    pushLog(`Match Setup pushed — ${legacyMatchSetup.teamA}  vs  ${legacyMatchSetup.teamB}, ${matchSetup.venue}`);
     fireToast("Match Setup pushed to overlay");
 
-    // FIX — snapshot the previous value so it can be rolled back if the
-    // DB write below fails; previously this flipped to true optimistically
-    // and never reverted on failure, leaving the UI claiming "pushed" even
-    // though the match record wasn't actually updated.
+    // Snapshot the previous value so it can be rolled back if the DB
+    // write below fails; previously this flipped to true optimistically
+    // and never reverted on failure, leaving the UI claiming "pushed"
+    // even though the match record wasn't actually updated.
     const previousCompleted = matchSetupCompleted;
     setMatchSetupCompleted(true);
     sendBus({ type: "matchSetup", data: matchSetup });
@@ -589,9 +600,6 @@ export default function OverlayAdminConsole({
   function handleVenueSelect(match: GeocodeMatch, displayName?: string) {
     const name = (displayName || (match as any)?.name || matchSetup.venue || "").toString();
     setWeather((w) => ({ ...w, venue: name.toUpperCase() }));
-    // FIX — previously only the local weather-widget venue string was
-    // updated, so picking a venue from the weather search never synced
-    // back into Match Setup's own venue field.
     setMatchSetup((prev) => ({ ...prev, venue: name }));
   }
 
@@ -604,6 +612,26 @@ export default function OverlayAdminConsole({
 
   useEffect(() => {
     liveStateRef.current = liveState;
+  }, [liveState]);
+
+  // FIX — this was the core "not syncing in real time" complaint. Every
+  // ball, wicket, or crew change flowed only into local `liveState` (and,
+  // separately, into Supabase persistence elsewhere) — the overlay only
+  // ever received it when someone clicked "Push Live State". Mirrors the
+  // existing weather auto-broadcast effect below: skips the very first
+  // mount (so we don't fire before the bus is connected / before any
+  // real change happened), then sends the full liveState on every
+  // change after that. The manual push button is left in place — it
+  // still exists to explicitly persist to Supabase via saveLiveState —
+  // but the overlay no longer has to wait for it to see new state.
+  const liveStateMountedRef = useRef(false);
+  useEffect(() => {
+    if (!liveStateMountedRef.current) {
+      liveStateMountedRef.current = true;
+      return;
+    }
+    sendBus({ type: "liveState", data: liveState });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveState]);
 
   useEffect(() => {
@@ -697,9 +725,9 @@ export default function OverlayAdminConsole({
     weatherRef.current = weather;
   }, [weather]);
 
-  // NEW — broadcast weather changes to the overlay. Skips the initial
-  // mount so we don't fire a spurious event before the bus is even
-  // connected / before any real change has happened.
+  // Broadcast weather changes to the overlay. Skips the initial mount
+  // so we don't fire a spurious event before the bus is even connected
+  // / before any real change has happened.
   const weatherMountedRef = useRef(false);
   useEffect(() => {
     if (!weatherMountedRef.current) {
@@ -781,7 +809,7 @@ export default function OverlayAdminConsole({
   }
 
   // ── callbacks handed to ScoringSection — fire the visual moment AND
-  // now also broadcast it as an OverlayEvent to the on-air overlay. ──
+  // broadcast it as an OverlayEvent to the on-air overlay. ──
   function handleBoundaryMoment(moment: "four" | "six", batter: { name: string; runs: number; balls: number }) {
     fireStamp("boundary", moment.toUpperCase());
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
@@ -852,6 +880,12 @@ export default function OverlayAdminConsole({
     setLivePushed(true);
     setLiveDirty(false);
     pushLog("Live State pushed to overlay");
+    // Kept — the auto-broadcast effect above already sent this state
+    // the moment it changed, so this call is now effectively a no-op
+    // resend. Left in place because it's harmless (idempotent) and the
+    // button still serves its other job below: explicitly persisting
+    // the current liveState to Supabase on demand rather than waiting
+    // for the engine's own incremental saves.
     sendBus({ type: "liveState", data: liveState });
     if (matchId) saveLiveState(matchId, liveState);
     setTimeout(() => setLivePushed(false), 1500);
@@ -862,14 +896,6 @@ export default function OverlayAdminConsole({
   }
 
   async function restartMatchAndEngine() {
-    // FIX (restart desync bug) — force the scoring engine's own internal
-    // state to reset too, regardless of whether this was triggered from
-    // the header/top-bar button or ScoringSection's own restart dialog
-    // (which already calls engine.resetEngineState() itself — calling it
-    // again here is a harmless no-op in that case). Previously only
-    // liveState/dismissedPlayers were reset here, leaving extraType,
-    // pendingWicket, the undo snapshot, and ballSequence stale whenever
-    // the header button was used.
     scoringSectionRef.current?.resetEngine();
 
     const fresh = initialLiveState();
@@ -1095,7 +1121,7 @@ export default function OverlayAdminConsole({
           </div>
           <h1 className="font-archivo text-lg sm:text-2xl font-bold italic tracking-tighter uppercase shrink-0">
             <span style={{ color: legacyMatchSetup.teamAColor }}>{legacyMatchSetup.teamA}</span> 
-              vs{" "}
+              {"  "}vs{"  "}
             <span style={{ color: legacyMatchSetup.teamBColor }}>{legacyMatchSetup.teamB}</span>
           </h1>
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full shrink-0" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)" }}>
