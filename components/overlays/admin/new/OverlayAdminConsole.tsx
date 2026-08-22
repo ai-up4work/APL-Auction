@@ -126,39 +126,80 @@ function GroupLabel({ children, center }: { children: React.ReactNode; center?: 
 function MobileChannelRow({
   icon,
   label,
+  sublabel,
   on,
   onClick,
   dotColor,
+  disabled,
 }: {
   icon: string;
   label: string;
+  sublabel?: string;
   on: boolean;
   onClick: () => void;
   dotColor: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98]"
+      disabled={disabled}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all active:scale-[0.98] disabled:active:scale-100"
       style={{
-        background: on ? `${dotColor}14` : "rgba(255,255,255,0.02)",
-        border: `1px solid ${on ? `${dotColor}40` : "rgba(255,255,255,0.08)"}`,
+        background: on ? `${dotColor}12` : "rgba(255,255,255,0.02)",
+        border: `1px solid ${on ? `${dotColor}38` : "rgba(255,255,255,0.06)"}`,
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       <span
         className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
         style={{
-          background: on ? `${dotColor}22` : "rgba(255,255,255,0.04)",
+          background: on ? `${dotColor}20` : "rgba(255,255,255,0.04)",
           border: `1px solid ${on ? `${dotColor}40` : "rgba(255,255,255,0.08)"}`,
         }}
       >
-        <Icon name={icon} style={{ fontSize: 18, color: on ? dotColor : "rgba(255,255,255,0.4)" }} />
+        <Icon name={icon} style={{ fontSize: 17, color: on ? dotColor : "rgba(255,255,255,0.42)" }} />
       </span>
-      <span className="flex-1 text-left font-archivo text-sm font-bold" style={{ color: on ? "#e5e7eb" : "rgba(255,255,255,0.55)" }}>
-        {label}
+      <span className="flex-1 min-w-0 text-left">
+        <span className="block font-archivo text-[13.5px] font-bold truncate" style={{ color: on ? "#f4f4f5" : "rgba(255,255,255,0.62)" }}>
+          {label}
+        </span>
+        {sublabel && (
+          <span className="block font-mono-geist text-[8.5px] font-bold uppercase tracking-[0.1em] truncate" style={{ color: on ? dotColor : "rgba(255,255,255,0.32)" }}>
+            {sublabel}
+          </span>
+        )}
+      </span>
+      <span
+        className="relative shrink-0 w-8 h-[18px] rounded-full transition-colors duration-200"
+        style={{ background: on ? dotColor : "rgba(255,255,255,0.14)" }}
+      >
+        <span
+          className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all duration-200"
+          style={{ left: on ? "16px" : "2px", boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }}
+        />
       </span>
     </button>
+  );
+}
+function ChannelGroupCard({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl p-2.5 flex flex-col gap-2" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="flex items-baseline justify-between gap-2 px-1">
+        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-theme-orange">{title}</span>
+        {hint && <span className="font-mono-geist text-[8px] uppercase tracking-[0.1em] text-on-surface-variant shrink-0">{hint}</span>}
+      </div>
+      <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
   );
 }
 function MomentButton({
@@ -284,6 +325,75 @@ function BatterPickerButton({
           {batter?.name || label}
         </span>
         <span className="text-[9px] uppercase tracking-wide font-mono-geist text-on-surface-variant">{label}</span>
+      </span>
+    </button>
+  );
+}
+
+function TeamAvatar({
+  name,
+  logoUrl,
+  color,
+  size = 32,
+}: {
+  name: string;
+  logoUrl?: string;
+  color: string;
+  size?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showLogo = !!logoUrl && !failed;
+  return (
+    <span
+      className="rounded-full flex items-center justify-center shrink-0 overflow-hidden font-mono-geist font-bold"
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(9, size * 0.32),
+        background: showLogo ? "rgba(255,255,255,0.06)" : `${color}22`,
+        border: `1px solid ${color}55`,
+        color,
+      }}
+    >
+      {showLogo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logoUrl} alt="" className="w-full h-full object-contain p-0.5" onError={() => setFailed(true)} />
+      ) : (
+        initials(name)
+      )}
+    </span>
+  );
+}
+
+function TeamPickerButton({
+  name,
+  logoUrl,
+  color,
+  selected,
+  onClick,
+}: {
+  name: string;
+  logoUrl?: string;
+  color: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all"
+      style={{
+        border: `1px solid ${selected ? `${color}80` : "rgba(255,255,255,0.08)"}`,
+        background: selected ? `${color}1a` : "rgba(255,255,255,0.02)",
+      }}
+    >
+      <TeamAvatar name={name} logoUrl={logoUrl} color={color} size={34} />
+      <span
+        className="text-[12px] font-archivo font-bold truncate min-w-0"
+        style={{ color: selected ? color : "var(--color-on-surface)" }}
+      >
+        {name}
       </span>
     </button>
   );
@@ -1028,13 +1138,20 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", "WON");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: MATCH WON — ${result.winningTeamName} ${result.margin}`);
+    // Match the winning team's name back to teamA/teamB so the overlay
+    // graphic gets the same color + logo treatment as the manual
+    // "Fire Match Won" form below — previously this path sent neither.
+    const isTeamA = result.winningTeamName === legacyMatchSetup.teamA;
+    const isTeamB = result.winningTeamName === legacyMatchSetup.teamB;
     sendBus({
       type: "moment",
       moment: "matchWon",
       player: result.winningTeamName,
       score: result.margin,
+      teamColor: isTeamA ? legacyMatchSetup.teamAColor : isTeamB ? legacyMatchSetup.teamBColor : undefined,
+      teamLogo: isTeamA ? legacyMatchSetup.teamAlogo : isTeamB ? legacyMatchSetup.teamBlogo : undefined,
       method: result.method as "runs" | "wickets" | "tie",
-    });
+    } as OverlayEvent);
   }
 
   function pushLiveState() {
@@ -1136,8 +1253,9 @@ export default function OverlayAdminConsole({
       player: name,
       score: margin,
       teamColor: matchWonDraft.winner === "teamA" ? legacyMatchSetup.teamAColor : matchWonDraft.winner === "teamB" ? legacyMatchSetup.teamBColor : undefined,
+      teamLogo: matchWonDraft.winner === "teamA" ? legacyMatchSetup.teamAlogo : matchWonDraft.winner === "teamB" ? legacyMatchSetup.teamBlogo : undefined,
       method: matchWonDraft.method === "batting" ? "wickets" : matchWonDraft.method === "bowling" ? "runs" : "tie",
-    });
+    } as OverlayEvent);
     setShowMatchWonForm(false);
   }
 
@@ -1507,41 +1625,76 @@ export default function OverlayAdminConsole({
             }`}
           >
             {/* Broadcast Channels */}
-            <div className="p-4 shrink-0 lg:hidden flex flex-col gap-2.5">
-              <div>
-                <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
-                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">Toggle what's live on the overlay.</p>
+            <div className="p-4 shrink-0 lg:hidden flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
+                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
+                    Toggle what&apos;s live on the overlay
+                  </p>
+                </div>
+                {anyFullscreenOn && (
+                  <span
+                    className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-full font-mono-geist text-[8px] font-bold uppercase tracking-[0.12em]"
+                    style={{ background: "rgba(201,151,31,0.14)", border: "1px solid rgba(201,151,31,0.35)", color: "#e8c468" }}
+                  >
+                    <Icon name="visibility_off" style={{ fontSize: 11 }} />
+                    On-air hidden
+                  </span>
+                )}
               </div>
 
-              <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
-                  On Air{anyFullscreenOn ? " · suppressed by fullscreen" : ""}
-                </span>
-                <div className="grid grid-cols-3 gap-1.5 mt-1">
-                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
-                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
-                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
-                </div>
-              </div>
+              <ChannelGroupCard title="On Air" hint={anyFullscreenOn ? "suppressed" : undefined}>
+                <MobileChannelRow
+                  icon="partly_cloudy_day"
+                  label="Weather"
+                  sublabel={alwaysOn.weather && !anyFullscreenOn ? "Live" : undefined}
+                  on={alwaysOn.weather && !anyFullscreenOn}
+                  dotColor="#22c55e"
+                  onClick={() => toggleAlwaysOn("weather")}
+                />
+                <MobileChannelRow
+                  icon="scoreboard"
+                  label="Live Score Bar"
+                  sublabel={alwaysOn.liveScoreBar && !anyFullscreenOn ? "Live" : undefined}
+                  on={alwaysOn.liveScoreBar && !anyFullscreenOn}
+                  dotColor="#22c55e"
+                  onClick={() => toggleAlwaysOn("liveScoreBar")}
+                />
+                <MobileChannelRow
+                  icon="military_tech"
+                  label="Tournament Logo"
+                  sublabel={alwaysOn.tournamentLogo && !anyFullscreenOn ? "Live" : undefined}
+                  on={alwaysOn.tournamentLogo && !anyFullscreenOn}
+                  dotColor="#22c55e"
+                  onClick={() => toggleAlwaysOn("tournamentLogo")}
+                />
+              </ChannelGroupCard>
 
-              <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen · pick one</span>
-                <div className="grid grid-cols-3 gap-1.5 mt-1">
-                  <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
-                  <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
-                  <MobileChannelRow icon="theaters" label="Match Intro" on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => toggleFullScreen("matchIntro")} />
-                </div>
-              </div>
+              <ChannelGroupCard title="Full-Screen" hint="pick one">
+                <MobileChannelRow icon="leaderboard" label="Points Table" sublabel={fullScreen.pointsTable ? "On air" : undefined} on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
+                <MobileChannelRow icon="receipt_long" label="Match Scorecard" sublabel={fullScreen.matchScorecard ? "On air" : undefined} on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
+                <MobileChannelRow icon="theaters" label="Match Intro" sublabel={fullScreen.matchIntro ? "On air" : undefined} on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => toggleFullScreen("matchIntro")} />
+              </ChannelGroupCard>
 
-              <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
-                  Moments{anyFullscreenOn ? " · suppressed by fullscreen" : " · pick one"}
-                </span>
-                <div className="grid grid-cols-2 gap-1.5 mt-1">
-                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries && !anyFullscreenOn} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("matchBoundaries")} />
-                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries && !anyFullscreenOn} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("tournamentBoundaries")} />
-                </div>
-              </div>
+              <ChannelGroupCard title="Moments" hint={anyFullscreenOn ? "suppressed" : "pick one"}>
+                <MobileChannelRow
+                  icon="stadium"
+                  label="Match Boundaries"
+                  sublabel={boundaryChannels.matchBoundaries && !anyFullscreenOn ? "Live" : undefined}
+                  on={boundaryChannels.matchBoundaries && !anyFullscreenOn}
+                  dotColor="#e8c468"
+                  onClick={() => toggleBoundaryChannel("matchBoundaries")}
+                />
+                <MobileChannelRow
+                  icon="emoji_events"
+                  label="Tournament Boundaries"
+                  sublabel={boundaryChannels.tournamentBoundaries && !anyFullscreenOn ? "Live" : undefined}
+                  on={boundaryChannels.tournamentBoundaries && !anyFullscreenOn}
+                  dotColor="#e8c468"
+                  onClick={() => toggleBoundaryChannel("tournamentBoundaries")}
+                />
+              </ChannelGroupCard>
             </div>
 
             <div className="flex flex-col gap-4 pb-4 lg:contents lg:pb-0">
@@ -1723,31 +1876,41 @@ export default function OverlayAdminConsole({
                     {showMatchWonForm && (
                       <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-theme-orange/10 border border-theme-orange/25">
                         <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.18em] text-theme-orange">Match Won Detail</span>
+
                         <div className="flex flex-col gap-1.5">
                           <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Winning Team</span>
-                          <div className="grid grid-cols-3 gap-2">
-                            {[
-                              { key: "teamA" as const, label: legacyMatchSetup.teamA },
-                              { key: "teamB" as const, label: legacyMatchSetup.teamB },
-                              { key: "custom" as const, label: "Other" },
-                            ].map((opt) => (
-                              <button
-                                type="button"
-                                key={opt.key}
-                                onClick={() => setMatchWonDraft((p) => ({ ...p, winner: opt.key }))}
-                                className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-center transition-all"
-                                style={{
-                                  border: `1px solid ${matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
-                                  background: matchWonDraft.winner === opt.key ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
-                                }}
-                              >
-                                <span className={`text-[11px] font-archivo font-bold truncate max-w-full ${matchWonDraft.winner === opt.key ? "text-theme-orange" : "text-on-surface"}`}>
-                                  {opt.label}
-                                </span>
-                              </button>
-                            ))}
+                          <div className="grid grid-cols-2 gap-2">
+                            <TeamPickerButton
+                              name={legacyMatchSetup.teamA}
+                              logoUrl={legacyMatchSetup.teamAlogo}
+                              color={legacyMatchSetup.teamAColor}
+                              selected={matchWonDraft.winner === "teamA"}
+                              onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamA" }))}
+                            />
+                            <TeamPickerButton
+                              name={legacyMatchSetup.teamB}
+                              logoUrl={legacyMatchSetup.teamBlogo}
+                              color={legacyMatchSetup.teamBColor}
+                              selected={matchWonDraft.winner === "teamB"}
+                              onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamB" }))}
+                            />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "custom" }))}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-center transition-all"
+                            style={{
+                              border: `1px solid ${matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
+                              background: matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
+                            }}
+                          >
+                            <Icon name="edit" style={{ fontSize: 13, color: matchWonDraft.winner === "custom" ? "#e8c468" : "rgba(255,255,255,0.45)" }} />
+                            <span className={`text-[11px] font-archivo font-bold ${matchWonDraft.winner === "custom" ? "text-theme-orange" : "text-on-surface-variant"}`}>
+                              Other / Custom Name
+                            </span>
+                          </button>
                         </div>
+
                         {matchWonDraft.winner === "custom" && (
                           <input
                             value={matchWonDraft.customName}
@@ -1771,6 +1934,48 @@ export default function OverlayAdminConsole({
                           <option value="bowling">Defending side won (by runs)</option>
                           <option value="tie">Tie</option>
                         </select>
+
+                        {/* Live preview of the graphic about to be fired */}
+                        {(() => {
+                          const previewName =
+                            matchWonDraft.winner === "teamA"
+                              ? legacyMatchSetup.teamA
+                              : matchWonDraft.winner === "teamB"
+                              ? legacyMatchSetup.teamB
+                              : matchWonDraft.customName || "Winner";
+                          const previewLogo =
+                            matchWonDraft.winner === "teamA"
+                              ? legacyMatchSetup.teamAlogo
+                              : matchWonDraft.winner === "teamB"
+                              ? legacyMatchSetup.teamBlogo
+                              : undefined;
+                          const previewColor =
+                            matchWonDraft.winner === "teamA"
+                              ? legacyMatchSetup.teamAColor
+                              : matchWonDraft.winner === "teamB"
+                              ? legacyMatchSetup.teamBColor
+                              : "#c9971f";
+                          return (
+                            <div
+                              className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                              style={{ background: "rgba(0,0,0,0.25)", border: `1px solid ${previewColor}40` }}
+                            >
+                              <TeamAvatar name={previewName} logoUrl={previewLogo} color={previewColor} size={36} />
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="font-archivo text-sm font-bold truncate" style={{ color: previewColor }}>
+                                  {previewName}
+                                </span>
+                                <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
+                                  {matchWonDraft.margin || "Match Won"}
+                                  {" · "}
+                                  {matchWonDraft.method === "batting" ? "By wickets" : matchWonDraft.method === "bowling" ? "By runs" : "Tie"}
+                                </span>
+                              </div>
+                              <Icon name="emoji_events" style={{ fontSize: 20, color: previewColor }} />
+                            </div>
+                          );
+                        })()}
+
                         <button
                           type="button"
                           onClick={fireMatchWonMoment}

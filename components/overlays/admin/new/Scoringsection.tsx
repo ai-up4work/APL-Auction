@@ -919,11 +919,6 @@ function MatchOverScreen({
             <Icon name="undo" style={{ fontSize: 14 }} /> Undo &amp; Keep Scoring
           </button>
         )}
-        {onRestart && (
-          <button type="button" onClick={onRestart} className="flex items-center gap-1.5 font-mono-geist text-[11px] font-black uppercase tracking-wide rounded-lg px-5 py-2.5 bg-theme-orange text-black transition-all">
-            <Icon name="restart_alt" style={{ fontSize: 14 }} /> Restart Match
-          </button>
-        )}
       </div>
     </div>
   );
