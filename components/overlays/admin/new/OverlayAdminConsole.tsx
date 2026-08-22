@@ -614,6 +614,77 @@ export default function OverlayAdminConsole({
     liveStateRef.current = liveState;
   }, [liveState]);
 
+  // ═══════════ NEW — Realtime sync from other writers ═══════════
+  // Mirrors the subscription in app/overlay/[auctionId]/page.tsx. That
+  // page already reflects DB writes made by the match simulator's
+  // patch_match_setup RPC (or any other live-scoring writer) in real
+  // time — this console previously did not: it only ever loaded
+  // match_setup/live_state once on mount, and after that only updated
+  // its own local state from its own UI actions or from bus events it
+  // sent itself. Run the simulator in one tab with this console open in
+  // another and the console would sit there showing stale data
+  // (score/venue/toss/etc.) until a hard refresh, even though the
+  // overlay display page was updating live the whole time.
+  //
+  // Placed after the liveState/liveDirty/matchSetupEditing declarations
+  // above (rather than up near the first matchId-load effect) so the
+  // dependency array below doesn't reference those consts before they're
+  // initialized in this component's execution order.
+  //
+  // Two guards keep this from fighting a human actively using the
+  // console at the same moment:
+  //  - matches/match_setup: skipped while matchSetupEditing is true, so
+  //    an incoming row doesn't yank a field out from under someone
+  //    mid-edit in MatchSetupPanel (matchSetupEditing is the same flag
+  //    MatchSetupPanel already reports via onEditingChange).
+  //  - match_state/live_state: skipped while liveDirty is true, so an
+  //    unsaved manual scoring edit in ScoringSection isn't stomped by
+  //    an unrelated echo landing back from Realtime.
+  //
+  // Requires `matches` and `match_state` to be added to the Supabase
+  // Realtime publication (Database → Replication) with RLS SELECT
+  // policies that permit whatever role this page runs as — same
+  // requirement already documented on the overlay page's subscription.
+  //
+  // Keyed on matchId, same as the load effect above and the bus
+  // connection — every table involved here is keyed by match_id.
+  useEffect(() => {
+    if (!matchId) return;
+
+    const channel = supabase
+      .channel(`admin-db:${matchId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` },
+        (payload) => {
+          if (matchSetupEditing) return;
+          const row = payload.new as { match_setup: DbMatchSetupRow; match_setup_completed: boolean };
+          dbSetupRef.current = row.match_setup ?? null;
+          setMatchSetup((prev) => dbRowToOverlaySetup(row.match_setup ?? null, prev));
+          setMatchSetupCompleted(!!row.match_setup_completed);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "match_state", filter: `match_id=eq.${matchId}` },
+        (payload) => {
+          if (liveDirty) return;
+          const row = payload.new as { live_state?: LiveState } | undefined;
+          if (row?.live_state) setLiveState(row.live_state);
+        }
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          console.warn("[OverlayAdminConsole] db realtime connection issue:", status, "matchId:", matchId);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [matchId, matchSetupEditing, liveDirty]);
+  // ═══════════ END Realtime sync from other writers ═══════════
+
   // FIX — this was the core "not syncing in real time" complaint. Every
   // ball, wicket, or crew change flowed only into local `liveState` (and,
   // separately, into Supabase persistence elsewhere) — the overlay only

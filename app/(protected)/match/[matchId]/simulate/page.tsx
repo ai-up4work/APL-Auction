@@ -19,6 +19,8 @@ import {
   type SimPlayer,
   type SimPlayerPool,
 } from "@/lib/matches/simulator-engine"
+import { saveLiveState } from "@/lib/matchPersistence"
+import type { LiveState } from "@/lib/overlayBus"
 
 type RunState = "idle" | "running" | "paused" | "done" | "error"
 
@@ -399,6 +401,188 @@ async function resolveBracketTeamSides(
   return null
 }
 
+// ─────────────────────────────────────────────────────────────
+// LIVE STATE TRACKER
+//
+// InningsSimState (simulator-engine.ts) intentionally tracks only
+// team-level state (runs, wkts, legalBalls, bowlerLegalBalls-per-name)
+// — it has no per-batter or per-bowler cumulative figures, since that
+// was never needed for writing `balls` rows. LiveScoreBar/
+// CricketScorecard read from `match_state.live_state`, which DOES need
+// those figures (striker/non-striker runs+balls+4s+6s, bowler
+// overs/maidens/runs/wickets). This tracker rebuilds that view
+// incrementally from each `SimBallRow` as the simulation produces it,
+// entirely on the caller side — simulator-engine.ts itself is
+// untouched.
+//
+// Scoring conventions used here (standard, but worth stating since
+// they're not encoded anywhere else):
+//  - wide / no_ball: NOT a legal ball, batter does not face it, runs go
+//    to extras only (not credited to any batter).
+//  - bye / leg_bye: IS a legal ball (batter faces it, ball counts
+//    against both batter's and bowler's tally), but the runs are NOT
+//    credited to the batter's own run tally, and NOT charged as runs
+//    conceded by the bowler.
+//  - wicket: batter faces the ball (0 runs). Credited to the bowler
+//    UNLESS the dismissal is a run_out (standard cricket convention).
+//  - maiden: an over is a maiden if the bowler conceded 0 runs off the
+//    bat/extras charged to them (byes/leg-byes don't break a maiden,
+//    consistent with them not being "conceded" above).
+// ─────────────────────────────────────────────────────────────
+
+interface LiveBatterStat {
+  runs: number
+  balls: number
+  fours: number
+  sixes: number
+}
+
+interface LiveBowlerStat {
+  runs: number
+  legalBalls: number
+  wickets: number
+  maidenOvers: number
+  ballsThisOver: number
+  runsThisOver: number
+}
+
+interface LiveStatsTracker {
+  batters: Map<string, LiveBatterStat>
+  bowlers: Map<string, LiveBowlerStat>
+  partnershipRuns: number
+  partnershipBalls: number
+  thisOverLog: string[]
+}
+
+function newStatsTracker(): LiveStatsTracker {
+  return { batters: new Map(), bowlers: new Map(), partnershipRuns: 0, partnershipBalls: 0, thisOverLog: [] }
+}
+
+function getBatterStat(tracker: LiveStatsTracker, name: string): LiveBatterStat {
+  let s = tracker.batters.get(name)
+  if (!s) {
+    s = { runs: 0, balls: 0, fours: 0, sixes: 0 }
+    tracker.batters.set(name, s)
+  }
+  return s
+}
+
+function getBowlerStat(tracker: LiveStatsTracker, name: string): LiveBowlerStat {
+  let s = tracker.bowlers.get(name)
+  if (!s) {
+    s = { runs: 0, legalBalls: 0, wickets: 0, maidenOvers: 0, ballsThisOver: 0, runsThisOver: 0 }
+    tracker.bowlers.set(name, s)
+  }
+  return s
+}
+
+/** Mutates `tracker` in place with the outcome of one delivery. Called
+ *  once per row, right after simulateNextDelivery() returns it. */
+function applyBallToLiveStats(tracker: LiveStatsTracker, row: SimBallRow) {
+  const isWide = row.extra_type === "wide"
+  const isNoBall = row.extra_type === "no_ball"
+  const isByeLike = row.extra_type === "bye" || row.extra_type === "leg_bye"
+  const isLegal = !isWide && !isNoBall
+
+  const bowler = getBowlerStat(tracker, row.bowler_name)
+
+  // Bowler concedes everything except byes/leg-byes.
+  if (!isByeLike) {
+    bowler.runs += row.runs
+    bowler.runsThisOver += row.runs
+  }
+
+  if (isLegal) {
+    bowler.legalBalls += 1
+    bowler.ballsThisOver += 1
+    if (bowler.ballsThisOver >= 6) {
+      if (bowler.runsThisOver === 0) bowler.maidenOvers += 1
+      bowler.ballsThisOver = 0
+      bowler.runsThisOver = 0
+    }
+
+    const striker = getBatterStat(tracker, row.striker_name)
+    striker.balls += 1
+    if (!isByeLike) {
+      striker.runs += row.runs
+      if (row.runs === 4) striker.fours += 1
+      if (row.runs === 6) striker.sixes += 1
+    }
+
+    tracker.partnershipBalls += 1
+    if (!row.is_wicket) tracker.partnershipRuns += row.runs
+  }
+  // wide/no_ball: extras only — no batter ball faced, no partnership tick.
+
+  if (row.is_wicket) {
+    if (row.dismissal_type !== "run_out") bowler.wickets += 1
+    tracker.partnershipRuns = 0
+    tracker.partnershipBalls = 0
+  }
+
+  const label = isWide ? "wd" : isNoBall ? "nb" : row.is_wicket ? "W" : row.runs === 0 ? "." : String(row.runs)
+  tracker.thisOverLog.push(label)
+}
+
+/** Snapshots the current InningsSimState + tracker into the LiveState
+ *  shape `match_state`/LiveScoreBar/CricketScorecard expect. Stat
+ *  lookups key off `current.striker`/`current.nonStriker`/
+ *  `current.currentBowler` — i.e. whoever is *currently* at the crease
+ *  or bowling right now, which may differ from who this specific ball
+ *  was attributed to (e.g. a wicket ball brings in a fresh batter with
+ *  0/0 stats, or strike rotates to the non-striker). That's intentional
+ *  — this always reflects "who's out there right now and their figures
+ *  so far", matching what a real live-score bar shows. */
+function buildLiveStateSnapshot(
+  current: InningsSimState,
+  tracker: LiveStatsTracker,
+  target: number | null
+): LiveState {
+  const strikerStat = getBatterStat(tracker, current.striker.name)
+  const nonStrikerStat = getBatterStat(tracker, current.nonStriker.name)
+  const bowlerName = current.currentBowler?.name ?? current.lastOverBowler?.name ?? ""
+  const bowlerStat = bowlerName ? getBowlerStat(tracker, bowlerName) : null
+
+  // Match-wide boundary tally — summed across every batter tracked so
+  // far this innings. There's no tournament-aggregate data available at
+  // this layer, so tournamentBoundaries mirrors matchBoundaries rather
+  // than being left at a misleading 0/0; swap this out if/when a real
+  // tournament-boundaries source is wired in.
+  let matchFours = 0
+  let matchSixes = 0
+  tracker.batters.forEach((b) => {
+    matchFours += b.fours
+    matchSixes += b.sixes
+  })
+
+  return {
+    score: {
+      runs: current.runs,
+      wickets: current.wkts,
+      overs: Math.floor(current.legalBalls / 6),
+      balls: current.legalBalls % 6,
+    },
+    striker: { name: current.striker.name, ...strikerStat },
+    nonStriker: { name: current.nonStriker.name, ...nonStrikerStat },
+    bowler: {
+      name: bowlerName,
+      overs: bowlerStat ? Math.floor(bowlerStat.legalBalls / 6) : 0,
+      balls: bowlerStat ? bowlerStat.legalBalls % 6 : 0,
+      maidens: bowlerStat?.maidenOvers ?? 0,
+      runs: bowlerStat?.runs ?? 0,
+      wickets: bowlerStat?.wickets ?? 0,
+    },
+    partnership: { runs: tracker.partnershipRuns, balls: tracker.partnershipBalls },
+    matchBoundaries: { fours: matchFours, sixes: matchSixes },
+    tournamentBoundaries: { fours: matchFours, sixes: matchSixes },
+    pointsTable: [],
+    target: target ?? undefined,
+    inningsNumber: current.inningsNumber,
+    matchComplete: current.finished,
+    thisOver: [...tracker.thisOverLog],
+  } as LiveState
+}
+
 export default function SimulateMatchPage() {
   useScrollTop()
   const params = useParams<{ matchId: string }>()
@@ -535,6 +719,13 @@ export default function SimulateMatchPage() {
     liveCtx: LiveScoreContext
   ): Promise<InningsSimState> {
     let current = state
+    // NEW — fresh per-innings tracker for batter/bowler cumulative
+    // figures. simulator-engine.ts only tracks team-level state, so
+    // striker/non-striker runs+balls+4s+6s and bowler overs/maidens/
+    // runs/wickets are rebuilt here, ball by ball, purely from the
+    // SimBallRow stream — see the LiveStatsTracker block above.
+    const tracker = newStatsTracker()
+
     while (!current.finished) {
       if (token !== runTokenRef.current) return current // superseded — bail without touching the DB
       await waitWhilePaused(token)
@@ -585,6 +776,31 @@ export default function SimulateMatchPage() {
             },
           })
           if (liveErr) console.error("[runInnings] live score patch failed:", liveErr.message)
+        }
+
+        // NEW — feeds `match_state`, which is what LiveScoreBar and
+        // CricketScorecard actually read (they never look at
+        // matchSetup.scoreA/wktsA/oversA — those only drive the public
+        // matches list / patch above). Written on every ball, same
+        // cadence as the ball insert itself, so the overlay reflects
+        // the simulation in real time via the overlay page's
+        // `match_state` Realtime subscription instead of only updating
+        // once the match finishes.
+        if (token !== runTokenRef.current) return current
+        applyBallToLiveStats(tracker, row)
+        const liveStateSnapshot = buildLiveStateSnapshot(current, tracker, liveCtx.target ?? null)
+        const saved = await saveLiveState(matchId, liveStateSnapshot)
+        if (!saved) console.error("[runInnings] saveLiveState failed for ball", row.sequence)
+
+        // "This over" ball log resets the moment the engine starts a
+        // new over. current.ballInOver is set back to 0 by
+        // simulateNextDelivery() exactly when an over completes (and at
+        // no other time after the innings' first ball), so this check
+        // reliably fires once per over boundary, right after the
+        // over-completing ball's snapshot has already gone out above
+        // (so viewers see the 6th ball land before the strip clears).
+        if (current.ballInOver === 0) {
+          tracker.thisOverLog = []
         }
       }
       await sleep(speedRef.current)

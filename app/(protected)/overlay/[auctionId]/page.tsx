@@ -8,9 +8,11 @@ import {
   loadLiveState,
   loadWeather,
   loadOnAirChannels,
+  normalizeMatchSetup,
   type WeatherCoords,
   type TournamentIdentity,
 } from "@/lib/matchPersistence";
+import { supabase } from "@/lib/supabase";
 
 import WeatherCard from "@/components/overlays/WeatherCard";
 import MatchBoundaries from "@/components/overlays/MatchBoundaries";
@@ -87,7 +89,33 @@ interface DbHydrateExtrasAction {
   channels: ChannelVisibility | null;
 }
 
-type Action = OverlayEvent | DbHydrateAction | DbHydrateExtrasAction;
+// NEW — fired by the `matches` row Realtime subscription below. Kept
+// distinct from `dbHydrate` because a mid-match UPDATE never carries
+// tournament identity (that only ever comes from the initial
+// getOrCreateMatch join against `tournaments`) — reusing dbHydrate here
+// would force a bogus `tournament: null` through on every score tick
+// and blank out the crest the instant the first ball lands.
+interface DbMatchSetupUpdateAction {
+  type: "dbMatchSetupUpdate";
+  matchSetup: MatchSetup;
+  matchSetupCompleted: boolean;
+}
+
+// NEW — fired by the `weather_readings` Realtime subscription. Separate
+// from dbHydrateExtras because that action's weather branch is gated on
+// `channels` being non-null (it was designed for the one-time combined
+// mount load) — a standalone weather update would otherwise be dropped.
+interface DbWeatherUpdateAction {
+  type: "dbWeatherUpdate";
+  data: WeatherData;
+}
+
+type Action =
+  | OverlayEvent
+  | DbHydrateAction
+  | DbHydrateExtrasAction
+  | DbMatchSetupUpdateAction
+  | DbWeatherUpdateAction;
 
 function reducer(state: OverlayState, event: Action): OverlayState {
   switch (event.type) {
@@ -204,6 +232,26 @@ function reducer(state: OverlayState, event: Action): OverlayState {
         liveState: event.liveState ?? state.liveState,
       };
     }
+    // NEW — mid-match UPDATE on the `matches` row itself (e.g. the
+    // simulator's patch_match_setup RPC, or a real live-scoring engine
+    // write). Runs the same normalizeMatchSetup() the initial
+    // getOrCreateMatch load uses, so scoreA/wktsA/oversA/scoreB/wktsB/
+    // oversB/currentInnings/target/matchComplete/status all land in the
+    // same shape every downstream component already expects.
+    case "dbMatchSetupUpdate":
+      return {
+        ...state,
+        matchSetup: event.matchSetup,
+        matchSetupCompleted: event.matchSetupCompleted,
+      };
+    // NEW — mid-match UPDATE/INSERT on `weather_readings`. Doesn't touch
+    // `show` — visibility is still governed by the weather channel
+    // toggle (bus event / on_air_channels), this only refreshes the data.
+    case "dbWeatherUpdate":
+      return {
+        ...state,
+        weather: { ...state.weather, data: { ...state.weather.data, ...event.data } },
+      };
     case "clearAll":
       return { ...initialState, testBg: state.testBg };
     default:
@@ -268,6 +316,82 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
       cancelled = true;
     };
   }, [auctionId]);
+
+  // NEW — Postgres Realtime subscription. The mount-time load above is
+  // one-shot; without this, anything that writes to these tables after
+  // that point (the match simulator's patch_match_setup RPC, a real
+  // live-scoring engine, admin edits made outside the bus flow) is
+  // invisible to this page until a hard refresh. This listens directly
+  // to the tables instead of relying on every writer to also know about
+  // and correctly target the `overlay:${auctionId}` broadcast channel.
+  //
+  // Requires: `matches`, `match_state`, `weather_readings`, and
+  // `on_air_channels` to be added to the Supabase Realtime publication
+  // (Database → Replication), and RLS SELECT policies on each that
+  // permit whatever role this page runs as — Realtime enforces RLS on
+  // the row being broadcast, same as a normal SELECT would.
+  //
+  // Keyed on matchId (not auctionId) since matchId isn't known until
+  // the dbHydrate effect above resolves, and every one of these tables
+  // is keyed by match_id, not auction_id.
+  useEffect(() => {
+    if (!matchId) return;
+
+    const channel = supabase
+      .channel(`match-db:${matchId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` },
+        (payload) => {
+          const row = payload.new as { match_setup: unknown; match_setup_completed: boolean };
+          dispatch({
+            type: "dbMatchSetupUpdate",
+            matchSetup: normalizeMatchSetup(row.match_setup),
+            matchSetupCompleted: !!row.match_setup_completed,
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "match_state", filter: `match_id=eq.${matchId}` },
+        (payload) => {
+          const row = payload.new as { live_state?: LiveState } | undefined;
+          dispatch({
+            type: "dbHydrateExtras",
+            liveState: row?.live_state ?? null,
+            weather: null,
+            channels: null,
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "on_air_channels", filter: `match_id=eq.${matchId}` },
+        (payload) => {
+          const row = payload.new as { channels?: ChannelVisibility } | undefined;
+          if (!row?.channels) return;
+          dispatch({ type: "dbHydrateExtras", liveState: null, weather: null, channels: row.channels });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "weather_readings", filter: `match_id=eq.${matchId}` },
+        (payload) => {
+          const row = payload.new as { data?: WeatherData } | undefined;
+          if (!row?.data) return;
+          dispatch({ type: "dbWeatherUpdate", data: row.data });
+        }
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          console.warn("[OverlayDisplayPage] db realtime connection issue:", status, "matchId:", matchId);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [matchId]);
 
   useEffect(() => {
     document.body.style.background = "transparent";
