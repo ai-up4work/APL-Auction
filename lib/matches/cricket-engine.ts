@@ -181,6 +181,13 @@ export interface MatchSetup {
   date?: string
   time?: string
   toss?: string | null
+  /**
+   * Structured toss result. Optional — most existing matches only ever
+   * have the freeform `toss` sentence below. When an editor UI writes
+   * these directly, resolveTossOrder() prefers them over parsing prose.
+   */
+  tossWinner?: "team1" | "team2" | null
+  tossDecision?: "bat" | "bowl" | null
   overs?: number
   venue?: string
   tournamentId?: string
@@ -223,4 +230,73 @@ export function buildSquads(setup: MatchSetup, teamAName: string, teamBName: str
     const teamName = isTeamA ? teamAName : isTeamB ? teamBName : "Unknown Team"
     return { team: teamName, captain: s.captain, players: s.players?.map((p) => ({ name: p.name, role: p.role, xi: p.xi })) || [] }   // handle empty player set gracefully
   })
+}
+
+// ── Toss resolution ────────────────────────────────────────────────
+export interface TossOrder {
+  /** Which setup identity ("team1" or "team2") bats first in innings 1. */
+  battingFirstSide: "team1" | "team2"
+}
+
+/**
+ * Determines which side bats first in innings 1.
+ *
+ * Resolution order:
+ *  1. Structured `tossWinner` / `tossDecision` fields, when present —
+ *     the reliable path, intended for a future editor UI that writes
+ *     these directly instead of (or alongside) the prose string.
+ *  2. A best-effort parse of the freeform `toss` string every existing
+ *     match already has (e.g. "Mumbai Kings won the toss and elected
+ *     to bat"), matched case-insensitively against team1/team2 name
+ *     AND short code, plus a bat/bowl/field keyword.
+ *  3. If neither is confidently resolvable (toss blank, or the string
+ *     names both/neither team), falls back to team1 batting first —
+ *     the previous hardcoded behavior — so an ambiguous or missing
+ *     toss never blocks a simulation from running.
+ */
+export function resolveTossOrder(setup: MatchSetup): TossOrder {
+  const rawWinner = (setup.tossWinner ?? "").trim()
+
+  if (rawWinner) {
+    // Accept the literal "team1"/"team2" form...
+    if (rawWinner === "team1" || rawWinner === "team2") {
+      return applyDecision(rawWinner, setup.tossDecision)
+    }
+
+    // ...or a team name/short code, which is what the match editor
+    // actually writes into tossWinner (its <select> options use
+    // form.team1Name/form.team2Name as the value, not "team1"/"team2").
+    const winnerNorm = rawWinner.toLowerCase()
+    const t1Tags = [setup.team1?.name, setup.team1?.short].filter(Boolean).map((s) => s!.toLowerCase())
+    const t2Tags = [setup.team2?.name, setup.team2?.short].filter(Boolean).map((s) => s!.toLowerCase())
+
+    if (t1Tags.includes(winnerNorm)) return applyDecision("team1", setup.tossDecision)
+    if (t2Tags.includes(winnerNorm)) return applyDecision("team2", setup.tossDecision)
+    // tossWinner is set but doesn't match either team — fall through to
+    // parsing the `toss` prose string below rather than guessing.
+  }
+
+  const text = (setup.toss ?? "").toLowerCase()
+  if (!text.trim()) return { battingFirstSide: "team1" }
+
+  const t1Tags = [setup.team1?.name, setup.team1?.short].filter(Boolean).map((s) => s!.toLowerCase())
+  const t2Tags = [setup.team2?.name, setup.team2?.short].filter(Boolean).map((s) => s!.toLowerCase())
+
+  const mentionsTeam1 = t1Tags.some((tag) => tag && text.includes(tag))
+  const mentionsTeam2 = t2Tags.some((tag) => tag && text.includes(tag))
+
+  if (mentionsTeam1 === mentionsTeam2) return { battingFirstSide: "team1" }
+
+  const wonBy: "team1" | "team2" = mentionsTeam1 ? "team1" : "team2"
+  const electedToBowl =
+    /\b(elect(?:ed)?|choose|chose|decid(?:ed|es)?)\b.{0,15}\b(bowl|field)\b/.test(text) ||
+    /\bput .* in to (bowl|field)\b/.test(text)
+
+  const battingFirstSide = electedToBowl ? (wonBy === "team1" ? "team2" : "team1") : wonBy
+  return { battingFirstSide }
+}
+
+function applyDecision(winner: "team1" | "team2", decision: string | null | undefined): TossOrder {
+  const winnerBats = decision !== "bowl"
+  return { battingFirstSide: winnerBats ? winner : winner === "team1" ? "team2" : "team1" }
 }

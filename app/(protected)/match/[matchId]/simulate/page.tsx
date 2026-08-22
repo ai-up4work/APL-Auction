@@ -9,7 +9,7 @@ import { useScrollTop } from "@/hooks/use-scroll-top"
 import { AppHeader } from "@/components/app-header"
 import { pageStyles } from "@/data/site-data"
 import { supabaseBrowser as supabase } from "@/lib/matches/supabase-browser"
-import { parseMatchSetup, type MatchSetup } from "@/lib/matches/cricket-engine"
+import { parseMatchSetup, resolveTossOrder, type MatchSetup } from "@/lib/matches/cricket-engine"
 import {
   createInningsState,
   generatePlaceholderPool,
@@ -705,6 +705,12 @@ export default function SimulateMatchPage() {
   // now that write is a shallow patch of just the score fields, so
   // baseSetup is gone; LiveScoreContext only carries what's actually
   // needed to build that patch.
+  //
+  // `side` is the SETUP identity ("team1"/"team2") of whichever pool is
+  // actually batting in this innings — NOT assumed to be "team1 bats
+  // first, team2 chases" anymore. Toss can put either side in first,
+  // so the caller resolves this once via resolveTossOrder() and passes
+  // the correct identity in for each innings.
   type LiveScoreContext = {
     side: "team1" | "team2"
     currentInnings: 1 | 2
@@ -758,7 +764,10 @@ export default function SimulateMatchPage() {
         // fields for this side, currentInnings, target (if set), and
         // status are sent. Nothing else in match_setup is touched, so
         // this write can no longer race an edit made on /edit — see the
-        // block comment above writeMatchSetup().
+        // block comment above writeMatchSetup(). `liveCtx.side` is the
+        // toss-resolved batting identity for this innings, so the
+        // score always lands on the correct team's field regardless of
+        // who won the toss.
         if (current.legalBalls % 6 === 0 || row.is_wicket) {
           if (token !== runTokenRef.current) return current
           const scoreField = liveCtx.side === "team1" ? "scoreA" : "scoreB"
@@ -1069,6 +1078,19 @@ export default function SimulateMatchPage() {
       const teamBPool = realTeamBPool ?? generatePlaceholderPool(setup.team2.name, setup.team2.short, identity.team2Id)
       setUsedRealSquads({ team1: !!realTeamAPool, team2: !!realTeamBPool })
 
+      // NEW — decide who actually bats first, per the toss, instead of
+      // always starting team1 batting. Every reference to "innings 1
+      // batting team" / "innings 2 batting team" below now goes through
+      // battingFirstPool/bowlingFirstPool rather than teamAPool/teamBPool
+      // directly. battingFirstSide/secondSide track the underlying
+      // setup identity (team1 vs team2) of each side, since scoreA/
+      // scoreB, match_team_stats, and the bracket write are always keyed
+      // to setup team1/team2 — not to who happened to bat first.
+      const { battingFirstSide } = resolveTossOrder(setup)
+      const secondSide: "team1" | "team2" = battingFirstSide === "team1" ? "team2" : "team1"
+      const battingFirstPool = battingFirstSide === "team1" ? teamAPool : teamBPool
+      const bowlingFirstPool = battingFirstSide === "team1" ? teamBPool : teamAPool
+
       pushLog(`Starting simulation: ${teamAPool.teamName} vs ${teamBPool.teamName}, ${oversLimit} overs a side.`, true)
       if (!realTeamAPool || !realTeamBPool) {
         pushLog(
@@ -1077,23 +1099,35 @@ export default function SimulateMatchPage() {
           }.`
         )
       }
-      pushLog(`1st innings: ${teamAPool.teamName} batting.`, true)
+      pushLog(`Toss: ${battingFirstPool.teamName} bat first.`, true)
+      pushLog(`1st innings: ${battingFirstPool.teamName} batting.`, true)
 
       let innings1 = createInningsState({
         inningsNumber: 1,
-        battingTeam: teamAPool,
-        bowlingTeam: teamBPool,
+        battingTeam: battingFirstPool,
+        bowlingTeam: bowlingFirstPool,
         oversLimit,
         startSequence: 0,
       })
-      innings1 = await runInnings(matchId, innings1, teamAPool.teamShort, myToken, {
-        side: "team1",
+      innings1 = await runInnings(matchId, innings1, battingFirstPool.teamShort, myToken, {
+        side: battingFirstSide,
         currentInnings: 1,
       })
       if (myToken !== runTokenRef.current) return // a newer run took over — abandon silently
 
       const target = innings1.runs + 1
-      pushLog(`Innings 1 complete: ${teamAPool.teamName} ${innings1.runs}/${innings1.wkts}. Target: ${target}.`, true)
+      pushLog(`Innings 1 complete: ${battingFirstPool.teamName} ${innings1.runs}/${innings1.wkts}. Target: ${target}.`, true)
+
+      // Dynamic field names so scoreA/scoreB always land on the correct
+      // setup team regardless of which one actually batted first —
+      // "first" here means "batted in innings 1", "second" means
+      // "batted in innings 2 / is chasing", NOT "team1"/"team2".
+      const firstScoreField = battingFirstSide === "team1" ? "scoreA" : "scoreB"
+      const firstWktsField = battingFirstSide === "team1" ? "wktsA" : "wktsB"
+      const firstOversField = battingFirstSide === "team1" ? "oversA" : "oversB"
+      const secondScoreField = secondSide === "team1" ? "scoreA" : "scoreB"
+      const secondWktsField = secondSide === "team1" ? "wktsA" : "wktsB"
+      const secondOversField = secondSide === "team1" ? "oversA" : "oversB"
 
       // Flip currentInnings to 2 in the SAME write that sets the target,
       // so the two facts ("2nd innings has started" and "this is the
@@ -1101,23 +1135,22 @@ export default function SimulateMatchPage() {
       // and the other hasn't. status stays "live" here — the match is
       // still very much in progress, just in its second innings.
       //
-      // CHANGED — only runtime keys sent. team1's final score
-      // (scoreA/wktsA/oversA) is folded in here explicitly so it
-      // persists into innings 2 rather than being lost — previously this
-      // relied on spreading a `setupAfterInnings1` object that carried
-      // it implicitly; now it's just three explicit keys in the patch.
+      // CHANGED — only runtime keys sent, and the score fields are now
+      // resolved dynamically (firstScoreField/secondScoreField) instead
+      // of being hardcoded to scoreA=innings1/scoreB=innings2, since
+      // innings1 no longer always belongs to team1.
       const { error: setupUpdateErr } = await writeMatchSetup(
         matchId,
         {
           overs: oversLimit,
-          scoreA: innings1.runs,
-          wktsA: innings1.wkts,
-          oversA: oversLabel(innings1.legalBalls),
+          [firstScoreField]: innings1.runs,
+          [firstWktsField]: innings1.wkts,
+          [firstOversField]: oversLabel(innings1.legalBalls),
           target,
           currentInnings: 2,
-          scoreB: 0,
-          wktsB: 0,
-          oversB: "0.0",
+          [secondScoreField]: 0,
+          [secondWktsField]: 0,
+          [secondOversField]: "0.0",
         },
         "live"
       )
@@ -1125,32 +1158,49 @@ export default function SimulateMatchPage() {
 
       if (myToken !== runTokenRef.current) return
 
-      pushLog(`2nd innings: ${teamBPool.teamName} chasing ${target}.`, true)
+      pushLog(`2nd innings: ${bowlingFirstPool.teamName} chasing ${target}.`, true)
 
       let innings2 = createInningsState({
         inningsNumber: 2,
-        battingTeam: teamBPool,
-        bowlingTeam: teamAPool,
+        battingTeam: bowlingFirstPool,
+        bowlingTeam: battingFirstPool,
         oversLimit,
         target,
         startSequence: innings1.sequence,
       })
-      innings2 = await runInnings(matchId, innings2, teamBPool.teamShort, myToken, {
-        side: "team2",
+      innings2 = await runInnings(matchId, innings2, bowlingFirstPool.teamShort, myToken, {
+        side: secondSide,
         currentInnings: 2,
         target,
       })
       if (myToken !== runTokenRef.current) return
 
-      const teamAWon = innings2.runs < target - 1
+      // Result is now computed generically off "chasing side" rather
+      // than assuming team2 always chases — the chasing side is
+      // whichever pool batted in innings 2 (bowlingFirstPool /
+      // secondSide), which toss can put on either team.
       const isTie = innings2.runs === target - 1
+      const chasingWon = innings2.runs >= target
+      const winningSide: "team1" | "team2" | null = isTie ? null : chasingWon ? secondSide : battingFirstSide
+      const team1Won = !isTie && winningSide === "team1"
+
+      const chasingPool = bowlingFirstPool
+      const defendingPool = battingFirstPool
+
       const resultText = isTie
         ? "Match tied."
-        : innings2.runs >= target
-          ? `${teamBPool.teamName} win by ${10 - innings2.wkts} wicket${10 - innings2.wkts === 1 ? "" : "s"}.`
-          : `${teamAPool.teamName} win by ${target - 1 - innings2.runs} runs.`
+        : chasingWon
+          ? `${chasingPool.teamName} win by ${10 - innings2.wkts} wicket${10 - innings2.wkts === 1 ? "" : "s"}.`
+          : `${defendingPool.teamName} win by ${target - 1 - innings2.runs} runs.`
 
-      pushLog(`Innings 2 complete: ${teamBPool.teamName} ${innings2.runs}/${innings2.wkts}. ${resultText}`, true)
+      pushLog(`Innings 2 complete: ${bowlingFirstPool.teamName} ${innings2.runs}/${innings2.wkts}. ${resultText}`, true)
+
+      // team1Innings/team2Innings — final figures keyed to SETUP
+      // identity regardless of batting order, used for the completion
+      // write and match_team_stats below so team1's/team2's numbers are
+      // always correct even when team2 batted first.
+      const team1Innings = battingFirstSide === "team1" ? innings1 : innings2
+      const team2Innings = battingFirstSide === "team1" ? innings2 : innings1
 
       // ── Mark the match complete on `matches` itself ──────────────
       // matchComplete + status: "completed" are both added alongside
@@ -1164,23 +1214,23 @@ export default function SimulateMatchPage() {
       // matches (see the bracketRow branch below).
       //
       // CHANGED — only runtime keys sent, same as every other write in
-      // this file now. This is the write that used to most visibly wipe
-      // out mid-match edits, since it landed once per match right at
-      // the very end.
+      // this file now, and scoreA/scoreB now come from
+      // team1Innings/team2Innings (toss-aware) instead of assuming
+      // innings1 == team1's figures.
       const { error: completeUpdateErr } = await writeMatchSetup(
         matchId,
         {
           overs: oversLimit,
-          scoreA: innings1.runs,
-          wktsA: innings1.wkts,
-          oversA: oversLabel(innings1.legalBalls),
+          scoreA: team1Innings.runs,
+          wktsA: team1Innings.wkts,
+          oversA: oversLabel(team1Innings.legalBalls),
+          scoreB: team2Innings.runs,
+          wktsB: team2Innings.wkts,
+          oversB: oversLabel(team2Innings.legalBalls),
           target,
           currentInnings: 2,
           matchComplete: true,
           resultText,
-          scoreB: innings2.runs,
-          wktsB: innings2.wkts,
-          oversB: oversLabel(innings2.legalBalls),
         },
         "completed"
       )
@@ -1211,6 +1261,11 @@ export default function SimulateMatchPage() {
       // was already written as "completed" above regardless, since the
       // simulation engine itself did finish — only the bracket's
       // record of the result is left unresolved in these branches.
+      //
+      // CHANGED — bracketTeamAStats/bracketTeamBStats now source their
+      // figures from team1Innings/team2Innings (toss-aware, always
+      // correctly matched to setup identity) instead of innings1/
+      // innings2 directly.
       if (bracketRow) {
         const sides = await resolveBracketTeamSides(bracketRow, setup)
 
@@ -1222,12 +1277,12 @@ export default function SimulateMatchPage() {
           const bracketTeamBId = bracketRow.team_b_id as string
 
           const bracketTeamAStats = teamAIsSetupTeam1
-            ? { runs: innings1.runs, ballsFaced: innings1.legalBalls, runsConceded: innings2.runs, ballsBowled: innings2.legalBalls, isWinner: teamAWon }
-            : { runs: innings2.runs, ballsFaced: innings2.legalBalls, runsConceded: innings1.runs, ballsBowled: innings1.legalBalls, isWinner: !teamAWon }
+            ? { runs: team1Innings.runs, ballsFaced: team1Innings.legalBalls, runsConceded: team2Innings.runs, ballsBowled: team2Innings.legalBalls, isWinner: team1Won }
+            : { runs: team2Innings.runs, ballsFaced: team2Innings.legalBalls, runsConceded: team1Innings.runs, ballsBowled: team1Innings.legalBalls, isWinner: !team1Won }
 
           const bracketTeamBStats = teamAIsSetupTeam1
-            ? { runs: innings2.runs, ballsFaced: innings2.legalBalls, runsConceded: innings1.runs, ballsBowled: innings1.legalBalls, isWinner: !teamAWon }
-            : { runs: innings1.runs, ballsFaced: innings1.legalBalls, runsConceded: innings2.runs, ballsBowled: innings2.legalBalls, isWinner: teamAWon }
+            ? { runs: team2Innings.runs, ballsFaced: team2Innings.legalBalls, runsConceded: team1Innings.runs, ballsBowled: team1Innings.legalBalls, isWinner: !team1Won }
+            : { runs: team1Innings.runs, ballsFaced: team1Innings.legalBalls, runsConceded: team2Innings.runs, ballsBowled: team2Innings.legalBalls, isWinner: team1Won }
 
           if (isTie) {
             bracketTeamAStats.isWinner = false

@@ -857,6 +857,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
               isCommentaryOverPending={isCommentaryOverPending}
               teamAColor={teamAColor}
               teamBColor={teamBColor}
+              firstInningsTeam={firstInningsTeam}
+              secondInningsTeam={secondInningsTeam}
             />
           )}
         </div>

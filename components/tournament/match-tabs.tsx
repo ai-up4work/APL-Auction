@@ -449,6 +449,17 @@ interface MatchTabsProps {
    *  colors instead of MatchGraphs recomputing its own, undistinct pair. */
   teamAColor: string
   teamBColor: string
+  /** Physical team that actually batted in innings1 / innings2 —
+   *  resolved via match.inningsOneBattingTeam in MatchDetailClient.
+   *  Every innings-order label in this file (Scorecard toggle buttons,
+   *  BattingCard/BowlingCard titles, Overs tab pills, Commentary tab
+   *  pills) MUST key off these two instead of match.teamA/match.teamB
+   *  directly — the innings data (innings1 / innings2Partial /
+   *  innings2Final) is keyed by bowling order, not team identity, so a
+   *  hardcoded teamA-batted-first assumption silently mislabels every
+   *  match where the team batting second won the toss. */
+  firstInningsTeam: MatchDetail["teamA"]
+  secondInningsTeam: MatchDetail["teamA"]
 }
 
 export default function MatchTabs({
@@ -476,6 +487,8 @@ export default function MatchTabs({
   isCommentaryOverPending,
   teamAColor,
   teamBColor,
+  firstInningsTeam,
+  secondInningsTeam,
 }: MatchTabsProps) {
   const isTabLocked = (t: Tab): boolean => {
     switch (t) {
@@ -533,7 +546,7 @@ export default function MatchTabs({
                     innings === 1 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
                   }`}
                 >
-                  {match.teamA.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
+                  {firstInningsTeam.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
                 </button>
                 <button
                   onClick={() => setInnings(2)}
@@ -548,11 +561,11 @@ export default function MatchTabs({
                   }`}
                 >
                   {innings2Started ? (
-                    `${match.teamB.short} — 2nd Innings · ${runs}/${wkts}`
+                    `${secondInningsTeam.short} — 2nd Innings · ${runs}/${wkts}`
                   ) : (
                     <>
                       <Lock className="h-3 w-3 shrink-0" />
-                      {match.teamB.short} — yet to bat
+                      {secondInningsTeam.short} — yet to bat
                     </>
                   )}
                 </button>
@@ -561,7 +574,7 @@ export default function MatchTabs({
               {innings === 1 && (
                 <>
                   <BattingCard
-                    title={`${match.teamA.short} Batting`}
+                    title={`${firstInningsTeam.short} Batting`}
                     rows={match.innings1.batting}
                     extras={match.innings1.extras}
                     extrasNote={match.innings1.extrasNote}
@@ -571,21 +584,21 @@ export default function MatchTabs({
                     dnb={match.innings1.dnb}
                   />
                   <FowList fow={match.innings1.fow} />
-                  <BowlingCard title={`${match.teamB.short} Bowling`} rows={match.innings1.bowling} />
+                  <BowlingCard title={`${secondInningsTeam.short} Bowling`} rows={match.innings1.bowling} />
                 </>
               )}
 
               {innings === 2 && !innings2Started && (
                 <LockedTabPanel
                   title="2nd innings not started"
-                  hint={`${match.teamB.short} haven't come out to bat yet — this fills in the moment the chase begins.`}
+                  hint={`${secondInningsTeam.short} haven't come out to bat yet — this fills in the moment the chase begins.`}
                 />
               )}
 
               {innings === 2 && innings2Started && live && (
                 <>
                   <BattingCard
-                    title={`${match.teamB.short} Batting`}
+                    title={`${secondInningsTeam.short} Batting`}
                     rows={match.innings2Partial.batting}
                     extras={0}
                     extrasNote="—"
@@ -596,14 +609,14 @@ export default function MatchTabs({
                     creaseNote={notOutBatters(match.innings2Partial.batting)}
                   />
                   <FowList fow={match.innings2Partial.fow} />
-                  <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Partial.bowling} live />
+                  <BowlingCard title={`${firstInningsTeam.short} Bowling`} rows={match.innings2Partial.bowling} live />
                 </>
               )}
 
               {innings === 2 && innings2Started && !live && (
                 <>
                   <BattingCard
-                    title={`${match.teamB.short} Batting`}
+                    title={`${secondInningsTeam.short} Batting`}
                     rows={match.innings2Final.batting}
                     extras={match.innings2Final.extras}
                     extrasNote={match.innings2Final.extrasNote}
@@ -613,7 +626,7 @@ export default function MatchTabs({
                     dnb={match.innings2Final.dnb}
                   />
                   <FowList fow={match.innings2Final.fow} />
-                  <BowlingCard title={`${match.teamA.short} Bowling`} rows={match.innings2Final.bowling} />
+                  <BowlingCard title={`${firstInningsTeam.short} Bowling`} rows={match.innings2Final.bowling} />
                 </>
               )}
             </>
@@ -694,7 +707,7 @@ export default function MatchTabs({
                         : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
                     }`}
                   >
-                    {match.teamA.short} (1st Inn)
+                    {firstInningsTeam.short} (1st Inn)
                   </button>
                   <button
                     onClick={() => setInnings(2)}
@@ -709,7 +722,7 @@ export default function MatchTabs({
                     }`}
                   >
                     {!innings2Started && <Lock className="h-2.5 w-2.5" />}
-                    {match.teamB.short} (2nd Inn)
+                    {secondInningsTeam.short} (2nd Inn)
                   </button>
                 </div>
 
@@ -810,7 +823,7 @@ export default function MatchTabs({
                         : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
                     }`}
                   >
-                    {match.teamA.short} (1st Inn)
+                    {firstInningsTeam.short} (1st Inn)
                   </button>
                   <button
                     onClick={() => setInnings(2)}
@@ -825,7 +838,7 @@ export default function MatchTabs({
                     }`}
                   >
                     {!innings2Started && <Lock className="h-2.5 w-2.5" />}
-                    {match.teamB.short} (2nd Inn)
+                    {secondInningsTeam.short} (2nd Inn)
                   </button>
                   {live && (
                     <span className="ml-auto flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel self-center">
