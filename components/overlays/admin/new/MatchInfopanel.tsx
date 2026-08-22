@@ -41,6 +41,15 @@ import type { GeocodeMatch } from "@/lib/fetchVenueWeather";
    between them (no grid) — with the squad moved out, each card is
    short enough that both plus the rest of the details fit in one
    viewport on mobile and desktop alike.
+
+   FIX (this update) — DrawerSection's header row was a <button>
+   that also rendered `headerExtra` (a real <button> — the "Edit"
+   SmallButton) as a DOM child. A <button> nested inside a <button>
+   is invalid HTML; React warned "cannot contain a nested <button>"
+   and the inner Edit click was unreliable. The header is now a
+   <div role="button"> with equivalent click/keyboard behavior, so
+   the actual <button> elements inside headerExtra are valid
+   siblings instead of invalid children. See DrawerSection below.
    ───────────────────────────────────────────────────────────── */
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
@@ -258,10 +267,27 @@ function DrawerSection({
     // dead gap below the card on mobile. Desktop still wants to fill
     // the shared right column, so it keeps `lg:h-full`.
     <div className="flex flex-col min-h-0 lg:h-full overflow-hidden">
-      <button
-        type="button"
+      {/* FIX — was a <button> wrapping the whole header row, with
+          headerExtra (which renders a real <SmallButton> = <button>)
+          rendered INSIDE it. A <button> nested inside a <button> is
+          invalid HTML — React warns "cannot contain a nested <button>",
+          and browsers handle the inner click inconsistently (usually
+          swallowing it, or firing the outer toggle too). Swapped the
+          outer element to a <div role="button"> with the same
+          click/keyboard behavior (Enter/Space toggles, same as a real
+          button would) so headerExtra's actual <button> children are
+          proper siblings instead of DOM-invalid nested children. */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(!open)}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 lg:py-1.5 text-left border-b flex-shrink-0 ${
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(!open);
+          }
+        }}
+        className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 lg:py-1.5 text-left border-b flex-shrink-0 cursor-pointer select-none ${
           showBottomBorderMobile ? "border-white/10" : "border-transparent"
         } ${open ? "lg:border-white/10" : "lg:border-transparent"}`}
       >
@@ -283,7 +309,7 @@ function DrawerSection({
         <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           {headerExtra}
         </div>
-      </button>
+      </div>
       <div className={`flex-col p-4 gap-3 lg:gap-2.5 min-h-0 lg:flex-1 overflow-y-auto ${HIDE_SCROLLBAR} ${contentVisibilityClass}`}>
         {children}
       </div>
@@ -577,6 +603,15 @@ export default function MatchSetupPanel({
   // Tell the parent whenever the section opens/closes, so it can hide
   // LiveStatePanel / Weather / Moments only while this section is
   // genuinely taking over the full column height on desktop.
+  //
+  // NOTE: despite the callback's name, this reports drawer
+  // expanded/collapsed — NOT "the user is actively editing a field."
+  // This panel is view-only (see file header); there is nothing
+  // editable in it anymore. Callers should not treat this as a signal
+  // to suppress unrelated state updates (e.g. Realtime writes) — it
+  // defaults to `true` and stays `true` for most of this panel's
+  // lifetime, so gating anything on it will effectively disable that
+  // thing almost permanently.
   useEffect(() => {
     onEditingChange?.(drawerOpen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -628,7 +663,7 @@ export default function MatchSetupPanel({
         .join(" ");
 
   return (
-    <div className={outerClassName}>
+    <div className={outerClassName} style={mobileHeightStyle}>
       <div className="flex flex-col min-h-0 lg:flex-1 lg:h-full overflow-hidden">
           <DrawerSection
           step="1"

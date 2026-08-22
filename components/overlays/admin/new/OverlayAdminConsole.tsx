@@ -626,20 +626,31 @@ export default function OverlayAdminConsole({
   // (score/venue/toss/etc.) until a hard refresh, even though the
   // overlay display page was updating live the whole time.
   //
-  // Placed after the liveState/liveDirty/matchSetupEditing declarations
-  // above (rather than up near the first matchId-load effect) so the
-  // dependency array below doesn't reference those consts before they're
+  // Placed after the liveState/liveDirty declarations above (rather
+  // than up near the first matchId-load effect) so the dependency
+  // array below doesn't reference those consts before they're
   // initialized in this component's execution order.
   //
-  // Two guards keep this from fighting a human actively using the
-  // console at the same moment:
-  //  - matches/match_setup: skipped while matchSetupEditing is true, so
-  //    an incoming row doesn't yank a field out from under someone
-  //    mid-edit in MatchSetupPanel (matchSetupEditing is the same flag
-  //    MatchSetupPanel already reports via onEditingChange).
-  //  - match_state/live_state: skipped while liveDirty is true, so an
-  //    unsaved manual scoring edit in ScoringSection isn't stomped by
-  //    an unrelated echo landing back from Realtime.
+  // FIX — the `matches` handler previously bailed out while
+  // `matchSetupEditing` was true, on the assumption that flag meant
+  // "someone is actively typing in MatchSetupPanel, don't stomp them."
+  // MatchSetupPanel is now a VIEW-ONLY summary (see its own header
+  // comment: "Match Setup is no longer editable inline... Editing now
+  // lives exclusively at /match/{matchId}/edit") — it has no editable
+  // fields to protect anymore. Its `onEditingChange` callback actually
+  // reports whether the details drawer is expanded/collapsed (for
+  // desktop layout purposes), and that drawer defaults to OPEN
+  // (`useState(true)`) and stays open for essentially the entire time
+  // anyone has this panel visible. So the old guard was discarding
+  // *every* incoming match_setup Realtime update almost all the time —
+  // this was the actual reason simulator writes never appeared here.
+  // There's nothing left in this component for an incoming row to
+  // clobber, so the guard is simply removed.
+  //
+  // match_state/live_state keeps its liveDirty guard: ScoringSection's
+  // fields ARE genuinely locally editable (tapping runs/wickets before
+  // a push), so an unsaved manual scoring edit should still not be
+  // stomped by an unrelated echo landing back from Realtime.
   //
   // Requires `matches` and `match_state` to be added to the Supabase
   // Realtime publication (Database → Replication) with RLS SELECT
@@ -657,7 +668,6 @@ export default function OverlayAdminConsole({
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` },
         (payload) => {
-          if (matchSetupEditing) return;
           const row = payload.new as { match_setup: DbMatchSetupRow; match_setup_completed: boolean };
           dbSetupRef.current = row.match_setup ?? null;
           setMatchSetup((prev) => dbRowToOverlaySetup(row.match_setup ?? null, prev));
@@ -682,7 +692,7 @@ export default function OverlayAdminConsole({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [matchId, matchSetupEditing, liveDirty]);
+  }, [matchId, liveDirty]);
   // ═══════════ END Realtime sync from other writers ═══════════
 
   // FIX — this was the core "not syncing in real time" complaint. Every
