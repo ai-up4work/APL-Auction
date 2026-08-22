@@ -1,7 +1,7 @@
 // app/components/tournament/tournament-detail-client.tsx
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -83,6 +83,45 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  "glitch"/flash on every tab change. Keeping panels mounted and just  */
 /*  hiding them fixes that; the extra always-mounted DOM is cheap next  */
 /*  to what it was doing before (destroy + rebuild on every click).     */
+/*                                                                        */
+/*  NEW — DEFAULT TAB NOW FOLLOWS TOURNAMENT STATUS:                    */
+/*  Previously always defaulted to "points" regardless of where the     */
+/*  tournament actually stood. The initial tab now depends on           */
+/*  tournament.status:                                                  */
+/*    - "Upcoming"  -> Schedule (nothing's been played, so the fixture   */
+/*                      list is the most useful thing to land on)       */
+/*    - "Live"      -> Points Table (standings are what's actively      */
+/*                      moving right now)                                */
+/*    - "Completed" -> Line Up (the new podium/results tab below —      */
+/*                      once it's over, the champion/runner-up/         */
+/*                      semifinalist result is the headline)             */
+/*  Any other/unknown status falls back to Overview. This only sets the */
+/*  INITIAL tab — visitors can still freely switch to any tab, and if   */
+/*  the data behind the chosen default tab isn't actually there yet,    */
+/*  that tab still renders its own LockedTabPlaceholder rather than     */
+/*  silently redirecting elsewhere, consistent with how every other     */
+/*  tab on this page already handles missing data.                      */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/*  NOTE ON LINE UP (new tab):                                          */
+/*  A podium-style "Winners Lineup" showcase — champion in the center,  */
+/*  runner-up and a semifinalist flanking it, each in a glowing gradient */
+/*  ring with their team logo (same broadcast-overlay visual language   */
+/*  used for the match-complete banner on the match detail page).       */
+/*                                                                        */
+/*  Results are derived from the legacy flat `tournament.bracket` array  */
+/*  (BracketMatch[]) — the Final match's winner/loser become champion/   */
+/*  runner-up, and one losing semifinalist (first found, excluding TBD)  */
+/*  fills the third spot. Tournaments on the newer bracketFormat         */
+/*  ("single"/"double", rendered via BracketPreviewPanel off             */
+/*  bracketRounds/doubleElimData) aren't derivable here since those      */
+/*  shapes aren't exposed to this file today — for those (or any        */
+/*  tournament with no legacy bracket at all), this falls back to the    */
+/*  Points Table's top 3 ranked teams instead, so the tab still shows    */
+/*  something meaningful whenever ANY result data exists. If neither is  */
+/*  available, the tab shows the same LockedTabPlaceholder pattern as    */
+/*  every other tab on this page.                                        */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -162,6 +201,16 @@ function initials(name: string) {
     .toUpperCase()
 }
 
+/** Which tab should be open on first render, based on where the
+ *  tournament actually stands right now. See "NEW — DEFAULT TAB NOW
+ *  FOLLOWS TOURNAMENT STATUS" above. */
+function defaultTabForStatus(status: string | undefined): string {
+  if (status === "Upcoming") return "schedule"
+  if (status === "Live") return "points"
+  if (status === "Completed") return "lineup"
+  return "overview"
+}
+
 /**
  * Shared player avatar for the Stats tab: real photo when
  * PlayerStatRow/BowlingStatRow.img is set, falling back to an
@@ -194,7 +243,7 @@ function StatAvatar({ name, img, size = "md" }: { name: string; img?: string; si
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState("points")
+  const [activeTab, setActiveTab] = useState(() => defaultTabForStatus(tournament.status))
   const [isNavOpen, setIsNavOpen] = useState(false)
 
   const handleNavigation = (path: string) => {
@@ -228,6 +277,20 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
 
   const hasAwards = !!tournament.awards?.length
   const hasPrizes = !!tournament.prizes?.length
+
+  // Team name -> logo, shared by Schedule and the new Line Up tab.
+  const logoByTeam = useMemo(
+    () => new Map((tournament.squads ?? []).filter((s) => s.logo).map((s) => [s.team, s.logo as string])),
+    [tournament.squads],
+  )
+
+  // Champion / runner-up / semifinalist for the Line Up tab — see
+  // "NOTE ON LINE UP" above for how this is derived and its fallback.
+  const lineup = useMemo(
+    () => deriveLineup(tournament.bracket, tournament.pointsTable, logoByTeam),
+    [tournament.bracket, tournament.pointsTable, logoByTeam],
+  )
+  const hasLineup = !!lineup.champion
 
   // Shared class applied to every TabsContent so panels stay mounted
   // (forceMount) and are only ever shown/hidden via CSS driven off
@@ -337,6 +400,7 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                     Overview
                   </TabsTrigger>
                   <LockableTabTrigger value="points" label="Points Table" locked={!hasPoints} />
+                  <LockableTabTrigger value="lineup" label="Line Up" locked={!hasLineup} />
                   <LockableTabTrigger value="schedule" label="Schedule" locked={!hasFixtures} />
                   <LockableTabTrigger value="bracket" label="Bracket" locked={!hasBracket} />
                   <LockableTabTrigger value="squads" label="Squads" locked={!hasSquads} />
@@ -439,6 +503,23 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                       icon={Award}
                       title="Leaderboard Not Available Yet"
                       description="Top run-scorers and wicket-takers will populate here once matches start being recorded."
+                    />
+                  )}
+                </TabsContent>
+
+                {/* LINE UP — champion / runner-up / semifinalist podium */}
+                <TabsContent value="lineup" forceMount className={tabContentClass}>
+                  {hasLineup ? (
+                    <TeamLineupPanel
+                      champion={lineup.champion}
+                      runnerUp={lineup.runnerUp}
+                      semifinalist={lineup.semifinalist}
+                    />
+                  ) : (
+                    <LockedTabPlaceholder
+                      icon={Crown}
+                      title="Winners Lineup Not Available Yet"
+                      description="Once the final has been played, the champion, runner-up, and a semifinalist will be showcased here."
                     />
                   )}
                 </TabsContent>
@@ -1595,6 +1676,195 @@ function BracketTeamRow({ team, isWinner }: { team: BracketTeam; isWinner: boole
         {team.name}
       </span>
       {team.score && <span className="text-gray-400 text-xs">{team.score}</span>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// LINE UP — winners podium (champion / runner-up / semifinalist)
+// ─────────────────────────────────────────────────────────────
+
+interface LineupTeam {
+  name: string
+  short?: string
+  logo?: string
+}
+
+/** Derives the champion, runner-up, and a semifinalist for the Line Up
+ *  tab. See "NOTE ON LINE UP" near the top of this file for the full
+ *  rationale and the Points-Table fallback used when there's no
+ *  legacy `bracket` array to read from. */
+function deriveLineup(
+  bracket: BracketMatch[] | undefined,
+  pointsTable: PointsRow[] | undefined,
+  logoByTeam: Map<string, string>,
+): { champion?: LineupTeam; runnerUp?: LineupTeam; semifinalist?: LineupTeam } {
+  if (bracket && bracket.length > 0) {
+    const roundOf = (m: BracketMatch) => (m as any).round ?? m.label.replace(/\s*-?\s*Match\s*\d+$/i, "").trim()
+
+    // "Final" but not "Semifinal"/"Quarterfinal" (both contain "final").
+    const finalMatch = bracket.find((m) => {
+      const r = roundOf(m).toLowerCase()
+      return r.includes("final") && !r.includes("semi") && !r.includes("quarter")
+    })
+    const semiMatches = bracket.filter((m) => roundOf(m).toLowerCase().includes("semi"))
+
+    if (finalMatch && finalMatch.winner) {
+      const winnerTeam = finalMatch.team1.short === finalMatch.winner ? finalMatch.team1 : finalMatch.team2
+      const loserTeam = finalMatch.team1.short === finalMatch.winner ? finalMatch.team2 : finalMatch.team1
+
+      const toLineupTeam = (t: BracketTeam): LineupTeam => ({
+        name: t.name,
+        short: t.short,
+        logo: logoByTeam.get(t.name),
+      })
+
+      // First losing semifinalist that isn't TBD and isn't already the
+      // champion/runner-up (guards against a bracket with a bye run
+      // straight into the final).
+      const semiLoser = semiMatches
+        .map((m) => (m.team1.short === m.winner ? m.team2 : m.team1))
+        .find((t) => t.short && t.short !== "TBD" && t.short !== winnerTeam.short && t.short !== loserTeam.short)
+
+      return {
+        champion: toLineupTeam(winnerTeam),
+        runnerUp: toLineupTeam(loserTeam),
+        semifinalist: semiLoser ? toLineupTeam(semiLoser) : undefined,
+      }
+    }
+  }
+
+  // Fallback: no (usable) legacy bracket — use final Points Table
+  // standing instead, so the tab isn't empty whenever standings exist.
+  if (pointsTable && pointsTable.length >= 2) {
+    const sorted = [...pointsTable].sort((a, b) => {
+      const diff = b.points - a.points
+      if (diff !== 0) return diff
+      return (parseFloat(b.nrr) || 0) - (parseFloat(a.nrr) || 0)
+    })
+    const toLineupTeam = (r: PointsRow): LineupTeam => ({ name: r.team, logo: logoByTeam.get(r.team) })
+    return {
+      champion: toLineupTeam(sorted[0]),
+      runnerUp: sorted[1] ? toLineupTeam(sorted[1]) : undefined,
+      semifinalist: sorted[2] ? toLineupTeam(sorted[2]) : undefined,
+    }
+  }
+
+  return {}
+}
+
+const PODIUM_META: Record<
+  1 | 2 | 3,
+  { label: string; accent: string; ring: string; Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; ringSize: string; podiumHeight: string }
+> = {
+  1: {
+    label: "Champion",
+    accent: "#F5D583",
+    ring: "from-[#F5D583] via-[#D4AF37] to-[#C98A2E]",
+    Icon: Crown,
+    ringSize: "h-28 w-28 sm:h-36 sm:w-36",
+    podiumHeight: "h-24 sm:h-28",
+  },
+  2: {
+    label: "Runner-Up",
+    accent: "#D8D8D8",
+    ring: "from-[#EDEDED] via-[#C4C4C4] to-[#8A8A8A]",
+    Icon: Medal,
+    ringSize: "h-20 w-20 sm:h-28 sm:w-28",
+    podiumHeight: "h-16 sm:h-20",
+  },
+  3: {
+    label: "Semifinalist",
+    accent: "#D8A06B",
+    ring: "from-[#E3B27E] via-[#C98A4E] to-[#8B5A2B]",
+    Icon: Medal,
+    ringSize: "h-20 w-20 sm:h-28 sm:w-28",
+    podiumHeight: "h-12 sm:h-14",
+  },
+}
+
+function PodiumSpot({ team, place }: { team: LineupTeam; place: 1 | 2 | 3 }) {
+  const meta = PODIUM_META[place]
+  return (
+    <div className="relative flex flex-col items-center flex-1 min-w-0 max-w-[8.5rem] sm:max-w-[11rem]">
+      <span
+        className="text-[10px] uppercase tracking-widest font-cinzel font-bold mb-2 whitespace-nowrap"
+        style={{ color: meta.accent }}
+      >
+        {meta.label}
+      </span>
+
+      <div className={`relative ${meta.ringSize} mb-3 flex items-center justify-center shrink-0`}>
+        <div
+          className="absolute rounded-full blur-xl opacity-40 pointer-events-none"
+          style={{ inset: "-16%", background: `radial-gradient(circle, ${meta.accent}55 0%, transparent 70%)` }}
+        />
+        <div className={`relative h-full w-full rounded-full p-[3px] bg-gradient-to-br ${meta.ring} shadow-lg`}>
+          <div className="h-full w-full rounded-full bg-black/85 border border-white/10 flex items-center justify-center overflow-hidden">
+            {team.logo ? (
+              <div className="relative h-full w-full">
+                <Image src={team.logo} alt={`${team.name} logo`} fill className="object-cover p-2" />
+              </div>
+            ) : (
+              <span className="text-white text-sm font-bold font-cinzel">{initials(team.name)}</span>
+            )}
+          </div>
+        </div>
+        <span
+          className="absolute -top-1 -right-1 h-7 w-7 rounded-full bg-black border-2 flex items-center justify-center shadow-md"
+          style={{ borderColor: meta.accent }}
+        >
+          <meta.Icon className="h-3.5 w-3.5" style={{ color: meta.accent }} />
+        </span>
+      </div>
+
+      <p className="text-white text-sm font-semibold font-cinzel text-center leading-tight truncate w-full mb-3">
+        {team.name}
+      </p>
+
+      <div
+        className={`w-full rounded-t-lg ${meta.podiumHeight} flex items-start justify-center pt-2.5`}
+        style={{
+          background: `linear-gradient(180deg, ${meta.accent}30, ${meta.accent}08)`,
+          borderTop: `2px solid ${meta.accent}`,
+        }}
+      >
+        <span className="text-lg font-black font-cinzel" style={{ color: meta.accent }}>
+          {place}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function TeamLineupPanel({
+  champion,
+  runnerUp,
+  semifinalist,
+}: {
+  champion?: LineupTeam
+  runnerUp?: LineupTeam
+  semifinalist?: LineupTeam
+}) {
+  if (!champion) return null
+
+  return (
+    <div className="relative bg-black/50 border border-gold/20 rounded-xl p-8 sm:p-10 mb-8 overflow-hidden">
+      <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 h-72 w-72 rounded-full bg-gold/[0.08] blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+
+      <div className="relative text-center mb-10">
+        <p className="text-gold/70 text-[10px] uppercase tracking-[0.3em] font-cinzel mb-2 flex items-center justify-center gap-2">
+          <Sparkles className="h-3 w-3" /> Tournament Complete <Sparkles className="h-3 w-3" />
+        </p>
+        <h2 className="text-2xl sm:text-3xl font-bold text-white font-cinzel">Winners Lineup</h2>
+      </div>
+
+      <div className="relative flex items-end justify-center gap-3 sm:gap-8 max-w-3xl mx-auto">
+        {runnerUp && <PodiumSpot team={runnerUp} place={2} />}
+        <PodiumSpot team={champion} place={1} />
+        {semifinalist && <PodiumSpot team={semifinalist} place={3} />}
+      </div>
     </div>
   )
 }
