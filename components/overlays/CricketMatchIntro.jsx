@@ -561,42 +561,7 @@ export default function CricketMatchIntro({ show, hideTrigger = false, matchSetu
                           )}
                         </div>
 
-                        {/* Stub compartment — faint warm paper tint distinguishes it as its
-                            own piece of stock, torn from the main ticket body on the left */}
-                        <div
-                          className="relative flex flex-col justify-center gap-2 px-6 sm:px-8 py-4 sm:w-[220px] shrink-0 border-t sm:border-t-0 sm:border-l border-dashed"
-                          style={{
-                            borderColor: "var(--color-border-overlay)",
-                            background:
-                              "linear-gradient(135deg, rgba(201,151,31,0.05), rgba(201,151,31,0.02))",
-                          }}
-                        >
-                          <p
-                            className="font-mono text-[9px] font-semibold uppercase tracking-[0.15em] leading-relaxed"
-                            style={{ color: "var(--color-outline)" }}
-                          >
-                            {TEAM_A.short}·{TEAM_B.short} — {MATCH_META.format}
-                          </p>
-                          <div className="flex items-end gap-[2px] h-6" aria-hidden="true">
-                            {[3, 1, 2, 1, 4, 1, 2, 3, 1, 2, 1, 3, 1, 2].map((w, idx) => (
-                              <span
-                                key={idx}
-                                style={{
-                                  width: w,
-                                  height: idx % 4 === 0 ? "100%" : "60%",
-                                  background: "var(--color-outline)",
-                                  opacity: 0.55,
-                                }}
-                              />
-                            ))}
-                          </div>
-                          <span
-                            className="font-mono text-[8px] tracking-[0.2em]"
-                            style={{ color: "var(--color-outline)", opacity: 0.6 }}
-                          >
-                            NO. 003417
-                          </span>
-                        </div>
+  
                       </div>
                     </div>
                   </div>
