@@ -5,17 +5,11 @@ import type {
   WeatherData,
   ChannelVisibility,
   SquadPlayer,
+  TeamInfo,
 } from "@/lib/overlayBus";
 import type { EngineSyncState } from "@/hooks/useLiveScoringEngine";
 
 // ── error logging helper ────────────────────────────────────────────
-// PostgrestError instances often print as `{}` when passed as a second
-// console.error argument (Next's dev overlay can't serialize the class
-// instance's non-plain-enumerable shape in every case). Destructuring
-// the fields we care about guarantees we always see something useful —
-// message, details, hint, and the Postgres error code (e.g. 42501 =
-// insufficient_privilege, which is the classic "forgot to GRANT after
-// creating tables via the SQL editor" error).
 function logDbError(context: string, error: unknown) {
   try {
     const e = error as Record<string, unknown> | null;
@@ -23,10 +17,6 @@ function logDbError(context: string, error: unknown) {
     console.error(`[matchPersistence] ${context} failed — typeof:`, typeof error);
     console.error(`[matchPersistence] ${context} failed — keys:`, error && typeof error === "object" ? Object.keys(error) : null);
 
-    // Circular-safe stringify — the old plain JSON.stringify threw when the
-    // error object had a circular `cause`/`response` chain (common in fetch
-    // and some Postgrest errors), which crashed BEFORE the `fields:` log
-    // below ever ran — so you never actually saw message/code/hint.
     const seen = new WeakSet();
     let safeJson = "<unserializable>";
     try {
@@ -59,12 +49,6 @@ function logDbError(context: string, error: unknown) {
   }
 }
 
-// ── matches ────────────────────────────────────────────────────────────
-// Every read/write below is keyed by auctionId, not the internal uuid —
-// callers never need to know the row id exists. getOrCreateMatch() is the
-// one function that resolves auctionId -> uuid; everything else takes
-// auctionId directly and resolves internally so callsites stay simple.
-
 // ── balls (event log) ───────────────────────────────────────────────
 
 export interface BallInsert {
@@ -85,29 +69,6 @@ export interface BallInsert {
   noBallRunOrigin?: string;
 }
 
-// Fire-and-forget by design — callers don't await this on the scoring
-// hot path (recordBall/resolveWicket already committed local state and
-// broadcast before this resolves). A failed insert here means a gap in
-// the DB ledger, not a broken UI.
-//
-// FIX (race condition) — this used to be a plain `.insert(...)`, which
-// meant it could race against `undo()`'s `deleteLastBall(...)` for the
-// exact same (match_id, innings_number, sequence): undo() decrements
-// ballSequenceRef immediately and fires off an unawaited delete, so if
-// the user undoes and then immediately scores again, recordBall() reuses
-// that same sequence number and calls appendBall() before the prior
-// delete has necessarily committed — a straight duplicate-key violation
-// on balls_match_id_innings_number_sequence_key (23505), independent of
-// how fast the delete usually completes; it's a genuine race, not a
-// flake.
-//
-// Reusing the sequence after an undo is actually the correct semantic —
-// the new ball is meant to replace the one that was undone — so this is
-// now an upsert keyed on the exact columns the unique constraint covers.
-// That makes it commutative with the delete: whichever of (delete, new
-// insert) lands second, the end state is "the new ball occupies that
-// sequence slot," which is what we want either way, and there's no
-// longer a window where two writes to the same key can conflict.
 export async function appendBall(matchId: string, ball: BallInsert): Promise<boolean> {
   const { error } = await supabase.from("balls").upsert(
     {
@@ -137,10 +98,6 @@ export async function appendBall(matchId: string, ball: BallInsert): Promise<boo
   return true;
 }
 
-// Deletes exactly one row — the delivery undo() just reverted past.
-// Keyed by (match_id, innings_number, sequence), matching the unique
-// constraint on the table, so this can never accidentally delete more
-// than one row.
 export async function deleteLastBall(
   matchId: string,
   inningsNumber: number,
@@ -160,9 +117,6 @@ export async function deleteLastBall(
   return true;
 }
 
-// Wipes the entire ledger for a match — used on Restart Match, alongside
-// clearEngineState(). Innings-scoped rows are covered too since this
-// deletes by match_id only, not per-innings.
 export async function deleteAllBalls(matchId: string): Promise<boolean> {
   const { error } = await supabase.from("balls").delete().eq("match_id", matchId);
   if (error) {
@@ -172,16 +126,29 @@ export async function deleteAllBalls(matchId: string): Promise<boolean> {
   return true;
 }
 
+// ── matches ────────────────────────────────────────────────────────────
+
+export interface TournamentIdentity {
+  tournamentId: string;
+  name: string;
+  logoUrl: string;
+}
+
 export interface MatchRow {
   id: string;
   auction_id: string;
   match_setup: MatchSetup;
   match_setup_completed: boolean;
+  // Tournament identity, read straight from `tournaments` and kept
+  // entirely separate from match_setup. `tournaments.name`/`logo_url`
+  // is the single source of truth for a tournament match's crest — it
+  // is NOT merged into matchSetup.tournamentName/tournamentLogoUrl, so
+  // there's never ambiguity about which of two places "won." This is
+  // null for a standalone match (no tournament_id on the row) or if
+  // the tournament itself has no logo uploaded yet.
+  tournament: TournamentIdentity | null;
 }
 
-// Mirrors emptyMatchSetup in page.tsx — duplicated here (not imported)
-// because page.tsx's version isn't exported. Only used as the seed row
-// for a brand-new auctionId; every subsequent read returns the real data.
 const emptyOverlayTeam = () => ({
   name: "",
   shortCode: "",
@@ -211,32 +178,12 @@ const EMPTY_MATCH_SETUP: MatchSetup = {
 // ── shape normalization ──────────────────────────────────────────────
 // `matches.match_setup` is a bare jsonb column with no DB-level schema —
 // two very different producers write into it:
-//   1. The Match Editor / createFriendlyMatch flow
-//      (app/(protected)/match/[matchId]/edit/page.tsx, and
-//      lib/organization/organization.ts), which writes
+//   1. The Match Editor / createFriendlyMatch flow, which writes
 //      { team1, team2, round, venue, date, time, toss, overs, officials,
 //        squads, rosterLocked, matchTitle, matchNumber, matchMeta,
 //        tossWinner, tossDecision, tournament, tournamentLogoUrl, ... }.
-//      `tossWinner` there is a TEAM NAME string, and `squads` can be
-//      either the flat auction-import shape or the grouped
-//      { teamId, captain, players } shape the editor itself saves.
 //   2. This overlay admin flow, which reads/writes the real MatchSetup
 //      shape: { teamA, teamB, tossWinner: "A"|"B"|"", tournamentName, ... }.
-// A friendly match's `id` doubles as its `auction_id` (see
-// createFriendlyMatch), so visiting /overlay/{friendlyMatchId} resolves
-// straight to that row via getOrCreateMatch — but its match_setup is
-// still team1/team2-shaped at that point. Without normalizing here,
-// every consumer of MatchRow (OverlayAdminPage first among them) would
-// read `matchSetup.teamA.name` off an object that only has `team1`, and
-// crash.
-//
-// IMPORTANT: this must map EVERY field the Match Editor can set, not
-// just a handful — a previous version of this function only carried
-// over venue/round/team-names, silently dropping colors, logos,
-// squads, match number/meta, toss winner/decision, tournament ref, and
-// kickoff time on every read. That made it look like the Match Editor
-// "wasn't saving" those fields, when really the save was fine and only
-// this projection was incomplete.
 export function isFriendlyMatchShape(raw: unknown): raw is Record<string, any> {
   return (
     !!raw &&
@@ -248,9 +195,8 @@ export function isFriendlyMatchShape(raw: unknown): raw is Record<string, any> {
 
 // Squads on a friendly-match row can be in either shape the editor
 // itself already has to handle:
-//   - GROUPED (what the editor saves): [{ teamId: "team1"|"team2", captain, players: [{name, role, xi, playerId}] }]
-//   - FLAT (what createFriendlyMatch writes pre-edit): [{ name, role, team: "<short code>", captain? }]
-// Extracts just the named players for one side as overlay SquadPlayers.
+//   - GROUPED: [{ teamId: "team1"|"team2", captain, players: [{name, role, xi, playerId}] }]
+//   - FLAT: [{ name, role, team: "<short code>", captain? }]
 function extractFriendlySquadPlayers(
   raw: Record<string, any>,
   teamKey: "team1" | "team2",
@@ -272,24 +218,20 @@ function extractFriendlySquadPlayers(
       }));
   }
 
-  // Flat shape — bucket by short code the same way the editor does,
-  // defaulting anything that doesn't clearly match team2 into team1.
-  const otherShort = (teamKey === "team1" ? raw.team2?.short : raw.team1?.short) ?? "";
   const wantTeam2 = teamKey === "team2";
   return rawSquads
     .filter((p) => p && typeof p?.name === "string" && p.name.trim())
     .filter((p) => {
       const code = (p.team ?? "").toString().toUpperCase();
-      const isTeam2 = !!code && code === (raw.team2?.short ?? "").toString().toUpperCase() && code !== (raw.team1?.short ?? "").toString().toUpperCase();
+      const isTeam2 =
+        !!code &&
+        code === (raw.team2?.short ?? "").toString().toUpperCase() &&
+        code !== (raw.team1?.short ?? "").toString().toUpperCase();
       return wantTeam2 ? isTeam2 : !isTeam2;
     })
     .map((p) => ({ id: `manual:${p.name}`, name: p.name as string }));
 }
 
-// The editor's overs number doesn't map onto anything overlay-side —
-// overlay wants an explicit T20/ODI/Test enum. Best-effort guess so the
-// overlay's format-dependent UI (e.g. total-overs display) isn't stuck
-// on the T20 default for every ODI/Test friendly match.
 function guessFormatFromOvers(overs: unknown): MatchSetup["format"] {
   const n = typeof overs === "number" ? overs : Number(overs);
   if (!Number.isFinite(n) || n <= 0) return "T20";
@@ -298,9 +240,6 @@ function guessFormatFromOvers(overs: unknown): MatchSetup["format"] {
   return "Test";
 }
 
-// `tossWinner` on a friendly match is a team NAME string (e.g.
-// "Emberfall Paladins"), but overlay's MatchSetup.tossWinner is the
-// letter "A" | "B" | "". Resolve by comparing against team1/team2 name.
 function resolveTossWinnerLetter(raw: Record<string, any>): MatchSetup["tossWinner"] {
   const winner = typeof raw.tossWinner === "string" ? raw.tossWinner.trim() : "";
   if (!winner) return "";
@@ -309,9 +248,6 @@ function resolveTossWinnerLetter(raw: Record<string, any>): MatchSetup["tossWinn
   return "";
 }
 
-// Combines the editor's separate date/time fields into overlay's single
-// free-text kickoffTime, e.g. "2026-08-14 19:30". Falls back to
-// whichever of the two is actually present.
 function combineKickoffTime(raw: Record<string, any>): string {
   const date = typeof raw.date === "string" ? raw.date.trim() : "";
   const time = typeof raw.time === "string" ? raw.time.trim() : "";
@@ -322,31 +258,40 @@ function combineKickoffTime(raw: Record<string, any>): string {
 export function normalizeMatchSetup(raw: unknown): MatchSetup {
   if (isFriendlyMatchShape(raw)) {
     const r = raw as Record<string, any>;
-    const squads = Array.isArray(r.squads) ? r.squads : [];
     const team1Short = r.team1?.short ?? "";
     const team2Short = r.team2?.short ?? "";
 
-    const squadPlayersFor = (teamShort: string) =>
-      squads
-        .filter((p: any) => p.team === teamShort)
-        .map((p: any, i: number) => ({
-          id: `${teamShort}-${i}`,
-          name: p.name,
-          imageUrl: p.imageUrl || undefined,
-        }));
-
-    const teamAPlayers = squadPlayersFor(team1Short);
-    const teamBPlayers = squadPlayersFor(team2Short);
+    const teamAPlayers = extractFriendlySquadPlayers(r, "team1", team1Short);
+    const teamBPlayers = extractFriendlySquadPlayers(r, "team2", team2Short);
 
     return {
       ...EMPTY_MATCH_SETUP,
+      tournamentName: typeof r.tournamentName === "string" ? r.tournamentName : "",
+      season: typeof r.season === "string" ? r.season : "",
+      tournamentLogoUrl: typeof r.tournamentLogoUrl === "string" ? r.tournamentLogoUrl : "",
       venue: typeof r.venue === "string" ? r.venue : "",
-      matchTitle: typeof r.round === "string" ? r.round : "",
+      format:
+        r.format === "T20" || r.format === "ODI" || r.format === "Test"
+          ? r.format
+          : guessFormatFromOvers(r.overs),
+      matchNumber: typeof r.matchNumber === "string" ? r.matchNumber : "",
+      matchTitle:
+        typeof r.matchTitle === "string" && r.matchTitle.trim()
+          ? r.matchTitle
+          : typeof r.round === "string"
+          ? r.round
+          : "",
+      kickoffTime: combineKickoffTime(r),
+      matchMeta: typeof r.matchMeta === "string" ? r.matchMeta : "",
+      tournament: typeof r.tournament === "string" ? r.tournament : "",
+      tossWinner: resolveTossWinnerLetter(r),
+      tossDecision: r.tossDecision === "bat" || r.tossDecision === "bowl" ? r.tossDecision : "",
       teamA: {
         ...emptyOverlayTeam(),
         name: r.team1?.name ?? "",
         shortCode: team1Short,
         logoUrl: r.team1?.logo ?? "",
+        color: typeof r.team1?.color === "string" && r.team1.color ? r.team1.color : emptyOverlayTeam().color,
         squadPlayers: teamAPlayers,
         squad: teamAPlayers.map((p) => p.name),
       },
@@ -355,6 +300,7 @@ export function normalizeMatchSetup(raw: unknown): MatchSetup {
         name: r.team2?.name ?? "",
         shortCode: team2Short,
         logoUrl: r.team2?.logo ?? "",
+        color: typeof r.team2?.color === "string" && r.team2.color ? r.team2.color : emptyOverlayTeam().color,
         squadPlayers: teamBPlayers,
         squad: teamBPlayers.map((p) => p.name),
       },
@@ -373,31 +319,115 @@ export function normalizeMatchSetup(raw: unknown): MatchSetup {
 }
 
 // ─────────────────────────────────────────────────────────────
+// TOURNAMENT IDENTITY — read directly from `tournaments`, kept fully
+// separate from match_setup. This is the ONLY source consumers should
+// use for a tournament match's display name/logo — match_setup's own
+// tournamentName/tournamentLogoUrl fields are left alone (still usable
+// for a STANDALONE match's own self-set title/logo) but are no longer
+// treated as authoritative for anything actually attached to a real
+// tournament row.
+// ─────────────────────────────────────────────────────────────
+async function loadTournamentIdentity(tournamentId: string): Promise<TournamentIdentity | null> {
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select("id, name, logo_url")
+    .eq("id", tournamentId)
+    .maybeSingle();
+
+  if (error) {
+    logDbError("loadTournamentIdentity", error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    tournamentId: data.id,
+    name: data.name ?? "",
+    logoUrl: data.logo_url ?? "",
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Bracket team fallback for tournament matches whose real team
+// assignment lives on bracket_matches.team_a_id/team_b_id -> teams
+// rather than in match_setup. Bracket data wins whenever it has a
+// named team for a side; match_setup's own teamA/teamB (admin-entered
+// extras: custom colors, squads, logo overrides) only fills in a side
+// the bracket lookup doesn't have. Friendly matches have no
+// bracket_match_id, so this is a guaranteed no-op for them.
+// ─────────────────────────────────────────────────────────────
+
+interface BracketTeamFallback {
+  teamA: Partial<TeamInfo>;
+  teamB: Partial<TeamInfo>;
+  venue?: string;
+}
+
+async function loadBracketTeamFallback(bracketMatchId: string): Promise<BracketTeamFallback | null> {
+  const { data: bracketRow, error } = await supabase
+    .from("bracket_matches")
+    .select("team_a_id, team_b_id, venue")
+    .eq("id", bracketMatchId)
+    .maybeSingle();
+
+  if (error) {
+    logDbError("loadBracketTeamFallback bracket_matches", error);
+    return null;
+  }
+  if (!bracketRow) return null;
+
+  const teamIds = [bracketRow.team_a_id, bracketRow.team_b_id].filter(Boolean) as string[];
+  if (teamIds.length === 0) return null;
+
+  const { data: teamRows, error: teamsErr } = await supabase
+    .from("teams")
+    .select("id, name, code, color, logo")
+    .in("id", teamIds);
+
+  if (teamsErr) {
+    logDbError("loadBracketTeamFallback teams", teamsErr);
+    return null;
+  }
+
+  const byId = new Map((teamRows ?? []).map((t) => [t.id, t]));
+  const a = bracketRow.team_a_id ? byId.get(bracketRow.team_a_id) : undefined;
+  const b = bracketRow.team_b_id ? byId.get(bracketRow.team_b_id) : undefined;
+
+  if (!a && !b) return null;
+
+  return {
+    teamA: a ? { name: a.name, shortCode: a.code, color: a.color, logoUrl: a.logo ?? "" } : {},
+    teamB: b ? { name: b.name, shortCode: b.code, color: b.color, logoUrl: b.logo ?? "" } : {},
+    venue: bracketRow.venue ?? undefined,
+  };
+}
+
+async function applyBracketTeamFallback(
+  matchSetup: MatchSetup,
+  bracketMatchId: string | null
+): Promise<MatchSetup> {
+  if (!bracketMatchId) return matchSetup;
+
+  const fallback = await loadBracketTeamFallback(bracketMatchId);
+  if (!fallback) return matchSetup;
+
+  const bracketHasA = !!fallback.teamA?.name?.trim();
+  const bracketHasB = !!fallback.teamB?.name?.trim();
+
+  return {
+    ...matchSetup,
+    teamA: bracketHasA ? { ...matchSetup.teamA, ...fallback.teamA } : matchSetup.teamA,
+    teamB: bracketHasB ? { ...matchSetup.teamB, ...fallback.teamB } : matchSetup.teamB,
+    venue: fallback.venue?.trim() ? fallback.venue : matchSetup.venue,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // REVERSE MERGE — overlay MatchSetup (teamA/teamB) → whatever raw shape
 // currently lives on the row, preserving everything the Match Editor
 // owns (squads, officials, rosterLocked, round, playerId links, etc).
-//
-// This is the inverse of normalizeMatchSetup's friendly-shape branch,
-// and it's the actual fix for the "editor data disappears" bug: the
-// old saveMatchSetup did a blind `match_setup: matchSetup` upsert,
-// which replaced the ENTIRE column with the overlay's much smaller
-// teamA/teamB shape the moment anything here saved — including on
-// initial hydration (see the hydration-guard fix in the admin page).
-//
-// Only the fields the overlay page actually edits are written back;
-// everything else on the existing row passes through untouched via the
-// initial spread of `base`.
 // ─────────────────────────────────────────────────────────────
 
-// kickoffTime is combineKickoffTime's output: "<date> <time>", or just
-// one of the two, or arbitrary free text typed directly into the
-// overlay's Kickoff Time field. Only split back into date/time when it
-// matches that exact ISO pattern — if the operator typed something
-// free-form ("Starts after lunch break"), we must NOT shove that into
-// the editor's <input type="date">/<input type="time"> fields, since
-// those inputs will silently reject/clear invalid values and we'd lose
-// data on the next Match Editor load. In that case kickoffTime is still
-// carried through as its own additive key so nothing is lost.
 function splitKickoffTime(kickoffTime: string): { date?: string; time?: string } {
   const isoDate = /^\d{4}-\d{2}-\d{2}$/;
   const isoTime = /^\d{2}:\d{2}(:\d{2})?$/;
@@ -414,11 +444,6 @@ function splitKickoffTime(kickoffTime: string): { date?: string; time?: string }
   return {};
 }
 
-// tossWinner on the overlay side is "A" | "B" | ""; on the friendly
-// side it's the actual team name string. Convert using whatever team
-// names are currently on the raw row (falling back to the overlay's
-// own team names if the raw row has none yet, e.g. a match created
-// directly from the overlay admin page with no Match Editor row).
 function tossWinnerLetterToName(
   letter: MatchSetup["tossWinner"],
   base: Record<string, any>,
@@ -438,9 +463,6 @@ export function mergeOverlaySetupIntoRaw(
   const winnerName = tossWinnerLetterToName(overlaySetup.tossWinner, base, overlaySetup);
 
   return {
-    // Preserve everything not explicitly handled below: squads,
-    // officials, rosterLocked, round, date/time (unless overridden
-    // just below), playerId links, org-specific keys, etc.
     ...base,
 
     tournamentName: overlaySetup.tournamentName,
@@ -453,16 +475,10 @@ export function mergeOverlaySetupIntoRaw(
     matchMeta: overlaySetup.matchMeta,
     tournament: overlaySetup.tournament,
 
-    // Only overwrite date/time if kickoffTime actually parsed as one of
-    // them — otherwise leave whatever the editor already had untouched.
     ...(date ? { date } : {}),
     ...(time ? { time } : {}),
-    // Always carry the raw kickoffTime string through too, additively,
-    // so free-text entries aren't lost even when they don't parse.
     kickoffTime: overlaySetup.kickoffTime,
 
-    // toss — same de-duplication pattern the Match Editor itself uses:
-    // tossWinner/tossDecision are the source of truth, `toss` is derived.
     tossWinner: winnerName,
     tossDecision: overlaySetup.tossDecision,
     toss:
@@ -470,9 +486,6 @@ export function mergeOverlaySetupIntoRaw(
         ? `${winnerName} won the toss and elected to ${overlaySetup.tossDecision === "bat" ? "bat" : "bowl"}`
         : base.toss ?? "",
 
-    // Merge team fields — preserve any existing team1/team2 keys this
-    // function doesn't know about, rather than replacing the objects
-    // outright.
     team1: {
       ...(base.team1 ?? {}),
       name: overlaySetup.teamA.name,
@@ -488,24 +501,23 @@ export function mergeOverlaySetupIntoRaw(
       color: overlaySetup.teamB.color,
     },
 
-    // NOTE: overlaySetup.teamA/teamB.squadPlayers are deliberately NOT
-    // merged into `squads` here. The editor's `squads` carries playerId
-    // links, xi/roles, and captain — merging the overlay's simpler
-    // {id,name,imageUrl} list back in would need its own reconciliation
-    // pass (matching by playerId vs "manual:" ids) to avoid duplicating
-    // or dropping data, same as TeamRosterPicker already has to do on
-    // read. Leaving `squads` untouched here means the Match Editor
-    // stays the source of truth for roster edits; the overlay's own
-    // squadPlayers selection still round-trips fine because it's read
-    // fresh from `players`/`teams` via useAuctionRoster, not from this
-    // merged blob.
+    // NOTE: overlaySetup.teamA/teamB.squadPlayers deliberately NOT
+    // merged into `squads` here — see prior notes on reconciliation
+    // needing playerId-vs-"manual:" matching, same as TeamRosterPicker.
   };
 }
 
+// ── getOrCreateMatch — also selects bracket_match_id/tournament_id and
+// resolves both the bracket team fallback AND the standalone
+// tournament-identity read before returning. The insert branch (a
+// brand-new row) intentionally skips both — a freshly inserted row has
+// neither a bracket_match_id nor a tournament_id yet, since those are
+// populated separately by bracket progression / tournament assignment
+// flows.
 export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | null> {
   const { data: existing, error: selectErr } = await supabase
     .from("matches")
-    .select("id, auction_id, match_setup, match_setup_completed")
+    .select("id, auction_id, match_setup, match_setup_completed, bracket_match_id, tournament_id")
     .eq("auction_id", auctionId)
     .maybeSingle();
 
@@ -514,7 +526,12 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     return null;
   }
   if (existing) {
-    return { ...existing, match_setup: normalizeMatchSetup(existing.match_setup) } as MatchRow;
+    const normalized = normalizeMatchSetup(existing.match_setup);
+    const resolved = await applyBracketTeamFallback(normalized, existing.bracket_match_id ?? null);
+    const tournament = existing.tournament_id
+      ? await loadTournamentIdentity(existing.tournament_id)
+      : null;
+    return { ...existing, match_setup: resolved, tournament } as MatchRow;
   }
 
   const { data: created, error: insertErr } = await supabase
@@ -527,28 +544,18 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     logDbError("getOrCreateMatch insert", insertErr);
     return null;
   }
-  return { ...created, match_setup: normalizeMatchSetup(created.match_setup) } as MatchRow;
+  return {
+    ...created,
+    match_setup: normalizeMatchSetup(created.match_setup),
+    tournament: null,
+  } as MatchRow;
 }
 
-// ── CHANGED — was a blind overwrite of the whole match_setup column
-// with whatever shape the caller passed in (always the overlay's
-// teamA/teamB shape). That silently destroyed Match Editor data
-// (team1/team2, squads, officials, rosterLocked, matchMeta, round,
-// playerId links, ...) the first time this ran against a friendly
-// match's row — including on initial page hydration, before the user
-// had touched anything.
-//
-// Now: read whatever is currently on the row, and if it's in the
-// friendly-match (team1/team2) shape, merge the overlay's edits back
-// into that shape via mergeOverlaySetupIntoRaw instead of replacing it
-// wholesale. If the row is already in the overlay's own shape (or
-// doesn't exist yet), write matchSetup through as-is — nothing to
-// preserve in that case.
-//
-// This still always writes the real overlay teamA/teamB VIEW into the
-// in-memory object the admin page holds (that part is unchanged and
-// lives in normalizeMatchSetup on read) — this function only changes
-// what actually gets persisted to Postgres.
+// ── saveMatchSetup — reads whatever is currently on the row, and if
+// it's in the friendly-match (team1/team2) shape, merges the overlay's
+// edits back into that shape via mergeOverlaySetupIntoRaw instead of
+// replacing it wholesale. Prevents a blind overwrite from destroying
+// Match Editor data (squads, officials, rosterLocked, etc).
 export async function saveMatchSetup(
   auctionId: string,
   matchSetup: MatchSetup,
@@ -561,9 +568,6 @@ export async function saveMatchSetup(
     .maybeSingle();
 
   if (selectErr) {
-    // Log and fall through with no merge base rather than aborting the
-    // whole save — better to write matchSetup as-is than to drop the
-    // user's edit entirely because of a transient read failure.
     logDbError("saveMatchSetup select (pre-merge)", selectErr);
   }
 
@@ -573,10 +577,6 @@ export async function saveMatchSetup(
     ? mergeOverlaySetupIntoRaw(rawExisting, matchSetup)
     : matchSetup;
 
-  // upsert on the unique auction_id column recreates the row if it's
-  // somehow missing instead of no-op'ing, same reasoning as before:
-  // a plain .update() against a missing row succeeds with 0 rows
-  // affected and NO error, which would make saves silently vanish.
   const { error } = await supabase
     .from("matches")
     .upsert(

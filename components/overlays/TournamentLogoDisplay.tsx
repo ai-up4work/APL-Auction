@@ -3,50 +3,68 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-// Same fictional tournament identity used across the whole card family.
-const TOURNAMENT = {
-  name: "MOON KNIGHT CUP",
-  edition: "SEASON 7 · T20",
-  logo: "/valiant-league-logo.png",
-};
-
 /**
  * TournamentLogoDisplay — top-left readout showing the tournament crest and
- * name together, side by side, as one symmetric unit. No flip animation, no
- * "Tournament" eyebrow label — just a bigger logo and the wordmark sitting
- * on the same vertical center, docked permanently top-left over the footage.
+ * name together, side by side, as one symmetric unit.
  *
- * Position is hard-pinned top-left and not exposed as a prop, same
- * reasoning as the other overlays — this always lives in the same spot.
+ * FIXED: previously defaulted name/edition/logo to a hardcoded fictional
+ * tournament ("MOON KNIGHT CUP" / "valiant-league-logo.png") whenever the
+ * caller passed undefined — which meant a real match with no logo set
+ * silently displayed an unrelated brand's crest as if it were correct,
+ * indistinguishable from genuine data. There is no meaningful default for
+ * "which tournament is this" — every value now comes from the caller
+ * (ultimately: the `tournaments` table for a tournament match, or the
+ * match's own matchSetup for a standalone match). If `name` isn't
+ * provided, nothing renders. If `logo` isn't provided, an explicit "no
+ * logo" placeholder renders instead of silently substituting a fake one.
+ *
+ * Position is hard-pinned top-left and not exposed as a prop — this
+ * always lives in the same spot.
  */
 export default function TournamentLogoDisplay({
-  name = TOURNAMENT.name,
-  edition = TOURNAMENT.edition,
-  logo = TOURNAMENT.logo,
+  name,
+  edition,
+  logo,
+}: {
+  name?: string;
+  edition?: string;
+  logo?: string;
 }) {
   const [mounted, setMounted] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => setMounted(true), []);
+  // Reset the failed-image flag whenever the logo URL itself changes,
+  // so a fresh (working) URL isn't stuck showing the placeholder from
+  // a previous broken one.
+  useEffect(() => setImgFailed(false), [logo]);
 
-  if (!mounted) return null;
+  if (!mounted || !name) return null;
+
+  const showPhoto = !!logo && !imgFailed;
 
   return createPortal(
     <div
       className="tld-wrap fixed z-[90] flex items-center gap-3 sm:gap-4 shrink-0 pointer-events-none"
       style={{ top: "24px", left: "16px" }}
     >
-      {/* Logo — bare crest, no medallion ring, just sized up and given a
-          drop-shadow for contrast against the footage, same treatment as
-          the other unboxed overlays (WeatherCard, LiveScoreBar ticker). */}
-      <img
-        src={logo}
-        alt={name}
-        className="tld-logo h-14 w-14 sm:h-16 sm:w-16 object-contain shrink-0"
-        style={{ filter: "drop-shadow(0 3px 10px rgba(0,0,0,0.8)) drop-shadow(0 0 12px rgba(201,151,31,0.35))" }}
-      />
+      {showPhoto ? (
+        <img
+          src={logo}
+          alt={name}
+          onError={() => setImgFailed(true)}
+          className="tld-logo h-14 w-14 sm:h-16 sm:w-16 object-contain shrink-0"
+          style={{ filter: "drop-shadow(0 3px 10px rgba(0,0,0,0.8)) drop-shadow(0 0 12px rgba(201,151,31,0.35))" }}
+        />
+      ) : (
+        <div
+          className="tld-logo h-14 w-14 sm:h-16 sm:w-16 shrink-0 rounded-full bg-white/5 border border-white/15 flex items-center justify-center"
+          style={{ filter: "drop-shadow(0 3px 10px rgba(0,0,0,0.6))" }}
+        >
+          <span className="text-white/40 text-[9px] font-bold uppercase tracking-wide">No Logo</span>
+        </div>
+      )}
 
-      {/* Name — vertically centered against the logo so the two read as
-          one symmetric lockup rather than a stacked label. */}
       <div className="tld-text flex flex-col items-start justify-center leading-tight">
         <p
           className="font-heading font-black text-lg sm:text-xl uppercase tracking-wide leading-tight"
@@ -54,12 +72,14 @@ export default function TournamentLogoDisplay({
         >
           {name}
         </p>
-        <p
-          className="text-[9px] sm:text-[9.5px] font-bold uppercase tracking-[0.2em] mt-1"
-          style={{ color: "var(--color-theme-orange, #C9971F)", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.85))" }}
-        >
-          {edition}
-        </p>
+        {edition && (
+          <p
+            className="text-[9px] sm:text-[9.5px] font-bold uppercase tracking-[0.2em] mt-1"
+            style={{ color: "var(--color-theme-orange, #C9971F)", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.85))" }}
+          >
+            {edition}
+          </p>
+        )}
       </div>
 
       <style jsx>{`
