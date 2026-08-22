@@ -182,6 +182,30 @@
 //        the only case where teamA.id/teamB.id are genuine teams.id
 //        values — for standalone matches this fallback correctly
 //        produces nothing).
+//
+// INNINGS → PHYSICAL TEAM MAPPING (fixed):
+//   `innings1`/`innings2Final` are aggregated purely from
+//   `balls.innings_number` (1 or 2) — that table has NO team identity
+//   at all, only player names. Every downstream consumer (this file's
+//   own MatchDetail shape, and match-detail-client.tsx) previously
+//   assumed "innings1 belongs to teamA, innings2 belongs to teamB",
+//   which only holds when teamA happens to win the toss and bat first.
+//   The moment teamB wins the toss and bats first, that assumption
+//   silently mislabels the whole scorecard — and, worse, flips the
+//   computed match winner, which is exactly why the match-detail page
+//   and the overlay admin console (OverlayAdminConsole's
+//   `inningsOneBattingTeam`, correctly derived from
+//   matchSetup.tossWinner/tossDecision) could disagree about who won
+//   the same match.
+//
+//   `match_setup.tossWinner` (the winning team's literal display NAME)
+//   and `match_setup.tossDecision` ("bat"/"bowl") were already being
+//   written into the DB by the overlay console (see
+//   lib/matchSetupAdapter.ts's overlaySetupToDbPatch) — this file just
+//   never read them. MatchDetail now exposes the resolved
+//   `inningsOneBattingTeam: "teamA" | "teamB"`, computed the same way
+//   the admin console computes it, so both surfaces derive batting
+//   order identically and can never disagree again.
 
 import { supabase } from "@/lib/supabase"
 import { slugify } from "@/data/site-data"
@@ -340,6 +364,29 @@ export interface MatchDetail {
    * only for older rows written before this field existed.
    */
   currentInnings: 1 | 2
+  /**
+   * Which physical team (teamA or teamB) batted FIRST — i.e. which one
+   * `innings1` actually belongs to.
+   *
+   * `innings1`/`innings2Final` are aggregated purely from
+   * `balls.innings_number` (1 or 2), which carries no team identity at
+   * all — `balls` only ever records player names, never which side was
+   * batting. Every consumer previously assumed "innings1 = teamA,
+   * innings2 = teamB", which only holds when teamA happens to win the
+   * toss and bat first. See the INNINGS → PHYSICAL TEAM MAPPING note at
+   * the top of this file for the full story — this is what was causing
+   * the match-detail page and the overlay admin console to compute two
+   * different winners for the same match.
+   *
+   * Resolved from the same `tossWinner` (literal team name) +
+   * `tossDecision` ("bat"/"bowl") fields the overlay console writes
+   * into `match_setup` (lib/matchSetupAdapter.ts), using the identical
+   * logic OverlayAdminConsole uses for its own `inningsOneBattingTeam`.
+   * Defaults to "teamA" only when toss info is missing/unrecognized
+   * (older rows written before the toss was captured this way) — same
+   * fallback the admin console itself falls back to for an unset toss.
+   */
+  inningsOneBattingTeam: "teamA" | "teamB"
   /** From match_state.live_state, when the engine populates it. */
   winProb?: { a: number; b: number }
   /** Match's own banner if set, else the parent tournament's banner/logo
@@ -417,6 +464,19 @@ interface MatchSetup {
   currentInnings?: 1 | 2
   /** Set by the Match Editor's banner upload field — see toRawSetup. */
   tournamentLogoUrl?: string
+  /**
+   * Structured toss fields written by the overlay admin console (see
+   * lib/matchSetupAdapter.ts's overlaySetupToDbPatch): `tossWinner` is
+   * the winning team's literal display NAME (matches team1.name or
+   * team2.name exactly), `tossDecision` is "bat" | "bowl". Used to
+   * resolve MatchDetail.inningsOneBattingTeam — see that field's doc
+   * comment and the INNINGS → PHYSICAL TEAM MAPPING note at the top of
+   * this file. Distinct from the plain `toss` sentence above, which is
+   * just a display string and can't be reliably parsed back into a
+   * team + decision.
+   */
+  tossWinner?: string | null
+  tossDecision?: string | null
 }
 
 interface BallRow {
@@ -628,6 +688,47 @@ function parseMatchSetup(raw: unknown): MatchSetup | null {
   const setup = raw as Partial<MatchSetup>
   if (!isMatchSetupTeam(setup.team1) || !isMatchSetupTeam(setup.team2)) return null
   return setup as MatchSetup
+}
+
+/**
+ * Resolves which physical team ("teamA" or "teamB") actually batted
+ * first, from the structured `tossWinner`/`tossDecision` fields on
+ * `match_setup` — the same fields OverlayAdminConsole writes via
+ * lib/matchSetupAdapter.ts, and the same logic it uses internally for
+ * its own `inningsOneBattingTeam`. See the INNINGS → PHYSICAL TEAM
+ * MAPPING note at the top of this file, and the doc comment on
+ * MatchDetail.inningsOneBattingTeam.
+ *
+ * `tossWinner` is compared against `setup.team1.name`/`setup.team2.name`
+ * specifically (not the resolved teamA/teamB refs, which may carry a
+ * different display name for bracket-linked matches, e.g. straight from
+ * the `teams` table) — tossWinner was written by the same overlay
+ * console session that also wrote team1.name/team2.name into this exact
+ * match_setup blob, so comparing within that same blob is the only
+ * self-consistent comparison available.
+ */
+function resolveInningsOneBattingTeam(setup: MatchSetup): "teamA" | "teamB" {
+  const team1Name = setup.team1.name
+  const team2Name = setup.team2.name
+  const tossWinnerName = setup.tossWinner ?? ""
+  const tossDecision = setup.tossDecision ?? ""
+
+  if (tossWinnerName && tossDecision) {
+    if (tossWinnerName === team1Name) {
+      return tossDecision === "bat" ? "teamA" : "teamB"
+    }
+    if (tossWinnerName === team2Name) {
+      return tossDecision === "bat" ? "teamB" : "teamA"
+    }
+    // tossWinner doesn't match either team's name exactly (e.g. a team
+    // renamed after the toss was recorded) — fall through to the
+    // default below rather than guessing.
+  }
+
+  // No toss info recorded, or it didn't match — default to "teamA",
+  // same fallback OverlayAdminConsole's own inningsOneBattingTeam uses
+  // when matchSetup.tossWinner is unset.
+  return "teamA"
 }
 
 /**
@@ -1013,6 +1114,13 @@ export async function getMatchDetailById(
     }
   }
 
+  // ── which physical team batted first — see INNINGS → PHYSICAL TEAM
+  //    MAPPING note at the top of this file and MatchDetail.inningsOneBattingTeam.
+  //    Resolved from setup.team1/team2.name (NOT the possibly-bracket-
+  //    overridden teamA/teamB above), since tossWinner was written
+  //    against those exact match_setup names in the same blob. ──
+  const inningsOneBattingTeam = resolveInningsOneBattingTeam(setup)
+
   // ── ball-by-ball for both innings ──
   const { data: ballRows, error: ballErr } = await supabase
     .from("balls")
@@ -1149,6 +1257,7 @@ export async function getMatchDetailById(
     isLive,
     hasBallData,
     currentInnings,
+    inningsOneBattingTeam,
     winProb,
     tournamentLogoUrl,
   }
@@ -1567,7 +1676,7 @@ export async function getTournamentStats(tournamentId: string): Promise<Tourname
   const bowlingStatsByMatch: Record<string, BowlingStatRow[]> = {}
   for (const [matchId, agg] of perMatchRaw) {
     battingStatsByMatch[matchId] = agg.battingStats.map((r) => ({ ...r, img: imgByName.get(r.player) }))
-    bowlingStatsByMatch[matchId] = agg.bowlingStats.map((r) => ({ ...r, img: imgByName.get(r.player) }))
+    bowlingStatsByMatch[matchId] = agg.bowlingStats.map((r): BowlingStatRow => ({ ...r, img: imgByName.get(r.player) }))
   }
 
   return { battingStats, bowlingStats, matches, battingStatsByMatch, bowlingStatsByMatch }

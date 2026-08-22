@@ -1004,12 +1004,36 @@ export function PenaltyDialog({
 // the full height/width of its parent (flex-1, w-full, h-full) the
 // same way the live score card above it spans the whole panel.
 //
+// UPDATED — winner logo/icon badge enlarged ~60% across the board
+// (clamp min/preferred/max all scaled up together), with an extra bump
+// to the mobile floor specifically (since `cqi` barely contributes on
+// narrow screens, the clamp minimum is what actually governs size
+// there) so it reads as the hero element of the graphic on every
+// device. Also added a soft glow ring and gradient border behind it
+// for a more "broadcast trophy" feel instead of a flat bordered circle.
+//
 // winningTeamName is now expected to already be resolved by the caller
 // (from the same winningTeamKey used for the logo/color) rather than
 // being read straight off liveState.matchResult?.winningTeamName —
 // that field is frequently empty/inconsistent (see resolveWinningTeamKey
 // comments above), which is why the win banner used to show a bare
 // "Match Complete" instead of "<Team> Win" even when the logo appeared.
+// MatchOverScreen — container-query driven (containerType: "inline-size" on
+// the outer wrapper) so the logo, heading, badges and buttons scale fluidly
+// with whatever width the panel actually has. Sized to match the original
+// admin console proportions (larger hero logo/heading than the read-only
+// match-detail page's version, since this panel is the primary focal point
+// of the whole scoring console once a match ends) — with two additions
+// borrowed from the match-detail page's MatchCompleteBanner: the top
+// accent hairline for a "framed" look, and a border-t divider above the
+// final-score line instead of it floating on its own.
+//
+// winningTeamName is expected to already be resolved by the caller (from
+// the same winningTeamKey used for the logo/color) rather than being read
+// straight off liveState.matchResult?.winningTeamName — that field is
+// frequently empty/inconsistent (see resolveWinningTeamKey comments above),
+// which is why the win banner used to show a bare "Match Complete" instead
+// of "<Team> Win" even when the logo appeared.
 export function MatchOverScreen({
   winningTeamName,
   winningTeamLogo,
@@ -1036,6 +1060,7 @@ export function MatchOverScreen({
   const isTie = method === "tie";
   const accent = isTie ? "#c9971f" : winningTeamColor || "#c9971f";
   const methodLabel = method === "wickets" ? "Won by wickets" : method === "runs" ? "Won by runs" : undefined;
+  const resultPill = margin || methodLabel ? [margin, methodLabel].filter(Boolean).join(" · ") : undefined;
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => {
     setLogoFailed(false);
@@ -1054,6 +1079,13 @@ export function MatchOverScreen({
         } as CSSProperties
       }
     >
+      {/* Top accent hairline — matches the "framed" look of the
+          match-detail page's MatchCompleteBanner. */}
+      <span
+        className="absolute inset-x-0 top-0 h-px"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}80, transparent)` }}
+      />
+
       <span
         className="relative z-10 flex items-center font-black uppercase font-mono-geist"
         style={{
@@ -1061,37 +1093,65 @@ export function MatchOverScreen({
           fontSize: "clamp(9px, 2cqi, 13px)",
           letterSpacing: "0.2em",
           color: accent,
-          marginBottom: "clamp(12px, 3cqi, 24px)",
+          marginBottom: "clamp(14px, 3.4cqi, 26px)",
         }}
       >
         <Icon name="emoji_events" style={{ fontSize: "clamp(12px, 2.4cqi, 18px)" }} />
         Match Complete
       </span>
 
+      {/* Soft ambient glow sitting behind the logo — purely decorative,
+          gives the badge some depth instead of sitting flat on the
+          background gradient. */}
       <div
-        className="relative z-10 rounded-full flex items-center justify-center bg-black/60 overflow-hidden"
+        className="relative flex items-center justify-center"
         style={{
-          width: "clamp(96px, 22cqi, 220px)",
-          height: "clamp(96px, 22cqi, 220px)",
-          border: "3px solid",
-          borderColor: `${accent}80`,
-          marginBottom: "clamp(12px, 3cqi, 24px)",
+          marginBottom: "clamp(14px, 3.4cqi, 26px)",
         }}
       >
-        {winningTeamLogo && !logoFailed ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={winningTeamLogo}
-            alt=""
-            className="w-full h-full object-contain"
-            style={{ padding: "clamp(4px, 1.5cqi, 12px)" }}
-            onError={() => setLogoFailed(true)}
-          />
-        ) : (
-          <span className="flex items-center justify-center" style={{ color: accent, fontSize: "clamp(28px, 7cqi, 48px)" }}>
-            {isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: "clamp(28px, 6cqi, 40px)" }} />}
-          </span>
-        )}
+        <div
+          className="absolute rounded-full pointer-events-none"
+          style={{
+            width: "clamp(240px, 42cqi, 420px)",
+            height: "clamp(240px, 42cqi, 420px)",
+            background: `radial-gradient(circle, ${accent}35 0%, ${accent}10 45%, transparent 72%)`,
+            filter: "blur(2px)",
+          }}
+        />
+
+        {/* Gradient ring wrapper — the hero element of the graphic,
+            sized larger than the read-only match page's version since
+            this is the focal point of the whole admin scoring panel. */}
+        <div
+          className="relative rounded-full"
+          style={{
+            width: "clamp(196px, 35cqi, 352px)",
+            height: "clamp(196px, 35cqi, 352px)",
+            padding: "clamp(3px, 0.7cqi, 5px)",
+            background: `linear-gradient(135deg, ${accent}, ${accent}55 45%, ${accent}CC)`,
+            boxShadow: `0 0 0 1px rgba(255,255,255,0.06), 0 clamp(8px,2cqi,20px) clamp(20px,5cqi,48px) ${accent}30`,
+          }}
+        >
+          <div
+            className="w-full h-full rounded-full flex items-center justify-center bg-black/70 overflow-hidden"
+            style={{ border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            {winningTeamLogo && !logoFailed ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={winningTeamLogo}
+                alt=""
+                className="w-full h-full object-contain"
+                style={{ padding: "clamp(8px, 2.2cqi, 18px)" }}
+                onError={() => setLogoFailed(true)}
+              />
+            ) : (
+              <span className="flex items-center justify-center" style={{ color: accent, fontSize: "clamp(56px, 11cqi, 77px)" }}>
+                {isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: "clamp(56px, 10cqi, 64px)" }} />}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       <h2
@@ -1101,7 +1161,7 @@ export function MatchOverScreen({
         {isTie ? "It's a Tie" : winningTeamName ? `${winningTeamName} Win` : "Match Complete"}
       </h2>
 
-      {!isTie && (margin || methodLabel) && (
+      {!isTie && resultPill && (
         <p
           className="relative z-10 font-mono-geist font-bold uppercase tracking-wide inline-block"
           style={{
@@ -1114,19 +1174,19 @@ export function MatchOverScreen({
             marginTop: "clamp(10px, 2cqi, 16px)",
           }}
         >
-          {margin || methodLabel}
-          {margin && methodLabel ? ` · ${methodLabel}` : ""}
+          {resultPill}
         </p>
       )}
 
       {(finalScoreLabel || targetLabel) && (
         <div
-          className="relative z-10 flex items-center flex-wrap justify-center font-mono-geist text-on-surface-variant uppercase"
+          className="relative z-10 flex items-center flex-wrap justify-center font-mono-geist text-on-surface-variant uppercase border-t border-white/10"
           style={{
             gap: "clamp(6px, 1.2cqi, 10px)",
             fontSize: "clamp(9px, 1.6cqi, 12px)",
             letterSpacing: "0.12em",
-            marginTop: "clamp(8px, 1.6cqi, 12px)",
+            marginTop: "clamp(16px, 3.2cqi, 26px)",
+            paddingTop: "clamp(12px, 2.4cqi, 18px)",
           }}
         >
           {finalScoreLabel && <span>{finalScoreLabel}</span>}

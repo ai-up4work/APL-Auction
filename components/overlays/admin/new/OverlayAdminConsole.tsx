@@ -66,7 +66,11 @@ import {
   ROSTER_TEAM_B_FALLBACK,
   matchesTeamLabel,
 } from "./OverlayAdminConsoleParts";
-import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays/admin/new/Scoringsection";
+import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays/admin/new/ScoringSection";
+// NEW — used to independently cross-check match_team_stats.is_winner
+// against the live score before trusting it as the winner override. See
+// the dbWinnerTeamKey effect below for the full rationale.
+import { resolveWinningTeamKeyFromScore } from "@/components/overlays/admin/new/ScoringSectionParts";
 
 let idCtr = 0;
 
@@ -383,7 +387,8 @@ export default function OverlayAdminConsole({
   // liveState.matchResult.winningTeamName against either a shortcode
   // ("RAV") or a full name ("Ratmalana Aviators"), as a fallback for
   // matches with no match_team_stats row (see dbWinnerTeamKey below,
-  // which is now the primary source of truth).
+  // which is now cross-checked against the score rather than blindly
+  // trusted — see that effect's comment for why).
   const legacyMatchSetup = useMemo(
     () => ({
       teamA: matchSetup.teamA.shortCode || matchSetup.teamA.name || "Team A",
@@ -450,23 +455,54 @@ export default function OverlayAdminConsole({
     liveStateRef.current = liveState;
   }, [liveState]);
 
-  // ═══════════ NEW — winning team, fetched directly from the DB ═══════════
+  const inningsOneBattingTeam: "teamA" | "teamB" = useMemo(() => {
+    if (matchSetup.tossWinner === "A") return matchSetup.tossDecision === "bat" ? "teamA" : "teamB";
+    if (matchSetup.tossWinner === "B") return matchSetup.tossDecision === "bat" ? "teamB" : "teamA";
+    return "teamA";
+  }, [matchSetup.tossWinner, matchSetup.tossDecision]);
+
+  const battingTeamKey: "teamA" | "teamB" =
+    (liveState.inningsNumber ?? 1) === 1
+      ? inningsOneBattingTeam
+      : inningsOneBattingTeam === "teamA"
+      ? "teamB"
+      : "teamA";
+  const bowlingTeamKey: "teamA" | "teamB" = battingTeamKey === "teamA" ? "teamB" : "teamA";
+
+  const maxOvers = matchSetup.format === "T20" ? 20 : matchSetup.format === "ODI" ? 50 : undefined;
+
+  // ═══════════ NEW — winning team, fetched from the DB, cross-validated against the score ═══════════
   // The winning team's logo on the match-complete screen used to be
   // resolved entirely from liveState.matchResult.winningTeamName, which
-  // can arrive empty or missing depending on how the match was
-  // completed (live engine vs. an imported/simulated match record).
-  // Rather than keep patching that string-matching, this fetches the
-  // actual recorded winner straight from match_team_stats.is_winner —
-  // a column that exists specifically to answer "which team won this
-  // match" — and resolves it to "teamA"/"teamB" by matching team_id
-  // against matchSetup.teamA.teamId / matchSetup.teamB.teamId (both
-  // already populated whenever teams are backed by real `teams` rows).
+  // can arrive empty/missing depending on how the match was completed
+  // (live engine vs. an imported/simulated match record). match_team_stats
+  // .is_winner exists specifically to answer "which team won this match"
+  // and is normally the best source — BUT it's an independent write path
+  // (set by whatever process finalizes stats) that can disagree with the
+  // live scoring state if, e.g., its team_id got attached to the wrong
+  // physical team during import/simulation. That's exactly what caused
+  // one team to be shown as the winner in this console while the
+  // match-detail page (which derives the winner purely from innings
+  // totals + toss, never touching match_team_stats) correctly showed the
+  // other — same underlying score, two different "winner" answers.
   //
-  // Runs whenever the match is marked complete (and again if matchId
-  // changes). ScoringSection still has its own local fallbacks
-  // (score-derived / method-derived / name-matching) for the rare case
-  // where no match_team_stats row exists yet — this is simply the
-  // preferred, authoritative source when it's available.
+  // Fix: before trusting the DB value, independently derive the winner
+  // from the live score/target using the exact same logic ScoringSection's
+  // local fallback uses (resolveWinningTeamKeyFromScore, which is
+  // toss/innings-order aware via battingTeamKey/bowlingTeamKey — the same
+  // values that already agree with match-detail-client's determineWinner()).
+  // If the DB value and the score-derived value disagree, the score-derived
+  // value wins and a warning is logged — the live score is ground truth we
+  // can verify from this page's own state; a mismatched foreign key in
+  // match_team_stats is exactly the kind of bad data that shouldn't
+  // silently override it.
+  //
+  // If the score can't yet determine a winner (e.g. match was marked
+  // complete via a manual "Match Won" moment with no target set, or an
+  // abandoned/DLS match), the DB value is used as-is with no cross-check
+  // possible, and ScoringSection's remaining local fallbacks (method-
+  // derived, then name-matching) only get a turn if there's no DB value
+  // either.
   const [dbWinnerTeamKey, setDbWinnerTeamKey] = useState<"teamA" | "teamB" | null>(null);
 
   useEffect(() => {
@@ -487,32 +523,65 @@ export default function OverlayAdminConsole({
         return;
       }
       const winnerRow = (data ?? []).find((r) => r.is_winner === true);
-      if (!winnerRow) {
-        setDbWinnerTeamKey(null);
+
+      let dbKey: "teamA" | "teamB" | null = null;
+      if (winnerRow?.team_id) {
+        if (winnerRow.team_id === matchSetup.teamA.teamId) dbKey = "teamA";
+        else if (winnerRow.team_id === matchSetup.teamB.teamId) dbKey = "teamB";
+      }
+
+      // Independently derive the winner from the live score/target, using
+      // the same toss-aware battingTeamKey/bowlingTeamKey this console
+      // already computes for scoring purposes.
+      const isSecondInnings = (liveState.inningsNumber ?? 1) === 2;
+      const scoreKey = resolveWinningTeamKeyFromScore(
+        liveState,
+        isSecondInnings,
+        maxOvers,
+        battingTeamKey,
+        bowlingTeamKey
+      );
+
+      if (scoreKey && dbKey && scoreKey !== dbKey) {
+        console.warn(
+          "[OverlayAdminConsole] match_team_stats winner disagrees with live score — trusting score. " +
+            "This usually means match_team_stats.team_id is mismatched against matchSetup.teamA/teamB.teamId " +
+            "for this match; that row should be corrected.",
+          {
+            matchId,
+            winnerRow,
+            dbKeyResolved: dbKey,
+            scoreKeyResolved: scoreKey,
+            teamAId: matchSetup.teamA.teamId,
+            teamBId: matchSetup.teamB.teamId,
+          }
+        );
+        setDbWinnerTeamKey(scoreKey);
         return;
       }
-      if (winnerRow.team_id && winnerRow.team_id === matchSetup.teamA.teamId) {
-        setDbWinnerTeamKey("teamA");
-      } else if (winnerRow.team_id && winnerRow.team_id === matchSetup.teamB.teamId) {
-        setDbWinnerTeamKey("teamB");
-      } else {
-        // team_id didn't match either side's teamId — leave null so
-        // ScoringSection's local fallbacks get a chance instead of
-        // silently guessing wrong.
-        if (process.env.NODE_ENV !== "production") {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[OverlayAdminConsole] match_team_stats winner team_id didn't match teamA/teamB.teamId:",
-            { winnerRow, teamAId: matchSetup.teamA.teamId, teamBId: matchSetup.teamB.teamId }
-          );
-        }
-        setDbWinnerTeamKey(null);
+
+      if (dbKey) {
+        setDbWinnerTeamKey(dbKey);
+        return;
       }
+
+      if (winnerRow && !dbKey && process.env.NODE_ENV !== "production") {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[OverlayAdminConsole] match_team_stats winner team_id didn't match teamA/teamB.teamId:",
+          { winnerRow, teamAId: matchSetup.teamA.teamId, teamBId: matchSetup.teamB.teamId }
+        );
+      }
+
+      // No usable DB winner — fall back to the score-derived key if we
+      // have one, otherwise let ScoringSection's own local fallback chain
+      // (method-derived, then name-matching) take over.
+      setDbWinnerTeamKey(scoreKey);
     })();
     return () => {
       cancelled = true;
     };
-  }, [matchId, liveState.matchComplete, matchSetup.teamA.teamId, matchSetup.teamB.teamId]);
+  }, [matchId, liveState, matchSetup.teamA.teamId, matchSetup.teamB.teamId, battingTeamKey, bowlingTeamKey, maxOvers]);
   // ═══════════ END winning team fetch ═══════════
 
   // ═══════════ NEW — Realtime sync from other writers ═══════════
@@ -630,20 +699,6 @@ export default function OverlayAdminConsole({
     };
   }, [matchId]);
 
-  const inningsOneBattingTeam: "teamA" | "teamB" = useMemo(() => {
-    if (matchSetup.tossWinner === "A") return matchSetup.tossDecision === "bat" ? "teamA" : "teamB";
-    if (matchSetup.tossWinner === "B") return matchSetup.tossDecision === "bat" ? "teamB" : "teamA";
-    return "teamA";
-  }, [matchSetup.tossWinner, matchSetup.tossDecision]);
-
-  const battingTeamKey: "teamA" | "teamB" =
-    (liveState.inningsNumber ?? 1) === 1
-      ? inningsOneBattingTeam
-      : inningsOneBattingTeam === "teamA"
-      ? "teamB"
-      : "teamA";
-  const bowlingTeamKey: "teamA" | "teamB" = battingTeamKey === "teamA" ? "teamB" : "teamA";
-
   const battingSquad: SquadPlayer[] =
     matchSetup[battingTeamKey].squadPlayers?.length
       ? matchSetup[battingTeamKey].squadPlayers
@@ -656,8 +711,6 @@ export default function OverlayAdminConsole({
       : bowlingTeamKey === "teamA"
       ? ROSTER_TEAM_A_FALLBACK
       : ROSTER_TEAM_B_FALLBACK;
-
-  const maxOvers = matchSetup.format === "T20" ? 20 : matchSetup.format === "ODI" ? 50 : undefined;
 
   useIsMobile();
 

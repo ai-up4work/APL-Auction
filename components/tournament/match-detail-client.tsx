@@ -7,7 +7,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, MapPin, Radio, Shield, Lock, Clock3, RefreshCw, Users, CircleDot } from "lucide-react"
+import { Calendar, MapPin, Radio, Shield, Lock, Clock3, RefreshCw, Users, CircleDot, Trophy } from "lucide-react"
 import { useScrollTop } from "@/hooks/use-scroll-top"
 import { useLiveMatch } from "@/hooks/use-live-match"
 import { useBallCommentary } from "@/hooks/use-ball-commentary"
@@ -95,11 +95,27 @@ function SetupField({
   )
 }
 
+// FIXED — previously assumed "innings1 always belongs to teamA, innings2
+// always belongs to teamB", which only holds when teamA wins the toss
+// and bats first. `innings1`/`innings2Final` are keyed purely by which
+// innings was bowled first, not by team identity — see the INNINGS →
+// PHYSICAL TEAM MAPPING note in data/match-data.ts and the doc comment
+// on MatchDetail.inningsOneBattingTeam. This is exactly what was
+// causing this page and the overlay admin console (which always
+// derived batting order from the toss) to compute two different
+// winners for the same match. Now resolves the physical team ("a" =
+// teamA, "b" = teamB) via match.inningsOneBattingTeam instead of
+// assuming innings order === team order.
 function determineWinner(match: MatchDetail): "a" | "b" | "tie" {
-  const totalA = match.innings1.total
-  const totalB = match.innings2Final.total
-  if (totalA === totalB) return "tie"
-  return totalB > totalA ? "b" : "a"
+  const totalFirst = match.innings1.total
+  const totalSecond = match.innings2Final.total
+  if (totalFirst === totalSecond) return "tie"
+
+  const secondInningsWon = totalSecond > totalFirst
+  const firstInningsIsTeamA = match.inningsOneBattingTeam === "teamA"
+
+  if (secondInningsWon) return firstInningsIsTeamA ? "b" : "a"
+  return firstInningsIsTeamA ? "a" : "b"
 }
 
 function currentPartnership(
@@ -217,6 +233,130 @@ function WinProbabilityBar({
         </span>
       </div>
       {tied && <p className="text-gray-500 text-[10.5px] text-center mt-2 font-cinzel">Match Tied</p>}
+    </div>
+  )
+}
+
+// ── Match-complete hero banner — shown at the top of the match card once
+// status === "completed", REPLACING the innings score grid, CRR/RRR row,
+// and the WinProbabilityBar entirely (rather than sitting above them) —
+// once a match is done, "DEL 171/3" / "RAV 172/2" / "CRR 8.82" / a
+// 0%-100% win-probability split are all redundant with (or actively
+// confusing next to) a clear winner banner, so none of that renders for
+// completed matches anymore. The compact final-score line inside this
+// banner is the only score summary shown. Surfaces the winning team's
+// logo in a glowing gradient ring (same broadcast-overlay language used
+// on the admin scoring console's MatchOverScreen), the winner headline,
+// and the result note as a pill badge.
+function MatchCompleteBanner({
+  match,
+  winner,
+  teamAColor,
+  teamBColor,
+}: {
+  match: MatchDetail
+  winner: "a" | "b" | "tie" | null
+  teamAColor: string
+  teamBColor: string
+}) {
+  if (!winner) return null
+  const isTie = winner === "tie"
+  const winningTeam = winner === "a" ? match.teamA : winner === "b" ? match.teamB : null
+  const accent = isTie ? "#F5A623" : winner === "a" ? teamAColor : teamBColor
+
+  return (
+    <div
+      className="relative overflow-hidden rounded-2xl p-6 sm:p-8 text-center"
+      style={
+        {
+          containerType: "inline-size",
+          background: `radial-gradient(120% 100% at 50% 0%, ${accent}22 0%, ${accent}08 45%, transparent 70%)`,
+        } as React.CSSProperties
+      }
+    >
+      <span
+        className="absolute inset-x-0 top-0 h-px"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}80, transparent)` }}
+      />
+
+      <div className="flex items-center justify-center gap-2 mb-4 sm:mb-5">
+        <Trophy className="h-3.5 w-3.5" style={{ color: accent }} />
+        <span
+          className="text-[10px] uppercase tracking-[0.3em] font-cinzel font-bold"
+          style={{ color: accent }}
+        >
+          Match Complete
+        </span>
+      </div>
+
+      {/* Winner badge — logo in a gradient ring with a soft glow behind
+          it, matching the broadcast-overlay treatment used elsewhere
+          (see MatchOverScreen on the admin scoring console). */}
+      <div
+        className="relative mx-auto mb-4 sm:mb-5 flex items-center justify-center"
+        style={{ width: "clamp(96px, 24cqi, 132px)", height: "clamp(96px, 24cqi, 132px)" }}
+      >
+        <div
+          className="absolute rounded-full pointer-events-none"
+          style={{
+            width: "clamp(150px, 38cqi, 210px)",
+            height: "clamp(150px, 38cqi, 210px)",
+            background: `radial-gradient(circle, ${accent}35 0%, ${accent}10 45%, transparent 72%)`,
+            filter: "blur(2px)",
+          }}
+        />
+        <div
+          className="relative h-full w-full rounded-full"
+          style={{
+            padding: "clamp(2px, 0.6cqi, 4px)",
+            background: `linear-gradient(135deg, ${accent}, ${accent}55 45%, ${accent}CC)`,
+            boxShadow: `0 0 0 1px rgba(255,255,255,0.06), 0 8px 32px ${accent}30`,
+          }}
+        >
+          <div className="h-full w-full rounded-full bg-black/80 border border-white/10 flex items-center justify-center overflow-hidden">
+            {winningTeam?.logo ? (
+              <div className="relative h-full w-full">
+                <Image
+                  src={winningTeam.logo}
+                  alt={`${winningTeam.name} logo`}
+                  fill
+                  className="object-contain p-2.5"
+                  sizes="132px"
+                />
+              </div>
+            ) : isTie ? (
+              <span style={{ fontSize: "clamp(28px, 7cqi, 40px)" }}>🤝</span>
+            ) : (
+              <Trophy style={{ color: accent, width: "clamp(32px, 8cqi, 44px)", height: "clamp(32px, 8cqi, 44px)" }} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <h3 className="font-cinzel font-bold text-white mb-1" style={{ fontSize: "clamp(18px, 4.4cqi, 26px)" }}>
+        {isTie ? "It's a Tie" : winningTeam ? `${winningTeam.name} Win` : "Match Complete"}
+      </h3>
+
+      {!isTie && match.resultNote && (
+        <p
+          className="inline-block text-xs font-bold font-cinzel uppercase tracking-wide rounded-full px-4 py-1.5 mt-1"
+          style={{ background: `${accent}1a`, border: `1px solid ${accent}4d`, color: accent }}
+        >
+          {match.resultNote}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-5 pt-4 border-t border-white/10 text-xs font-cinzel uppercase tracking-widest text-gray-400">
+        <span>
+          {match.teamA.short} {match.innings1.total}/{match.innings1.wkts}
+          <span className="opacity-60"> ({match.innings1.overs})</span>
+        </span>
+        <span className="opacity-30 hidden sm:inline">·</span>
+        <span>
+          {match.teamB.short} {match.innings2Final.total}/{match.innings2Final.wkts}
+          <span className="opacity-60"> ({match.innings2Final.overs})</span>
+        </span>
+      </div>
     </div>
   )
 }
@@ -361,6 +501,15 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
         : { a: 0, b: 100 }
     : match.winProb
 
+  // NEW — which physical team actually batted in innings1/innings2Final,
+  // resolved via match.inningsOneBattingTeam (see data/match-data.ts).
+  // Every place below that used to say "match.teamA" for the first
+  // innings and "match.teamB" for the second now goes through these
+  // instead, so the scoreboard labels always match whichever team
+  // genuinely batted in that innings — not a hardcoded assumption.
+  const firstInningsTeam = match.inningsOneBattingTeam === "teamB" ? match.teamB : match.teamA
+  const secondInningsTeam = match.inningsOneBattingTeam === "teamB" ? match.teamA : match.teamB
+
   const activeBattingRows = live ? (innings2Started ? match.innings2Partial.batting : match.innings1.batting) : []
   const activeBowlingRows = live ? (innings2Started ? match.innings2Partial.bowling : match.innings1.bowling) : []
   const partnership = live ? currentPartnership(activeBattingRows) : null
@@ -385,6 +534,14 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
       ),
     [match.teamA.color, match.teamB.color],
   )
+
+  // NEW — the outer match-summary card's border/glow now reflects the
+  // winning team's color once the match is completed, instead of the
+  // fixed gold/30 outline used for live/not-started matches. Falls back
+  // to the tie gold accent for a tied match. `winner` is now physical
+  // team-aware (see determineWinner fix above), so this always lights
+  // up the correct team's color.
+  const cardAccent = completed ? (winner === "tie" ? "#F5A623" : winner === "a" ? teamAColor : teamBColor) : null
 
   // ── Groq-generated commentary for the tab currently being viewed. ──
   // Innings + team direction mirror the same logic the Commentary/Overs
@@ -414,8 +571,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
     matchId: match.id,
     inningsNumber: innings,
     deliveries: commentaryDeliveries,
-    teamBatting: innings === 1 ? match.teamA.name : match.teamB.name,
-    teamBowling: innings === 1 ? match.teamB.name : match.teamA.name,
+    teamBatting: innings === 1 ? firstInningsTeam.name : secondInningsTeam.name,
+    teamBowling: innings === 1 ? secondInningsTeam.name : firstInningsTeam.name,
     target: match.target,
     scoreState: {
       total: innings === 1 ? match.innings1.total : runs,
@@ -543,7 +700,20 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
 
       <section className="px-4 relative z-10 -mt-24 md:-mt-24">
         <div className="container mx-auto max-w-3xl">
-          <div className="bg-black/80 backdrop-blur-xl border border-gold/30 rounded-lg p-6 mb-8 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
+          <div
+            className="bg-black/80 backdrop-blur-xl rounded-lg p-6 mb-8 border"
+            style={
+              cardAccent
+                ? {
+                    borderColor: `${cardAccent}55`,
+                    boxShadow: `0 10px 40px rgba(0,0,0,0.5), 0 0 0 1px ${cardAccent}20 inset`,
+                  }
+                : {
+                    borderColor: "rgba(245,166,35,0.3)",
+                    boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+                  }
+            }
+          >
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <div className="flex items-center gap-2">
                 {status === "live" && (
@@ -579,11 +749,23 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                   Scorecards, overs, and live stats will appear here once ball-by-ball data starts coming in.
                 </p>
               </div>
+            ) : completed ? (
+              // Completed matches show ONLY the banner — the innings
+              // score grid, CRR/RRR row, and WinProbabilityBar (which
+              // read like "DEL 171/3", "CRR 8.82", "DEL 0% / RAV 100%")
+              // are redundant once there's a clear winner and are no
+              // longer rendered here at all.
+              <MatchCompleteBanner
+                match={match}
+                winner={winner}
+                teamAColor={teamAColor}
+                teamBColor={teamBColor}
+              />
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   <div className="rounded-lg p-4 border border-gold/10 bg-white/[0.02] min-w-0">
-                    <span className="text-white font-bold font-cinzel">{match.teamA.short}</span>
+                    <span className="text-white font-bold font-cinzel">{firstInningsTeam.short}</span>
                     <p className="text-2xl font-bold text-white font-cinzel mt-1">
                       {match.innings1.total}/{match.innings1.wkts}
                       <span className="text-sm text-gray-400 font-normal ml-2">({match.innings1.overs} ov)</span>
@@ -596,7 +778,7 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                         : "border-gold/10 bg-white/[0.02]"
                     }`}
                   >
-                    <span className="text-white font-bold font-cinzel">{match.teamB.short}</span>
+                    <span className="text-white font-bold font-cinzel">{secondInningsTeam.short}</span>
                     {innings2Started ? (
                       <p className="text-2xl font-bold text-white font-cinzel mt-1">
                         {runs}/{wkts}
@@ -611,11 +793,9 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                 {live && <CurrentPlayStrip partnership={partnership} bowler={bowlerNow} />}
 
                 <p className="text-white font-semibold mb-3 border-l-2 border-gold pl-3 text-sm break-words">
-                  {status === "completed"
-                    ? match.resultNote || "Match completed."
-                    : !innings2Started
-                      ? `${match.teamA.short} batting — 1st innings in progress.`
-                      : `${match.teamB.short} need ${need} run${need === 1 ? "" : "s"} from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`}
+                  {!innings2Started
+                    ? `${firstInningsTeam.short} batting — 1st innings in progress.`
+                    : `${secondInningsTeam.short} need ${need} run${need === 1 ? "" : "s"} from ${ballsLeft} ball${ballsLeft === 1 ? "" : "s"}`}
                 </p>
 
                 <div className="flex flex-wrap gap-4 text-sm">
