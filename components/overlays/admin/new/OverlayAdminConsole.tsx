@@ -1,4 +1,4 @@
-// app/(protected)/overlay/[auctionId]/admin/page.tsx
+// app/components/overlays/admin/new/OverlayAdminConsole.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -374,6 +374,15 @@ export default function OverlayAdminConsole({
   const [fullScreen, setFullScreen] = useState({ pointsTable: false, matchScorecard: false, matchIntro: false });
   const [boundaryChannels, setBoundaryChannels] = useState({ matchBoundaries: false, tournamentBoundaries: false });
 
+  // NEW — mirrors OnAirChannels.tsx's suppression rule: while any
+  // fullscreen channel is live, the "Always On" ambient channels and
+  // the boundary channels are forced invisible on the overlay. Their
+  // own on/off toggle state is left untouched here (see the refs +
+  // effect further down) so they come back exactly as they were the
+  // moment every fullscreen channel goes off again — this is a
+  // suppression, not a toggle-off.
+  const anyFullscreenOn = fullScreen.pointsTable || fullScreen.matchScorecard || fullScreen.matchIntro;
+
   const [matchSetup, setMatchSetup] = useState<MatchSetup>(defaultMatchSetup());
   const [matchSetupEditing, setMatchSetupEditing] = useState(false);
   const [matchSetupCompleted, setMatchSetupCompleted] = useState(false);
@@ -465,18 +474,23 @@ export default function OverlayAdminConsole({
   }, [busChannelKey]);
 
   useEffect(() => {
+    // Snapshot reflects actual overlay visibility, not raw toggle state
+    // — a suppressed channel is still "on" locally but must answer a
+    // requestSync as invisible, or a reconnecting overlay page would
+    // briefly show something that's supposed to be hidden behind the
+    // active fullscreen channel.
     channelsRef.current = {
-      weather: alwaysOn.weather,
-      liveScoreBar: alwaysOn.liveScoreBar,
-      tournamentLogo: alwaysOn.tournamentLogo,
+      weather: alwaysOn.weather && !anyFullscreenOn,
+      liveScoreBar: alwaysOn.liveScoreBar && !anyFullscreenOn,
+      tournamentLogo: alwaysOn.tournamentLogo && !anyFullscreenOn,
       pointsTable: fullScreen.pointsTable,
       matchScorecard: fullScreen.matchScorecard,
       matchIntro: fullScreen.matchIntro,
-      matchBoundaries: boundaryChannels.matchBoundaries,
-      tournamentBoundaries: boundaryChannels.tournamentBoundaries,
+      matchBoundaries: boundaryChannels.matchBoundaries && !anyFullscreenOn,
+      tournamentBoundaries: boundaryChannels.tournamentBoundaries && !anyFullscreenOn,
       testBg: false,
     };
-  }, [alwaysOn, fullScreen, boundaryChannels]);
+  }, [alwaysOn, fullScreen, boundaryChannels, anyFullscreenOn]);
 
   useEffect(() => {
     matchSetupRef.current = matchSetup;
@@ -496,30 +510,96 @@ export default function OverlayAdminConsole({
   // and causing a toggle to visually "flicker" or revert. Each handler
   // now computes the next value first, fires the bus event exactly
   // once, then calls setState with a plain value.
+  // NEW — while a fullscreen channel is on-air, ambient channels are
+  // suppressed (see `anyFullscreenOn` above): the overlay is already
+  // showing them as hidden, so a toggle here only needs to flip local
+  // state for when suppression lifts, and must NOT send a bus event —
+  // sending one would incorrectly reveal the channel through/over the
+  // fullscreen graphic that's currently live. Restoration happens in
+  // the dedicated suppression effect below once fullscreen clears.
   function toggleAlwaysOn(key: "weather" | "liveScoreBar" | "tournamentLogo") {
     const value = !alwaysOn[key];
-    if (key === "weather") {
-      sendBus({ type: "weather", show: value, data: weatherRef.current });
-    } else if (key === "liveScoreBar") {
-      sendBus({ type: "liveScoreBar", show: value });
-    } else {
-      sendBus({ type: "tournamentLogo", show: value });
+    if (!anyFullscreenOn) {
+      if (key === "weather") {
+        sendBus({ type: "weather", show: value, data: weatherRef.current });
+      } else if (key === "liveScoreBar") {
+        sendBus({ type: "liveScoreBar", show: value });
+      } else {
+        sendBus({ type: "tournamentLogo", show: value });
+      }
     }
     setAlwaysOn((prev) => ({ ...prev, [key]: value }));
   }
 
+  // NEW — fullscreen channels are mutually exclusive, mirroring
+  // OnAirChannels.tsx's toggleFullscreen: turning one on turns every
+  // other fullscreen channel off. Bus events are sent for every key
+  // whose value actually changes (the newly-on one, and any that got
+  // knocked off), computed up front so each fires exactly once.
   function toggleFullScreen(key: "pointsTable" | "matchScorecard" | "matchIntro") {
-    const value = !fullScreen[key];
-    sendBus({ type: key, show: value });
-    setFullScreen((prev) => ({ ...prev, [key]: value }));
+    const turningOn = !fullScreen[key];
+    const next = { pointsTable: false, matchScorecard: false, matchIntro: false, [key]: turningOn } as typeof fullScreen;
+    (Object.keys(fullScreen) as (keyof typeof fullScreen)[]).forEach((k) => {
+      if (fullScreen[k] !== next[k]) sendBus({ type: k, show: next[k] });
+    });
+    setFullScreen(next);
   }
 
+  // NEW — boundary channels are mutually exclusive with each other
+  // (mirrors OnAirChannels.tsx's toggleBoundary), and are suppressed
+  // (no bus event) while a fullscreen channel is on-air, same as
+  // toggleAlwaysOn above.
   function toggleBoundaryChannel(key: "matchBoundaries" | "tournamentBoundaries") {
-    const value = !boundaryChannels[key];
-    const counts = key === "matchBoundaries" ? liveStateRef.current.matchBoundaries : liveStateRef.current.tournamentBoundaries;
-    sendBus({ type: key, show: value, fours: counts.fours, sixes: counts.sixes });
-    setBoundaryChannels((prev) => ({ ...prev, [key]: value }));
+    const turningOn = !boundaryChannels[key];
+    const other: "matchBoundaries" | "tournamentBoundaries" = key === "matchBoundaries" ? "tournamentBoundaries" : "matchBoundaries";
+    const next = { ...boundaryChannels, [key]: turningOn, [other]: turningOn ? false : boundaryChannels[other] };
+    if (!anyFullscreenOn) {
+      (["matchBoundaries", "tournamentBoundaries"] as const).forEach((k) => {
+        if (boundaryChannels[k] !== next[k]) {
+          const counts = k === "matchBoundaries" ? liveStateRef.current.matchBoundaries : liveStateRef.current.tournamentBoundaries;
+          sendBus({ type: k, show: next[k], fours: counts.fours, sixes: counts.sixes });
+        }
+      });
+    }
+    setBoundaryChannels(next);
   }
+
+  // NEW — the actual suppress/restore broadcast. Fires only on the
+  // true/false edge of `anyFullscreenOn` (a ref guards against
+  // re-running for unrelated re-renders), and for each ambient/boundary
+  // channel that's currently toggled on locally, sends the matching
+  // hide (entering fullscreen) or show (leaving fullscreen) event.
+  // Reads alwaysOn/boundaryChannels via refs rather than closing over
+  // the state values directly, so this doesn't need to re-subscribe
+  // (and doesn't risk acting on stale values) every time someone
+  // flips an ambient/boundary toggle while fullscreen is already on.
+  const alwaysOnRef = useRef(alwaysOn);
+  useEffect(() => {
+    alwaysOnRef.current = alwaysOn;
+  }, [alwaysOn]);
+  const boundaryChannelsRef = useRef(boundaryChannels);
+  useEffect(() => {
+    boundaryChannelsRef.current = boundaryChannels;
+  }, [boundaryChannels]);
+  const prevAnyFullscreenOnRef = useRef(anyFullscreenOn);
+  useEffect(() => {
+    if (anyFullscreenOn === prevAnyFullscreenOnRef.current) return;
+    prevAnyFullscreenOnRef.current = anyFullscreenOn;
+    const show = !anyFullscreenOn;
+    const on = alwaysOnRef.current;
+    const boundaries = boundaryChannelsRef.current;
+    if (on.weather) sendBus({ type: "weather", show, data: weatherRef.current });
+    if (on.liveScoreBar) sendBus({ type: "liveScoreBar", show });
+    if (on.tournamentLogo) sendBus({ type: "tournamentLogo", show });
+    if (boundaries.matchBoundaries) {
+      const counts = liveStateRef.current.matchBoundaries;
+      sendBus({ type: "matchBoundaries", show, fours: counts.fours, sixes: counts.sixes });
+    }
+    if (boundaries.tournamentBoundaries) {
+      const counts = liveStateRef.current.tournamentBoundaries;
+      sendBus({ type: "tournamentBoundaries", show, fours: counts.fours, sixes: counts.sixes });
+    }
+  }, [anyFullscreenOn]);
   // ══════════════════ END overlay bus connection ══════════════════
 
   useEffect(() => {
@@ -1239,16 +1319,16 @@ export default function OverlayAdminConsole({
       {/* ── On Air channels — desktop only ── */}
       <div className="hidden lg:flex sticky top-16 w-full z-40 px-3 sm:px-6 py-1.5 sm:py-3 items-start gap-4 flex-wrap border-b border-white/5 bg-surface-container-lowest">
         <div className="flex flex-col items-center gap-1.5">
-          <GroupLabel center>On Air</GroupLabel>
+          <GroupLabel center>On Air{anyFullscreenOn ? " (suppressed)" : ""}</GroupLabel>
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            <TogglePill label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
-            <TogglePill label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
-            <TogglePill label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
+            <TogglePill label="Weather" on={alwaysOn.weather && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
+            <TogglePill label="Live Score Bar" on={alwaysOn.liveScoreBar && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
+            <TogglePill label="Tournament Logo" on={alwaysOn.tournamentLogo && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
           </div>
         </div>
         <span className="hidden sm:block w-px self-stretch bg-white/10" />
         <div className="flex flex-col items-center gap-1.5">
-          <GroupLabel center>Full-Screen</GroupLabel>
+          <GroupLabel center>Full-Screen (exclusive)</GroupLabel>
           <div className="flex items-center gap-2 flex-wrap justify-center">
             <TogglePill label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
             <TogglePill label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
@@ -1257,13 +1337,13 @@ export default function OverlayAdminConsole({
         </div>
         <span className="hidden sm:block w-px self-stretch bg-white/10" />
         <div className="flex flex-col items-center gap-1.5">
-          <GroupLabel center>Moments</GroupLabel>
+          <GroupLabel center>Moments{anyFullscreenOn ? " (suppressed)" : ""}</GroupLabel>
           <div className="flex items-center gap-2 flex-wrap justify-center">
             {BOUNDARY_CHANNELS.map((c) => (
               <TogglePill
                 key={c.key}
                 label={c.label}
-                on={boundaryChannels[c.key]}
+                on={boundaryChannels[c.key] && !anyFullscreenOn}
                 dotColor="#e8c468"
                 onClick={() => toggleBoundaryChannel(c.key)}
               />
@@ -1434,16 +1514,18 @@ export default function OverlayAdminConsole({
               </div>
 
               <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">On Air</span>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
+                  On Air{anyFullscreenOn ? " · suppressed by fullscreen" : ""}
+                </span>
                 <div className="grid grid-cols-3 gap-1.5 mt-1">
-                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
-                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
-                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
+                  <MobileChannelRow icon="partly_cloudy_day" label="Weather" on={alwaysOn.weather && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("weather")} />
+                  <MobileChannelRow icon="scoreboard" label="Live Score Bar" on={alwaysOn.liveScoreBar && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("liveScoreBar")} />
+                  <MobileChannelRow icon="military_tech" label="Tournament Logo" on={alwaysOn.tournamentLogo && !anyFullscreenOn} dotColor="#22c55e" onClick={() => toggleAlwaysOn("tournamentLogo")} />
                 </div>
               </div>
 
               <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen</span>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Full-Screen · pick one</span>
                 <div className="grid grid-cols-3 gap-1.5 mt-1">
                   <MobileChannelRow icon="leaderboard" label="Points Table" on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
                   <MobileChannelRow icon="receipt_long" label="Match Scorecard" on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
@@ -1452,10 +1534,12 @@ export default function OverlayAdminConsole({
               </div>
 
               <div>
-                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">Moments</span>
+                <span className="font-mono-geist text-[8px] font-bold uppercase tracking-[0.16em] text-theme-orange">
+                  Moments{anyFullscreenOn ? " · suppressed by fullscreen" : " · pick one"}
+                </span>
                 <div className="grid grid-cols-2 gap-1.5 mt-1">
-                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("matchBoundaries")} />
-                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("tournamentBoundaries")} />
+                  <MobileChannelRow icon="stadium" label="Match Boundaries" on={boundaryChannels.matchBoundaries && !anyFullscreenOn} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("matchBoundaries")} />
+                  <MobileChannelRow icon="emoji_events" label="Tournament Boundaries" on={boundaryChannels.tournamentBoundaries && !anyFullscreenOn} dotColor="#e8c468" onClick={() => toggleBoundaryChannel("tournamentBoundaries")} />
                 </div>
               </div>
             </div>
