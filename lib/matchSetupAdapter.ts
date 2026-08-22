@@ -7,6 +7,7 @@
 //     (app/(protected)/match/[matchId]/edit). Keys: team1/team2
 //     ({name,short,logo,color}), squads (grouped array keyed by
 //     teamId "team1"/"team2", each with captain + players
+//     [{name,role,xi,playerId}]), date/timetain + players
 //     [{name,role,xi,playerId}]), date/time, tossWinner (the literal
 //     team NAME string), tossDecision, toss (derived sentence), plus
 //     round/officials/overs/matchMeta/rosterLocked, which the overlay

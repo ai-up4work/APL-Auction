@@ -327,7 +327,7 @@ export function normalizeMatchSetup(raw: unknown): MatchSetup {
 // treated as authoritative for anything actually attached to a real
 // tournament row.
 // ─────────────────────────────────────────────────────────────
-async function loadTournamentIdentity(tournamentId: string): Promise<TournamentIdentity | null> {
+export async function loadTournamentIdentity(tournamentId: string): Promise<TournamentIdentity | null> {
   const { data, error } = await supabase
     .from("tournaments")
     .select("id, name, logo_url")
@@ -345,6 +345,29 @@ async function loadTournamentIdentity(tournamentId: string): Promise<TournamentI
     name: data.name ?? "",
     logoUrl: data.logo_url ?? "",
   };
+}
+
+// NEW — matchId-keyed variant for callers (like OverlayAdminConsole)
+// that only have matchId in hand, not tournamentId directly. Mirrors
+// exactly what getOrCreateMatch already does internally for the
+// overlay display page: read matches.tournament_id, then resolve the
+// real tournament row. Returns null for a standalone match (no
+// tournament_id on the row) — same "null means standalone" contract
+// TournamentIdentity already documents.
+export async function loadTournamentIdentityForMatch(matchId: string): Promise<TournamentIdentity | null> {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("tournament_id")
+    .eq("id", matchId)
+    .maybeSingle();
+
+  if (error) {
+    logDbError("loadTournamentIdentityForMatch select", error);
+    return null;
+  }
+  if (!data?.tournament_id) return null;
+
+  return loadTournamentIdentity(data.tournament_id);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -507,14 +530,27 @@ export function mergeOverlaySetupIntoRaw(
   };
 }
 
-// ── getOrCreateMatch — also selects bracket_match_id/tournament_id and
-// resolves both the bracket team fallback AND the standalone
-// tournament-identity read before returning. The insert branch (a
-// brand-new row) intentionally skips both — a freshly inserted row has
-// neither a bracket_match_id nor a tournament_id yet, since those are
-// populated separately by bracket progression / tournament assignment
-// flows.
-export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | null> {
+// ── getOrCreateMatch result — now distinguishes "no match, no error"
+// from "a query actually failed," so callers can show something
+// truthful instead of quietly rendering default placeholder state
+// forever. `error` carries the raw Postgres/Supabase error fields for
+// display/logging by the caller.
+export interface GetOrCreateMatchResult {
+  match: MatchRow | null;
+  error: { context: string; message: string; code?: string; hint?: string } | null;
+}
+
+function toResultError(context: string, error: unknown): GetOrCreateMatchResult["error"] {
+  const e = error as Record<string, unknown> | null;
+  return {
+    context,
+    message: (e?.message as string) ?? "Unknown error",
+    code: e?.code as string | undefined,
+    hint: e?.hint as string | undefined,
+  };
+}
+
+export async function getOrCreateMatch(auctionId: string): Promise<GetOrCreateMatchResult> {
   const { data: existing, error: selectErr } = await supabase
     .from("matches")
     .select("id, auction_id, match_setup, match_setup_completed, bracket_match_id, tournament_id")
@@ -523,15 +559,16 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
 
   if (selectErr) {
     logDbError("getOrCreateMatch select", selectErr);
-    return null;
+    return { match: null, error: toResultError("select", selectErr) };
   }
+
   if (existing) {
     const normalized = normalizeMatchSetup(existing.match_setup);
     const resolved = await applyBracketTeamFallback(normalized, existing.bracket_match_id ?? null);
     const tournament = existing.tournament_id
       ? await loadTournamentIdentity(existing.tournament_id)
       : null;
-    return { ...existing, match_setup: resolved, tournament } as MatchRow;
+    return { match: { ...existing, match_setup: resolved, tournament } as MatchRow, error: null };
   }
 
   const { data: created, error: insertErr } = await supabase
@@ -541,14 +578,37 @@ export async function getOrCreateMatch(auctionId: string): Promise<MatchRow | nu
     .single();
 
   if (insertErr) {
+    // FIX — unique_violation (23505) on auction_id means a concurrent
+    // request already inserted the row between our select and our
+    // insert (two tabs/renders racing getOrCreateMatch for the same
+    // auction). That's not a real failure — re-select and return the
+    // row that now exists instead of reporting an error.
+    if ((insertErr as unknown as Record<string, unknown>).code === "23505") {
+      const { data: raced, error: raceSelectErr } = await supabase
+        .from("matches")
+        .select("id, auction_id, match_setup, match_setup_completed, bracket_match_id, tournament_id")
+        .eq("auction_id", auctionId)
+        .maybeSingle();
+
+      if (raceSelectErr || !raced) {
+        logDbError("getOrCreateMatch insert-race re-select", raceSelectErr ?? "no row found after 23505");
+        return { match: null, error: toResultError("insert-race", raceSelectErr ?? insertErr) };
+      }
+
+      const normalized = normalizeMatchSetup(raced.match_setup);
+      const resolved = await applyBracketTeamFallback(normalized, raced.bracket_match_id ?? null);
+      const tournament = raced.tournament_id ? await loadTournamentIdentity(raced.tournament_id) : null;
+      return { match: { ...raced, match_setup: resolved, tournament } as MatchRow, error: null };
+    }
+
     logDbError("getOrCreateMatch insert", insertErr);
-    return null;
+    return { match: null, error: toResultError("insert", insertErr) };
   }
+
   return {
-    ...created,
-    match_setup: normalizeMatchSetup(created.match_setup),
-    tournament: null,
-  } as MatchRow;
+    match: { ...created, match_setup: normalizeMatchSetup(created.match_setup), tournament: null } as MatchRow,
+    error: null,
+  };
 }
 
 // ── saveMatchSetup — reads whatever is currently on the row, and if
@@ -758,3 +818,4 @@ export interface StandingRow {
   points: number;
   nrr: number;
 }
+

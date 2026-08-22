@@ -64,6 +64,16 @@ interface LegacyMatchSetup {
   matchTitle: string;
   tossWinner: string;
   tossElected: string;
+  // NEW — full (non-shortcode) team names, e.g. "Ratmalana Aviators"
+  // alongside teamA/teamB which are shortcode-preferred display
+  // labels, e.g. "RAV". Needed because liveState.matchResult.winningTeamName
+  // can come back holding either form depending on how the result was
+  // produced (live engine vs. an imported/simulated match record whose
+  // resultText embeds the full name) — matching against only one form
+  // silently drops the logo the moment the other form shows up. See
+  // resolveWinningTeamKey below.
+  teamAFullName?: string;
+  teamBFullName?: string;
 }
 
 /* ───────────────────────── helpers ───────────────────────── */
@@ -94,6 +104,99 @@ function Icon({
       {name}
     </span>
   );
+}
+
+// ───────────────────────── team-name resolution helpers ─────────────────────────
+//
+// UPDATED — replaces the old strict/naive normalizeTeamName + `===`
+// comparison. Kept as two pieces:
+//
+//   normalizeTeamName(s)  — trims, lowercases, and strips everything
+//                            that isn't a letter/number, so "DEL",
+//                            "del", " Del ", "D.E.L" all compare equal.
+//
+//   resolveWinningTeamKey(...) — the actual matching logic. Tries an
+//                            exact normalized match first (the
+//                            expected case — the engine wrote back
+//                            exactly matchSetup.teamA/teamB), then
+//                            falls back to a substring match in either
+//                            direction to tolerate the engine having
+//                            written a fuller/shorter variant of the
+//                            same team's label (e.g. "Delta Strikers"
+//                            vs the shortcode "DEL"). If the result is
+//                            ambiguous or matches neither team, it
+//                            returns null rather than guessing, and
+//                            logs a dev-only warning with the actual
+//                            values so a real mismatch is easy to spot
+//                            in the console instead of silently
+//                            falling back to the trophy icon with no
+//                            trace of why.
+
+function normalizeTeamName(s?: string): string {
+  return (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// UPDATED — a team can have TWO valid labels: a shortcode (e.g. "RAV")
+// and a full name (e.g. "Ratmalana Aviators"). `liveState.matchResult
+// .winningTeamName` can come back holding either one depending on
+// where the result was produced (the live scoring engine tends to use
+// whatever label was fed into it as battingTeamName/bowlingTeamName —
+// typically the shortcode; an imported/simulated match's resultText,
+// by contrast, embeds the full name, e.g. "Ratmalana Aviators win by
+// 8 wickets."). Matching against only one form is fragile: a 3-letter
+// shortcode like "RAV" is not reliably a substring of its own full
+// name ("Ratmalana Aviators" never actually contains the consecutive
+// letters r-a-v), so the old single-label substring fallback still
+// failed for exactly this case.
+//
+// This version takes both labels per team and matches winningTeamName
+// against whichever one actually applies:
+//   1. Exact normalized match against either label, for either team.
+//   2. Substring match (either direction) against either label, for
+//      either team — a looser fallback for partial/truncated names.
+// If both teams match (label collision) or neither does, returns null
+// and logs a dev-only warning with everything that was compared, so a
+// genuine new mismatch pattern is easy to diagnose from the console
+// rather than silently falling back to the trophy icon with no trace.
+function resolveWinningTeamKey(
+  winningTeamName: string | undefined,
+  teamALabels: { shortLabel: string; fullName?: string },
+  teamBLabels: { shortLabel: string; fullName?: string }
+): "teamA" | "teamB" | null {
+  const name = normalizeTeamName(winningTeamName);
+  if (!name) return null;
+
+  const aCandidates = [teamALabels.shortLabel, teamALabels.fullName]
+    .map(normalizeTeamName)
+    .filter((s) => s.length > 0);
+  const bCandidates = [teamBLabels.shortLabel, teamBLabels.fullName]
+    .map(normalizeTeamName)
+    .filter((s) => s.length > 0);
+
+  // Pass 1 — exact match against any candidate label.
+  if (aCandidates.some((c) => c === name)) return "teamA";
+  if (bCandidates.some((c) => c === name)) return "teamB";
+
+  // Pass 2 — substring match either direction, against any candidate.
+  const aMatch = aCandidates.some((c) => name.includes(c) || c.includes(name));
+  const bMatch = bCandidates.some((c) => name.includes(c) || c.includes(name));
+
+  if (aMatch && !bMatch) return "teamA";
+  if (bMatch && !aMatch) return "teamB";
+
+  // Ambiguous (matched both, or neither) — don't guess wrong, just
+  // fall back to no logo/color and leave a trace in dev.
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[ScoringSection] Could not resolve winningTeamName to a team:",
+      { winningTeamName, teamALabels, teamBLabels }
+    );
+  }
+  return null;
 }
 
 const OVER_BALL_STYLES: Record<
@@ -873,46 +976,94 @@ function PenaltyDialog({
   );
 }
 
+// MatchOverScreen also accepts finalScoreLabel/targetLabel so the win
+// card shows what was actually scored/chased, not just the margin
+// string.
 function MatchOverScreen({
   winningTeamName,
   winningTeamLogo,
+  winningTeamColor,
   margin,
   method,
+  finalScoreLabel,
+  targetLabel,
   canUndo,
   onUndo,
   onRestart,
 }: {
   winningTeamName?: string;
   winningTeamLogo?: string;
+  winningTeamColor?: string;
   margin?: string;
   method?: string;
+  finalScoreLabel?: string;
+  targetLabel?: string;
   canUndo: boolean;
   onUndo: () => void;
   onRestart?: () => void;
 }) {
   const isTie = method === "tie";
+  const accent = isTie ? "#c9971f" : winningTeamColor || "#c9971f";
+  const methodLabel = method === "wickets" ? "Won by wickets" : method === "runs" ? "Won by runs" : undefined;
+  const [logoFailed, setLogoFailed] = useState(false);
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [winningTeamLogo]);
+
   return (
-    <div className="relative overflow-hidden flex w-full box-border flex-col items-center text-center gap-1 py-14 px-6 sm:px-12 rounded-[22px] border border-theme-orange/25" style={{ background: "radial-gradient(120% 100% at 50% 0%, rgba(201,151,31,0.14) 0%, rgba(201,151,31,0.03) 45%, transparent 70%)" }}>
-      <span className="relative z-10 flex items-center gap-1.5 text-[10.5px] font-black uppercase tracking-[0.2em] font-mono-geist text-theme-orange mb-5">
+    <div
+      className="relative overflow-hidden flex w-full box-border flex-col items-center text-center gap-1 py-14 px-6 sm:px-12 rounded-[22px] border"
+      style={{
+        borderColor: `${accent}40`,
+        background: `radial-gradient(120% 100% at 50% 0%, ${accent}24 0%, ${accent}08 45%, transparent 70%)`,
+      }}
+    >
+      <span
+        className="relative z-10 flex items-center gap-1.5 text-[10.5px] font-black uppercase tracking-[0.2em] font-mono-geist mb-5"
+        style={{ color: accent }}
+      >
         <Icon name="emoji_events" style={{ fontSize: 14 }} />
         Match Complete
       </span>
-      <div className="relative z-10 w-24 h-24 sm:w-[104px] sm:h-[104px] rounded-full flex items-center justify-center bg-black/60 border-[3px] border-theme-orange/50 overflow-hidden mb-5">
-        {winningTeamLogo ? (
+      <div
+        className="relative z-10 w-24 h-24 sm:w-[104px] sm:h-[104px] rounded-full flex items-center justify-center bg-black/60 border-[3px] overflow-hidden mb-5"
+        style={{ borderColor: `${accent}80` }}
+      >
+        {winningTeamLogo && !logoFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={winningTeamLogo} alt="" className="w-full h-full object-cover" />
+          <img
+            src={winningTeamLogo}
+            alt=""
+            className="w-full h-full object-contain p-2"
+            onError={() => setLogoFailed(true)}
+          />
         ) : (
-          <span className="flex items-center justify-center text-theme-orange text-3xl">{isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: 36 }} />}</span>
+          <span className="flex items-center justify-center text-3xl" style={{ color: accent }}>
+            {isTie ? "🤝" : <Icon name="emoji_events" style={{ fontSize: 36 }} />}
+          </span>
         )}
       </div>
       <h2 className="relative z-10 font-archivo text-[19px] sm:text-[26px] font-black uppercase text-white m-0">
         {isTie ? "It's a Tie" : winningTeamName ? `${winningTeamName} Win` : "Match Complete"}
       </h2>
-      {!isTie && margin && (
-        <p className="relative z-10 font-mono-geist text-[11px] sm:text-[12.5px] font-bold uppercase tracking-wide text-theme-orange mt-3.5 px-4 py-1.5 rounded-full bg-theme-orange/10 border border-theme-orange/30 inline-block">
-          {margin}
+      {!isTie && (margin || methodLabel) && (
+        <p
+          className="relative z-10 font-mono-geist text-[11px] sm:text-[12.5px] font-bold uppercase tracking-wide mt-3.5 px-4 py-1.5 rounded-full inline-block"
+          style={{ color: accent, background: `${accent}1a`, border: `1px solid ${accent}4d` }}
+        >
+          {margin || methodLabel}
+          {margin && methodLabel ? ` · ${methodLabel}` : ""}
         </p>
       )}
+
+      {(finalScoreLabel || targetLabel) && (
+        <div className="relative z-10 flex items-center gap-2 mt-3 flex-wrap justify-center font-mono-geist text-[10px] sm:text-[11px] text-on-surface-variant uppercase tracking-[0.12em]">
+          {finalScoreLabel && <span>{finalScoreLabel}</span>}
+          {finalScoreLabel && targetLabel && <span className="opacity-40">·</span>}
+          {targetLabel && <span>{targetLabel}</span>}
+        </div>
+      )}
+
       <div className="relative z-10 flex gap-2.5 mt-6 flex-wrap justify-center">
         {canUndo && (
           <button type="button" onClick={onUndo} className="flex items-center gap-1.5 font-mono-geist text-[11px] font-black uppercase tracking-wide rounded-lg px-5 py-2.5 border border-red-400/35 bg-red-500/10 text-red-400 hover:bg-red-500/15 transition-all">
@@ -1026,20 +1177,6 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
   const [showBowlerChangePrompt, setShowBowlerChangePrompt] = useState(false);
   const [showPenaltyDialog, setShowPenaltyDialog] = useState(false);
 
-  // FIX (false "over complete — change bowler?" prompt on load/resume)
-  // — this effect's very first run could see `liveState.score.overs`
-  // jump straight from the component's initial (empty) value to
-  // whatever a hydrated match's DB-loaded state actually has, e.g.
-  // 0 -> 5 in a single update (loadLiveState in the parent resolves
-  // asynchronously and calls setLiveState with the real, mid-match
-  // value). If that jump happened to land with `balls === 0` — very
-  // plausible right after resuming a match at the start of an over —
-  // this fired the bowler-change modal as a false positive on page
-  // load, not on any real over transition that happened while the page
-  // was open. `hasCheckedOversRef` makes the very first run of this
-  // effect only record a baseline instead of comparing against one, so
-  // the prompt can only fire for a genuine overs increment witnessed
-  // live.
   const prevOversRef = useRef(liveState.score.overs);
   const hasCheckedOversRef = useRef(false);
   useEffect(() => {
@@ -1163,6 +1300,46 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
     statCards.splice(2, 0, { label: "Target", value: `${liveState.target}` });
   }
 
+  // UPDATED — resolve winning team via resolveWinningTeamKey, passing
+  // BOTH the shortcode-preferred label (matchSetup.teamA/teamB, e.g.
+  // "RAV") and the full team name (matchSetup.teamAFullName/
+  // teamBFullName, e.g. "Ratmalana Aviators") for each team, since
+  // winningTeamName can come back holding either form. See helper
+  // definition near the top of this file for the full rationale.
+  // winningTeamKey is computed once and reused for both the logo and
+  // the accent color lookups.
+  const winningTeamKey = useMemo(
+    () =>
+      resolveWinningTeamKey(
+        liveState.matchResult?.winningTeamName,
+        { shortLabel: matchSetup.teamA, fullName: matchSetup.teamAFullName },
+        { shortLabel: matchSetup.teamB, fullName: matchSetup.teamBFullName }
+      ),
+    [
+      liveState.matchResult?.winningTeamName,
+      matchSetup.teamA,
+      matchSetup.teamAFullName,
+      matchSetup.teamB,
+      matchSetup.teamBFullName,
+    ]
+  );
+
+  const matchResultLogo = useMemo(() => {
+    if (winningTeamKey === "teamA") return matchSetup.teamAlogo;
+    if (winningTeamKey === "teamB") return matchSetup.teamBlogo;
+    return undefined;
+  }, [winningTeamKey, matchSetup.teamAlogo, matchSetup.teamBlogo]);
+
+  const matchResultColor = useMemo(() => {
+    if (winningTeamKey === "teamA") return matchSetup.teamAColor;
+    if (winningTeamKey === "teamB") return matchSetup.teamBColor;
+    return undefined;
+  }, [winningTeamKey, matchSetup.teamAColor, matchSetup.teamBColor]);
+
+  const matchResultFinalScoreLabel = `${liveState.score.runs}/${liveState.score.wickets} (${overs} ov)`;
+  const matchResultTargetLabel =
+    isSecondInnings && liveState.target !== undefined ? `Target ${liveState.target}` : undefined;
+
   return (
     <section
       className={`order-1 lg:order-2 flex-col lg:h-full min-h-0 px-4 pt-4 sm:px-3 sm:pt-3 lg:p-4 gap-2.5 sm:gap-4
@@ -1283,9 +1460,12 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
       {liveState.matchComplete ? (
         <MatchOverScreen
           winningTeamName={liveState.matchResult?.winningTeamName}
-          winningTeamLogo={undefined}
+          winningTeamLogo={matchResultLogo}
+          winningTeamColor={matchResultColor}
           margin={liveState.matchResult?.margin}
           method={liveState.matchResult?.method}
+          finalScoreLabel={matchResultFinalScoreLabel}
+          targetLabel={matchResultTargetLabel}
           canUndo={engine.canUndo}
           onUndo={engine.undo}
           onRestart={onRestartMatch ? () => setShowRestartConfirm(true) : undefined}
@@ -1535,14 +1715,6 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
                 <span style={{ fontSize: "clamp(0.6rem, min(3.6cqh, 4.5cqi), 0.85rem)" }}>Undo</span>
               </button>
 
-              {/* FIX — MoreActionsMenu (Penalty +5 / Injured / Abandon)
-                  was fully implemented above (its own state, handlers,
-                  and the component itself) but was never actually
-                  mounted anywhere in this JSX — there was no button
-                  anywhere that could open it, so the feature was
-                  completely unreachable. Placed as the last cell in the
-                  same run/extras/Out/Undo grid so it keeps the same
-                  tap-target sizing as everything else here. */}
               <MoreActionsMenu
                 onAdminAction={(label) => onAdminAction?.(label)}
                 onPenaltyClick={() => setShowPenaltyDialog(true)}

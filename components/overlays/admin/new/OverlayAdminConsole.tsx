@@ -34,6 +34,13 @@ import {
   saveEngineState,
   clearEngineState,
   deleteAllBalls,
+  // NEW — resolves the same `tournaments` row the overlay display page
+  // resolves (matches.tournament_id -> tournaments.name/logo_url), so
+  // the admin header logo agrees with TournamentLogoDisplay instead of
+  // reading matchSetup.tournamentLogoUrl, which can be empty/stale on
+  // a genuinely tournament-attached match.
+  loadTournamentIdentityForMatch,
+  type TournamentIdentity,
 } from "@/lib/matchPersistence";
 
 const GOLD_GRADIENT = "linear-gradient(135deg,#A87815,#E8C468)";
@@ -473,6 +480,31 @@ interface ScoringSectionHandle {
   resetEngine: () => void;
 }
 
+// UPDATED — mirrors OnAirChannels.tsx's team-name matching problem:
+// liveState.matchResult.winningTeamName (or, for the manual "Fire
+// Match Won" form / handleMatchComplete path below) needs to be
+// compared against whichever label the winner ended up recorded
+// under. A team can be legitimately referred to by either its
+// shortcode ("RAV") or its full name ("Ratmalana Aviators") depending
+// on where the string came from (live engine vs. an imported match's
+// resultText). Comparing against only one form is fragile — see the
+// matching resolveWinningTeamKey helper in ScoringSection.tsx for the
+// full rationale; this local version is used for the moment-graphic
+// dispatch in handleMatchComplete below, which needs the same
+// resilience for the exact same reason.
+function normalizeTeamNameForMatch(s?: string): string {
+  return (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+function matchesTeamLabel(candidate: string, shortLabel: string, fullName?: string): boolean {
+  const name = normalizeTeamNameForMatch(candidate);
+  if (!name) return false;
+  const labels = [shortLabel, fullName].map(normalizeTeamNameForMatch).filter((s) => s.length > 0);
+  return labels.some((l) => l === name || name.includes(l) || l.includes(name));
+}
+
 export default function OverlayAdminConsole({
   auctionId = null,
   matchId = null,
@@ -740,12 +772,64 @@ export default function OverlayAdminConsole({
     };
   }, [matchId]);
 
+  // NEW — tournament identity, resolved the exact same way
+  // OverlayDisplayPage/getOrCreateMatch resolve it:
+  // matches.tournament_id -> tournaments.name/logo_url. This is kept
+  // entirely separate from matchSetup — matchSetup.tournamentName/
+  // tournamentLogoUrl can be empty or stale even on a genuinely
+  // tournament-attached match, which is exactly why the admin header
+  // logo was blank while the overlay page's TournamentLogoDisplay
+  // (which reads from this same `tournaments` source) showed it fine.
+  // null means either "standalone match, no tournament_id" or "the
+  // tournament row has no logo uploaded yet" — either way the header
+  // falls back to the match's own self-set logo below.
+  const [tournament, setTournament] = useState<TournamentIdentity | null>(null);
+
+  useEffect(() => {
+    if (!matchId) {
+      setTournament(null);
+      return;
+    }
+    let cancelled = false;
+    loadTournamentIdentityForMatch(matchId).then((t) => {
+      if (!cancelled) setTournament(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [matchId]);
+
+  // NEW — mirrors OverlayDisplayPage's isStandalone branch exactly: no
+  // tournament attached (tournament is null) -> fall back to the
+  // match's own self-set logo (matchSetup.tournamentLogoUrl); otherwise
+  // the tournament's crest always wins, since matchSetup's field is not
+  // treated as authoritative once a real tournament_id is attached.
+  const isStandaloneMatch = !tournament;
+  const headerLogoSrc = isStandaloneMatch
+    ? matchSetup.tournamentLogoUrl || DEFAULT_LOGO_SRC
+    : tournament!.logoUrl || DEFAULT_LOGO_SRC;
+
+  // UPDATED — legacyMatchSetup now also carries teamAFullName/
+  // teamBFullName (matchSetup.teamA.name / matchSetup.teamB.name)
+  // alongside the existing shortcode-preferred teamA/teamB fields.
+  // These extra fields are NOT used for display anywhere (teamA/teamB
+  // still drive every label/header in the UI exactly as before) — they
+  // exist solely so ScoringSection's winning-team resolution can match
+  // liveState.matchResult.winningTeamName against either a shortcode
+  // ("RAV") or a full name ("Ratmalana Aviators"), since a completed
+  // match's result string can hold either depending on how it was
+  // produced. See ScoringSection.tsx's resolveWinningTeamKey for the
+  // full rationale — this was the actual root cause of the winning
+  // team's logo not appearing on the match-complete screen even though
+  // the logo URL itself was present and valid in the database.
   const legacyMatchSetup = useMemo(
     () => ({
       teamA: matchSetup.teamA.shortCode || matchSetup.teamA.name || "Team A",
+      teamAFullName: matchSetup.teamA.name || undefined,
       teamAColor: matchSetup.teamA.color || "#c9971f",
       teamAlogo: matchSetup.teamA.logoUrl,
       teamB: matchSetup.teamB.shortCode || matchSetup.teamB.name || "Team B",
+      teamBFullName: matchSetup.teamB.name || undefined,
       teamBColor: matchSetup.teamB.color || "#3d9dd8",
       teamBlogo: matchSetup.teamB.logoUrl,
       venue: matchSetup.venue,
@@ -950,10 +1034,13 @@ export default function OverlayAdminConsole({
 
   useIsMobile();
 
+  // NEW — dependency changed from matchSetup.tournamentLogoUrl to the
+  // resolved headerLogoSrc, so a fallback-vs-real-logo swap correctly
+  // clears any previous load failure state.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => {
     setLogoFailed(false);
-  }, [matchSetup.tournamentLogoUrl]);
+  }, [headerLogoSrc]);
 
   const [mobileTab, setMobileTab] = useState<"overlay" | "scoring" | "setup">("scoring");
 
@@ -1138,11 +1225,14 @@ export default function OverlayAdminConsole({
     fireStamp("boundary", "WON");
     spawnParticles(PARTICLE_COLORS_BOUNDARY);
     pushLog(`Moment: MATCH WON — ${result.winningTeamName} ${result.margin}`);
-    // Match the winning team's name back to teamA/teamB so the overlay
-    // graphic gets the same color + logo treatment as the manual
-    // "Fire Match Won" form below — previously this path sent neither.
-    const isTeamA = result.winningTeamName === legacyMatchSetup.teamA;
-    const isTeamB = result.winningTeamName === legacyMatchSetup.teamB;
+    // UPDATED — was a strict `===` compare against legacyMatchSetup.teamA/
+    // teamB (i.e. shortcode only). Now uses matchesTeamLabel, which
+    // checks both the shortcode and the full team name, so a result
+    // string holding the full name ("Ratmalana Aviators") still
+    // correctly resolves back to the right team's color/logo even
+    // though legacyMatchSetup.teamB itself is the shortcode ("RAV").
+    const isTeamA = matchesTeamLabel(result.winningTeamName, legacyMatchSetup.teamA, legacyMatchSetup.teamAFullName);
+    const isTeamB = !isTeamA && matchesTeamLabel(result.winningTeamName, legacyMatchSetup.teamB, legacyMatchSetup.teamBFullName);
     sendBus({
       type: "moment",
       moment: "matchWon",
@@ -1387,7 +1477,7 @@ export default function OverlayAdminConsole({
           <div className="w-16 h-16 flex items-center justify-center shrink-0 overflow-hidden">
             {!logoFailed ? (
               <Image
-                src={matchSetup.tournamentLogoUrl || DEFAULT_LOGO_SRC}
+                src={headerLogoSrc}
                 alt="Tournament logo"
                 width={80}
                 height={80}

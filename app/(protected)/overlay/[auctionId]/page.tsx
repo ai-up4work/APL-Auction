@@ -294,20 +294,26 @@ export default function OverlayDisplayPage({ params }: { params: Promise<{ aucti
 
   useEffect(() => {
     let cancelled = false;
-    getOrCreateMatch(auctionId).then(async (row) => {
-      if (cancelled || !row) return;
-      setMatchId(row.id);
+    getOrCreateMatch(auctionId).then(async ({ match, error }) => {
+      if (cancelled) return;
+      if (error) {
+        console.error("[OverlayDisplayPage] getOrCreateMatch failed:", error);
+        return;
+      }
+      if (!match) return;
+
+      setMatchId(match.id);
       dispatch({
         type: "dbHydrate",
-        matchSetup: row.match_setup,
-        matchSetupCompleted: !!row.match_setup_completed,
-        tournament: row.tournament,
+        matchSetup: match.match_setup,
+        matchSetupCompleted: !!match.match_setup_completed,
+        tournament: match.tournament,
       });
 
       const [liveState, weather, channels] = await Promise.all([
-        loadLiveState(row.id),
-        loadWeather(row.id),
-        loadOnAirChannels(row.id),
+        loadLiveState(match.id),
+        loadWeather(match.id),
+        loadOnAirChannels(match.id),
       ]);
       if (cancelled) return;
       dispatch({ type: "dbHydrateExtras", liveState, weather, channels });
