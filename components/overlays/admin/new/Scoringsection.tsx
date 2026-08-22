@@ -108,29 +108,34 @@ function Icon({
 
 // ───────────────────────── team-name resolution helpers ─────────────────────────
 //
-// UPDATED — replaces the old strict/naive normalizeTeamName + `===`
-// comparison. Kept as two pieces:
+// UPDATED — this used to be the ONLY way the winning team's logo/color
+// were resolved, by matching liveState.matchResult.winningTeamName
+// against the two teams' labels. The problem: winningTeamName can
+// legitimately arrive empty/undefined depending on how the engine (or
+// an imported/simulated match record) populated matchResult — when
+// that happens, normalizeTeamName(winningTeamName) is "" and this
+// function correctly bails out to null immediately, which is exactly
+// what was happening (confirmed via the dev console warning showing
+// an empty `name` alongside two populated label objects). No amount
+// of smarter string matching fixes a name that never arrives.
+//
+// This is now used ONLY as a fallback. The primary resolution path is
+// resolveWinningTeamKeyFromMethod below, which doesn't depend on
+// winningTeamName at all.
 //
 //   normalizeTeamName(s)  — trims, lowercases, and strips everything
 //                            that isn't a letter/number, so "DEL",
 //                            "del", " Del ", "D.E.L" all compare equal.
 //
-//   resolveWinningTeamKey(...) — the actual matching logic. Tries an
-//                            exact normalized match first (the
-//                            expected case — the engine wrote back
-//                            exactly matchSetup.teamA/teamB), then
-//                            falls back to a substring match in either
-//                            direction to tolerate the engine having
-//                            written a fuller/shorter variant of the
-//                            same team's label (e.g. "Delta Strikers"
-//                            vs the shortcode "DEL"). If the result is
-//                            ambiguous or matches neither team, it
-//                            returns null rather than guessing, and
-//                            logs a dev-only warning with the actual
-//                            values so a real mismatch is easy to spot
-//                            in the console instead of silently
-//                            falling back to the trophy icon with no
-//                            trace of why.
+//   resolveWinningTeamKey(...) — tries an exact normalized match first
+//                            (the engine wrote back exactly
+//                            matchSetup.teamA/teamB), then falls back
+//                            to a substring match in either direction.
+//                            Returns null (rather than guessing) if
+//                            winningTeamName is empty, ambiguous, or
+//                            matches neither team, and logs a dev-only
+//                            warning with the actual values so a real
+//                            mismatch is easy to spot in the console.
 
 function normalizeTeamName(s?: string): string {
   return (s || "")
@@ -139,35 +144,12 @@ function normalizeTeamName(s?: string): string {
     .replace(/[^a-z0-9]/g, "");
 }
 
-// UPDATED — a team can have TWO valid labels: a shortcode (e.g. "RAV")
-// and a full name (e.g. "Ratmalana Aviators"). `liveState.matchResult
-// .winningTeamName` can come back holding either one depending on
-// where the result was produced (the live scoring engine tends to use
-// whatever label was fed into it as battingTeamName/bowlingTeamName —
-// typically the shortcode; an imported/simulated match's resultText,
-// by contrast, embeds the full name, e.g. "Ratmalana Aviators win by
-// 8 wickets."). Matching against only one form is fragile: a 3-letter
-// shortcode like "RAV" is not reliably a substring of its own full
-// name ("Ratmalana Aviators" never actually contains the consecutive
-// letters r-a-v), so the old single-label substring fallback still
-// failed for exactly this case.
-//
-// This version takes both labels per team and matches winningTeamName
-// against whichever one actually applies:
-//   1. Exact normalized match against either label, for either team.
-//   2. Substring match (either direction) against either label, for
-//      either team — a looser fallback for partial/truncated names.
-// If both teams match (label collision) or neither does, returns null
-// and logs a dev-only warning with everything that was compared, so a
-// genuine new mismatch pattern is easy to diagnose from the console
-// rather than silently falling back to the trophy icon with no trace.
 function resolveWinningTeamKey(
   winningTeamName: string | undefined,
   teamALabels: { shortLabel: string; fullName?: string },
   teamBLabels: { shortLabel: string; fullName?: string }
 ): "teamA" | "teamB" | null {
   const name = normalizeTeamName(winningTeamName);
-  console.log("resolveWinningTeamKey", { winningTeamName, name, winningTeamLogos: { teamALabels, teamBLabels } });
   if (!name) return null;
 
   const aCandidates = [teamALabels.shortLabel, teamALabels.fullName]
@@ -198,6 +180,76 @@ function resolveWinningTeamKey(
     );
   }
   return null;
+}
+
+// NEW — the actual fix. Primary, robust winner resolution that doesn't
+// depend on winningTeamName being present or spelled consistently at
+// all. It uses the match's own reported result *method*
+// ("runs" | "wickets" | "tie") together with battingTeamKey /
+// bowlingTeamKey, which ScoringSection already receives as props and
+// which are authoritative (computed by the parent from toss + innings
+// number — see OverlayAdminConsole's battingTeamKey/bowlingTeamKey
+// memo). A match completes during the second innings, so at the
+// moment it ends:
+//   - battingTeamKey is always the chasing side
+//   - bowlingTeamKey is always the side that batted first (defending)
+// "Won by wickets" always means the chasing side won -> battingTeamKey.
+// "Won by runs" always means the defending side won -> bowlingTeamKey.
+// "Tie" has no winner, so this returns null and the tie UI (🤝) is
+// used instead, same as before.
+function resolveWinningTeamKeyFromMethod(
+  method: string | undefined,
+  battingTeamKey: "teamA" | "teamB",
+  bowlingTeamKey: "teamA" | "teamB"
+): "teamA" | "teamB" | null {
+  if (method === "wickets") return battingTeamKey;
+  if (method === "runs") return bowlingTeamKey;
+  return null;
+}
+
+// NEW — the most robust layer of all. Some matches reach
+// matchComplete=true WITHOUT ever going through the live engine's own
+// endInnings()/setMatchResult flow — e.g. a match imported or
+// simulated from an external record (score/target/resultText fields,
+// no matchResult object at all). For those, liveState.matchResult can
+// be entirely undefined, which means BOTH resolveWinningTeamKeyFromMethod
+// (no `method`) and resolveWinningTeamKey (no `winningTeamName`) return
+// null, and the UI falls back to the trophy icon no matter how the
+// label-matching is written.
+//
+// This function sidesteps matchResult completely and derives the
+// winner from the raw scoring state ScoringSection already has as
+// props/state — the same numbers rendered on screen a moment earlier:
+//   - second-innings (chasing) score >= target -> chasing team won
+//     (battingTeamKey, since the chasing side is always the one
+//     batting in the 2nd innings)
+//   - innings over (10 wickets down, or overs/balls used up per
+//     maxOvers) and short of target by more than 1 run -> defending
+//     team won (bowlingTeamKey)
+//   - exactly 1 short when the innings ends -> tie (no winner)
+//   - anything else (2nd innings still in progress, or no target set)
+//     -> can't determine yet, return null
+function resolveWinningTeamKeyFromScore(
+  liveState: LiveState,
+  isSecondInnings: boolean,
+  maxOvers: number | undefined,
+  battingTeamKey: "teamA" | "teamB",
+  bowlingTeamKey: "teamA" | "teamB"
+): "teamA" | "teamB" | null {
+  if (!isSecondInnings || liveState.target === undefined) return null;
+
+  const runs = liveState.score.runs;
+  const target = liveState.target;
+  if (runs >= target) return battingTeamKey;
+
+  const wickets = liveState.score.wickets;
+  const ballsBowled = liveState.score.overs * 6 + liveState.score.balls;
+  const totalBalls = maxOvers !== undefined ? maxOvers * 6 : undefined;
+  const inningsOver = wickets >= 10 || (totalBalls !== undefined && ballsBowled >= totalBalls);
+  if (!inningsOver) return null;
+
+  if (runs === target - 1) return null; // tie — no winner
+  return bowlingTeamKey;
 }
 
 const OVER_BALL_STYLES: Record<
@@ -1114,6 +1166,13 @@ export interface ScoringSectionProps {
   initialEngineState?: EngineSyncState | null;
   onAdminAction?: (label: string, meta?: Record<string, unknown>) => void;
   onDismissedPlayersChange?: (players: Set<string>) => void;
+  // NEW — resolved directly from the database (match_team_stats.is_winner),
+  // computed by the parent (OverlayAdminConsole) which has access to
+  // matchSetup.teamA.teamId/teamB.teamId. When present, this is the
+  // authoritative winner and skips every local heuristic below —
+  // those (score-derived / method-derived / name-matching) only run
+  // as a fallback for a match with no match_team_stats row.
+  winnerTeamKeyOverride?: "teamA" | "teamB" | null;
 }
 
 const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(function ScoringSection(
@@ -1143,6 +1202,7 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
     initialEngineState,
     onAdminAction,
     onDismissedPlayersChange,
+    winnerTeamKeyOverride,
   },
   ref
 ) {
@@ -1301,23 +1361,50 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
     statCards.splice(2, 0, { label: "Target", value: `${liveState.target}` });
   }
 
-  // UPDATED — resolve winning team via resolveWinningTeamKey, passing
-  // BOTH the shortcode-preferred label (matchSetup.teamA/teamB, e.g.
-  // "RAV") and the full team name (matchSetup.teamAFullName/
-  // teamBFullName, e.g. "Ratmalana Aviators") for each team, since
-  // winningTeamName can come back holding either form. See helper
-  // definition near the top of this file for the full rationale.
-  // winningTeamKey is computed once and reused for both the logo and
-  // the accent color lookups.
+  // UPDATED — winningTeamKey is now resolved with a two-step strategy:
+  //
+  //   1. PRIMARY — resolveWinningTeamKeyFromMethod, using
+  //      liveState.matchResult.method ("runs" | "wickets" | "tie")
+  //      together with battingTeamKey/bowlingTeamKey (already known,
+  //      authoritative props). This is robust to winningTeamName being
+  //      empty, misspelled, or in either shortcode/full-name form,
+  //      because it never looks at winningTeamName at all.
+  //
+  //   2. FALLBACK — the original resolveWinningTeamKey name-matching
+  //      logic, only used if method-based resolution can't decide
+  //      (e.g. a tie, or a match record with no method set).
+  //
+  // This was the actual root cause of the winning team's logo not
+  // appearing: the console showed resolveWinningTeamKey being called
+  // with an EMPTY winningTeamName (the debug log printed the two label
+  // objects but no name), so it always bailed out to null before ever
+  // comparing labels — no amount of smarter label matching could have
+  // fixed that, since the name simply wasn't arriving.
+  // UPDATED — winnerTeamKeyOverride (resolved by the parent directly
+  // from match_team_stats.is_winner, the DB's own record of who won)
+  // now takes priority over every local heuristic. Falls through to
+  // score-derived / method-derived / name-matching only when the
+  // override is null/undefined — e.g. a match with no
+  // match_team_stats row written yet.
   const winningTeamKey = useMemo(
     () =>
+      winnerTeamKeyOverride ??
+      resolveWinningTeamKeyFromScore(liveState, isSecondInnings, maxOvers, battingTeamKey, bowlingTeamKey) ??
+      resolveWinningTeamKeyFromMethod(liveState.matchResult?.method, battingTeamKey, bowlingTeamKey) ??
       resolveWinningTeamKey(
         liveState.matchResult?.winningTeamName,
         { shortLabel: matchSetup.teamA, fullName: matchSetup.teamAFullName },
         { shortLabel: matchSetup.teamB, fullName: matchSetup.teamBFullName }
       ),
     [
+      winnerTeamKeyOverride,
+      liveState,
+      isSecondInnings,
+      maxOvers,
+      liveState.matchResult?.method,
       liveState.matchResult?.winningTeamName,
+      battingTeamKey,
+      bowlingTeamKey,
       matchSetup.teamA,
       matchSetup.teamAFullName,
       matchSetup.teamB,

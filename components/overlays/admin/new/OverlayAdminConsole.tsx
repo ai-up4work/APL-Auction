@@ -816,12 +816,9 @@ export default function OverlayAdminConsole({
   // still drive every label/header in the UI exactly as before) — they
   // exist solely so ScoringSection's winning-team resolution can match
   // liveState.matchResult.winningTeamName against either a shortcode
-  // ("RAV") or a full name ("Ratmalana Aviators"), since a completed
-  // match's result string can hold either depending on how it was
-  // produced. See ScoringSection.tsx's resolveWinningTeamKey for the
-  // full rationale — this was the actual root cause of the winning
-  // team's logo not appearing on the match-complete screen even though
-  // the logo URL itself was present and valid in the database.
+  // ("RAV") or a full name ("Ratmalana Aviators"), as a fallback for
+  // matches with no match_team_stats row (see dbWinnerTeamKey below,
+  // which is now the primary source of truth).
   const legacyMatchSetup = useMemo(
     () => ({
       teamA: matchSetup.teamA.shortCode || matchSetup.teamA.name || "Team A",
@@ -887,6 +884,71 @@ export default function OverlayAdminConsole({
   useEffect(() => {
     liveStateRef.current = liveState;
   }, [liveState]);
+
+  // ═══════════ NEW — winning team, fetched directly from the DB ═══════════
+  // The winning team's logo on the match-complete screen used to be
+  // resolved entirely from liveState.matchResult.winningTeamName, which
+  // can arrive empty or missing depending on how the match was
+  // completed (live engine vs. an imported/simulated match record).
+  // Rather than keep patching that string-matching, this fetches the
+  // actual recorded winner straight from match_team_stats.is_winner —
+  // a column that exists specifically to answer "which team won this
+  // match" — and resolves it to "teamA"/"teamB" by matching team_id
+  // against matchSetup.teamA.teamId / matchSetup.teamB.teamId (both
+  // already populated whenever teams are backed by real `teams` rows).
+  //
+  // Runs whenever the match is marked complete (and again if matchId
+  // changes). ScoringSection still has its own local fallbacks
+  // (score-derived / method-derived / name-matching) for the rare case
+  // where no match_team_stats row exists yet — this is simply the
+  // preferred, authoritative source when it's available.
+  const [dbWinnerTeamKey, setDbWinnerTeamKey] = useState<"teamA" | "teamB" | null>(null);
+
+  useEffect(() => {
+    if (!matchId || !liveState.matchComplete) {
+      setDbWinnerTeamKey(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("match_team_stats")
+        .select("team_id, is_winner")
+        .eq("match_id", matchId);
+      if (cancelled) return;
+      if (error) {
+        console.error("[OverlayAdminConsole] failed to load match_team_stats:", error.message);
+        setDbWinnerTeamKey(null);
+        return;
+      }
+      const winnerRow = (data ?? []).find((r) => r.is_winner === true);
+      if (!winnerRow) {
+        setDbWinnerTeamKey(null);
+        return;
+      }
+      if (winnerRow.team_id && winnerRow.team_id === matchSetup.teamA.teamId) {
+        setDbWinnerTeamKey("teamA");
+      } else if (winnerRow.team_id && winnerRow.team_id === matchSetup.teamB.teamId) {
+        setDbWinnerTeamKey("teamB");
+      } else {
+        // team_id didn't match either side's teamId — leave null so
+        // ScoringSection's local fallbacks get a chance instead of
+        // silently guessing wrong.
+        if (process.env.NODE_ENV !== "production") {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[OverlayAdminConsole] match_team_stats winner team_id didn't match teamA/teamB.teamId:",
+            { winnerRow, teamAId: matchSetup.teamA.teamId, teamBId: matchSetup.teamB.teamId }
+          );
+        }
+        setDbWinnerTeamKey(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [matchId, liveState.matchComplete, matchSetup.teamA.teamId, matchSetup.teamB.teamId]);
+  // ═══════════ END winning team fetch ═══════════
 
   // ═══════════ NEW — Realtime sync from other writers ═══════════
   // Mirrors the subscription in app/overlay/[auctionId]/page.tsx. That
@@ -1666,6 +1728,7 @@ export default function OverlayAdminConsole({
           initialEngineState={initialEngineState}
           onAdminAction={onAdminAction}
           onDismissedPlayersChange={setDismissedPlayers}
+          winnerTeamKeyOverride={dbWinnerTeamKey}
         />
 
         {/* ══════════ RIGHT: Match Setup + Moments + Weather (3rd on mobile) ══════════ */}
