@@ -339,9 +339,9 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
     liveState.matchResult?.winningTeamName,
   ]);
 
-  const matchResultFinalScoreLabel = `${liveState.score.runs}/${liveState.score.wickets} (${overs} ov)`;
+  const matchResultFinalScoreLabel = `${liveState.score.runs}/${liveState.score.wickets} (${overs} ov) BY ${matchResultWinningTeamName}`;
   const matchResultTargetLabel =
-    isSecondInnings && liveState.target !== undefined ? `Target ${liveState.target}` : undefined;
+    isSecondInnings && liveState.target !== undefined ? `Target ${liveState.target} ` : undefined;
 
   return (
     <section

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Lock, Shield, Sparkles, Database } from "lucide-react"
+import { Lock, Shield, Sparkles, Database, Trophy } from "lucide-react"
 import type {
   MatchDetail,
   BattingRow,
@@ -490,6 +490,15 @@ export default function MatchTabs({
   firstInningsTeam,
   secondInningsTeam,
 }: MatchTabsProps) {
+  // Squad name -> team logo, sourced from match.teamA/teamB (the actual
+  // logo data lives there, not on MatchSquad itself — a squad's `team`
+  // field is just the team's display name). Falls back to whatever the
+  // squad object carries directly in case it's ever populated upstream.
+  const teamLogoByName = new Map<string, string | undefined>([
+    [match.teamA.name, match.teamA.logo],
+    [match.teamB.name, match.teamB.logo],
+  ])
+
   const isTabLocked = (t: Tab): boolean => {
     switch (t) {
       case "scorecard":
@@ -671,7 +680,13 @@ export default function MatchTabs({
               hint="Playing XI and bench lists will show up here once squads are added for this match."
             />
           ) : (
-            match.squads.map((s) => <MatchSquadPanel key={s.team} squad={s} />)
+            match.squads.map((s) => (
+              <MatchSquadPanel
+                key={s.team}
+                squad={s}
+                logo={teamLogoByName.get(s.team)}
+              />
+            ))
           )}
         </div>
       )}
@@ -923,48 +938,223 @@ export default function MatchTabs({
 }
 
 // ─────────────────────────────────────────────────────────────
-// DATA COMPONENTS
+// SCORECARD — batting / bowling / fall-of-wickets cards
+//
+// REDESIGNED: previously a plain header-row + data-grid table (same
+// bare layout for every card). Rows are now avatar-led — same visual
+// language as the live CurrentPlayStrip/partnership rows on the match
+// header — with the top scorer/wicket-taker picked out by a subtle
+// gold highlight + trophy mark, and bowling economy colour-coded
+// (green/gold/red) the same way econTone already does on the header
+// strip, so a completed scorecard reads at a glance instead of being
+// a flat list of numbers.
 // ─────────────────────────────────────────────────────────────
-function DataGrid({
-  columns,
+
+/** Colours a bowling economy figure — green when tidy, red when
+ *  expensive, gold in between. Mirrors the same thresholds used for
+ *  the live current-bowler strip on the match header. */
+function econTone(econ: string | number): string {
+  const value = typeof econ === "number" ? econ : parseFloat(econ)
+  if (Number.isNaN(value)) return "text-gold"
+  if (value < 6) return "text-emerald-400"
+  if (value > 9) return "text-red-400"
+  return "text-gold"
+}
+
+function BattingCard({
+  title,
   rows,
+  extras,
+  extrasNote,
+  total,
+  wkts,
+  overs,
+  dnb,
+  creaseNote,
+  live,
 }: {
-  columns: { key: string; label: string; align?: "left" | "right"; grow?: boolean }[]
-  rows: Record<string, React.ReactNode>[]
+  title: string
+  rows: BattingRow[]
+  extras: number
+  extrasNote: string
+  total: number
+  wkts: number
+  overs: string
+  dnb?: string[]
+  creaseNote?: string
+  live?: boolean
 }) {
-  const template = columns.map((c) => (c.grow ? "minmax(6rem,1fr)" : "3.2rem")).join(" ")
+  const topScore = rows.length ? Math.max(...rows.map((b) => b.runs)) : 0
+
   return (
-    <div className="border border-gold/10 rounded-md overflow-x-auto">
-      <div className="min-w-[22rem]">
-        <div className="grid border-b border-gold/10 bg-white/[0.02]" style={{ gridTemplateColumns: template }}>
-          {columns.map((c) => (
-            <div
-              key={c.key}
-              className={`p-2.5 text-[9.5px] tracking-widest uppercase text-gray-500 font-cinzel ${
-                c.align === "right" ? "text-right" : "text-left"
-              }`}
-            >
-              {c.label}
-            </div>
-          ))}
-        </div>
-        {rows.length === 0 ? (
-          <p className="text-gray-600 text-xs text-center py-6">No data yet.</p>
-        ) : (
-          rows.map((row, i) => (
-            <div
-              key={i}
-              className={`grid items-start text-xs md:text-sm ${i < rows.length - 1 ? "border-b border-gold/5" : ""}`}
-              style={{ gridTemplateColumns: template }}
-            >
-              {columns.map((c) => (
-                <div key={c.key} className={`p-2.5 ${c.align === "right" ? "text-right text-gray-200" : "text-left"}`}>
-                  {row[c.key]}
-                </div>
-              ))}
-            </div>
-          ))
+    <div className="relative rounded-xl border border-gold/15 bg-gradient-to-b from-white/[0.03] to-transparent p-5 mb-4 overflow-hidden">
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-gold text-xs uppercase tracking-widest font-cinzel font-semibold">{title}</p>
+        {live && (
+          <span className="flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-300 animate-pulse" /> live
+          </span>
         )}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-gray-600 text-xs text-center py-6">No data yet.</p>
+      ) : (
+        <div className="divide-y divide-gold/5">
+          {rows.map((b) => {
+            const sr = b.balls ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0"
+            const isTop = topScore > 0 && b.runs === topScore
+            return (
+              <div
+                key={b.name}
+                className={`flex items-center gap-3 py-2.5 px-1 -mx-1 rounded-lg transition-colors ${
+                  isTop ? "bg-gold/[0.06]" : ""
+                }`}
+              >
+                <div className="relative h-9 w-9 rounded-full bg-black/60 border border-gold/20 flex items-center justify-center shrink-0">
+                  <span className="text-[10.5px] font-bold text-gold font-cinzel">{initials(b.name)}</span>
+                  {b.notOut && (
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-black" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-gray-100 text-sm font-medium truncate flex items-center gap-1.5">
+                    {b.name}
+                    {isTop && <Trophy className="h-3 w-3 text-gold shrink-0" />}
+                  </p>
+                  <p className={`text-[10.5px] mt-0.5 truncate ${b.notOut ? "text-green-500" : "text-gray-500"}`}>
+                    {b.notOut ? "not out" : b.how}
+                  </p>
+                </div>
+
+                <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                  <span className="text-[9.5px] text-gray-500 tabular-nums bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                    {b.fours}×4
+                  </span>
+                  <span className="text-[9.5px] text-gray-500 tabular-nums bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                    {b.sixes}×6
+                  </span>
+                </div>
+
+                <div className="text-right shrink-0 w-16">
+                  <p className="text-sm font-bold font-cinzel text-white tabular-nums">
+                    {b.runs}
+                    <span className="text-gray-500 font-normal">({b.balls})</span>
+                  </p>
+                  <p className="text-[9px] text-gray-600 tabular-nums">SR {sr}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {creaseNote && (
+        <p className="text-gray-400 text-[11px] mt-3 pt-3 border-t border-gold/10 break-words">
+          At the crease: {creaseNote}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-gold/10">
+        <span className="text-[11px] text-gray-400">
+          Extras <span className="text-gray-200 font-medium">{extras}</span>{" "}
+          <span className="text-gray-600">({extrasNote})</span>
+        </span>
+        <span className="text-sm font-bold font-cinzel text-white bg-gold/10 border border-gold/20 rounded-md px-3 py-1">
+          {total}/{wkts} <span className="text-gray-400 font-normal text-xs">({overs} ov)</span>
+        </span>
+      </div>
+
+      {dnb && dnb.length > 0 && (
+        <p className="text-gray-500 text-[10px] mt-2.5 break-words">Did not bat: {dnb.join(", ")}</p>
+      )}
+    </div>
+  )
+}
+
+function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[]; live?: boolean }) {
+  const topWkts = rows.length ? Math.max(...rows.map((b) => b.wkts)) : 0
+
+  return (
+    <div className="relative rounded-xl border border-gold/15 bg-gradient-to-b from-white/[0.03] to-transparent p-5 mb-4 overflow-hidden">
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-gold text-xs uppercase tracking-widest font-cinzel font-semibold">{title}</p>
+        {live && <span className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">so far</span>}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-gray-600 text-xs text-center py-6">No data yet.</p>
+      ) : (
+        <div className="divide-y divide-gold/5">
+          {rows.map((b) => {
+            const isTop = topWkts > 0 && b.wkts === topWkts
+            return (
+              <div
+                key={b.name}
+                className={`flex items-center gap-3 py-2.5 px-1 -mx-1 rounded-lg transition-colors ${
+                  isTop ? "bg-gold/[0.06]" : ""
+                }`}
+              >
+                <div className="h-9 w-9 rounded-full bg-black/60 border border-gold/20 flex items-center justify-center shrink-0">
+                  <span className="text-[10.5px] font-bold text-gold font-cinzel">{initials(b.name)}</span>
+                </div>
+
+                <p className="text-gray-100 text-sm font-medium truncate flex-1 min-w-0 flex items-center gap-1.5">
+                  {b.name}
+                  {isTop && <Trophy className="h-3 w-3 text-gold shrink-0" />}
+                </p>
+
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="hidden sm:block text-center w-9">
+                    <p className="text-sm font-semibold text-white tabular-nums">{b.overs}</p>
+                    <p className="text-[8.5px] uppercase tracking-widest text-gray-600">Ov</p>
+                  </div>
+                  <div className="hidden sm:block text-center w-9">
+                    <p className="text-sm font-semibold text-white tabular-nums">{b.runs}</p>
+                    <p className="text-[8.5px] uppercase tracking-widest text-gray-600">R</p>
+                  </div>
+                  <div className="text-center w-7">
+                    <p className="text-base font-bold font-cinzel text-white tabular-nums">{b.wkts}</p>
+                    <p className="text-[8.5px] uppercase tracking-widest text-gray-600">W</p>
+                  </div>
+                  <div className="text-center w-11">
+                    <p className={`text-sm font-bold font-cinzel tabular-nums ${econTone(b.econ)}`}>{b.econ}</p>
+                    <p className="text-[8.5px] uppercase tracking-widest text-gray-600">Econ</p>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FowList({ fow }: { fow: FowEntry[] }) {
+  if (fow.length === 0) return null
+  return (
+    <div className="relative rounded-xl border border-gold/15 bg-gradient-to-b from-white/[0.03] to-transparent p-5 mb-4 overflow-hidden">
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+      <p className="text-gold text-xs uppercase tracking-widest font-cinzel font-semibold mb-3">Fall of Wickets</p>
+      <div className="flex flex-wrap gap-2">
+        {fow.map((f, i) => (
+          <span
+            key={`${f[0]}-${i}`}
+            className="flex items-center gap-1.5 text-[10.5px] text-gray-300 bg-white/[0.03] border border-gold/10 rounded-lg pl-1.5 pr-2.5 py-1"
+          >
+            <span className="h-4 w-4 rounded-full bg-red-600/80 text-white text-[8.5px] font-bold flex items-center justify-center shrink-0">
+              {i + 1}
+            </span>
+            <b className="text-white">{f[0]}</b>-{f[1]}
+            <span className="text-gray-500">({f[2]} ov)</span>
+          </span>
+        ))}
       </div>
     </div>
   )
@@ -1310,121 +1500,32 @@ function StatsPanel({
   )
 }
 
-function BattingCard({
-  title,
-  rows,
-  extras,
-  extrasNote,
-  total,
-  wkts,
-  overs,
-  dnb,
-  creaseNote,
-  live,
-}: {
-  title: string
-  rows: BattingRow[]
-  extras: number
-  extrasNote: string
-  total: number
-  wkts: number
-  overs: string
-  dnb?: string[]
-  creaseNote?: string
-  live?: boolean
-}) {
-  const columns = [
-    { key: "name", label: "Batter", grow: true },
-    { key: "r", label: "R", align: "right" as const },
-    { key: "b", label: "B", align: "right" as const },
-    { key: "4s", label: "4s", align: "right" as const },
-    { key: "6s", label: "6s", align: "right" as const },
-    { key: "sr", label: "SR", align: "right" as const },
-  ]
-  const rowData = rows.map((b) => ({
-    name: (
-      <div className="min-w-0">
-        <p className="text-gray-100 font-medium truncate">{b.name}</p>
-        <p className={`text-[10.5px] mt-0.5 truncate ${b.notOut ? "text-green-500" : "text-gray-500"}`}>
-          {b.notOut ? "not out" : b.how}
-        </p>
-      </div>
-    ),
-    r: b.runs,
-    b: b.balls,
-    "4s": b.fours,
-    "6s": b.sixes,
-    sr: b.balls ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0",
-  }))
-
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-gold text-xs uppercase tracking-widest font-cinzel">{title}</p>
-        {live && (
-          <span className="flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-300 animate-pulse" /> live
-          </span>
-        )}
-      </div>
-      <DataGrid columns={columns} rows={rowData} />
-      {creaseNote && <p className="text-gray-400 text-[11px] mt-3 break-words">At the crease: {creaseNote}</p>}
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-gray-400">
-        <span>
-          Extras {extras} <span className="text-gray-600">({extrasNote})</span>
-        </span>
-        <span className="text-white font-bold">
-          Total {total}/{wkts} <span className="text-gray-500 font-normal">({overs} ov)</span>
-        </span>
-      </div>
-      {dnb && dnb.length > 0 && <p className="text-gray-500 text-[10px] mt-2 break-words">Did not bat: {dnb.join(", ")}</p>}
+/** Team badge next to a squad's name — the actual team logo when
+ *  `squad.logo` is set (and loads successfully), falling back to the
+ *  generic Shield icon only when there's no logo or it 404s. Squads
+ *  previously always showed the Shield placeholder even when a real
+ *  logo was available on the team, because MatchSquadPanel's header
+ *  never read squad.logo at all. */
+function SquadLogo({ name, logo }: { name: string; logo?: string }) {
+  const [failed, setFailed] = useState(false)
+  const showLogo = !!logo && !failed
+  return showLogo ? (
+    <div className="relative h-9 w-9 rounded-full overflow-hidden border border-gold/30 bg-black/40 shrink-0">
+      <img
+        src={logo}
+        alt={`${name} logo`}
+        className="w-full h-full object-cover"
+        onError={() => setFailed(true)}
+      />
     </div>
+  ) : (
+    <span className="h-9 w-9 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0">
+      <Shield className="h-4 w-4 text-gold drop-shadow-[0_0_6px_rgba(245,166,35,0.4)]" />
+    </span>
   )
 }
 
-function BowlingCard({ title, rows, live }: { title: string; rows: BowlingRow[]; live?: boolean }) {
-  const columns = [
-    { key: "name", label: "Bowler", grow: true },
-    { key: "o", label: "O", align: "right" as const },
-    { key: "r", label: "R", align: "right" as const },
-    { key: "w", label: "W", align: "right" as const },
-    { key: "econ", label: "Econ", align: "right" as const },
-  ]
-  const rowData = rows.map((b) => ({
-    name: <p className="text-gray-100 font-medium truncate">{b.name}</p>,
-    o: b.overs,
-    r: b.runs,
-    w: b.wkts,
-    econ: b.econ,
-  }))
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-gold text-xs uppercase tracking-widest font-cinzel">{title}</p>
-        {live && <span className="text-gray-500 text-[10px] uppercase tracking-widest font-cinzel">so far</span>}
-      </div>
-      <DataGrid columns={columns} rows={rowData} />
-    </div>
-  )
-}
-
-function FowList({ fow }: { fow: FowEntry[] }) {
-  if (fow.length === 0) return null
-  return (
-    <div className="bg-black/50 border border-gold/20 rounded-lg p-6 mb-4">
-      <p className="text-gold text-xs uppercase tracking-widest font-cinzel mb-3">Fall of Wickets</p>
-      <div className="flex flex-wrap gap-2">
-        {fow.map((f, i) => (
-          <span key={`${f[0]}-${i}`} className="text-[10.5px] text-gray-300 bg-white/[0.02] border border-gold/10 rounded-lg px-2.5 py-1.5">
-            <b className="text-white">{f[0]}</b> {f[1]} ({f[2]} ov)
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
+function MatchSquadPanel({ squad, logo }: { squad: MatchSquad; logo?: string }) {
   const playingXI = squad.players.filter((p) => p.xi)
   const bench = squad.players.filter((p) => !p.xi)
 
@@ -1477,7 +1578,10 @@ function MatchSquadPanel({ squad }: { squad: MatchSquad }) {
     <div className="bg-black/50 border border-gold/20 rounded-xl p-6 shadow-xl">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6 border-b border-gold/10 pb-4">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Shield className="h-5 w-5 text-gold drop-shadow-[0_0_6px_rgba(245,166,35,0.4)] shrink-0" />
+          {/* Logo is resolved by MatchTabs from match.teamA/teamB (see
+              teamLogoByName) and passed in as `logo` — MatchSquad
+              itself doesn't carry a logo field. */}
+          <SquadLogo name={squad.team} logo={logo} />
           <h3 className="text-lg font-bold text-white font-cinzel tracking-wider truncate">{squad.team}</h3>
         </div>
         <div className="text-right">

@@ -253,11 +253,20 @@ function MatchCompleteBanner({
   winner,
   teamAColor,
   teamBColor,
+  firstInningsTeam,
+  secondInningsTeam,
 }: {
   match: MatchDetail
   winner: "a" | "b" | "tie" | null
   teamAColor: string
   teamBColor: string
+  /** Toss-resolved physical teams — see the doc comment on
+   *  MatchDetailClient's firstInningsTeam/secondInningsTeam below. The
+   *  final score line at the bottom of this banner previously hardcoded
+   *  teamA = 1st innings / teamB = 2nd innings, same bug already fixed
+   *  in the Scorecard/Overs/Commentary tabs, just missed here. */
+  firstInningsTeam: MatchDetail["teamA"]
+  secondInningsTeam: MatchDetail["teamA"]
 }) {
   if (!winner) return null
   const isTie = winner === "tie"
@@ -348,12 +357,12 @@ function MatchCompleteBanner({
 
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-5 pt-4 border-t border-white/10 text-xs font-cinzel uppercase tracking-widest text-gray-400">
         <span>
-          {match.teamA.short} {match.innings1.total}/{match.innings1.wkts}
+          {firstInningsTeam.short} {match.innings1.total}/{match.innings1.wkts}
           <span className="opacity-60"> ({match.innings1.overs})</span>
         </span>
         <span className="opacity-30 hidden sm:inline">·</span>
         <span>
-          {match.teamB.short} {match.innings2Final.total}/{match.innings2Final.wkts}
+          {secondInningsTeam.short} {match.innings2Final.total}/{match.innings2Final.wkts}
           <span className="opacity-60"> ({match.innings2Final.overs})</span>
         </span>
       </div>
@@ -472,11 +481,37 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
   const started = status !== "not_started"
   const hasBallData = match.hasBallData
 
-  const innings2Started = match.currentInnings === 2 || match.innings2Partial.batting.length > 0
+  // FIXED — previously only checked LIVE-only signals (currentInnings,
+  // innings2Partial.batting), both of which are typically empty/stale
+  // once a match is no longer live. That made a genuinely completed
+  // match look like its 2nd innings "never started" here, which
+  // cascaded into MatchTabs (Scorecard/Overs/Commentary) locking the
+  // entire 2nd innings for anyone visiting the page after the match was
+  // over — even though match.innings2Final has the full completed
+  // 2nd-innings scorecard sitting right there. Now also checks
+  // innings2Final directly, so a completed match always shows both
+  // innings, unlocked, exactly as it should for someone checking the
+  // result after the fact.
+  const innings2Started =
+    match.currentInnings === 2 ||
+    match.innings2Partial.batting.length > 0 ||
+    match.innings2Final.batting.length > 0
 
+  // FIXED — this used to jump straight to innings 2 any time
+  // innings2Started was true, which made sense back when that flag was
+  // only ever true while a chase was actually live. Now that
+  // innings2Started also correctly reflects completed matches (see the
+  // innings2Started fix below), that same condition made every
+  // completed match open on innings 2 by default whenever you switched
+  // tabs — jarring for someone landing on the scorecard to review the
+  // whole match, since they'd see the 2nd innings first and have to
+  // manually flip back to see how the 1st innings went. Defaulting to
+  // innings 2 now only kicks in while the chase is actually LIVE;
+  // completed (and not-yet-started) matches default to innings 1, and
+  // the innings toggle is still right there to switch either way.
   useEffect(() => {
-    setInnings(innings2Started ? 2 : 1)
-  }, [tab, innings2Started])
+    setInnings(live && innings2Started ? 2 : 1)
+  }, [tab, live, innings2Started])
 
   const runs = live ? currentTotal(match.innings2Partial) : match.innings2Final.total
   const wkts = live ? currentWkts(match.innings2Partial) : match.innings2Final.wkts
@@ -760,6 +795,8 @@ export default function MatchDetailClient({ match: initialMatch, tournamentSlug 
                 winner={winner}
                 teamAColor={teamAColor}
                 teamBColor={teamBColor}
+                firstInningsTeam={firstInningsTeam}
+                secondInningsTeam={secondInningsTeam}
               />
             ) : (
               <>
