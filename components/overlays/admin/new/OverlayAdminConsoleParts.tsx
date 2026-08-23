@@ -146,11 +146,7 @@ export function MobileChannelRow({
       }}
     >
       <span
-        className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-        style={{
-          background: on ? `${dotColor}20` : "rgba(255,255,255,0.04)",
-          border: `1px solid ${on ? `${dotColor}40` : "rgba(255,255,255,0.08)"}`,
-        }}
+        className="w-9 h-9 flex items-center justify-center shrink-0"
       >
         <Icon name={icon} style={{ fontSize: 17, color: on ? dotColor : "rgba(255,255,255,0.42)" }} />
       </span>
