@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import WeatherPanel from "@/components/overlays/admin/new/Weatherpanel";
 import MatchSetupPanel from "@/components/overlays/admin/new/MatchInfopanel";
-// import ScoringSection from "@/components/overlays/admin/new/Scoringsection";
 import {
   connectOverlayBus,
   type MatchSetup,

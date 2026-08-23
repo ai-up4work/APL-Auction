@@ -276,6 +276,7 @@ export const mockLiveMatch: MockMatchDetail = {
   },
   teamA,
   teamB,
+  inningsOneBattingTeam: "teamA",
   innings1,
   innings2Final,
   innings2Partial,
