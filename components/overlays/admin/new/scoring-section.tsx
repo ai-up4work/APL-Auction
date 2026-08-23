@@ -1,4 +1,4 @@
-// app/components/overlays/admin/new/Scoringsection.tsx
+// app/components/overlays/admin/new/scoring-section.tsx
 "use client";
 
 import {

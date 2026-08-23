@@ -65,7 +65,7 @@ import {
   ROSTER_TEAM_B_FALLBACK,
   matchesTeamLabel,
 } from "./OverlayAdminConsoleParts";
-import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays/admin/new/ScoringSection";
+import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays/admin/new/scoring-section";
 // NEW — used to independently cross-check match_team_stats.is_winner
 // against the live score before trusting it as the winner override. See
 // the dbWinnerTeamKey effect below for the full rationale.
