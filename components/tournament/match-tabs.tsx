@@ -682,6 +682,31 @@ export default function MatchTabs({
     }
   }
 
+  // ── status-driven default tab ──
+  // not_started -> Info (nothing else to show yet)
+  // live        -> Overs (the most useful live view)
+  // completed   -> Scorecard (the definitive summary once it's over)
+  //
+  // Only runs on an actual status transition (guarded by
+  // prevStatusRef), so it never fights a tab the user has manually
+  // picked while status stays the same — e.g. tapping into Squads or
+  // Stats during a live match won't get yanked back to Overs.
+  const prevStatusRef = useRef<typeof status | null>(null)
+
+  useEffect(() => {
+    if (prevStatusRef.current === status) return
+    prevStatusRef.current = status
+
+    const defaultForStatus: Tab =
+      status === "not_started" ? "info" : status === "live" ? "overs" : "scorecard"
+
+    // Fall back to "info" if the intended default is locked — e.g.
+    // status flips to "live" before the first delivery has landed, so
+    // "overs" isn't populated yet.
+    setTab(isTabLocked(defaultForStatus) ? "info" : defaultForStatus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
+
   // ── infinite-loop curved carousel: refs + scroll-driven transform math ──
   const tabScrollerRef = useRef<HTMLDivElement>(null)
   const tabItemRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
