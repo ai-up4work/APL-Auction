@@ -266,40 +266,73 @@ function PrimaryTabBar({ tab, setTab }: { tab: Primary; setTab: (t: Primary) => 
   }, [tab])
 
   return (
-    <div className="relative mb-8 max-w-full">
-      {/* subtle arc backdrop so the curve reads even before scrolling */}
-      <svg
-        className="pointer-events-none absolute left-0 right-0 -top-1 h-6 w-full opacity-20"
-        viewBox="0 0 100 10"
-        preserveAspectRatio="none"
-      >
-        <path d="M0,10 Q50,0 100,10" stroke="#f5a623" strokeWidth="0.5" fill="none" />
-      </svg>
+    <div className="mb-8 max-w-full">
+      {/* MOBILE — infinite-loop curved carousel. Scrolling/dragging a
+          long strip is a natural touch gesture, so the loop earns its
+          keep here. Hidden from md and up. */}
+      <div className="relative md:hidden">
+        <svg
+          className="pointer-events-none absolute left-0 right-0 -top-1 h-6 w-full opacity-20"
+          viewBox="0 0 100 10"
+          preserveAspectRatio="none"
+        >
+          <path d="M0,10 Q50,0 100,10" stroke="#f5a623" strokeWidth="0.5" fill="none" />
+        </svg>
 
-      <div
-        ref={tabScrollerRef}
-        onScroll={onTabScroll}
-        className="flex flex-nowrap items-end gap-1.5 overflow-x-auto snap-x snap-mandatory
-                   scrollbar-none bg-black/50 border border-gold/20 px-3 py-3 rounded-full w-fit max-w-full"
-      >
-        {LOOPED_TABS.map(({ key, label, icon: Icon, extKey }) => {
+        <div
+          ref={tabScrollerRef}
+          onScroll={onTabScroll}
+          className="flex flex-nowrap items-end gap-1.5 overflow-x-auto snap-x snap-mandatory
+                     scrollbar-none bg-black/50 border border-gold/20 px-3 py-3 rounded-full w-fit max-w-full"
+        >
+          {LOOPED_TABS.map(({ key, label, icon: Icon, extKey }) => {
+            const active = tab === key
+            return (
+              <button
+                key={extKey}
+                ref={(el) => {
+                  if (el) tabItemRefs.current.set(extKey, el)
+                  else tabItemRefs.current.delete(extKey)
+                }}
+                onClick={() => setTab(key)}
+                className={`snap-center shrink-0 flex items-center gap-1.5 font-cinzel text-xs uppercase
+                  tracking-wide px-4 py-2 rounded-full whitespace-nowrap origin-bottom
+                  transition-[background-color,color,border-color] duration-300 ${
+                  tabReducedMotion ? "" : "transition-transform will-change-transform"
+                } ${
+                  active
+                    ? "bg-gold text-black shadow-[0_4px_18px_rgba(245,166,35,0.35)] border border-gold"
+                    : "bg-white/[0.03] text-gray-300 border border-gold/10 hover:text-gold hover:border-gold/30"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* edge fades — purely decorative now, since the loop means the
+            strip is never actually empty past these edges */}
+        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-10 rounded-l-full bg-gradient-to-r from-black/70 to-transparent" />
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-10 rounded-r-full bg-gradient-to-l from-black/70 to-transparent" />
+      </div>
+
+      {/* DESKTOP — compact single-line strip, no loop. Five tabs fit
+          comfortably in one row, so the carousel's scroll/wrap
+          machinery is unnecessary width and motion here. */}
+      <div className="hidden md:flex flex-nowrap items-center gap-1 bg-black/50 border border-gold/20 p-1 rounded-full w-fit">
+        {PRIMARY_TABS.map(({ key, label, icon: Icon }) => {
           const active = tab === key
           return (
             <button
-              key={extKey}
-              ref={(el) => {
-                if (el) tabItemRefs.current.set(extKey, el)
-                else tabItemRefs.current.delete(extKey)
-              }}
+              key={key}
               onClick={() => setTab(key)}
-              className={`snap-center shrink-0 flex items-center gap-1.5 font-cinzel text-xs uppercase
-                tracking-wide px-4 py-2 rounded-full whitespace-nowrap origin-bottom
-                transition-[background-color,color,border-color] duration-300 ${
-                tabReducedMotion ? "" : "transition-transform will-change-transform"
-              } ${
+              className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide
+                px-4 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
                 active
-                  ? "bg-gold text-black shadow-[0_4px_18px_rgba(245,166,35,0.35)] border border-gold"
-                  : "bg-white/[0.03] text-gray-300 border border-gold/10 hover:text-gold hover:border-gold/30"
+                  ? "bg-gold text-black shadow-[0_2px_10px_rgba(245,166,35,0.3)]"
+                  : "text-gray-300 hover:text-gold hover:bg-white/[0.03]"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -308,11 +341,6 @@ function PrimaryTabBar({ tab, setTab }: { tab: Primary; setTab: (t: Primary) => 
           )
         })}
       </div>
-
-      {/* edge fades — purely decorative now, since the loop means the
-          strip is never actually empty past these edges */}
-      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-10 rounded-l-full bg-gradient-to-r from-black/70 to-transparent" />
-      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-10 rounded-r-full bg-gradient-to-l from-black/70 to-transparent" />
     </div>
   )
 }
