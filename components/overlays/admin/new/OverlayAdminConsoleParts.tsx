@@ -115,6 +115,7 @@ export function MobileChannelRow({
   onClick,
   dotColor,
   disabled,
+  grow,
 }: {
   icon: string;
   label: string;
@@ -123,13 +124,21 @@ export function MobileChannelRow({
   onClick: () => void;
   dotColor: string;
   disabled?: boolean;
+  // NEW — when set, this row takes an equal flex share of its parent's
+  // height (`flex-1 min-h-0`) instead of sizing to its own content, so
+  // a card's rows evenly divide whatever space `growRows` on the
+  // enclosing ChannelGroupCard gave that card. See
+  // OverlayAdminConsole's MOBILE_NAV_CLEARANCE comment for why.
+  grow?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all active:scale-[0.98] disabled:active:scale-100"
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all active:scale-[0.98] disabled:active:scale-100 ${
+        grow ? "flex-1 min-h-0" : ""
+      }`}
       style={{
         background: on ? `${dotColor}12` : "rgba(255,255,255,0.02)",
         border: `1px solid ${on ? `${dotColor}38` : "rgba(255,255,255,0.06)"}`,
@@ -172,18 +181,32 @@ export function ChannelGroupCard({
   title,
   hint,
   children,
+  className,
+  growRows,
 }: {
   title: string;
   hint?: string;
   children: React.ReactNode;
+  // NEW — extra classes for the outer card, e.g. "flex-1 min-h-0" so
+  // the card itself takes an equal share of the mobile Overlay tab's
+  // fixed height alongside its sibling cards.
+  className?: string;
+  // NEW — when set, the row container becomes a flexed column
+  // (`flex-1 min-h-0`) instead of a plain stack, so children passed
+  // with `grow` on MobileChannelRow can actually divide the card's
+  // available height instead of just sitting at their natural size.
+  growRows?: boolean;
 }) {
   return (
-    <div className="rounded-2xl p-2.5 flex flex-col gap-2" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
-      <div className="flex items-baseline justify-between gap-2 px-1">
+    <div
+      className={`rounded-2xl p-2.5 flex flex-col gap-2 ${className ?? ""}`}
+      style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}
+    >
+      <div className="flex items-baseline justify-between gap-2 px-1 shrink-0">
         <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.18em] text-theme-orange">{title}</span>
         {hint && <span className="font-mono-geist text-[8px] uppercase tracking-[0.1em] text-on-surface-variant shrink-0">{hint}</span>}
       </div>
-      <div className="flex flex-col gap-1.5">{children}</div>
+      <div className={`flex flex-col gap-1.5 ${growRows ? "flex-1 min-h-0" : ""}`}>{children}</div>
     </div>
   );
 }

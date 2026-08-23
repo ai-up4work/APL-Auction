@@ -52,8 +52,6 @@ import {
   useIsMobile,
   TogglePill,
   GroupLabel,
-  MobileChannelRow,
-  ChannelGroupCard,
   MomentButton,
   CenteredOverlay,
   BatterPickerButton,
@@ -64,6 +62,16 @@ import {
   ROSTER_TEAM_A_FALLBACK,
   ROSTER_TEAM_B_FALLBACK,
   matchesTeamLabel,
+  // NEW — used to rebuild the mobile "Overlay" tab as full-width rows
+  // that actually fill the viewport (see the block below), instead of
+  // the old flex-wrapped TogglePill grid that only occupied a sliver
+  // of the screen and left most of it dead black space. Both now also
+  // accept `grow`/`growRows`/`className` so their heights can flex to
+  // exactly fill whatever space is available above the bottom nav
+  // (see MOBILE_NAV_CLEARANCE below) instead of a scrolling list with
+  // a fixed-size spacer at the end.
+  MobileChannelRow,
+  ChannelGroupCard,
 } from "./OverlayAdminConsoleParts";
 import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays/admin/new/scoring-section";
 // NEW — used to independently cross-check match_team_stats.is_winner
@@ -72,6 +80,16 @@ import ScoringSection, { type ScoringSectionHandle } from "@/components/overlays
 import { resolveWinningTeamKeyFromScore } from "@/components/overlays/admin/new/ScoringSectionParts";
 
 let idCtr = 0;
+
+// NEW — the mobile bottom tab bar is `fixed`, so it never participates
+// in normal document flow/height calculations. Anything meant to fill
+// "the rest of the screen" above it (like the mobile Overlay tab below)
+// has to subtract this out explicitly. Reused in exactly one place, but
+// pulled into a constant so the nav's on-screen height and the value
+// subtracted from it can't quietly drift apart if either changes later.
+// env(safe-area-inset-bottom) covers the home-indicator inset on
+// notched/gesture-nav phones, which the nav's own padding already adds.
+const MOBILE_NAV_CLEARANCE = "calc(4.75rem + env(safe-area-inset-bottom))";
 
 export default function OverlayAdminConsole({
   auctionId = null,
@@ -1029,13 +1047,16 @@ export default function OverlayAdminConsole({
   }
 
   return (
-    <div className="bg-background text-on-background min-h-screen lg:h-screen lg:overflow-hidden flex flex-col relative" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="bg-background text-on-background lg:min-h-screen lg:h-screen lg:overflow-hidden flex flex-col relative" style={{ fontFamily: "'Inter', sans-serif" }}>
       <style
         dangerouslySetInnerHTML={{
           __html: `
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,600;0,700;1,700&family=Geist+Mono:wght@400;500;700&family=Inter:wght@400;500;700&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
+        html, body {
+          background: #050505;
+        }
         :root {
           --color-background: #050505;
           --color-on-background: #ffffff;
@@ -1389,375 +1410,420 @@ export default function OverlayAdminConsole({
             />
           </div>
 
+          {/* ══════════ Overlay tab (mobile) ══════════
+              FIX — this wrapper previously had no height rule on
+              mobile, so it only occupied as much vertical space as its
+              children needed, leaving the rest of the viewport (down to
+              the fixed bottom nav) empty/black. A later attempt fixed
+              the "hidden behind the nav" symptom by making the list
+              scroll with a fixed-height spacer at the end — that made
+              everything reachable, but on any taller phone it left the
+              cards small and clustered at the top with dead space below
+              them again, just moved past the fold.
+              This version instead gives the tab an explicit height —
+              exactly the viewport minus the nav (`MOBILE_NAV_CLEARANCE`,
+              same constant so the two numbers can't drift apart) — and
+              then lets the three channel-group cards each take
+              `flex-1 min-h-0`, so they always divide that fixed height
+              evenly among themselves regardless of phone size. Passing
+              `growRows` down does the same thing one level in: each
+              card's own rows split *that* card's share evenly too. Net
+              effect: the whole list dynamically resizes to just fit the
+              available space, taller on a big phone, more compact on a
+              small one, with no scrolling and nothing hidden or empty.
+              `overflow-y-auto` stays on as a safety net only — it has no
+              visible effect while the flex sizing above successfully
+              fits everything, and only kicks in if a screen is so short
+              that rows would otherwise be compressed past their own
+              minimum (icon + label) size. ══════════ */}
           <div
-            className={`flex-col min-h-0 max-h-[calc(100dvh-6rem)] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:max-h-none lg:overflow-visible lg:contents ${
+            className={`flex-col lg:h-auto lg:max-h-none lg:overflow-visible lg:contents ${
               mobileTab === "overlay" ? "flex" : "hidden"
             }`}
+            style={mobileTab === "overlay" ? { height: `calc(100dvh - ${MOBILE_NAV_CLEARANCE})` } : undefined}
           >
-            {/* Broadcast Channels */}
-            <div className="p-4 shrink-0 lg:hidden flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Broadcast Channels</h3>
-                  <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
-                    Toggle what&apos;s live on the overlay
-                  </p>
-                </div>
+            {/* Broadcast Channels — cards flex to divide the tab's
+                fixed height evenly instead of scrolling past it */}
+            <div className="px-3 pt-3 pb-3 shrink-0 lg:hidden flex flex-col gap-3 h-full min-h-0 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex items-center justify-between gap-2 shrink-0">
+                <h3 className="font-archivo text-[13px] font-bold italic uppercase">Broadcast Channels</h3>
                 {anyFullscreenOn && (
                   <span
-                    className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-full font-mono-geist text-[8px] font-bold uppercase tracking-[0.12em]"
+                    className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full font-mono-geist text-[8px] font-bold uppercase tracking-[0.1em]"
                     style={{ background: "rgba(201,151,31,0.14)", border: "1px solid rgba(201,151,31,0.35)", color: "#e8c468" }}
                   >
-                    <Icon name="visibility_off" style={{ fontSize: 11 }} />
-                    On-air hidden
+                    <Icon name="visibility_off" style={{ fontSize: 10 }} />
+                    Hidden
                   </span>
                 )}
               </div>
 
-              <ChannelGroupCard title="On Air" hint={anyFullscreenOn ? "suppressed" : undefined}>
+              <ChannelGroupCard title={`On Air${anyFullscreenOn ? " (suppressed)" : ""}`} className="flex-1 min-h-0" growRows>
                 <MobileChannelRow
+                  grow
                   icon="partly_cloudy_day"
                   label="Weather"
-                  sublabel={alwaysOn.weather && !anyFullscreenOn ? "Live" : undefined}
+                  sublabel={`${weather.venue} · ${weather.temp}°`}
                   on={alwaysOn.weather && !anyFullscreenOn}
                   dotColor="#22c55e"
                   onClick={() => toggleAlwaysOn("weather")}
                 />
                 <MobileChannelRow
+                  grow
                   icon="scoreboard"
                   label="Live Score Bar"
-                  sublabel={alwaysOn.liveScoreBar && !anyFullscreenOn ? "Live" : undefined}
                   on={alwaysOn.liveScoreBar && !anyFullscreenOn}
                   dotColor="#22c55e"
                   onClick={() => toggleAlwaysOn("liveScoreBar")}
                 />
                 <MobileChannelRow
-                  icon="military_tech"
+                  grow
+                  icon="shield"
                   label="Tournament Logo"
-                  sublabel={alwaysOn.tournamentLogo && !anyFullscreenOn ? "Live" : undefined}
                   on={alwaysOn.tournamentLogo && !anyFullscreenOn}
                   dotColor="#22c55e"
                   onClick={() => toggleAlwaysOn("tournamentLogo")}
                 />
               </ChannelGroupCard>
 
-              <ChannelGroupCard title="Full-Screen" hint="pick one">
-                <MobileChannelRow icon="leaderboard" label="Points Table" sublabel={fullScreen.pointsTable ? "On air" : undefined} on={fullScreen.pointsTable} dotColor="#c9971f" onClick={() => toggleFullScreen("pointsTable")} />
-                <MobileChannelRow icon="receipt_long" label="Match Scorecard" sublabel={fullScreen.matchScorecard ? "On air" : undefined} on={fullScreen.matchScorecard} dotColor="#c9971f" onClick={() => toggleFullScreen("matchScorecard")} />
-                <MobileChannelRow icon="theaters" label="Match Intro" sublabel={fullScreen.matchIntro ? "On air" : undefined} on={fullScreen.matchIntro} dotColor="#c9971f" onClick={() => toggleFullScreen("matchIntro")} />
+              <ChannelGroupCard title="Full-Screen" hint="Exclusive" className="flex-1 min-h-0" growRows>
+                <MobileChannelRow
+                  grow
+                  icon="leaderboard"
+                  label="Points Table"
+                  on={fullScreen.pointsTable}
+                  dotColor="#c9971f"
+                  onClick={() => toggleFullScreen("pointsTable")}
+                />
+                <MobileChannelRow
+                  grow
+                  icon="description"
+                  label="Match Scorecard"
+                  on={fullScreen.matchScorecard}
+                  dotColor="#c9971f"
+                  onClick={() => toggleFullScreen("matchScorecard")}
+                />
+                <MobileChannelRow
+                  grow
+                  icon="movie"
+                  label="Match Intro"
+                  on={fullScreen.matchIntro}
+                  dotColor="#c9971f"
+                  onClick={() => toggleFullScreen("matchIntro")}
+                />
               </ChannelGroupCard>
 
-              <ChannelGroupCard title="Moments" hint={anyFullscreenOn ? "suppressed" : "pick one"}>
+              <ChannelGroupCard title={`Moments Channel${anyFullscreenOn ? " (suppressed)" : ""}`} className="flex-1 min-h-0" growRows>
                 <MobileChannelRow
-                  icon="stadium"
+                  grow
+                  icon="sports_cricket"
                   label="Match Boundaries"
-                  sublabel={boundaryChannels.matchBoundaries && !anyFullscreenOn ? "Live" : undefined}
                   on={boundaryChannels.matchBoundaries && !anyFullscreenOn}
                   dotColor="#e8c468"
                   onClick={() => toggleBoundaryChannel("matchBoundaries")}
                 />
                 <MobileChannelRow
+                  grow
                   icon="emoji_events"
                   label="Tournament Boundaries"
-                  sublabel={boundaryChannels.tournamentBoundaries && !anyFullscreenOn ? "Live" : undefined}
                   on={boundaryChannels.tournamentBoundaries && !anyFullscreenOn}
                   dotColor="#e8c468"
                   onClick={() => toggleBoundaryChannel("tournamentBoundaries")}
                 />
               </ChannelGroupCard>
+
+              {/* Weather editor entry point — separate from the on/off
+                  toggle above; this row still opens the full weather
+                  editor (venue/temp/condition) via CenteredOverlay.
+                  Kept shrink-0 (not flex-1) — it's a single action row,
+                  not a group of channels, so it stays a fixed, compact
+                  size while the three cards above it absorb all the
+                  flexible space. */}
+              <button
+                type="button"
+                onClick={() => setWeatherOverlayOpen(true)}
+                className="w-full shrink-0 flex items-center justify-between gap-2 px-3 py-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] active:scale-[0.98] transition-all"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <Icon name="edit" style={{ fontSize: 15, color: "#e8c468" }} />
+                  <span className="font-archivo text-[13px] font-bold text-on-surface truncate">Edit Weather</span>
+                  <span className="font-mono-geist text-[9px] uppercase tracking-[0.08em] text-on-surface-variant truncate">
+                    {weather.venue} · {weather.temp}°
+                  </span>
+                </span>
+                <Icon name="chevron_right" className="text-on-surface-variant shrink-0" style={{ fontSize: 15 }} />
+              </button>
             </div>
 
-            <div className="flex flex-col gap-4 pb-4 lg:contents lg:pb-0">
-              <div className={`shrink-0 pt-4 px-4 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
-                <h3 className="font-archivo text-sm font-bold italic uppercase mb-0.5">Overlay Advanced</h3>
-                <p className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.06em] leading-tight">
-                  Moments &amp; live weather, together in one view.
-                </p>
-              </div>
+            <CenteredOverlay
+              open={weatherOverlayOpen}
+              onClose={() => setWeatherOverlayOpen(false)}
+              title="Weather"
+              icon="partly_cloudy_day"
+              iconColor="#22c55e"
+            >
+              <WeatherPanel
+                weather={weather}
+                setWeather={setWeather}
+                weatherEditing={true}
+                setWeatherEditing={setWeatherEditing}
+                pushLog={pushLog}
+                fireToast={fireToast}
+                mobileTab={mobileTab}
+                desktopVisible={desktopRightTab === "overlay"}
+              />
+            </CenteredOverlay>
 
-              <div className="px-4 shrink-0 lg:hidden">
-                <button
-                  type="button"
-                  onClick={() => setWeatherOverlayOpen(true)}
-                  className="w-full flex items-center justify-between gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] active:scale-[0.98] transition-all"
-                >
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.3)" }}
-                    >
-                      <Icon name="partly_cloudy_day" style={{ fontSize: 16, color: "#22c55e" }} />
-                    </span>
-                    <span className="flex flex-col items-start min-w-0">
-                      <span className="font-archivo text-sm font-bold text-on-surface truncate">Weather</span>
-                      <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
-                        {weather.venue} · {weather.temp}°
-                      </span>
-                    </span>
-                  </span>
-                  <Icon name="chevron_right" className="text-on-surface-variant shrink-0" style={{ fontSize: 16 }} />
-                </button>
-              </div>
-
-              <CenteredOverlay
-                open={weatherOverlayOpen}
-                onClose={() => setWeatherOverlayOpen(false)}
-                title="Weather"
-                icon="partly_cloudy_day"
-                iconColor="#22c55e"
+            <div className="flex flex-col flex-1 min-h-0 gap-2 lg:contents">
+              {/* ── Moments — DESKTOP ONLY now. All fields read from
+                  liveState. The manual firing buttons (Four/Six/Wicket/
+                  Fifty/Hundred/Maiden/Match Won) previously lived in the
+                  mobile Overlay tab and forced a fixed dvh-height scroll
+                  container just to fit; they're pure manual/testing
+                  triggers that duplicate what the live scoring engine
+                  already fires automatically, so on mobile they're
+                  dropped entirely — desktop keeps full access via the
+                  "Overlay" right-rail tab. ── */}
+              <div
+                className={`px-3 pb-3 lg:pb-0 lg:pt-3 flex-1 min-h-0 flex-col hidden ${
+                  desktopRightTab === "overlay" ? "lg:flex" : "lg:hidden"
+                }`}
               >
-                <WeatherPanel
-                  weather={weather}
-                  setWeather={setWeather}
-                  weatherEditing={true}
-                  setWeatherEditing={setWeatherEditing}
-                  pushLog={pushLog}
-                  fireToast={fireToast}
-                  mobileTab={mobileTab}
-                  desktopVisible={desktopRightTab === "overlay"}
-                />
-              </CenteredOverlay>
+                <h3 className="font-archivo text-[13px] font-bold italic uppercase mb-1.5 shrink-0">Moments</h3>
+                <div className="grid grid-cols-2 grid-rows-4 gap-2 flex-1 min-h-0">
+                  <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
+                  <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
+                  <MomentButton label="Wicket" full danger active={showWicketForm} onClick={() => setShowWicketForm((v) => !v)} />
+                  <MomentButton
+                    label="Fifty"
+                    active={showMilestoneForm && milestoneKind === "fifty"}
+                    onClick={() => {
+                      setMilestoneKind("fifty");
+                      setShowMilestoneForm(true);
+                    }}
+                  />
+                  <MomentButton
+                    label="Hundred"
+                    active={showMilestoneForm && milestoneKind === "hundred"}
+                    onClick={() => {
+                      setMilestoneKind("hundred");
+                      setShowMilestoneForm(true);
+                    }}
+                  />
+                  <MomentButton label="Maiden" onClick={() => fireMaidenMoment({ bowlerName: liveState.bowler.name, maidens: liveState.bowler.maidens })} />
+                  <MomentButton label="Match Won" active={showMatchWonForm} onClick={() => setShowMatchWonForm((v) => !v)} />
+                </div>
 
-              {/* ── Moments — all fields now read from liveState ── */}
-              <div className={`px-4 shrink-0 flex flex-col lg:min-h-0 lg:overflow-hidden ${desktopRightTab === "overlay" ? "lg:flex lg:flex-1" : "lg:hidden"}`}>
-                <button type="button" onClick={() => setShowMoments((v) => !v)} className="w-full flex items-center justify-between gap-3 mb-1 shrink-0">
-                  <h3 className="font-archivo text-base font-bold italic uppercase">Moments</h3>
-                </button>
-                {showMoments && (
-                  <div className="flex flex-col gap-3 lg:overflow-y-auto custom-scrollbar lg:min-h-0">
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <MomentButton label="Four" onClick={() => fireBoundaryMoment("four")} />
-                      <MomentButton label="Six" onClick={() => fireBoundaryMoment("six")} />
-                      <MomentButton label="Wicket" danger active={showWicketForm} onClick={() => setShowWicketForm((v) => !v)} />
-                      <MomentButton
-                        label="Fifty"
-                        active={showMilestoneForm && milestoneKind === "fifty"}
-                        onClick={() => {
-                          setMilestoneKind("fifty");
-                          setShowMilestoneForm(true);
-                        }}
-                      />
-                      <MomentButton label="Maiden" onClick={() => fireMaidenMoment({ bowlerName: liveState.bowler.name, maidens: liveState.bowler.maidens })} />
-                      <MomentButton label="Match Won" active={showMatchWonForm} onClick={() => setShowMatchWonForm((v) => !v)} />
-                    </div>
-                    <MomentButton
-                      label="Hundred"
-                      full
-                      active={showMilestoneForm && milestoneKind === "hundred"}
-                      onClick={() => {
-                        setMilestoneKind("hundred");
-                        setShowMilestoneForm(true);
-                      }}
-                    />
-
-                    <CenteredOverlay
-                      open={showWicketForm}
-                      onClose={() => setShowWicketForm(false)}
-                      title="Wicket Detail"
-                      icon="sports_cricket"
-                      iconColor="#f87171"
-                    >
-                      <div className="flex flex-col gap-3">
-                        <p className="font-mono-geist text-[9.5px] text-on-surface-variant uppercase tracking-[0.08em]">
-                          Manual graphic only — doesn&apos;t record a real dismissal. Use the Out button in Scoring for that.
-                        </p>
-                        <div className="flex flex-col gap-1.5">
-                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <BatterPickerButton batter={liveState.striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
-                            <BatterPickerButton batter={liveState.nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
-                          </div>
+                <CenteredOverlay
+                    open={showWicketForm}
+                    onClose={() => setShowWicketForm(false)}
+                    title="Wicket Detail"
+                    icon="sports_cricket"
+                    iconColor="#f87171"
+                  >
+                    <div className="flex flex-col gap-3">
+                      <p className="font-mono-geist text-[9.5px] text-on-surface-variant uppercase tracking-[0.08em]">
+                        Manual graphic only — doesn&apos;t record a real dismissal. Use the Out button in Scoring for that.
+                      </p>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batsman Out</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <BatterPickerButton batter={liveState.striker} label="Striker" selected={wicketDraft.batsmanOut === "striker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "striker" }))} />
+                          <BatterPickerButton batter={liveState.nonStriker} label="Non-Striker" selected={wicketDraft.batsmanOut === "nonStriker"} onClick={() => setWicketDraft((p) => ({ ...p, batsmanOut: "nonStriker" }))} />
                         </div>
-                        <div className="flex flex-col gap-1.5">
-                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
-                          <select
-                            value={wicketDraft.dismissalType}
-                            onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value }))}
-                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
-                          >
-                            <option value="bowled">Bowled</option>
-                            <option value="caught">Caught</option>
-                            <option value="lbw">LBW</option>
-                            <option value="runOut">Run Out</option>
-                            <option value="stumped">Stumped</option>
-                            <option value="hitWicket">Hit Wicket</option>
-                          </select>
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Fielder (if any)</span>
-                          <input
-                            value={wicketDraft.fielder}
-                            onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
-                            placeholder="Fielder name"
-                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
-                          />
-                        </div>
-                        <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {liveState.bowler.name || "—"}</p>
-                        <button
-                          type="button"
-                          onClick={fireWicketMoment}
-                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
-                          style={{ background: "#ef4444", color: "#fff" }}
-                        >
-                          Fire Wicket
-                        </button>
                       </div>
-                    </CenteredOverlay>
-
-                    <CenteredOverlay
-                      open={showMilestoneForm}
-                      onClose={() => setShowMilestoneForm(false)}
-                      title={milestoneKind === "fifty" ? "Fifty For" : "Hundred For"}
-                      icon="military_tech"
-                      iconColor="#e8c468"
-                    >
-                      <div className="flex flex-col gap-3">
-                        <div className="flex flex-col gap-1.5">
-                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batter</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <BatterPickerButton
-                              batter={liveState.striker}
-                              label="Striker"
-                              selected={milestoneBatter === "striker"}
-                              onClick={() => setMilestoneBatter("striker")}
-                            />
-                            <BatterPickerButton
-                              batter={liveState.nonStriker}
-                              label="Non-Striker"
-                              selected={milestoneBatter === "nonStriker"}
-                              onClick={() => setMilestoneBatter("nonStriker")}
-                            />
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            fireMilestoneMoment(milestoneKind, milestoneBatter);
-                            setShowMilestoneForm(false);
-                          }}
-                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
-                          style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
-                        >
-                          Fire {milestoneKind === "fifty" ? "Fifty" : "Hundred"}
-                        </button>
-                      </div>
-                    </CenteredOverlay>
-
-                    {showMatchWonForm && (
-                      <div className="flex flex-col gap-3 p-4 rounded-lg mt-1 bg-theme-orange/10 border border-theme-orange/25">
-                        <span className="font-mono-geist text-[10px] font-bold uppercase tracking-[0.18em] text-theme-orange">Match Won Detail</span>
-
-                        <div className="flex flex-col gap-1.5">
-                          <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Winning Team</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <TeamPickerButton
-                              name={legacyMatchSetup.teamA}
-                              logoUrl={legacyMatchSetup.teamAlogo}
-                              color={legacyMatchSetup.teamAColor}
-                              selected={matchWonDraft.winner === "teamA"}
-                              onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamA" }))}
-                            />
-                            <TeamPickerButton
-                              name={legacyMatchSetup.teamB}
-                              logoUrl={legacyMatchSetup.teamBlogo}
-                              color={legacyMatchSetup.teamBColor}
-                              selected={matchWonDraft.winner === "teamB"}
-                              onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamB" }))}
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "custom" }))}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-center transition-all"
-                            style={{
-                              border: `1px solid ${matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
-                              background: matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
-                            }}
-                          >
-                            <Icon name="edit" style={{ fontSize: 13, color: matchWonDraft.winner === "custom" ? "#e8c468" : "rgba(255,255,255,0.45)" }} />
-                            <span className={`text-[11px] font-archivo font-bold ${matchWonDraft.winner === "custom" ? "text-theme-orange" : "text-on-surface-variant"}`}>
-                              Other / Custom Name
-                            </span>
-                          </button>
-                        </div>
-
-                        {matchWonDraft.winner === "custom" && (
-                          <input
-                            value={matchWonDraft.customName}
-                            onChange={(e) => setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))}
-                            placeholder="Winning team name"
-                            className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
-                          />
-                        )}
-                        <input
-                          value={matchWonDraft.margin}
-                          onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
-                          placeholder="e.g. won by 4 wickets"
-                          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
-                        />
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Dismissal</span>
                         <select
-                          value={matchWonDraft.method}
-                          onChange={(e) => setMatchWonDraft((p) => ({ ...p, method: e.target.value }))}
+                          value={wicketDraft.dismissalType}
+                          onChange={(e) => setWicketDraft((p) => ({ ...p, dismissalType: e.target.value }))}
                           className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
                         >
-                          <option value="batting">Chasing side won (by wickets)</option>
-                          <option value="bowling">Defending side won (by runs)</option>
-                          <option value="tie">Tie</option>
+                          <option value="bowled">Bowled</option>
+                          <option value="caught">Caught</option>
+                          <option value="lbw">LBW</option>
+                          <option value="runOut">Run Out</option>
+                          <option value="stumped">Stumped</option>
+                          <option value="hitWicket">Hit Wicket</option>
                         </select>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Fielder (if any)</span>
+                        <input
+                          value={wicketDraft.fielder}
+                          onChange={(e) => setWicketDraft((p) => ({ ...p, fielder: e.target.value }))}
+                          placeholder="Fielder name"
+                          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                        />
+                      </div>
+                      <p className="font-mono-geist text-[10px] text-on-surface-variant">Bowler from Live State: {liveState.bowler.name || "—"}</p>
+                      <button
+                        type="button"
+                        onClick={fireWicketMoment}
+                        className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                        style={{ background: "#ef4444", color: "#fff" }}
+                      >
+                        Fire Wicket
+                      </button>
+                    </div>
+                  </CenteredOverlay>
 
-                        {/* Live preview of the graphic about to be fired */}
-                        {(() => {
-                          const previewName =
-                            matchWonDraft.winner === "teamA"
-                              ? legacyMatchSetup.teamA
-                              : matchWonDraft.winner === "teamB"
-                              ? legacyMatchSetup.teamB
-                              : matchWonDraft.customName || "Winner";
-                          const previewLogo =
-                            matchWonDraft.winner === "teamA"
-                              ? legacyMatchSetup.teamAlogo
-                              : matchWonDraft.winner === "teamB"
-                              ? legacyMatchSetup.teamBlogo
-                              : undefined;
-                          const previewColor =
-                            matchWonDraft.winner === "teamA"
-                              ? legacyMatchSetup.teamAColor
-                              : matchWonDraft.winner === "teamB"
-                              ? legacyMatchSetup.teamBColor
-                              : "#c9971f";
-                          return (
-                            <div
-                              className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
-                              style={{ background: "rgba(0,0,0,0.25)", border: `1px solid ${previewColor}40` }}
-                            >
-                              <TeamAvatar name={previewName} logoUrl={previewLogo} color={previewColor} size={36} />
-                              <div className="flex flex-col min-w-0 flex-1">
-                                <span className="font-archivo text-sm font-bold truncate" style={{ color: previewColor }}>
-                                  {previewName}
-                                </span>
-                                <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
-                                  {matchWonDraft.margin || "Match Won"}
-                                  {" · "}
-                                  {matchWonDraft.method === "batting" ? "By wickets" : matchWonDraft.method === "bowling" ? "By runs" : "Tie"}
-                                </span>
-                              </div>
-                              <Icon name="emoji_events" style={{ fontSize: 20, color: previewColor }} />
-                            </div>
-                          );
-                        })()}
+                  <CenteredOverlay
+                    open={showMilestoneForm}
+                    onClose={() => setShowMilestoneForm(false)}
+                    title={milestoneKind === "fifty" ? "Fifty For" : "Hundred For"}
+                    icon="military_tech"
+                    iconColor="#e8c468"
+                  >
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Batter</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <BatterPickerButton
+                            batter={liveState.striker}
+                            label="Striker"
+                            selected={milestoneBatter === "striker"}
+                            onClick={() => setMilestoneBatter("striker")}
+                          />
+                          <BatterPickerButton
+                            batter={liveState.nonStriker}
+                            label="Non-Striker"
+                            selected={milestoneBatter === "nonStriker"}
+                            onClick={() => setMilestoneBatter("nonStriker")}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fireMilestoneMoment(milestoneKind, milestoneBatter);
+                          setShowMilestoneForm(false);
+                        }}
+                        className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                        style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                      >
+                        Fire {milestoneKind === "fifty" ? "Fifty" : "Hundred"}
+                      </button>
+                    </div>
+                  </CenteredOverlay>
 
+                  <CenteredOverlay
+                    open={showMatchWonForm}
+                    onClose={() => setShowMatchWonForm(false)}
+                    title="Match Won Detail"
+                    icon="emoji_events"
+                    iconColor="#e8c468"
+                  >
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono-geist text-[9px] font-bold uppercase tracking-[0.14em] text-on-surface-variant">Winning Team</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <TeamPickerButton
+                            name={legacyMatchSetup.teamA}
+                            logoUrl={legacyMatchSetup.teamAlogo}
+                            color={legacyMatchSetup.teamAColor}
+                            selected={matchWonDraft.winner === "teamA"}
+                            onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamA" }))}
+                          />
+                          <TeamPickerButton
+                            name={legacyMatchSetup.teamB}
+                            logoUrl={legacyMatchSetup.teamBlogo}
+                            color={legacyMatchSetup.teamBColor}
+                            selected={matchWonDraft.winner === "teamB"}
+                            onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "teamB" }))}
+                          />
+                        </div>
                         <button
                           type="button"
-                          onClick={fireMatchWonMoment}
-                          className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
-                          style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                          onClick={() => setMatchWonDraft((p) => ({ ...p, winner: "custom" }))}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-center transition-all"
+                          style={{
+                            border: `1px solid ${matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.5)" : "rgba(255,255,255,0.08)"}`,
+                            background: matchWonDraft.winner === "custom" ? "rgba(201,151,31,0.14)" : "rgba(255,255,255,0.02)",
+                          }}
                         >
-                          Fire Match Won
+                          <Icon name="edit" style={{ fontSize: 13, color: matchWonDraft.winner === "custom" ? "#e8c468" : "rgba(255,255,255,0.45)" }} />
+                          <span className={`text-[11px] font-archivo font-bold ${matchWonDraft.winner === "custom" ? "text-theme-orange" : "text-on-surface-variant"}`}>
+                            Other / Custom Name
+                          </span>
                         </button>
                       </div>
-                    )}
-                  </div>
-                )}
+
+                      {matchWonDraft.winner === "custom" && (
+                        <input
+                          value={matchWonDraft.customName}
+                          onChange={(e) => setMatchWonDraft((p) => ({ ...p, customName: e.target.value }))}
+                          placeholder="Winning team name"
+                          className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                        />
+                      )}
+                      <input
+                        value={matchWonDraft.margin}
+                        onChange={(e) => setMatchWonDraft((p) => ({ ...p, margin: e.target.value }))}
+                        placeholder="e.g. won by 4 wickets"
+                        className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface placeholder:text-on-surface-variant"
+                      />
+                      <select
+                        value={matchWonDraft.method}
+                        onChange={(e) => setMatchWonDraft((p) => ({ ...p, method: e.target.value }))}
+                        className="w-full rounded-lg px-3 py-2 text-sm outline-none bg-white/[0.03] border border-white/10 text-on-surface"
+                      >
+                        <option value="batting">Chasing side won (by wickets)</option>
+                        <option value="bowling">Defending side won (by runs)</option>
+                        <option value="tie">Tie</option>
+                      </select>
+
+                      {/* Live preview of the graphic about to be fired */}
+                      {(() => {
+                        const previewName =
+                          matchWonDraft.winner === "teamA"
+                            ? legacyMatchSetup.teamA
+                            : matchWonDraft.winner === "teamB"
+                            ? legacyMatchSetup.teamB
+                            : matchWonDraft.customName || "Winner";
+                        const previewLogo =
+                          matchWonDraft.winner === "teamA"
+                            ? legacyMatchSetup.teamAlogo
+                            : matchWonDraft.winner === "teamB"
+                            ? legacyMatchSetup.teamBlogo
+                            : undefined;
+                        const previewColor =
+                          matchWonDraft.winner === "teamA"
+                            ? legacyMatchSetup.teamAColor
+                            : matchWonDraft.winner === "teamB"
+                            ? legacyMatchSetup.teamBColor
+                            : "#c9971f";
+                        return (
+                          <div
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                            style={{ background: "rgba(0,0,0,0.25)", border: `1px solid ${previewColor}40` }}
+                          >
+                            <TeamAvatar name={previewName} logoUrl={previewLogo} color={previewColor} size={36} />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="font-archivo text-sm font-bold truncate" style={{ color: previewColor }}>
+                                {previewName}
+                              </span>
+                              <span className="font-mono-geist text-[9px] uppercase tracking-[0.1em] text-on-surface-variant truncate">
+                                {matchWonDraft.margin || "Match Won"}
+                                {" · "}
+                                {matchWonDraft.method === "batting" ? "By wickets" : matchWonDraft.method === "bowling" ? "By runs" : "Tie"}
+                              </span>
+                            </div>
+                            <Icon name="emoji_events" style={{ fontSize: 20, color: previewColor }} />
+                          </div>
+                        );
+                      })()}
+
+                      <button
+                        type="button"
+                        onClick={fireMatchWonMoment}
+                        className="w-full py-2.5 rounded-full font-mono-geist text-[11px] font-black uppercase tracking-wide"
+                        style={{ background: GOLD_GRADIENT, color: "#1a1304" }}
+                      >
+                        Fire Match Won
+                      </button>
+                    </div>
+                  </CenteredOverlay>
               </div>
 
               <div className={`hidden px-4 lg:mb-4 shrink-0 ${desktopRightTab === "overlay" ? "lg:block" : "lg:hidden"}`}>
