@@ -707,31 +707,29 @@ const ScoringSection = forwardRef<ScoringSectionHandle, ScoringSectionProps>(fun
                 Out
               </button>
 
-              <button
-                type="button"
-                onClick={() => engine.canUndo && engine.undo()}
-                disabled={!engine.canUndo || extraArmed}
-                className="h-full w-full rounded-lg font-mono-geist font-bold uppercase tracking-[0.1em] transition-all hover:brightness-110 active:scale-95 border disabled:opacity-35 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
-                style={{ color: "#fbbf24", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
-              >
-                <Icon name="undo" style={{ fontSize: "clamp(0.9rem, min(6cqh, 7cqi), 1.6rem)" }} />
-                <span style={{ fontSize: "clamp(0.6rem, min(3.6cqh, 4.5cqi), 0.85rem)" }}>Undo</span>
-              </button>
-
               <MoreActionsMenu
                 onAdminAction={(label) => onAdminAction?.(label)}
                 onPenaltyClick={() => setShowPenaltyDialog(true)}
-                disabled={controlsLocked}
               />
             </div>
 
-            <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 sm:py-3 glass-panel shrink-0 min-w-0">
               <span className="font-mono-geist text-[9px] text-on-surface-variant uppercase tracking-[0.14em] font-bold shrink-0">This Over</span>
-              <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
+              <div className="flex items-center gap-1.5 overflow-x-auto min-w-0 flex-1">
                 {Array.from({ length: Math.max(6, thisOverDisplay.length) }, (_, i) => (
                   <OverBall key={i} entry={i < thisOverDisplay.length ? normalizeOverEntry(thisOverDisplay[i]) : null} />
                 ))}
               </div>
+              <button
+                type="button"
+                onClick={() => engine.canUndo && engine.undo()}
+                disabled={!engine.canUndo || extraArmed}
+                className="flex items-center gap-1 font-mono-geist text-[9px] font-bold uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-lg border transition-all hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                style={{ color: "#fbbf24", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" }}
+              >
+                <Icon name="undo" style={{ fontSize: 13 }} />
+                <span className="hidden sm:inline">Undo</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-4 sm:[grid-template-columns:repeat(auto-fit,minmax(120px,1fr))] gap-2 sm:gap-3 shrink-0">
