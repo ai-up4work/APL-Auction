@@ -392,9 +392,10 @@ function useCurvedInfiniteTabs(
     return closestKey
   }, [lockedMap])
 
-  // Re-measures one copy-width and, on first run, parks the scroll
-  // position in the middle copy so there's a full copy's worth of
-  // tabs to scroll into on both sides right from the start.
+  // Re-measures one copy-width. On resize this just re-parks the
+  // scroll position in the middle copy (recenter=true is only used
+  // there now — see the mount effect below, which centers on the
+  // actual active tab instead of just the start of a copy).
   const measureAndCenterLoop = useCallback((recenter: boolean) => {
     const scroller = scrollerRef.current
     if (!scroller) return
@@ -405,10 +406,42 @@ function useCurvedInfiniteTabs(
     }
   }, [])
 
+  // True once the initial mount-time centering below has run. The
+  // separate "center on activeTab change" effect further down skips
+  // its very first invocation (which React fires on mount regardless
+  // of dependencies) so it doesn't fight with this one — previously
+  // that effect would correctly center on the initial tab (e.g.
+  // "lineup" for a completed tournament), and then a frame later this
+  // effect would blindly jump scrollLeft to the start of a loop copy,
+  // discarding that correct position. The resulting scroll event then
+  // settled on whatever tab happened to land near center after the
+  // blind jump (e.g. "bracket"), silently overriding the real default
+  // tab. Centering directly on the active tab here — once — removes
+  // that race entirely.
+  const didInitialCenter = useRef(false)
+
   useEffect(() => {
     // Layout needs a tick to settle before scrollWidth is reliable.
     const raf = requestAnimationFrame(() => {
-      measureAndCenterLoop(true)
+      const scroller = scrollerRef.current
+      if (scroller) {
+        const width = scroller.scrollWidth / LOOP_COPIES
+        setWidth.current = width
+        if (width > 0) {
+          scroller.scrollLeft = width // park in the middle copy first
+          // Then, within that middle copy, center on whichever tab is
+          // actually active right now instead of leaving the strip
+          // sitting at the copy's start.
+          const el = itemRefs.current.get(`${activeTab}__1`)
+          if (el) {
+            const scrollerRect = scroller.getBoundingClientRect()
+            const elRect = el.getBoundingClientRect()
+            const offset = elRect.left - scrollerRect.left - scrollerRect.width / 2 + elRect.width / 2
+            scroller.scrollLeft += offset
+          }
+        }
+      }
+      didInitialCenter.current = true
       applyCurve()
     })
     return () => cancelAnimationFrame(raf)
