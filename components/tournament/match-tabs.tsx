@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react"
 import { Lock, Shield, Sparkles, Database, Trophy } from "lucide-react"
 import type {
   MatchDetail,
@@ -27,6 +27,25 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "graphs", label: "Graphs" },
   { key: "stats", label: "Stats" },
 ]
+
+// ─────────────────────────────────────────────────────────────
+// INFINITE LOOP TAB STRIP
+//
+// The tab strip is rendered as several back-to-back copies of TABS
+// (LOOPED_TABS below), and the scroll handler silently snaps the
+// scroll position back by one copy-width whenever it nears either
+// end — so however far the user scrolls, there are always tabs on
+// both sides and it never bottoms out on empty space. Each copy
+// carries a unique `extKey` (for React keys / per-element refs) while
+// `key` stays the real Tab value the click handler and lock/active
+// state key off.
+// ─────────────────────────────────────────────────────────────
+
+const LOOP_COPIES = 3
+
+const LOOPED_TABS = Array.from({ length: LOOP_COPIES }).flatMap((_, copyIdx) =>
+  TABS.map((t) => ({ ...t, extKey: `${t.key}__${copyIdx}` })),
+)
 
 function initials(name: string) {
   return name
@@ -414,6 +433,153 @@ function CommentaryFeed({
   )
 }
 
+// ─────────────────────────────────────────────────────────────
+// CURVED CAROUSEL TAB BAR — math + config
+//
+// The tab strip scrolls horizontally; the tab nearest the visual
+// center lifts up and scales up, tabs further away sink down and
+// shrink/fade — an arc/carousel read (all inline in this file, wired
+// up inside MatchTabs below via refs + scroll listener).
+// ─────────────────────────────────────────────────────────────
+
+const ARC_RANGE = 260 // px from center before a tab is "fully off-arc"
+const ARC_LIFT = 14 // px max upward lift for the centered tab
+const ARC_SCALE_MAX = 1.08
+const ARC_SCALE_MIN = 0.86
+const ARC_OPACITY_MAX = 1
+const ARC_OPACITY_MIN = 0.45
+
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v))
+}
+
+// Smoothstep falloff: 0 at dead center, 1 at/after ARC_RANGE.
+function arcFalloff(distance: number) {
+  const t = clamp(Math.abs(distance) / ARC_RANGE, 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+// ─────────────────────────────────────────────────────────────
+// SEGMENTED TABS — shared sliding-pill control for every secondary /
+// tertiary tab level under the main curved carousel (innings toggle
+// in Scorecard/Overs/Commentary, stat-category chips in Stats). One
+// component, one visual language: a capsule track with a gold pill
+// that glides to whichever segment is active, sized to that segment's
+// real rendered width via offsetLeft/offsetWidth (scroll-safe, so it
+// still works when the track itself scrolls horizontally on mobile
+// with many segments, e.g. the 5-wide batting stat row).
+// ─────────────────────────────────────────────────────────────
+
+interface SegmentedTabOption<T extends string | number> {
+  value: T
+  label: ReactNode
+  disabled?: boolean
+  disabledHint?: string
+}
+
+function SegmentedTabs<T extends string | number>({
+  options,
+  active,
+  onChange,
+  size = "md",
+  scrollable = false,
+  accent = "gold",
+}: {
+  options: SegmentedTabOption<T>[]
+  active: T
+  onChange: (v: T) => void
+  /** "md" = taller pills used for the innings toggle, "sm" = compact
+   *  chips used for stat categories. */
+  size?: "md" | "sm"
+  /** Lets the track scroll horizontally instead of wrapping — used
+   *  for the stat-category row, which can have 5+ segments. */
+  scrollable?: boolean
+  /** Indicator color — defaults to gold (used everywhere except the
+   *  bowling stat-category row, which is tinted emerald to match the
+   *  rest of the bowling side of the Stats panel). */
+  accent?: "gold" | "emerald"
+}) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const segRefs = useRef<Map<T, HTMLButtonElement>>(new Map())
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null)
+
+  const updateIndicator = useCallback(() => {
+    const el = segRefs.current.get(active)
+    if (!el) return
+    setIndicator({ left: el.offsetLeft, width: el.offsetWidth })
+  }, [active])
+
+  useEffect(() => {
+    updateIndicator()
+    window.addEventListener("resize", updateIndicator)
+    return () => window.removeEventListener("resize", updateIndicator)
+  }, [updateIndicator, options.length])
+
+  // Keep the active segment in view when the track scrolls horizontally.
+  useEffect(() => {
+    if (!scrollable) return
+    const el = segRefs.current.get(active)
+    const track = trackRef.current
+    if (!el || !track) return
+    const trackRect = track.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    if (elRect.left < trackRect.left || elRect.right > trackRect.right) {
+      el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, scrollable])
+
+  return (
+    <div
+      ref={trackRef}
+      className={`relative flex gap-1 rounded-full border border-gold/15 bg-black/40 p-1 ${
+        scrollable ? "overflow-x-auto scrollbar-none flex-nowrap" : "flex-wrap"
+      }`}
+    >
+      {indicator && (
+        <span
+          className={`absolute top-1 bottom-1 rounded-full transition-all duration-300 ease-out pointer-events-none ${
+            accent === "emerald"
+              ? "bg-emerald-400 shadow-[0_2px_14px_rgba(52,211,153,0.35)]"
+              : "bg-gold shadow-[0_2px_14px_rgba(245,166,35,0.35)]"
+          }`}
+          style={{ left: indicator.left, width: indicator.width }}
+        />
+      )}
+      {options.map((opt) => {
+        const isActive = opt.value === active
+        return (
+          <button
+            key={opt.value}
+            ref={(el) => {
+              if (el) segRefs.current.set(opt.value, el)
+              else segRefs.current.delete(opt.value)
+            }}
+            onClick={() => !opt.disabled && onChange(opt.value)}
+            disabled={opt.disabled}
+            title={opt.disabled ? opt.disabledHint : undefined}
+            className={`relative z-10 shrink-0 ${scrollable ? "" : "flex-1"} flex items-center justify-center gap-1.5
+              font-cinzel uppercase tracking-wide whitespace-nowrap rounded-full transition-colors duration-300
+              disabled:cursor-not-allowed ${
+                size === "sm" ? "text-[11px] px-3.5 py-2" : "text-xs px-4 py-2.5"
+              } ${
+                isActive
+                  ? "text-black font-bold"
+                  : opt.disabled
+                    ? "text-gray-600"
+                    : accent === "emerald"
+                      ? "text-gray-300 hover:text-emerald-300"
+                      : "text-gray-300 hover:text-gold"
+              }`}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 interface MatchTabsProps {
   match: MatchDetail
   status: "not_started" | "live" | "completed"
@@ -516,29 +682,187 @@ export default function MatchTabs({
     }
   }
 
+  // ── infinite-loop curved carousel: refs + scroll-driven transform math ──
+  const tabScrollerRef = useRef<HTMLDivElement>(null)
+  const tabItemRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const [tabReducedMotion, setTabReducedMotion] = useState(false)
+  const tabRafId = useRef<number | null>(null)
+  // Width (px) of one full copy of TABS inside the looped strip — used
+  // to silently snap scrollLeft back by one copy whenever the user
+  // nears either end, so the strip never runs out of tabs to scroll
+  // into. Measured after layout, re-measured on resize.
+  const tabSetWidth = useRef(0)
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+    setTabReducedMotion(mq.matches)
+    const handler = () => setTabReducedMotion(mq.matches)
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
+  }, [])
+
+  const applyTabCurve = useCallback(() => {
+    const scroller = tabScrollerRef.current
+    if (!scroller || tabReducedMotion) return
+
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    tabItemRefs.current.forEach((el) => {
+      const r = el.getBoundingClientRect()
+      const itemCenter = r.left + r.width / 2
+      const distance = itemCenter - centerX
+      const f = arcFalloff(distance) // 0 = centered, 1 = far
+      const lift = -ARC_LIFT * (1 - f)
+      const scale = ARC_SCALE_MAX - (ARC_SCALE_MAX - ARC_SCALE_MIN) * f
+      const opacity = ARC_OPACITY_MAX - (ARC_OPACITY_MAX - ARC_OPACITY_MIN) * f
+
+      el.style.transform = `translateY(${lift}px) scale(${scale})`
+      el.style.opacity = String(opacity)
+    })
+  }, [tabReducedMotion])
+
+  // Re-measures one copy-width and, on first run, parks the scroll
+  // position in the middle copy so there's a full copy's worth of
+  // tabs to scroll into on both sides right from the start.
+  const measureAndCenterLoop = useCallback((recenter: boolean) => {
+    const scroller = tabScrollerRef.current
+    if (!scroller) return
+    const width = scroller.scrollWidth / LOOP_COPIES
+    tabSetWidth.current = width
+    if (recenter && width > 0) {
+      scroller.scrollLeft = width // start in the middle copy
+    }
+  }, [])
+
+  useEffect(() => {
+    // Layout needs a tick to settle before scrollWidth is reliable.
+    const raf = requestAnimationFrame(() => {
+      measureAndCenterLoop(true)
+      applyTabCurve()
+    })
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Scroll handler: updates the curve every frame, and silently wraps
+  // scrollLeft back by one copy-width whenever it drifts near either
+  // end of the looped strip — imperceptible since adjacent copies are
+  // pixel-identical, so the strip always looks full of tabs.
+  const onTabScroll = useCallback(() => {
+    if (tabRafId.current) cancelAnimationFrame(tabRafId.current)
+    tabRafId.current = requestAnimationFrame(() => {
+      applyTabCurve()
+      const scroller = tabScrollerRef.current
+      const setWidth = tabSetWidth.current
+      if (!scroller || setWidth <= 0) return
+      if (scroller.scrollLeft < setWidth * 0.4) {
+        scroller.scrollLeft += setWidth
+      } else if (scroller.scrollLeft > setWidth * (LOOP_COPIES - 1.4)) {
+        scroller.scrollLeft -= setWidth
+      }
+    })
+  }, [applyTabCurve])
+
+  useEffect(() => {
+    const handleResize = () => {
+      measureAndCenterLoop(false)
+      applyTabCurve()
+    }
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.removeEventListener("resize", handleResize)
+      if (tabRafId.current) cancelAnimationFrame(tabRafId.current)
+    }
+  }, [measureAndCenterLoop, applyTabCurve])
+
+  // Center the active tab whenever it changes (tap or programmatic) —
+  // picks whichever looped copy of that tab is nearest the current
+  // scroll position, so the jump is always small.
+  useEffect(() => {
+    const scroller = tabScrollerRef.current
+    if (!scroller) return
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    let closestEl: HTMLButtonElement | null = null
+    let closestDist = Infinity
+    tabItemRefs.current.forEach((el, extKey) => {
+      if (extKey.split("__")[0] !== tab) return
+      const r = el.getBoundingClientRect()
+      const dist = Math.abs(r.left + r.width / 2 - centerX)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestEl = el
+      }
+    })
+    if (!closestEl) return
+    const elRect = (closestEl as HTMLButtonElement).getBoundingClientRect()
+    const offset = elRect.left - scrollerRect.left - scrollerRect.width / 2 + elRect.width / 2
+    scroller.scrollBy({ left: offset, behavior: "smooth" })
+    const t = setTimeout(applyTabCurve, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
   return (
     <>
-      <div className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full flex flex-wrap gap-1 mb-8">
-        {TABS.map(({ key, label }) => {
-          const locked = isTabLocked(key)
-          const active = tab === key
-          return (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-4 py-2 rounded-md transition-all duration-300 ${
-                active ? "bg-gold text-black" : locked ? "text-gray-600 hover:text-gray-400" : "text-gray-300 hover:text-gold"
-              }`}
-              title={locked ? `${label} — no data yet` : undefined}
-            >
-              {label}
-              {locked && <Lock className="h-2.5 w-2.5" />}
-            </button>
-          )
-        })}
+      {/* CURVED CAROUSEL TAB BAR — infinite loop */}
+      <div className="relative mb-8">
+        {/* subtle arc backdrop so the curve reads even before scrolling */}
+        <svg
+          className="pointer-events-none absolute left-0 right-0 -top-1 h-6 w-full opacity-20"
+          viewBox="0 0 100 10"
+          preserveAspectRatio="none"
+        >
+          <path d="M0,10 Q50,0 100,10" stroke="#f5a623" strokeWidth="0.5" fill="none" />
+        </svg>
+
+        <div
+          ref={tabScrollerRef}
+          onScroll={onTabScroll}
+          className="flex flex-nowrap items-end gap-1.5 overflow-x-auto snap-x snap-mandatory
+                     scrollbar-none bg-black/50 border border-gold/20 px-3 py-3 rounded-full w-full"
+        >
+          {LOOPED_TABS.map(({ key, label, extKey }) => {
+            const locked = isTabLocked(key)
+            const active = tab === key
+            return (
+              <button
+                key={extKey}
+                ref={(el) => {
+                  if (el) tabItemRefs.current.set(extKey, el)
+                  else tabItemRefs.current.delete(extKey)
+                }}
+                onClick={() => setTab(key)}
+                title={locked ? `${label} — no data yet` : undefined}
+                className={`snap-center shrink-0 flex items-center gap-1.5 font-cinzel text-xs uppercase
+                  tracking-wide px-4 py-2 rounded-full whitespace-nowrap origin-bottom
+                  transition-[background-color,color,border-color] duration-300 ${
+                  tabReducedMotion ? "" : "transition-transform will-change-transform"
+                } ${
+                  active
+                    ? "bg-gold text-black shadow-[0_4px_18px_rgba(245,166,35,0.35)] border border-gold"
+                    : locked
+                      ? "bg-white/[0.02] text-gray-600 border border-white/5 hover:text-gray-400"
+                      : "bg-white/[0.03] text-gray-300 border border-gold/10 hover:text-gold hover:border-gold/30"
+                }`}
+              >
+                {label}
+                {locked && <Lock className="h-2.5 w-2.5" />}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* edge fades — purely decorative now, since the loop means the
+            strip is never actually empty past these edges */}
+        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-10 rounded-l-full bg-gradient-to-r from-black/70 to-transparent" />
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-10 rounded-r-full bg-gradient-to-l from-black/70 to-transparent" />
       </div>
 
       {/* SCORECARD TAB */}
+
       {tab === "scorecard" && (
         <div className="mb-8">
           {!hasBallData ? (
@@ -548,36 +872,36 @@ export default function MatchTabs({
             />
           ) : (
             <>
-              <div className="flex flex-col sm:flex-row gap-2 mb-6">
-                <button
-                  onClick={() => setInnings(1)}
-                  className={`flex-1 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words ${
-                    innings === 1 ? "bg-gold/15 border-gold text-gold font-bold" : "border-gold/20 text-gray-300"
-                  }`}
-                >
-                  {firstInningsTeam.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
-                </button>
-                <button
-                  onClick={() => setInnings(2)}
-                  disabled={!innings2Started}
-                  title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
-                  className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-cinzel uppercase px-3 py-2.5 rounded-md border transition-all break-words disabled:cursor-not-allowed ${
-                    innings === 2
-                      ? "bg-gold/15 border-gold text-gold font-bold"
-                      : !innings2Started
-                        ? "border-dashed border-gray-700 text-gray-600"
-                        : "border-gold/20 text-gray-300"
-                  }`}
-                >
-                  {innings2Started ? (
-                    `${secondInningsTeam.short} — 2nd Innings · ${runs}/${wkts}`
-                  ) : (
-                    <>
-                      <Lock className="h-3 w-3 shrink-0" />
-                      {secondInningsTeam.short} — yet to bat
-                    </>
-                  )}
-                </button>
+              <div className="mb-6">
+                <SegmentedTabs
+                  active={innings}
+                  onChange={(i) => setInnings(i)}
+                  options={[
+                    {
+                      value: 1 as const,
+                      label: (
+                        <span className="break-words">
+                          {firstInningsTeam.short} — 1st Innings · {match.innings1.total}/{match.innings1.wkts}
+                        </span>
+                      ),
+                    },
+                    {
+                      value: 2 as const,
+                      disabled: !innings2Started,
+                      disabledHint: "2nd innings — locked until it starts",
+                      label: innings2Started ? (
+                        <span className="break-words">
+                          {secondInningsTeam.short} — 2nd Innings · {runs}/{wkts}
+                        </span>
+                      ) : (
+                        <>
+                          <Lock className="h-3 w-3 shrink-0" />
+                          {secondInningsTeam.short} — yet to bat
+                        </>
+                      ),
+                    },
+                  ]}
+                />
               </div>
 
               {innings === 1 && (
@@ -713,32 +1037,26 @@ export default function MatchTabs({
 
             return (
               <div className="mb-8 space-y-4 fade-in">
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <button
-                    onClick={() => setInnings(1)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      innings === 1
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {firstInningsTeam.short} (1st Inn)
-                  </button>
-                  <button
-                    onClick={() => setInnings(2)}
-                    disabled={!innings2Started}
-                    title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:cursor-not-allowed ${
-                      innings === 2
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : !innings2Started
-                          ? "bg-white/[0.02] border border-dashed border-gray-700 text-gray-600"
-                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {!innings2Started && <Lock className="h-2.5 w-2.5" />}
-                    {secondInningsTeam.short} (2nd Inn)
-                  </button>
+                <div className="mb-4 max-w-xs">
+                  <SegmentedTabs
+                    size="sm"
+                    active={innings}
+                    onChange={(i) => setInnings(i)}
+                    options={[
+                      { value: 1 as const, label: `${firstInningsTeam.short} (1st Inn)` },
+                      {
+                        value: 2 as const,
+                        disabled: !innings2Started,
+                        disabledHint: "2nd innings — locked until it starts",
+                        label: (
+                          <>
+                            {!innings2Started && <Lock className="h-2.5 w-2.5" />}
+                            {secondInningsTeam.short} (2nd Inn)
+                          </>
+                        ),
+                      },
+                    ]}
+                  />
                 </div>
 
                 {innings === 2 && !innings2Started ? (
@@ -830,31 +1148,27 @@ export default function MatchTabs({
             return (
               <div className="mb-8 space-y-4 fade-in">
                 <div className="flex flex-wrap gap-2 mb-4 items-center">
-                  <button
-                    onClick={() => setInnings(1)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      innings === 1
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {firstInningsTeam.short} (1st Inn)
-                  </button>
-                  <button
-                    onClick={() => setInnings(2)}
-                    disabled={!innings2Started}
-                    title={!innings2Started ? "2nd innings — locked until it starts" : undefined}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:cursor-not-allowed ${
-                      innings === 2
-                        ? "bg-gold text-black shadow-md shadow-gold/20"
-                        : !innings2Started
-                          ? "bg-white/[0.02] border border-dashed border-gray-700 text-gray-600"
-                          : "bg-white/5 border border-gold/10 text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {!innings2Started && <Lock className="h-2.5 w-2.5" />}
-                    {secondInningsTeam.short} (2nd Inn)
-                  </button>
+                  <div className="max-w-xs w-full sm:w-auto">
+                    <SegmentedTabs
+                      size="sm"
+                      active={innings}
+                      onChange={(i) => setInnings(i)}
+                      options={[
+                        { value: 1 as const, label: `${firstInningsTeam.short} (1st Inn)` },
+                        {
+                          value: 2 as const,
+                          disabled: !innings2Started,
+                          disabledHint: "2nd innings — locked until it starts",
+                          label: (
+                            <>
+                              {!innings2Started && <Lock className="h-2.5 w-2.5" />}
+                              {secondInningsTeam.short} (2nd Inn)
+                            </>
+                          ),
+                        },
+                      ]}
+                    />
+                  </div>
                   {live && (
                     <span className="ml-auto flex items-center gap-1.5 text-green-300 text-[10px] uppercase tracking-widest font-cinzel self-center">
                       <span className="h-1.5 w-1.5 rounded-full bg-green-300 animate-pulse" /> auto-updating
@@ -1418,22 +1732,25 @@ function StatsPanel({
         />
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1 mb-5 scrollbar-none">
-        {(mode === "batting" ? BATTING_STAT_CATEGORIES : BOWLING_STAT_CATEGORIES).map((c) => {
-          const active = mode === "batting" ? battingKey === c.key : bowlingKey === c.key
-          const activeStyle = mode === "batting" ? "bg-gold/15 border-gold text-gold" : "bg-emerald-400/10 border-emerald-400 text-emerald-300"
-          return (
-            <button
-              key={c.key}
-              onClick={() => (mode === "batting" ? setBattingKey(c.key as BattingStatKey) : setBowlingKey(c.key as BowlingStatKey))}
-              className={`shrink-0 text-[11px] font-cinzel uppercase tracking-wide px-3.5 py-2 rounded-full border transition-all whitespace-nowrap ${
-                active ? `${activeStyle} font-bold` : "border-white/10 text-gray-400 hover:text-white hover:border-white/25"
-              }`}
-            >
-              {c.label}
-            </button>
-          )
-        })}
+      <div className="mb-5">
+        {mode === "batting" ? (
+          <SegmentedTabs
+            size="sm"
+            scrollable
+            active={battingKey}
+            onChange={setBattingKey}
+            options={BATTING_STAT_CATEGORIES.map((c) => ({ value: c.key, label: c.label }))}
+          />
+        ) : (
+          <SegmentedTabs
+            size="sm"
+            scrollable
+            accent="emerald"
+            active={bowlingKey}
+            onChange={setBowlingKey}
+            options={BOWLING_STAT_CATEGORIES.map((c) => ({ value: c.key, label: c.label }))}
+          />
+        )}
       </div>
 
       {activeRows.length === 0 ? (
