@@ -7,6 +7,7 @@ import { TeamPoolTab, PlayerBankTab } from "@/components/organization/Tournament
 import { SquadBoardTab } from "@/components/organization/SquadBoardTab"
 import { RegistrationsTab } from "@/components/organization/Registrationstab"
 import { WorkflowBreadcrumb } from "@/components/organization/Workflowbreadcrumb"
+import { SubTabBar } from "@/components/organization/Subtabbar"
 import type { OrgSummary } from "@/lib/organization/organization"
 
 type RosterSub = "teamPool" | "playerBank" | "squadBoard" | "registrations"
@@ -51,21 +52,12 @@ export function RostersSection({
     <div>
       <WorkflowBreadcrumb currentPrimary="rosters" currentSub={sub} onNavigate={onNavigate} />
 
-      <div className="flex flex-wrap gap-1 mb-2 bg-black/40 border border-gold/15 p-1 rounded-lg w-fit">
-        {SUBS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => selectSub(key)}
-            className={`flex items-center gap-1.5 font-cinzel text-xs uppercase tracking-wide px-3.5 py-1.5 rounded-md transition-all ${
-              sub === key ? "bg-gold/90 text-gold" : "text-gray-400 hover:text-gold"
-            }`}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-      <p className="text-gray-500 text-xs mb-6 px-1">{active.blurb}</p>
+      <SubTabBar
+        active={sub}
+        onChange={selectSub}
+        options={SUBS.map(({ key, label, icon }) => ({ value: key, label, icon }))}
+      />
+      <p className="text-gray-500 text-xs -mt-3 mb-6 px-1">{active.blurb}</p>
 
       {sub === "teamPool" && <TeamPoolTab org={org} userId={userId} />}
       {sub === "playerBank" && <PlayerBankTab org={org} userId={userId} />}

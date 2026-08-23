@@ -692,6 +692,17 @@ export default function MatchTabs({
   // nears either end, so the strip never runs out of tabs to scroll
   // into. Measured after layout, re-measured on resize.
   const tabSetWidth = useRef(0)
+  // Debounce timer for "scroll settled" detection — once the user stops
+  // scrolling the strip, whichever tab is nearest dead-center becomes
+  // the active tab (carousel-picker behavior), the same way scrolling a
+  // native iOS/Android picker wheel selects whatever lands in the middle.
+  const tabScrollSettleId = useRef<number | null>(null)
+  // Set right before calling setTab() from the scroll-settle handler so
+  // the "re-center on active tab change" effect below (which also runs
+  // on click-driven tab changes) knows this particular change already
+  // IS centered — it was the user's scroll that drove it — and should
+  // skip re-scrolling, avoiding a jitery fight with the user's gesture.
+  const tabScrollDrivenChange = useRef(false)
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -722,6 +733,29 @@ export default function MatchTabs({
     })
   }, [tabReducedMotion])
 
+  // Finds whichever looped tab button is closest to the strip's visual
+  // center right now, and returns its real Tab key (stripping the
+  // `__copyIdx` suffix). Used by the scroll-settle handler below to
+  // decide which tab to select once the user stops scrolling.
+  const getClosestRealTabKey = useCallback((): Tab | null => {
+    const scroller = tabScrollerRef.current
+    if (!scroller) return null
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    let closestKey: Tab | null = null
+    let closestDist = Infinity
+    tabItemRefs.current.forEach((el, extKey) => {
+      const r = el.getBoundingClientRect()
+      const dist = Math.abs(r.left + r.width / 2 - centerX)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestKey = extKey.split("__")[0] as Tab
+      }
+    })
+    return closestKey
+  }, [])
+
   // Re-measures one copy-width and, on first run, parks the scroll
   // position in the middle copy so there's a full copy's worth of
   // tabs to scroll into on both sides right from the start.
@@ -745,10 +779,10 @@ export default function MatchTabs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Scroll handler: updates the curve every frame, and silently wraps
+  // Scroll handler: updates the curve every frame, silently wraps
   // scrollLeft back by one copy-width whenever it drifts near either
-  // end of the looped strip — imperceptible since adjacent copies are
-  // pixel-identical, so the strip always looks full of tabs.
+  // end of the looped strip, and — once scrolling settles — makes
+  // whichever tab landed in the middle the active tab.
   const onTabScroll = useCallback(() => {
     if (tabRafId.current) cancelAnimationFrame(tabRafId.current)
     tabRafId.current = requestAnimationFrame(() => {
@@ -762,7 +796,20 @@ export default function MatchTabs({
         scroller.scrollLeft -= setWidth
       }
     })
-  }, [applyTabCurve])
+
+    // Debounced "scroll settled" check — re-armed on every scroll event,
+    // so it only fires once movement actually stops. Whatever tab is
+    // nearest dead-center at that point becomes the active tab, exactly
+    // like scrolling a carousel/picker to a selection.
+    if (tabScrollSettleId.current) window.clearTimeout(tabScrollSettleId.current)
+    tabScrollSettleId.current = window.setTimeout(() => {
+      const closest = getClosestRealTabKey()
+      if (closest && closest !== tab) {
+        tabScrollDrivenChange.current = true
+        setTab(closest)
+      }
+    }, 120)
+  }, [applyTabCurve, getClosestRealTabKey, tab, setTab])
 
   useEffect(() => {
     const handleResize = () => {
@@ -773,13 +820,21 @@ export default function MatchTabs({
     return () => {
       window.removeEventListener("resize", handleResize)
       if (tabRafId.current) cancelAnimationFrame(tabRafId.current)
+      if (tabScrollSettleId.current) window.clearTimeout(tabScrollSettleId.current)
     }
   }, [measureAndCenterLoop, applyTabCurve])
 
-  // Center the active tab whenever it changes (tap or programmatic) —
+  // Center the active tab whenever it changes (tap, or programmatic) —
   // picks whichever looped copy of that tab is nearest the current
-  // scroll position, so the jump is always small.
+  // scroll position, so the jump is always small. Skipped when the tab
+  // change was itself driven by the user scrolling the strip to center
+  // — it's already centered, so re-scrolling would just fight the
+  // gesture that just finished.
   useEffect(() => {
+    if (tabScrollDrivenChange.current) {
+      tabScrollDrivenChange.current = false
+      return
+    }
     const scroller = tabScrollerRef.current
     if (!scroller) return
     const scrollerRect = scroller.getBoundingClientRect()

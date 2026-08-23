@@ -1,11 +1,11 @@
 // app/components/tournament/tournament-detail-client.tsx
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useCallback, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -68,11 +68,11 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  Every tab (Points, Schedule, Bracket, Squads, Stats) is now always   */
 /*  rendered so visitors can see the full shape of what a fully-run     */
 /*  tournament looks like. If the underlying data for a tab isn't there */
-/*  yet, the tab trigger is disabled + shows a lock icon, and its       */
+/*  yet, the tab is shown with a lock icon in the strip, and its        */
 /*  content renders a "coming soon" placeholder instead of being        */
 /*  hidden outright.                                                    */
 /*                                                                        */
-/*  FIXED (tab-switch glitch): every <TabsContent> below now renders    */
+/*  FIXED (tab-switch glitch): every <TabsContent> below still renders  */
 /*  with `forceMount` and toggles visibility purely via CSS              */
 /*  (`data-[state=inactive]:hidden`) instead of letting Radix unmount    */
 /*  the panel on every switch. Previously, switching away from a tab    */
@@ -83,6 +83,21 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  "glitch"/flash on every tab change. Keeping panels mounted and just  */
 /*  hiding them fixes that; the extra always-mounted DOM is cheap next  */
 /*  to what it was doing before (destroy + rebuild on every click).     */
+/*                                                                        */
+/*  NEW — CURVED INFINITE-LOOP TAB CAROUSEL:                            */
+/*  The tab strip previously used Radix's TabsList/TabsTrigger with a   */
+/*  simple "whichever tab lands nearest center becomes active" scroll   */
+/*  behavior. It's now the same curved carousel used on the match       */
+/*  detail page's tab bar (see components/match/match-tabs.tsx):        */
+/*  several looped copies of the tab list so the strip never runs out   */
+/*  of tabs to scroll into in either direction, plus a per-frame arc     */
+/*  transform (lift/scale/opacity keyed off distance from center) so    */
+/*  the centered tab visibly pops while neighbors sink and fade. Radix   */
+/*  Tabs.Root/TabsContent are still used underneath purely to drive      */
+/*  which panel is visible (via `value`/`onValueChange`) — the strip    */
+/*  itself is now plain buttons rather than TabsList/TabsTrigger, since  */
+/*  the arc math needs direct imperative control over each button's     */
+/*  transform/opacity per scroll frame.                                 */
 /*                                                                        */
 /*  NEW — DEFAULT TAB NOW FOLLOWS TOURNAMENT STATUS:                    */
 /*  Previously always defaulted to "points" regardless of where the     */
@@ -182,7 +197,7 @@ import type { PlayerStatRow, BowlingStatRow } from "@/data/match-data"
 /*  live → upcoming) with real match order never considered. Now sorts  */
 /*  by `Fixture.matchNumber` first — the real tournament-wide play      */
 /*  order sourced from matches.match_setup.matchNumber (see             */
-/*  bracket_matches.match_number / generateBracket.ts) — falling back   */
+/*  bracket_matches.match_number / generateBracket.ts) — falling back  */
 /*  to the old status/TBD ordering only for fixtures that don't have a  */
 /*  matchNumber yet (not scheduled through the live engine).            */
 /* ------------------------------------------------------------------ */
@@ -240,6 +255,336 @@ function StatAvatar({ name, img, size = "md" }: { name: string; img?: string; si
   )
 }
 
+// ─────────────────────────────────────────────────────────────
+// CURVED, INFINITE-LOOP TAB CAROUSEL
+//
+// Same visual language as the match-detail page's tab bar
+// (components/match/match-tabs.tsx): the strip is rendered as several
+// back-to-back copies of the tab list (LOOP_COPIES), and the scroll
+// handler silently snaps the scroll position back by one copy-width
+// whenever it nears either end — so there are always tabs on both
+// sides no matter how far the user scrolls. Whichever tab lands
+// nearest the visual center gets lifted, scaled up, and fully opaque;
+// tabs further away sink down and fade — an arc/carousel read. Locked
+// tabs (no data yet) are still clickable — clicking shows that tab's
+// "coming soon" placeholder — but they're skipped when deciding which
+// tab a *scroll* gesture should land on, so scrolling never silently
+// selects a tab with nothing behind it yet.
+// ─────────────────────────────────────────────────────────────
+
+const ARC_RANGE = 260 // px from center before a tab is "fully off-arc"
+const ARC_LIFT = 14 // px max upward lift for the centered tab
+const ARC_SCALE_MAX = 1.08
+const ARC_SCALE_MIN = 0.86
+const ARC_OPACITY_MAX = 1
+const ARC_OPACITY_MIN = 0.45
+const LOOP_COPIES = 3
+
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v))
+}
+
+// Smoothstep falloff: 0 at dead center, 1 at/after ARC_RANGE.
+function arcFalloff(distance: number) {
+  const t = clamp(Math.abs(distance) / ARC_RANGE, 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+interface CurvedTabDef {
+  key: string
+  label: string
+}
+
+function useCurvedInfiniteTabs(
+  tabs: CurvedTabDef[],
+  activeTab: string,
+  setActiveTab: (v: string) => void,
+  lockedMap: Record<string, boolean>,
+) {
+  const loopedTabs = useMemo(
+    () =>
+      Array.from({ length: LOOP_COPIES }).flatMap((_, copyIdx) =>
+        tabs.map((t) => ({ ...t, extKey: `${t.key}__${copyIdx}` })),
+      ),
+    [tabs],
+  )
+
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const [reducedMotion, setReducedMotion] = useState(false)
+  const rafId = useRef<number | null>(null)
+  // Width (px) of one full copy of `tabs` inside the looped strip —
+  // used to silently snap scrollLeft back by one copy whenever the
+  // user nears either end, so the strip never runs out of tabs to
+  // scroll into. Measured after layout, re-measured on resize.
+  const setWidth = useRef(0)
+  // Debounce timer for "scroll settled" detection — once the user
+  // stops scrolling, whichever tab is nearest dead-center becomes the
+  // active tab, the same way scrolling a native picker wheel selects
+  // whatever lands in the middle.
+  const settleId = useRef<number | null>(null)
+  // Set right before calling setActiveTab() from the scroll-settle
+  // handler so the "re-center on active tab change" effect below
+  // (which also runs on click-driven changes) knows this particular
+  // change already IS centered — it was the user's scroll that drove
+  // it — and should skip re-scrolling, avoiding a jittery fight with
+  // the user's gesture.
+  const scrollDrivenChange = useRef(false)
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+    setReducedMotion(mq.matches)
+    const handler = () => setReducedMotion(mq.matches)
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
+  }, [])
+
+  const registerItemRef = useCallback(
+    (extKey: string) => (el: HTMLButtonElement | null) => {
+      if (el) itemRefs.current.set(extKey, el)
+      else itemRefs.current.delete(extKey)
+    },
+    [],
+  )
+
+  const applyCurve = useCallback(() => {
+    const scroller = scrollerRef.current
+    if (!scroller || reducedMotion) return
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    itemRefs.current.forEach((el) => {
+      const r = el.getBoundingClientRect()
+      const itemCenter = r.left + r.width / 2
+      const distance = itemCenter - centerX
+      const f = arcFalloff(distance) // 0 = centered, 1 = far
+      const lift = -ARC_LIFT * (1 - f)
+      const scale = ARC_SCALE_MAX - (ARC_SCALE_MAX - ARC_SCALE_MIN) * f
+      const opacity = ARC_OPACITY_MAX - (ARC_OPACITY_MAX - ARC_OPACITY_MIN) * f
+      el.style.transform = `translateY(${lift}px) scale(${scale})`
+      el.style.opacity = String(opacity)
+    })
+  }, [reducedMotion])
+
+  // Finds whichever looped tab button is closest to the strip's
+  // visual center right now, and returns its real tab key (stripping
+  // the `__copyIdx` suffix). Locked tabs are skipped here so a scroll
+  // gesture never lands on a tab with nothing behind it — clicking a
+  // locked tab directly still works via the button's own onClick.
+  const getClosestRealKey = useCallback((): string | null => {
+    const scroller = scrollerRef.current
+    if (!scroller) return null
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    let closestKey: string | null = null
+    let closestDist = Infinity
+    itemRefs.current.forEach((el, extKey) => {
+      const realKey = extKey.split("__")[0]
+      if (lockedMap[realKey]) return
+      const r = el.getBoundingClientRect()
+      const dist = Math.abs(r.left + r.width / 2 - centerX)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestKey = realKey
+      }
+    })
+    return closestKey
+  }, [lockedMap])
+
+  // Re-measures one copy-width and, on first run, parks the scroll
+  // position in the middle copy so there's a full copy's worth of
+  // tabs to scroll into on both sides right from the start.
+  const measureAndCenterLoop = useCallback((recenter: boolean) => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const width = scroller.scrollWidth / LOOP_COPIES
+    setWidth.current = width
+    if (recenter && width > 0) {
+      scroller.scrollLeft = width // start in the middle copy
+    }
+  }, [])
+
+  useEffect(() => {
+    // Layout needs a tick to settle before scrollWidth is reliable.
+    const raf = requestAnimationFrame(() => {
+      measureAndCenterLoop(true)
+      applyCurve()
+    })
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Scroll handler: updates the curve every frame, silently wraps
+  // scrollLeft back by one copy-width whenever it drifts near either
+  // end of the looped strip, and — once scrolling settles — makes
+  // whichever tab landed in the middle the active tab.
+  const onScroll = useCallback(() => {
+    if (rafId.current) cancelAnimationFrame(rafId.current)
+    rafId.current = requestAnimationFrame(() => {
+      applyCurve()
+      const scroller = scrollerRef.current
+      const width = setWidth.current
+      if (!scroller || width <= 0) return
+      if (scroller.scrollLeft < width * 0.4) {
+        scroller.scrollLeft += width
+      } else if (scroller.scrollLeft > width * (LOOP_COPIES - 1.4)) {
+        scroller.scrollLeft -= width
+      }
+    })
+
+    if (settleId.current) window.clearTimeout(settleId.current)
+    settleId.current = window.setTimeout(() => {
+      const closest = getClosestRealKey()
+      if (closest && closest !== activeTab) {
+        scrollDrivenChange.current = true
+        setActiveTab(closest)
+      }
+    }, 120)
+  }, [applyCurve, getClosestRealKey, activeTab, setActiveTab])
+
+  useEffect(() => {
+    const handleResize = () => {
+      measureAndCenterLoop(false)
+      applyCurve()
+    }
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.removeEventListener("resize", handleResize)
+      if (rafId.current) cancelAnimationFrame(rafId.current)
+      if (settleId.current) window.clearTimeout(settleId.current)
+    }
+  }, [measureAndCenterLoop, applyCurve])
+
+  // Center the active tab whenever it changes (click, or programmatic)
+  // — picks whichever looped copy of that tab is nearest the current
+  // scroll position, so the jump is always small. Skipped when the
+  // change was itself driven by the user scrolling the strip to
+  // center — it's already centered, so re-scrolling would just fight
+  // the gesture that just finished.
+  useEffect(() => {
+    if (scrollDrivenChange.current) {
+      scrollDrivenChange.current = false
+      return
+    }
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const scrollerRect = scroller.getBoundingClientRect()
+    const centerX = scrollerRect.left + scrollerRect.width / 2
+
+    let closestEl: HTMLButtonElement | null = null
+    let closestDist = Infinity
+    itemRefs.current.forEach((el, extKey) => {
+      if (extKey.split("__")[0] !== activeTab) return
+      const r = el.getBoundingClientRect()
+      const dist = Math.abs(r.left + r.width / 2 - centerX)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestEl = el
+      }
+    })
+    if (!closestEl) return
+    const elRect = (closestEl as HTMLButtonElement).getBoundingClientRect()
+    const offset = elRect.left - scrollerRect.left - scrollerRect.width / 2 + elRect.width / 2
+    scroller.scrollBy({ left: offset, behavior: "smooth" })
+    const t = setTimeout(applyCurve, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  return { loopedTabs, scrollerRef, registerItemRef, onScroll, reducedMotion }
+}
+
+/** The curved, infinite-loop tab strip itself — renders `loopedTabs`
+ *  as plain buttons (no Radix TabsTrigger — the arc math needs direct
+ *  imperative control over each button's transform/opacity per scroll
+ *  frame) that call `setActiveTab` directly. Locked tabs still render
+ *  clickable, just dimmed with a lock icon, matching how every other
+ *  tab on this page shows a "coming soon" placeholder in its content
+ *  rather than being disabled outright. */
+function CurvedTabBar({
+  tabs,
+  activeTab,
+  setActiveTab,
+  lockedMap,
+}: {
+  tabs: CurvedTabDef[]
+  activeTab: string
+  setActiveTab: (v: string) => void
+  lockedMap: Record<string, boolean>
+}) {
+  const { loopedTabs, scrollerRef, registerItemRef, onScroll, reducedMotion } = useCurvedInfiniteTabs(
+    tabs,
+    activeTab,
+    setActiveTab,
+    lockedMap,
+  )
+
+  return (
+    <div className="relative mb-6">
+      {/* subtle arc backdrop so the curve reads even before scrolling */}
+      <svg
+        className="pointer-events-none absolute left-0 right-0 -top-1 h-6 w-full opacity-20"
+        viewBox="0 0 100 10"
+        preserveAspectRatio="none"
+      >
+        <path d="M0,10 Q50,0 100,10" stroke="#f5a623" strokeWidth="0.5" fill="none" />
+      </svg>
+
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        className="flex flex-nowrap items-end gap-1.5 overflow-x-auto snap-x snap-mandatory
+                   scrollbar-none bg-black/50 border border-gold/20 px-3 py-3 rounded-full w-full"
+      >
+        {loopedTabs.map(({ key, label, extKey }) => {
+          const locked = lockedMap[key]
+          const active = activeTab === key
+          return (
+            <button
+              key={extKey}
+              ref={registerItemRef(extKey)}
+              type="button"
+              onClick={() => setActiveTab(key)}
+              title={locked ? `${label} — coming soon` : undefined}
+              className={`snap-center shrink-0 flex items-center gap-1.5 font-cinzel text-xs uppercase
+                tracking-wide px-4 py-2 rounded-full whitespace-nowrap origin-bottom
+                transition-[background-color,color,border-color] duration-300 ${
+                reducedMotion ? "" : "transition-transform will-change-transform"
+              } ${
+                active
+                  ? "bg-gold text-black shadow-[0_4px_18px_rgba(245,166,35,0.35)] border border-gold"
+                  : locked
+                    ? "bg-white/[0.02] text-gray-600 border border-white/5 hover:text-gray-400"
+                    : "bg-white/[0.03] text-gray-300 border border-gold/10 hover:text-gold hover:border-gold/30"
+              }`}
+            >
+              {label}
+              {locked && <Lock className="h-2.5 w-2.5" />}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* edge fades — purely decorative now, since the loop means the
+          strip is never actually empty past these edges */}
+      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-10 rounded-l-full bg-gradient-to-r from-black/70 to-transparent" />
+      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-10 rounded-r-full bg-gradient-to-l from-black/70 to-transparent" />
+    </div>
+  )
+}
+
+const TOURNAMENT_TABS: CurvedTabDef[] = [
+  { key: "overview", label: "Overview" },
+  { key: "points", label: "Points Table" },
+  { key: "lineup", label: "Line Up" },
+  { key: "schedule", label: "Schedule" },
+  { key: "bracket", label: "Bracket" },
+  { key: "squads", label: "Squads" },
+  { key: "stats", label: "Stats" },
+  { key: "prizes", label: "Prizes" },
+]
+
 export default function TournamentDetailClient({ tournament, slug }: TournamentDetailClientProps) {
   useScrollTop()
   const router = useRouter()
@@ -291,6 +636,22 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
     [tournament.bracket, tournament.pointsTable, logoByTeam],
   )
   const hasLineup = !!lineup.champion
+
+  // Which top-level tabs are locked right now — shared by the curved
+  // tab bar (styling + which tabs a scroll gesture may land on).
+  const lockedMap = useMemo(
+    () => ({
+      overview: false,
+      points: !hasPoints,
+      lineup: !hasLineup,
+      schedule: !hasFixtures,
+      bracket: !hasBracket,
+      squads: !hasSquads,
+      stats: !hasLeaderboard,
+      prizes: false,
+    }),
+    [hasPoints, hasLineup, hasFixtures, hasBracket, hasSquads, hasLeaderboard],
+  )
 
   // Shared class applied to every TabsContent so panels stay mounted
   // (forceMount) and are only ever shown/hidden via CSS driven off
@@ -350,8 +711,10 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
                 overflow-y-auto; the grid stretch above makes this
                 match the banner's height (or the banner matches
                 this, whichever is taller), and it never scrolls
-                internally. */}
-            <div className="lg:col-span-1 fade-in-up">
+                internally. Hidden on mobile where it just added extra
+                scroll height for little value; shown again from lg:
+                up where it sits neatly beside the banner. */}
+            <div className="hidden lg:block lg:col-span-1 fade-in-up">
               <div className="lg:h-full bg-black/50 border border-gold/20 rounded-lg p-6 flex flex-col">
                 <h3 className="text-xl font-bold text-white mb-4 font-cinzel">Tournament Information</h3>
                 <div className="space-y-4 flex-1 flex flex-col justify-between">
@@ -392,26 +755,12 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
             {/* Main Content */}
             <div className="w-full lg:w-2/3 fade-in">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="bg-black/50 border border-gold/20 p-1 rounded-lg w-full justify-start mb-6 flex-wrap h-auto gap-1">
-                  <TabsTrigger
-                    value="overview"
-                    className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                  >
-                    Overview
-                  </TabsTrigger>
-                  <LockableTabTrigger value="points" label="Points Table" locked={!hasPoints} />
-                  <LockableTabTrigger value="lineup" label="Line Up" locked={!hasLineup} />
-                  <LockableTabTrigger value="schedule" label="Schedule" locked={!hasFixtures} />
-                  <LockableTabTrigger value="bracket" label="Bracket" locked={!hasBracket} />
-                  <LockableTabTrigger value="squads" label="Squads" locked={!hasSquads} />
-                  <LockableTabTrigger value="stats" label="Stats" locked={!hasLeaderboard} />
-                  <TabsTrigger
-                    value="prizes"
-                    className="data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300"
-                  >
-                    Prizes
-                  </TabsTrigger>
-                </TabsList>
+                <CurvedTabBar
+                  tabs={TOURNAMENT_TABS}
+                  activeTab={activeTab}
+                  setActiveTab={setActiveTab}
+                  lockedMap={lockedMap}
+                />
 
                 {/* OVERVIEW */}
                 <TabsContent value="overview" forceMount className={tabContentClass}>
@@ -644,24 +993,6 @@ export default function TournamentDetailClient({ tournament, slug }: TournamentD
         </div>
       </section>
     </main>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// TAB TRIGGER — disabled + lock icon when its data isn't there yet
-// ─────────────────────────────────────────────────────────────
-function LockableTabTrigger({ value, label, locked }: { value: string; label: string; locked: boolean }) {
-  return (
-    <TabsTrigger
-      value={value}
-      disabled={locked}
-      className={`data-[state=active]:bg-gold data-[state=active]:text-black font-cinzel relative px-4 py-2 rounded-md transition-all duration-300 flex items-center gap-1.5 ${
-        locked ? "opacity-40 cursor-not-allowed data-[state=active]:bg-transparent data-[state=active]:text-inherit" : ""
-      }`}
-    >
-      {locked && <Lock className="h-3 w-3" />}
-      {label}
-    </TabsTrigger>
   )
 }
 
