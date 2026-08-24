@@ -91,8 +91,63 @@ function toTeamNode(t: SimTeam): TeamNode {
   return { id: t.id, code: t.code, name: t.name, logo: t.logo, color: t.color };
 }
 
+/** Null-aware match resolver shared by the winners and losers brackets
+ *  so byes propagate the same way single elimination already does:
+ *  - both sides real   -> normal random result, real winner + real loser
+ *  - one side null      -> bye, the real side advances immediately with
+ *                          no score, and produces NO loser (a bye never
+ *                          drops anyone into the losers bracket)
+ *  - both sides null    -> nothing to play yet; stays null until an
+ *                          earlier bye/real match upstream resolves it */
+function playMatch(
+  id: string,
+  teamA: TeamNode | null,
+  teamB: TeamNode | null,
+  aFrom: string | null,
+  bFrom: string | null
+): { match: MatchNode; winner: TeamNode | null; loser: TeamNode | null } {
+  if (!teamA && !teamB) {
+    return {
+      match: { id, label: id, status: "scheduled", teamA: null, teamB: null, aFrom, bFrom },
+      winner: null,
+      loser: null,
+    };
+  }
+  if (!teamA || !teamB) {
+    const live = teamA ?? teamB!;
+    const winnerNode: TeamNode = { ...fresh(live), isWinner: true };
+    return {
+      match: {
+        id, label: id, status: "completed",
+        teamA: teamA ? winnerNode : null,
+        teamB: teamB ? winnerNode : null,
+        aFrom, bFrom,
+      },
+      winner: fresh(winnerNode),
+      loser: null,
+    };
+  }
+  const aWins = Math.random() < 0.5;
+  return {
+    match: {
+      id, label: id, status: "completed",
+      teamA: { ...fresh(teamA), score: randScore(aWins), isWinner: aWins },
+      teamB: { ...fresh(teamB), score: randScore(!aWins), isWinner: !aWins },
+      aFrom, bFrom,
+    },
+    winner: { ...fresh(aWins ? teamA : teamB), isWinner: true },
+    loser: { ...fresh(aWins ? teamB : teamA), isWinner: false },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  SINGLE_ELIMINATION                                                 */
+/*  Works for ANY team count (7, 30, 100, whatever) — not just powers  */
+/*  of two. The bracket is always sized up to the next power of two    */
+/*  internally (nextPowerOfTwo), with the leftover slots as byes,      */
+/*  seeded to the top seeds via standard bracket seeding order. The    */
+/*  team count itself never determines round *shape* — only how many  */
+/*  of round 0's slots are real matches vs. byes.                      */
 /* ------------------------------------------------------------------ */
 
 export interface SingleElimOptions {
@@ -167,6 +222,7 @@ export function simulateSingleElimination(teamsIn: SimTeam[], opts: SingleElimOp
         });
         nextAdvancing.push({ ...fresh(aWins ? teamA : teamB), isWinner: true });
       } else {
+        // One side is still a bye that hasn't met a real opponent yet.
         roundMatches.push({
           id, label: id, status: "scheduled",
           teamA: teamA ?? null, teamB: teamB ?? null,
@@ -183,32 +239,77 @@ export function simulateSingleElimination(teamsIn: SimTeam[], opts: SingleElimOp
   return rounds;
 }
 
-/** A 3rd-place match isn't representable inside TournamentBracket's
- *  Round[] (the component assumes the last round is exactly one match:
- *  the Final) — so it's generated separately and rendered next to the
- *  bracket via MatchResultCard instead of folded into `rounds`. */
-export function simulateThirdPlaceMatch(rounds: Round[]): MatchNode | null {
+/* ------------------------------------------------------------------ */
+/*  3RD PLACE MATCH                                                    */
+/*  Keys off bracket ROUND STRUCTURE, not team count — the semifinal   */
+/*  is always rounds[rounds.length - 2] with exactly 2 matches,        */
+/*  regardless of whether the tournament started with 7, 8, 30, 32,    */
+/*  or 100 teams. The only way this can't produce a real 3rd-place     */
+/*  match is if a bye survives all the way into the semifinal (only    */
+/*  possible with very few teams relative to bracket size, e.g. 3      */
+/*  teams in a 4-slot bracket) — that case is reported explicitly       */
+/*  via skippedReason rather than silently disappearing.               */
+/* ------------------------------------------------------------------ */
+
+export interface ThirdPlaceResult {
+  match: MatchNode | null;
+  /** Present only when match is null — lets the UI explain *why*
+   *  instead of just omitting the card with no context. */
+  skippedReason?: "NO_SEMIFINAL_ROUND" | "BYE_REACHED_SEMIFINAL";
+}
+
+export function simulateThirdPlaceMatch(rounds: Round[]): ThirdPlaceResult {
   const semiRound = rounds[rounds.length - 2];
-  if (!semiRound || semiRound.matches.length !== 2) return null;
+  if (!semiRound || semiRound.matches.length !== 2) {
+    // Bracket too small to even have a distinct semifinal round (e.g.
+    // a 2-team bracket: round 0 IS the final, there's no semifinal).
+    return { match: null, skippedReason: "NO_SEMIFINAL_ROUND" };
+  }
+
   const [sf1, sf2] = semiRound.matches;
   const loserOf = (m: MatchNode): TeamNode | null => {
-    if (!m.teamA || !m.teamB) return null;
+    if (!m.teamA || !m.teamB) return null; // bye — no real loser to extract
     return fresh(m.teamA.isWinner ? m.teamB : m.teamA);
   };
+
   const teamA = loserOf(sf1);
   const teamB = loserOf(sf2);
-  if (!teamA || !teamB) return null;
+  if (!teamA || !teamB) {
+    return { match: null, skippedReason: "BYE_REACHED_SEMIFINAL" };
+  }
+
   const aWins = Math.random() < 0.5;
   return {
-    id: "3RD", label: "3RD", status: "completed",
-    teamA: { ...teamA, score: randScore(aWins), isWinner: aWins },
-    teamB: { ...teamB, score: randScore(!aWins), isWinner: !aWins },
-    aFrom: sf1.id, bFrom: sf2.id,
+    match: {
+      id: "3RD",
+      label: "3RD",
+      status: "completed",
+      teamA: { ...teamA, score: randScore(aWins), isWinner: aWins },
+      teamB: { ...teamB, score: randScore(!aWins), isWinner: !aWins },
+      aFrom: sf1.id,
+      bFrom: sf2.id,
+    },
   };
 }
 
 /* ------------------------------------------------------------------ */
-/*  DOUBLE_ELIMINATION (power-of-two team counts only)                */
+/*  DOUBLE_ELIMINATION — any team count (n >= 2), byes included.       */
+/*                                                                      */
+/*  Same trick as simulateSingleElimination: bracket is sized up to    */
+/*  nextPowerOfTwo(n) and missing seed slots become null "byes",       */
+/*  seeded to the top real seeds via standard seed order. The winners  */
+/*  and losers brackets both stay fixed-size (powers of two) through-  */
+/*  out — a null slot just means "no real loser was ever produced      */
+/*  here", which plays out as an automatic bye wherever it's paired    */
+/*  against a real team, exactly like round 0 of single elimination.   */
+/*  A bye NEVER produces a loser, so it never seeds anyone into the    */
+/*  losers bracket — that's the one rule that makes byes and the       */
+/*  losers bracket compose correctly.                                  */
+/*                                                                      */
+/*  Note: with a lot of byes relative to bracket size (e.g. 3 teams    */
+/*  in an 8-slot bracket), you can get transient "both sides null"     */
+/*  losers-bracket matches early on — these render as an empty/TBD     */
+/*  slot and resolve themselves as real losers arrive in later rounds. */
 /* ------------------------------------------------------------------ */
 
 export interface DoubleElimOptions {
@@ -219,43 +320,41 @@ export interface DoubleElimOptions {
 export function simulateDoubleElimination(teamsIn: SimTeam[], opts: DoubleElimOptions = {}): DoubleElimData {
   const teams = opts.seeding === "RANDOM" ? shuffle(teamsIn) : teamsIn;
   const n = teams.length;
-  if ((n & (n - 1)) !== 0 || n < 2) {
-    throw new Error("Double elimination sandbox requires a power-of-two team count (byes + losers bracket don't mix cleanly here).");
+  if (n < 2) {
+    throw new Error("Double elimination needs at least 2 teams.");
   }
-  const order = seedOrder(n);
-  const bySeed: SimTeam[] = order.map((seed) => teams[seed - 1]);
-  const k = Math.log2(n);
+  const bracketSize = nextPowerOfTwo(n);
+  const order = seedOrder(bracketSize);
+  const bySeed: (SimTeam | null)[] = order.map((seed) => (seed <= n ? teams[seed - 1] : null));
+  const k = Math.log2(bracketSize);
 
   // ---- winners bracket ----
   const winners: Round[] = [];
   let wPrevIds: string[] = [];
-  let wAdvancing: TeamNode[] = [];
-  const losersOfWR: TeamNode[][] = [];
+  let wAdvancing: (TeamNode | null)[] = [];
+  const losersOfWR: (TeamNode | null)[][] = [];
 
   for (let r = 0; r < k; r++) {
-    const matchesCount = n / Math.pow(2, r + 1);
+    const matchesCount = bracketSize / Math.pow(2, r + 1);
     const { name, shortName } = roundName(matchesCount);
     const prefix = `WR${r + 1}`;
     const roundMatches: MatchNode[] = [];
-    const nextAdvancing: TeamNode[] = [];
-    const roundLosers: TeamNode[] = [];
+    const nextAdvancing: (TeamNode | null)[] = [];
+    const roundLosers: (TeamNode | null)[] = [];
 
     for (let i = 0; i < matchesCount; i++) {
       const id = `${prefix}-${i + 1}`;
-      const teamA: TeamNode = r === 0 ? toTeamNode(bySeed[i * 2]) : wAdvancing[i * 2];
-      const teamB: TeamNode = r === 0 ? toTeamNode(bySeed[i * 2 + 1]) : wAdvancing[i * 2 + 1];
+      const teamA: TeamNode | null =
+        r === 0 ? (bySeed[i * 2] ? toTeamNode(bySeed[i * 2]!) : null) : wAdvancing[i * 2];
+      const teamB: TeamNode | null =
+        r === 0 ? (bySeed[i * 2 + 1] ? toTeamNode(bySeed[i * 2 + 1]!) : null) : wAdvancing[i * 2 + 1];
       const aFrom = r === 0 ? null : wPrevIds[i * 2];
       const bFrom = r === 0 ? null : wPrevIds[i * 2 + 1];
-      const aWins = Math.random() < 0.5;
 
-      roundMatches.push({
-        id, label: id, status: "completed",
-        teamA: { ...teamA, score: randScore(aWins), isWinner: aWins },
-        teamB: { ...teamB, score: randScore(!aWins), isWinner: !aWins },
-        aFrom, bFrom,
-      });
-      nextAdvancing.push({ ...fresh(aWins ? teamA : teamB), isWinner: true });
-      roundLosers.push({ ...fresh(aWins ? teamB : teamA), isWinner: false });
+      const { match, winner, loser } = playMatch(id, teamA, teamB, aFrom, bFrom);
+      roundMatches.push(match);
+      nextAdvancing.push(winner);
+      roundLosers.push(loser);
     }
 
     winners.push({ id: r, name, shortName, matches: roundMatches });
@@ -264,17 +363,23 @@ export function simulateDoubleElimination(teamsIn: SimTeam[], opts: DoubleElimOp
     wAdvancing = nextAdvancing;
   }
   const wbChampion = wAdvancing[0];
+  if (!wbChampion) {
+    // Should be unreachable for n >= 2 — real teams always funnel into
+    // a real winner eventually — but fail loudly rather than silently
+    // rendering a broken grand final if bracket math is ever changed.
+    throw new Error("Double elimination: winners bracket produced no champion.");
+  }
 
   // ---- losers bracket ----
-  // Pattern (validated against n=4/8/16): for j = 1..k-1, a consolidation
-  // round K_j pairs up the previous drop round's winners among
-  // themselves, then a drop round D_j pairs K_j's winners against the
-  // losers freshly dropping in from WR_{j+1}. Anything crossing from the
-  // winners bracket into the losers bracket is tagged "L:" so
-  // DoubleElimBoard routes it through the long vertical lane instead of
-  // a short elbow.
+  // Pattern (validated against n=4/8/16, and against bye-padded n=3/5/6/7
+  // sized up to 4/8/8): for j = 1..k-1, a consolidation round K_j pairs
+  // up the previous drop round's winners among themselves, then a drop
+  // round D_j pairs K_j's winners against the losers freshly dropping in
+  // from WR_{j+1}. Anything crossing from the winners bracket into the
+  // losers bracket is tagged "L:" so DoubleElimBoard routes it through
+  // the long vertical lane instead of a short elbow.
   const losers: Round[] = [];
-  let prevDropWinners: TeamNode[] = losersOfWR[0];
+  let prevDropWinners: (TeamNode | null)[] = losersOfWR[0];
   let prevDropIds: string[] = winners[0].matches.map((m) => m.id);
   let prevIsFromWinners = true; // WR1 losers feed K_1 directly
 
@@ -283,21 +388,16 @@ export function simulateDoubleElimination(teamsIn: SimTeam[], opts: DoubleElimOp
     const kShort = `LK${j}`;
     const kCount = prevDropWinners.length / 2;
     const kMatches: MatchNode[] = [];
-    const kWinners: TeamNode[] = [];
+    const kWinners: (TeamNode | null)[] = [];
     const kIds: string[] = [];
     for (let i = 0; i < kCount; i++) {
       const teamA = prevDropWinners[i * 2];
       const teamB = prevDropWinners[i * 2 + 1];
       const id = `${kShort}-${i + 1}`;
-      const aWins = Math.random() < 0.5;
       const tag = (matchId: string) => (prevIsFromWinners ? `L:${matchId}` : matchId);
-      kMatches.push({
-        id, label: id, status: "completed",
-        teamA: { ...teamA, score: randScore(aWins), isWinner: aWins },
-        teamB: { ...teamB, score: randScore(!aWins), isWinner: !aWins },
-        aFrom: tag(prevDropIds[i * 2]), bFrom: tag(prevDropIds[i * 2 + 1]),
-      });
-      kWinners.push({ ...fresh(aWins ? teamA : teamB), isWinner: true });
+      const { match, winner } = playMatch(id, teamA, teamB, tag(prevDropIds[i * 2]), tag(prevDropIds[i * 2 + 1]));
+      kMatches.push(match);
+      kWinners.push(winner);
       kIds.push(id);
     }
     losers.push({ id: losers.length, name: `Losers Round ${losers.length + 1}`, shortName: kShort, matches: kMatches });
@@ -307,20 +407,15 @@ export function simulateDoubleElimination(teamsIn: SimTeam[], opts: DoubleElimOp
     const dropLosers = losersOfWR[j];
     const wrIds = winners[j].matches.map((m) => m.id);
     const dMatches: MatchNode[] = [];
-    const dWinners: TeamNode[] = [];
+    const dWinners: (TeamNode | null)[] = [];
     const dIds: string[] = [];
     for (let i = 0; i < kWinners.length; i++) {
       const teamA = kWinners[i];
       const teamB = dropLosers[i];
       const id = `${dShort}-${i + 1}`;
-      const aWins = Math.random() < 0.5;
-      dMatches.push({
-        id, label: id, status: "completed",
-        teamA: { ...teamA, score: randScore(aWins), isWinner: aWins },
-        teamB: { ...teamB, score: randScore(!aWins), isWinner: !aWins },
-        aFrom: kIds[i], bFrom: `L:${wrIds[i]}`,
-      });
-      dWinners.push({ ...fresh(aWins ? teamA : teamB), isWinner: true });
+      const { match, winner } = playMatch(id, teamA, teamB, kIds[i], `L:${wrIds[i]}`);
+      dMatches.push(match);
+      dWinners.push(winner);
       dIds.push(id);
     }
     losers.push({ id: losers.length, name: `Losers Round ${losers.length + 1}`, shortName: dShort, matches: dMatches });
@@ -330,7 +425,10 @@ export function simulateDoubleElimination(teamsIn: SimTeam[], opts: DoubleElimOp
     prevIsFromWinners = false; // from here on, K rounds pull from the losers bracket itself
   }
 
-  const lbChampion: TeamNode = k === 1 ? losersOfWR[0][0] : prevDropWinners[0];
+  const lbChampion: TeamNode | null = k === 1 ? losersOfWR[0][0] : prevDropWinners[0];
+  if (!lbChampion) {
+    throw new Error("Double elimination: losers bracket produced no champion.");
+  }
 
   // ---- grand final (+ optional reset) ----
   const gfAWins = Math.random() < 0.5;
@@ -380,7 +478,9 @@ export interface RRStanding {
 
 const BYE_TEAM: SimTeam = { id: "__BYE__", code: "BYE", name: "Bye", color: "#333333" };
 
-/** Circle method round-robin scheduler. matchesPerPair: 1 = single, 2 = double. */
+/** Circle method round-robin scheduler. Works for ANY team count,
+ *  even/odd (odd counts get a rotating bye automatically).
+ *  matchesPerPair: 1 = single, 2 = double. */
 export function generateRoundRobinSchedule(teamsIn: SimTeam[], matchesPerPair: 1 | 2 = 1): RRMatch[] {
   const list = [...teamsIn];
   if (list.length % 2 !== 0) list.push(BYE_TEAM);
@@ -414,7 +514,7 @@ export function simulateRoundRobinResults(matches: RRMatch[], allowDraw = false)
       return { ...m, scoreA: s, scoreB: s, winner: "DRAW" as const };
     }
     const aWins = Math.random() < 0.5;
-    return { ...m, scoreA: randScore(aWins), scoreB: randScore(!aWins), winner: (aWins ? "A" : "B") as "A" | "B" };
+    return { ...m, scoreA: randScore(aWins), scoreB: randScore(!aWins), winner: aWins ? "A" : "B" };
   });
 }
 
